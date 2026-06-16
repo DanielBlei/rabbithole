@@ -1,0 +1,37 @@
+# ai-searcher configuration. Copy to configs/config.yaml and edit.
+
+# Path to your interest profile (free-form markdown). This is injected into the
+# scoring prompt and is the main personalization knob.
+profile: ./configs/profile.example.md
+
+# Inference backend: ollama | vllm | heuristic
+#   ollama    - local Ollama server (default)
+#   vllm      - any OpenAI-compatible endpoint (vLLM, etc.)
+#   heuristic - keyword overlap, no model (offline testing)
+provider: ollama
+chat_host: http://localhost:11434
+chat_model: qwen3:0.6b
+api_key: "" # optional bearer token (vLLM prod / Ollama cloud)
+
+# Ranking and selection
+batch_size: 5    # items sent per scoring request
+top_n: 15        # max items in a digest
+min_score: 6     # only include items scoring >= this (0-10)
+since: 14d       # ignore items older than this; accepts 'd' (days) or 'h' (e.g. 14d, 168h)
+
+# Output
+output_dir: ./data/digests
+db_path: ./data/ai-searcher.db
+
+# Feeds (any RSS/Atom URL). Medium tag/author/publication feeds:
+#   https://medium.com/feed/tag/<tag>
+#   https://medium.com/feed/@<username>
+#   https://medium.com/feed/<publication>
+feeds:
+#  - { name: "Medium — AI",          url: "https://medium.com/feed/tag/artificial-intelligence" }
+#  - { name: "Medium — LLMs",        url: "https://medium.com/feed/tag/large-language-models" }
+#  - { name: "Medium — ML",          url: "https://medium.com/feed/tag/machine-learning" }
+#  - { name: "arXiv cs.AI",          url: "http://export.arxiv.org/rss/cs.AI" }
+#  - { name: "arXiv cs.LG",          url: "http://export.arxiv.org/rss/cs.LG" }
+#  - { name: "Hugging Face blog",    url: "https://huggingface.co/blog/feed.xml" }
+  - { name: "Red Hat Emerging Tech", url: "https://next.redhat.com/feed/" }

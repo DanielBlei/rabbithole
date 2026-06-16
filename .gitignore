@@ -1,0 +1,29 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/ai-searcher
+bin/
+
+# Test binary and coverage
+*.test
+*.out
+coverage.*
+
+# Go workspace
+go.work
+go.work.sum
+
+# Env
+.env
+
+# Editor/IDE
+.idea/
+.vscode/
+.claude
+CLAUDE.md
+
+# Project data (sqlite db + generated digests)
+/data
