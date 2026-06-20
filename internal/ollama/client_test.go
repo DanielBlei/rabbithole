@@ -66,6 +66,34 @@ func TestValidateFailsAfterAttemptsExhausted(t *testing.T) {
 	}
 }
 
+func TestValidateRetriesOnNextCallAfterFailure(t *testing.T) {
+	withFastValidateRetry(t)
+
+	var up bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !up {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"model":"llama3:latest"}]}`))
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "llama3:latest", "", false)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := c.Validate(t.Context()); err == nil {
+		t.Fatal("Validate() error = nil, want non-nil while server is down")
+	}
+
+	up = true
+	if err := c.Validate(t.Context()); err != nil {
+		t.Fatalf("Validate() error = %v, want nil once server is up (failure should not be cached forever)", err)
+	}
+}
+
 func TestValidateMissingModelDoesNotRetry(t *testing.T) {
 	withFastValidateRetry(t)
 

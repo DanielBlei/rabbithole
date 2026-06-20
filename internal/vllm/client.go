@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -42,12 +41,11 @@ type modelsResponse struct {
 
 // Client scores items via /v1/chat/completions in JSON mode.
 type Client struct {
-	host        string
-	model       string
-	think       bool
-	hc          *http.Client
-	once        sync.Once
-	validateErr error
+	host      string
+	model     string
+	think     bool
+	hc        *http.Client
+	validator *retry.Validator
 }
 
 // New connects to host using the given model. apiKey is optional (Bearer).
@@ -63,6 +61,7 @@ func New(host, model, apiKey string, think bool) (*Client, error) {
 		hc: &http.Client{
 			Transport: &httpclient.BearerTransport{Token: apiKey, Base: http.DefaultTransport},
 		},
+		validator: retry.NewValidator("vllm", validateAttempts, validateBackoff),
 	}, nil
 }
 
@@ -70,56 +69,35 @@ func New(host, model, apiKey string, think bool) (*Client, error) {
 // Connectivity is retried with backoff since the server may still be
 // starting up; a model that's reachable but not loaded fails immediately.
 func (c *Client) Validate(ctx context.Context) error {
-	c.once.Do(func() {
-		var models modelsResponse
-		c.validateErr = retry.Do(ctx, validateAttempts, validateBackoff, func() error {
-			m, err := c.listModels(ctx)
-			if err != nil {
-				return err
-			}
-			models = m
-			return nil
-		}, func(attempt int, err error, delay time.Duration) {
-			log.Debug().
-				Int("attempt", attempt).
-				Err(err).
-				Str("retry_in", delay.String()).
-				Msg("vllm: not reachable yet, retrying")
-		})
-		if c.validateErr != nil {
-			return
-		}
-		for _, m := range models.Data {
-			if m.ID == c.model {
-				return
-			}
-		}
-		c.validateErr = fmt.Errorf("model %q not loaded in vLLM at %s", c.model, c.host)
-	})
-	return c.validateErr
+	return c.validator.Validate(ctx, c.model,
+		fmt.Sprintf("load it in vLLM at %s", c.host), c.listModelNames)
 }
 
-func (c *Client) listModels(ctx context.Context) (modelsResponse, error) {
+func (c *Client) listModelNames(ctx context.Context) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, listTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.host+"/v1/models", nil)
 	if err != nil {
-		return modelsResponse{}, fmt.Errorf("build models request: %w", err)
+		return nil, fmt.Errorf("build models request: %w", err)
 	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return modelsResponse{}, fmt.Errorf("connect to vLLM: %w", err)
+		return nil, fmt.Errorf("connect to vLLM: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return modelsResponse{}, fmt.Errorf("vLLM /v1/models returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("vLLM /v1/models returned %d", resp.StatusCode)
 	}
 	var models modelsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&models); err != nil {
-		return modelsResponse{}, fmt.Errorf("decode models response: %w", err)
+		return nil, fmt.Errorf("decode models response: %w", err)
 	}
-	return models, nil
+	names := make([]string, len(models.Data))
+	for i, m := range models.Data {
+		names[i] = m.ID
+	}
+	return names, nil
 }
 
 type chatRequest struct {

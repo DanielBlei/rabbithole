@@ -58,6 +58,35 @@ func TestRecordIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRecordIgnoresDuplicateLink(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	// Different IDs (e.g. distinct guids) can still resolve to the same link.
+	// The UNIQUE constraint must keep UpdateUserState's WHERE link = ? targeting
+	// exactly one row.
+	first := feeds.Item{ID: "a", Source: "S", Title: "A", Link: "https://x/dup"}
+	second := feeds.Item{ID: "b", Source: "S", Title: "B", Link: "https://x/dup"}
+	if err := db.Record(ctx, []feeds.Item{first}, nil, time.Now()); err != nil {
+		t.Fatalf("first Record: %v", err)
+	}
+	if err := db.Record(ctx, []feeds.Item{second}, nil, time.Now()); err != nil {
+		t.Fatalf("second Record: %v", err)
+	}
+
+	var count int
+	if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM items WHERE link = ?", "https://x/dup").Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("want 1 row for duplicate link, got %d", count)
+	}
+}
+
 func TestUpdateUserState(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
