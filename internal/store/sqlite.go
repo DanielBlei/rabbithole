@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS items (
 	id               TEXT PRIMARY KEY,
 	source           TEXT NOT NULL,
 	title            TEXT NOT NULL,
-	link             TEXT NOT NULL,
+	link             TEXT NOT NULL UNIQUE,
 	summary          TEXT,
 	published_at     TIMESTAMP,
 	created_at       TIMESTAMP NOT NULL,
@@ -34,7 +34,6 @@ CREATE TABLE IF NOT EXISTS items (
 	user_note        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_items_digested ON items(digested_on);
-CREATE INDEX IF NOT EXISTS idx_items_link ON items(link);
 `
 
 // Status values for the items.status column. llm_score/llm_score_reason are
@@ -91,32 +90,41 @@ func Open(path string) (*Store, error) {
 // Close releases the database handle.
 func (s *Store) Close() error { return s.db.Close() }
 
-// Seen returns the set of item IDs already present in the store.
+// seenChunkSize caps how many ids go into a single "IN (...)" query, well
+// under SQLite's default bound parameter limit.
+const seenChunkSize = 500
+
+// Seen returns the set of ids in ids that are already present in the store.
 func (s *Store) Seen(ctx context.Context, ids []string) (map[string]bool, error) {
 	seen := make(map[string]bool, len(ids))
-	if len(ids) == 0 {
-		return seen, nil
+	for start := 0; start < len(ids); start += seenChunkSize {
+		chunk := ids[start:min(start+seenChunkSize, len(ids))]
+		if err := s.seenChunk(ctx, chunk, seen); err != nil {
+			return nil, err
+		}
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT id FROM items")
+	return seen, nil
+}
+
+func (s *Store) seenChunk(ctx context.Context, ids []string, seen map[string]bool) error {
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT id FROM items WHERE id IN ("+placeholders+")", args...)
 	if err != nil {
-		return nil, fmt.Errorf("query seen: %w", err)
+		return fmt.Errorf("query seen: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-
-	want := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		want[id] = true
-	}
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan seen: %w", err)
+			return fmt.Errorf("scan seen: %w", err)
 		}
-		if want[id] {
-			seen[id] = true
-		}
+		seen[id] = true
 	}
-	return seen, rows.Err()
+	return rows.Err()
 }
 
 // DigestEntry is an item selected for a digest, with its score.
