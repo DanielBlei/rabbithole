@@ -64,31 +64,45 @@ Medium feeds: `https://medium.com/feed/tag/<tag>`, `.../@<user>`, `.../<publicat
 ai-searcher run [--config PATH] [--provider P] [--dry-run] [--think] [--debug]
 ```
 
-- `--think` enables the model's reasoning mode during scoring. Off by default —
-  reasoning models (e.g. qwen3) otherwise spend the whole timeout on chain-of-thought
-  before emitting JSON. Leave it off unless you have a capable model and want the extra
-  reasoning.
+- `--think` enables the model's reasoning mode during scoring. On by default. Pass
+  `--think=false` for models without a capable think mode, or if you want faster scoring
+  without chain-of-thought before the JSON.
 - `--debug` logs every stage: config, per-feed fetches, age/dedup filtering, each scoring
   batch and per-item score, selection, and write — with timings.
+
+```
+ai-searcher item read|skip|unread <link>
+ai-searcher item rate <link> <0-10>
+ai-searcher item note <link> <text>...
+```
+
+Record your own take on a digest item, identified by the link printed in the digest —
+separate from `llm_score`/`llm_score_reason`, which are the model's verdict. `read`/`skip`/`unread` set
+`status`; `rate` sets `user_score` (0-10); `note` sets `user_note` (no quoting needed, all
+trailing words are joined). These call `internal/store.UpdateUserState` directly, the same
+method a future `serve` command's frontend would call.
 
 ## Layout
 
 ```
 cmd/                 cobra CLI (root + run)
 internal/config      YAML config + profile loading
+internal/pipeline    fetch -> score -> record cycle, shared by run and (later) serve
 internal/feeds       concurrent RSS/Atom fetch + normalization (gofeed)
 internal/rank        Scorer interface, prompt/JSON parsing, batching, selection, heuristic
 internal/inference   provider factory (ollama | vllm | heuristic)
 internal/ollama      Ollama JSON-mode client
 internal/vllm        OpenAI-compatible JSON-mode client
 internal/digest      markdown renderer
-internal/store       SQLite (seen dedup + digest history + feedback column)
+internal/store       SQLite (seen dedup, digest history, user status/notes)
 ```
 
 ## Roadmap
 
-- **Adaptive ranking** — a `rate` command writes the `feedback` column (already in the
-  schema); a later scorer feeds liked/disliked examples back into the prompt.
+- **Adaptive ranking** — feed `status`/`user_score`/`user_note` history (recorded via
+  `ai-searcher item`) back into the scoring prompt as liked/disliked examples.
+- **Serve command** — a local web frontend calling the same `internal/pipeline` and
+  `internal/store` functions the CLI calls, no client/server split.
 - **Full-text crawl** — fetch article bodies for richer scoring beyond title+summary.
 - **Embeddings pre-filter** — cheap shortlist → LLM rerank for large feed sets.
 - **Scheduling & delivery** — systemd timer / cron, plus email or chat delivery.

@@ -2,10 +2,23 @@ package rank
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/DanielBlei/ai-searcher/internal/feeds"
 )
+
+// stubScorer scores via fn, ignoring profile. Validate always succeeds.
+type stubScorer struct {
+	fn func(items []feeds.Item) ([]ItemScore, error)
+}
+
+func (s *stubScorer) Score(_ context.Context, _ string, items []feeds.Item) ([]ItemScore, error) {
+	return s.fn(items)
+}
+
+func (s *stubScorer) Validate(context.Context) error { return nil }
 
 func TestSelectFiltersAndSorts(t *testing.T) {
 	items := []feeds.Item{{ID: "a"}, {ID: "b"}, {ID: "c"}}
@@ -33,6 +46,64 @@ func TestSelectRespectsTopN(t *testing.T) {
 	got := Select(items, scores, 1, 2)
 	if len(got) != 2 {
 		t.Fatalf("got %d, want topN=2", len(got))
+	}
+}
+
+func TestScoreAllRetriesItemsMissingFromPartialResponse(t *testing.T) {
+	items := []feeds.Item{{ID: "a", Title: "a"}, {ID: "b", Title: "b"}, {ID: "c", Title: "c"}}
+	var calls [][]string
+	scorer := &stubScorer{fn: func(batch []feeds.Item) ([]ItemScore, error) {
+		ids := make([]string, len(batch))
+		for i, it := range batch {
+			ids[i] = it.ID
+		}
+		calls = append(calls, ids)
+		// Only ever score the first item of whatever batch is sent, mimicking a
+		// small model that returns one verdict for a multi-item batch.
+		first := batch[0]
+		return []ItemScore{{ID: first.ID, Score: 5, Reason: "x"}}, nil
+	}}
+
+	got := ScoreAll(context.Background(), scorer, "profile", items, 3)
+
+	if len(got) != len(items) {
+		t.Fatalf("got %d scores, want %d (all items should eventually be scored): calls=%v", len(got), len(items), calls)
+	}
+	for _, it := range items {
+		if _, ok := got[it.ID]; !ok {
+			t.Errorf("item %q missing from scores", it.ID)
+		}
+	}
+}
+
+func TestScoreBatchSkipsItemModelNeverScores(t *testing.T) {
+	items := []feeds.Item{{ID: "a", Title: "a"}, {ID: "b", Title: "b"}}
+	scorer := &stubScorer{fn: func(batch []feeds.Item) ([]ItemScore, error) {
+		for _, it := range batch {
+			if it.ID == "a" {
+				return nil, errors.New("model refuses to score item a")
+			}
+		}
+		return []ItemScore{{ID: batch[0].ID, Score: 5}}, nil
+	}}
+
+	got := scoreBatch(context.Background(), scorer, "profile", items)
+
+	if len(got) != 1 || got[0].ID != "b" {
+		t.Fatalf("got %+v, want only item b scored", got)
+	}
+}
+
+func TestFailureVerbDistinguishesTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	<-ctx.Done()
+
+	if got := failureVerb(fmt.Errorf("ollama chat: %w", ctx.Err())); got != "scoring timed out" {
+		t.Errorf("failureVerb(deadline exceeded) = %q, want %q", got, "scoring timed out")
+	}
+	if got := failureVerb(errors.New("no valid scores mapped from response")); got != "scoring failed" {
+		t.Errorf("failureVerb(parse error) = %q, want %q", got, "scoring failed")
 	}
 }
 

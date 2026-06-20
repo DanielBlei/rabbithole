@@ -10,14 +10,14 @@ profile: ./configs/profile.example.md
 #   heuristic - keyword overlap, no model (offline testing)
 provider: ollama
 chat_host: http://localhost:11434
-chat_model: qwen3:0.6b
+chat_model: gemma3:1b # qwen3:1.7b # qwen3:0.6b
 api_key: "" # optional bearer token (vLLM prod / Ollama cloud)
 
 # Ranking and selection
 batch_size: 5    # items sent per scoring request
 top_n: 15        # max items in a digest
 min_score: 6     # only include items scoring >= this (0-10)
-since: 14d       # ignore items older than this; accepts 'd' (days) or 'h' (e.g. 14d, 168h)
+since: 21d       # ignore items older than this; accepts 'd' (days) or 'h' (e.g. 14d, 168h)
 
 # Output
 output_dir: ./data/digests

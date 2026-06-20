@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/DanielBlei/ai-searcher/internal/feeds"
@@ -62,41 +63,50 @@ func BuildUserPrompt(profile string, items []feeds.Item) string {
 
 type rawScores struct {
 	Scores []struct {
-		Index  int    `json:"index"`
-		Score  int    `json:"score"`
-		Reason string `json:"reason"`
+		Index  int     `json:"index"`
+		Score  float64 `json:"score"` // some models emit fractional scores despite the int 0-10 prompt
+		Reason string  `json:"reason"`
 	} `json:"scores"`
 }
 
 // ParseScores extracts the JSON verdict from a model response and maps the
 // 1-based indices back onto items. It tolerates code fences and leading/trailing
-// prose by slicing to the outermost JSON object.
+// prose by slicing to the outermost JSON object. Errors include a snippet of
+// the raw response so a misbehaving model's actual output is visible in logs.
 func ParseScores(raw string, items []feeds.Item) ([]ItemScore, error) {
 	jsonStr, err := extractJSONObject(raw)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: raw=%q", err, truncate(raw, 200))
 	}
 	var parsed rawScores
 	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
-		return nil, fmt.Errorf("parse scores json: %w", err)
+		return nil, fmt.Errorf("parse scores json: %w: raw=%q", err, truncate(jsonStr, 200))
 	}
 	if len(parsed.Scores) == 0 {
-		return nil, fmt.Errorf("no scores in response")
+		return nil, fmt.Errorf("no scores in response: raw=%q", truncate(jsonStr, 200))
 	}
 	out := make([]ItemScore, 0, len(parsed.Scores))
-	for _, s := range parsed.Scores {
+	indices := make([]int, len(parsed.Scores))
+	for i, s := range parsed.Scores {
+		indices[i] = s.Index
 		idx := s.Index - 1
-		if idx < 0 || idx >= len(items) {
+		switch {
+		case len(items) == 1:
+			// A single-item batch has only one possible target regardless of
+			// the index the model reports — small models sometimes hardcode
+			// index 0 (or another constant) no matter the array size.
+			idx = 0
+		case idx < 0 || idx >= len(items):
 			continue
 		}
 		out = append(out, ItemScore{
 			ID:     items[idx].ID,
-			Score:  clamp(s.Score, 0, 10),
+			Score:  clamp(int(math.Round(s.Score)), 0, 10),
 			Reason: strings.TrimSpace(s.Reason),
 		})
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("no valid scores mapped from response")
+		return nil, fmt.Errorf("no valid scores mapped from response: got indices %v, want 1-%d", indices, len(items))
 	}
 	return out, nil
 }
