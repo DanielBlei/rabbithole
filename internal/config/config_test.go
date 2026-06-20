@@ -50,7 +50,7 @@ func writeConfig(t *testing.T, body string) string {
 	return p
 }
 
-const baseFeeds = "profile: ./p.md\nfeeds:\n  - { name: x, url: http://x }\n"
+const baseFeeds = "profile: ./p.md\ndb_path: ./test.db\nfeeds:\n  - { name: x, url: http://x }\n"
 
 func TestLoadSinceDaysAndHours(t *testing.T) {
 	for _, tc := range []struct {

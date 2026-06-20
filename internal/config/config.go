@@ -85,11 +85,10 @@ const (
 	defaultChatHost  = "http://localhost:11434"
 	defaultChatModel = "qwen3:4b"
 	defaultBatchSize = 5
-	defaultTopN      = 15
+	defaultTopN      = 30
 	defaultMinScore  = 6
 	defaultSince     = 14 * 24 * time.Hour
 	defaultOutputDir = "./data/digests"
-	defaultDBPath    = "./data/ai-searcher.db"
 )
 
 // Load reads and validates the config at path, applying defaults for unset fields.
@@ -134,9 +133,6 @@ func (c *Config) applyDefaults() {
 	if c.OutputDir == "" {
 		c.OutputDir = defaultOutputDir
 	}
-	if c.DBPath == "" {
-		c.DBPath = defaultDBPath
-	}
 }
 
 func (c *Config) validate() error {
@@ -147,6 +143,9 @@ func (c *Config) validate() error {
 	}
 	if c.Profile == "" {
 		return fmt.Errorf("profile path is required")
+	}
+	if c.DBPath == "" {
+		return fmt.Errorf("db_path is required")
 	}
 	if len(c.Feeds) == 0 {
 		return fmt.Errorf("at least one feed is required")

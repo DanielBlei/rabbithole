@@ -19,12 +19,26 @@ import (
 	"github.com/DanielBlei/ai-searcher/internal/feeds"
 	"github.com/DanielBlei/ai-searcher/internal/httpclient"
 	"github.com/DanielBlei/ai-searcher/internal/rank"
+	"github.com/DanielBlei/ai-searcher/internal/retry"
 )
 
 const (
 	listTimeout = 30 * time.Second
 	chatTimeout = 3 * time.Minute
 )
+
+// validateAttempts/validateBackoff bound how long Validate waits for the
+// server to come up: 3 tries with exponential backoff starting at 30s (30s, 60s).
+var (
+	validateAttempts = 3
+	validateBackoff  = 30 * time.Second
+)
+
+type modelsResponse struct {
+	Data []struct {
+		ID string `json:"id"`
+	} `json:"data"`
+}
 
 // Client scores items via /v1/chat/completions in JSON mode.
 type Client struct {
@@ -37,7 +51,7 @@ type Client struct {
 }
 
 // New connects to host using the given model. apiKey is optional (Bearer).
-// think enables the model's reasoning mode (off by default for scoring).
+// think enables the model's reasoning mode (on by default for scoring).
 func New(host, model, apiKey string, think bool) (*Client, error) {
 	if _, err := url.Parse(host); err != nil {
 		return nil, fmt.Errorf("invalid host %q: %w", host, err)
@@ -53,33 +67,26 @@ func New(host, model, apiKey string, think bool) (*Client, error) {
 }
 
 // Validate confirms the server is reachable and the model is loaded.
+// Connectivity is retried with backoff since the server may still be
+// starting up; a model that's reachable but not loaded fails immediately.
 func (c *Client) Validate(ctx context.Context) error {
 	c.once.Do(func() {
-		ctx, cancel := context.WithTimeout(ctx, listTimeout)
-		defer cancel()
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.host+"/v1/models", nil)
-		if err != nil {
-			c.validateErr = fmt.Errorf("build models request: %w", err)
-			return
-		}
-		resp, err := c.hc.Do(req)
-		if err != nil {
-			c.validateErr = fmt.Errorf("connect to vLLM: %w", err)
-			return
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusOK {
-			c.validateErr = fmt.Errorf("vLLM /v1/models returned %d", resp.StatusCode)
-			return
-		}
-		var models struct {
-			Data []struct {
-				ID string `json:"id"`
-			} `json:"data"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&models); err != nil {
-			c.validateErr = fmt.Errorf("decode models response: %w", err)
+		var models modelsResponse
+		c.validateErr = retry.Do(ctx, validateAttempts, validateBackoff, func() error {
+			m, err := c.listModels(ctx)
+			if err != nil {
+				return err
+			}
+			models = m
+			return nil
+		}, func(attempt int, err error, delay time.Duration) {
+			log.Debug().
+				Int("attempt", attempt).
+				Err(err).
+				Str("retry_in", delay.String()).
+				Msg("vllm: not reachable yet, retrying")
+		})
+		if c.validateErr != nil {
 			return
 		}
 		for _, m := range models.Data {
@@ -90,6 +97,29 @@ func (c *Client) Validate(ctx context.Context) error {
 		c.validateErr = fmt.Errorf("model %q not loaded in vLLM at %s", c.model, c.host)
 	})
 	return c.validateErr
+}
+
+func (c *Client) listModels(ctx context.Context) (modelsResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, listTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.host+"/v1/models", nil)
+	if err != nil {
+		return modelsResponse{}, fmt.Errorf("build models request: %w", err)
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return modelsResponse{}, fmt.Errorf("connect to vLLM: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return modelsResponse{}, fmt.Errorf("vLLM /v1/models returned %d", resp.StatusCode)
+	}
+	var models modelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&models); err != nil {
+		return modelsResponse{}, fmt.Errorf("decode models response: %w", err)
+	}
+	return models, nil
 }
 
 type chatRequest struct {
@@ -114,17 +144,18 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 	ctx, cancel := context.WithTimeout(ctx, chatTimeout)
 	defer cancel()
 
+	userPrompt := rank.BuildUserPrompt(profile, items)
 	reqBody := chatRequest{
 		Model:  c.model,
 		Stream: false,
 		Messages: []chatMessage{
 			{Role: "system", Content: rank.SystemPrompt},
-			{Role: "user", Content: rank.BuildUserPrompt(profile, items)},
+			{Role: "user", Content: userPrompt},
 		},
 		ResponseFormat: responseFormat{Type: "json_object"},
 	}
-	// Disable reasoning unless requested, so reasoning models return JSON
-	// promptly. Servers that don't recognize the field ignore it.
+	// Disable reasoning only if explicitly requested. Servers that don't
+	// recognize the field ignore it.
 	if !c.think {
 		off := false
 		reqBody.IncludeReasoning = &off
@@ -139,6 +170,7 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 		Int("items", len(items)).
 		Bool("think", c.think).
 		Msg("vllm: sending scoring request")
+	log.Trace().Str("prompt", userPrompt).Msg("vllm: prompt sent")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.host+"/v1/chat/completions", bytes.NewReader(body))
@@ -177,6 +209,7 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 		Str("elapsed", time.Since(start).Round(time.Millisecond).String()).
 		Int("response_bytes", len(content)).
 		Msg("vllm: scoring response received")
+	log.Trace().Str("response", content).Msg("vllm: raw response")
 
 	return rank.ParseScores(content, items)
 }

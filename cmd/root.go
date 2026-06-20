@@ -17,6 +17,7 @@ import (
 var (
 	configPath string
 	debug      bool
+	trace      bool
 	log        zerolog.Logger
 )
 
@@ -31,7 +32,7 @@ var rootCmd = &cobra.Command{
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		log = logger.New(debug)
+		log = logger.New(debug, trace)
 		return nil
 	},
 }
@@ -39,6 +40,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath, "path to config YAML")
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug logging")
+	rootCmd.PersistentFlags().BoolVar(&trace, "trace", false, "enable trace logging (raw model prompts/responses, implies --debug)")
 	rootCmd.AddCommand(runCmd)
 }
 

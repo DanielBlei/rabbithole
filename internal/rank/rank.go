@@ -2,6 +2,7 @@ package rank
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 
@@ -73,22 +74,60 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
-// scoreBatch scores a batch, falling back to single-item scoring on failure.
+// scoreBatch scores a batch, falling back to individual scoring on failure or
+// on a response that's missing entries for some of the batch's items — small
+// models in particular sometimes return a verdict for only part of a batch
+// without erroring.
 func scoreBatch(ctx context.Context, s Scorer, profile string, batch []feeds.Item) []ItemScore {
 	scores, err := s.Score(ctx, profile, batch)
 	if err == nil {
-		return scores
+		missing := missingItems(batch, scores)
+		if len(missing) == 0 {
+			return scores
+		}
+		log.Warn().Int("items", len(batch)).Int("missing", len(missing)).
+			Msg("batch response missing scores for some items, retrying individually")
+		return append(scores, retryEach(ctx, s, profile, missing)...)
 	}
 	if len(batch) == 1 {
-		log.Warn().Str("item", batch[0].Title).Err(err).Msg("scoring failed, skipping")
+		log.Warn().Str("item", batch[0].Title).Err(err).Msg(failureVerb(err) + ", skipping")
 		return nil
 	}
-	log.Warn().Int("batch", len(batch)).Err(err).Msg("batch scoring failed, retrying individually")
+	log.Warn().Int("items", len(batch)).Err(err).Msg("batch " + failureVerb(err) + ", retrying individually")
+	return retryEach(ctx, s, profile, batch)
+}
+
+// failureVerb labels why scoring a batch/item didn't produce a usable result,
+// so logs distinguish a slow/unresponsive backend from one that responded but
+// produced unusable output (e.g. a malformed or unmappable verdict).
+func failureVerb(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "scoring timed out"
+	}
+	return "scoring failed"
+}
+
+func retryEach(ctx context.Context, s Scorer, profile string, items []feeds.Item) []ItemScore {
 	var out []ItemScore
-	for _, it := range batch {
+	for _, it := range items {
 		out = append(out, scoreBatch(ctx, s, profile, []feeds.Item{it})...)
 	}
 	return out
+}
+
+// missingItems returns the items in batch that scores has no entry for.
+func missingItems(batch []feeds.Item, scores []ItemScore) []feeds.Item {
+	got := make(map[string]bool, len(scores))
+	for _, sc := range scores {
+		got[sc.ID] = true
+	}
+	var missing []feeds.Item
+	for _, it := range batch {
+		if !got[it.ID] {
+			missing = append(missing, it)
+		}
+	}
+	return missing
 }
 
 // Select keeps items scoring at least minScore, sorts by score descending
