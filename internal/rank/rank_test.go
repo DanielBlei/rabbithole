@@ -99,11 +99,20 @@ func TestFailureVerbDistinguishesTimeout(t *testing.T) {
 	defer cancel()
 	<-ctx.Done()
 
-	if got := failureVerb(fmt.Errorf("ollama chat: %w", ctx.Err())); got != "scoring timed out" {
-		t.Errorf("failureVerb(deadline exceeded) = %q, want %q", got, "scoring timed out")
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "timeout", err: fmt.Errorf("ollama chat: %w", ctx.Err()), want: "scoring timed out"},
+		{name: "generic error", err: errors.New("no valid scores mapped from response"), want: "scoring failed"},
 	}
-	if got := failureVerb(errors.New("no valid scores mapped from response")); got != "scoring failed" {
-		t.Errorf("failureVerb(parse error) = %q, want %q", got, "scoring failed")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := failureVerb(tt.err); got != tt.want {
+				t.Errorf("failureVerb() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

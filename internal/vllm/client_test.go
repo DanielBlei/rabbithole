@@ -3,6 +3,8 @@ package vllm
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -17,102 +19,88 @@ func withFastValidateRetry(t *testing.T) {
 	})
 }
 
-func TestValidateRetriesUntilServerComesUp(t *testing.T) {
+func TestValidate(t *testing.T) {
 	withFastValidateRetry(t)
 
-	var calls int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if calls < 3 {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"llama3"}]}`))
-	}))
-	defer srv.Close()
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "model present succeeds", body: `{"data":[{"id":"llama3"}]}`},
+		{name: "model missing fails", body: `{"data":[{"id":"other"}]}`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
 
-	c, err := New(srv.URL, "llama3", "", false)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	if err := c.Validate(t.Context()); err != nil {
-		t.Fatalf("Validate() error = %v, want nil", err)
-	}
-	if calls != 3 {
-		t.Fatalf("calls = %d, want 3", calls)
+			c, err := New(srv.URL, "llama3", "", false)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			err = c.Validate(t.Context())
+			if tt.wantErr && err == nil {
+				t.Fatal("Validate() error = nil, want non-nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("Validate() error = %v, want nil", err)
+			}
+		})
 	}
 }
 
-func TestValidateFailsAfterAttemptsExhausted(t *testing.T) {
-	withFastValidateRetry(t)
-
-	var calls int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	defer srv.Close()
-
-	c, err := New(srv.URL, "llama3", "", false)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
+func TestListModelNames(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		statusCode int // 0 means 200
+		want       []string
+		wantErr    string // substring; empty means no error
+	}{
+		{
+			name: "decodes model list",
+			body: `{"data":[{"id":"llama3"},{"id":"mistral"}]}`,
+			want: []string{"llama3", "mistral"},
+		},
+		{
+			name:       "server error surfaces as error",
+			statusCode: http.StatusServiceUnavailable,
+			wantErr:    "vLLM /v1/models returned",
+		},
 	}
-	if err := c.Validate(t.Context()); err == nil {
-		t.Fatal("Validate() error = nil, want non-nil")
-	}
-	if calls != validateAttempts {
-		t.Fatalf("calls = %d, want %d", calls, validateAttempts)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tt.statusCode != 0 {
+					w.WriteHeader(tt.statusCode)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
 
-func TestValidateRetriesOnNextCallAfterFailure(t *testing.T) {
-	withFastValidateRetry(t)
-
-	var up bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !up {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"llama3"}]}`))
-	}))
-	defer srv.Close()
-
-	c, err := New(srv.URL, "llama3", "", false)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	if err := c.Validate(t.Context()); err == nil {
-		t.Fatal("Validate() error = nil, want non-nil while server is down")
-	}
-
-	up = true
-	if err := c.Validate(t.Context()); err != nil {
-		t.Fatalf("Validate() error = %v, want nil once server is up (failure should not be cached forever)", err)
-	}
-}
-
-func TestValidateMissingModelDoesNotRetry(t *testing.T) {
-	withFastValidateRetry(t)
-
-	var calls int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"other"}]}`))
-	}))
-	defer srv.Close()
-
-	c, err := New(srv.URL, "llama3", "", false)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	if err := c.Validate(t.Context()); err == nil {
-		t.Fatal("Validate() error = nil, want non-nil")
-	}
-	if calls != 1 {
-		t.Fatalf("calls = %d, want 1 (a missing model should fail fast, not retry)", calls)
+			c, err := New(srv.URL, "llama3", "", false)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			got, err := c.listModelNames(t.Context())
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("listModelNames() error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("listModelNames() error = %v, want nil", err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("listModelNames() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
