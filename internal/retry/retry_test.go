@@ -30,36 +30,50 @@ func TestDoSucceedsAfterFailures(t *testing.T) {
 	}
 }
 
-func TestDoExhaustsAttempts(t *testing.T) {
-	wantErr := errors.New("still down")
-	var calls int
-	err := Do(context.Background(), 3, time.Millisecond, func() error {
-		calls++
-		return wantErr
-	}, nil)
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("Do() error = %v, want %v", err, wantErr)
+func TestDoFailureModes(t *testing.T) {
+	tests := []struct {
+		name      string
+		attempts  int
+		delay     time.Duration
+		fn        func(calls *int, cancel context.CancelFunc) error
+		wantCalls int
+	}{
+		{
+			name:     "exhausts attempts",
+			attempts: 3,
+			delay:    time.Millisecond,
+			fn: func(calls *int, _ context.CancelFunc) error {
+				*calls++
+				return errors.New("still down")
+			},
+			wantCalls: 3,
+		},
+		{
+			name:     "stops on context cancel",
+			attempts: 5,
+			delay:    50 * time.Millisecond,
+			fn: func(calls *int, cancel context.CancelFunc) error {
+				*calls++
+				if *calls == 1 {
+					cancel()
+				}
+				return errors.New("not ready")
+			},
+			wantCalls: 1,
+		},
 	}
-	if calls != 3 {
-		t.Fatalf("calls = %d, want 3", calls)
-	}
-}
-
-func TestDoStopsOnContextCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	var calls int
-	err := Do(ctx, 5, 50*time.Millisecond, func() error {
-		calls++
-		if calls == 1 {
-			cancel()
-		}
-		return errors.New("not ready")
-	}, nil)
-	if err == nil {
-		t.Fatal("Do() error = nil, want non-nil")
-	}
-	if calls != 1 {
-		t.Fatalf("calls = %d, want 1 (should stop waiting once context is cancelled)", calls)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			var calls int
+			err := Do(ctx, tt.attempts, tt.delay, func() error { return tt.fn(&calls, cancel) }, nil)
+			if err == nil {
+				t.Fatal("Do() error = nil, want non-nil")
+			}
+			if calls != tt.wantCalls {
+				t.Fatalf("calls = %d, want %d", calls, tt.wantCalls)
+			}
+		})
 	}
 }
 

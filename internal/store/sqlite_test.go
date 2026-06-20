@@ -118,29 +118,57 @@ func TestUpdateUserState(t *testing.T) {
 	}
 }
 
-func TestUpdateUserStateNotFound(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
+func TestUpdateUserStateErrors(t *testing.T) {
+	readStatus := StatusRead
+	badStatus := "archived"
+	tests := []struct {
+		name      string
+		seedItem  bool
+		link      string
+		patch     UserPatch
+		wantErrIs error // checked via errors.Is when non-nil
+		wantErr   bool  // checked via plain non-nil when wantErrIs is nil
+	}{
+		{
+			name:      "not found",
+			link:      "https://x/missing",
+			patch:     UserPatch{Status: &readStatus},
+			wantErrIs: ErrItemNotFound,
+		},
+		{
+			name:     "invalid status",
+			seedItem: true,
+			link:     "https://x/a",
+			patch:    UserPatch{Status: &badStatus},
+			wantErr:  true,
+		},
 	}
-	defer func() { _ = db.Close() }()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			defer func() { _ = db.Close() }()
+			ctx := context.Background()
 
-	status := StatusRead
-	err = db.UpdateUserState(context.Background(), "https://x/missing", UserPatch{Status: &status})
-	if !errors.Is(err, ErrItemNotFound) {
-		t.Errorf("expected ErrItemNotFound, got %v", err)
-	}
-}
+			if tt.seedItem {
+				items := []feeds.Item{{ID: "a", Source: "S", Title: "A", Link: tt.link}}
+				if err := db.Record(ctx, items, nil, time.Now()); err != nil {
+					t.Fatalf("Record: %v", err)
+				}
+			}
 
-func TestUpdateUserStateInvalidStatus(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	bad := "archived"
-	if err := db.UpdateUserState(context.Background(), "https://x/a", UserPatch{Status: &bad}); err == nil {
-		t.Error("expected error for invalid status")
+			err = db.UpdateUserState(ctx, tt.link, tt.patch)
+			if tt.wantErrIs != nil {
+				if !errors.Is(err, tt.wantErrIs) {
+					t.Errorf("UpdateUserState() error = %v, want errors.Is(_, %v)", err, tt.wantErrIs)
+				}
+				return
+			}
+			if tt.wantErr && err == nil {
+				t.Error("UpdateUserState() error = nil, want non-nil")
+			}
+		})
 	}
 }
