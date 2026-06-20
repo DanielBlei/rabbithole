@@ -64,7 +64,7 @@ func TestScoreAllRetriesItemsMissingFromPartialResponse(t *testing.T) {
 		return []ItemScore{{ID: first.ID, Score: 5, Reason: "x"}}, nil
 	}}
 
-	got := ScoreAll(context.Background(), scorer, "profile", items, 3)
+	got := ScoreAll(context.Background(), scorer, "profile", items, 3, 4)
 
 	if len(got) != len(items) {
 		t.Fatalf("got %d scores, want %d (all items should eventually be scored): calls=%v", len(got), len(items), calls)
