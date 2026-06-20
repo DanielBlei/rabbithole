@@ -173,7 +173,11 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
+		Usage struct {
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&completion); err != nil {
 		return nil, fmt.Errorf("decode chat response: %w", err)
@@ -183,11 +187,22 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 	}
 
 	content := completion.Choices[0].Message.Content
+	finishReason := completion.Choices[0].FinishReason
 	log.Debug().
 		Str("elapsed", time.Since(start).Round(time.Millisecond).String()).
 		Int("response_bytes", len(content)).
+		Str("finish_reason", finishReason).
+		Int("completion_tokens", completion.Usage.CompletionTokens).
 		Msg("vllm: scoring response received")
 	log.Trace().Str("response", content).Msg("vllm: raw response")
 
-	return rank.ParseScores(content, items)
+	scores, err := rank.ParseScores(content, items)
+	if err != nil {
+		// finish_reason "length" means vLLM cut generation off at the token
+		// budget mid-answer; "stop" means the model emitted its own stop
+		// token and still produced unparseable output. Distinguishing the two
+		// tells us whether to raise the token budget or suspect the model.
+		return nil, fmt.Errorf("%w (finish_reason=%q, completion_tokens=%d)", err, finishReason, completion.Usage.CompletionTokens)
+	}
+	return scores, nil
 }

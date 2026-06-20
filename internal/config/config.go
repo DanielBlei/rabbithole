@@ -65,30 +65,32 @@ type Feed struct {
 
 // Config is the full run configuration loaded from YAML.
 type Config struct {
-	Profile   string   `yaml:"profile"`    // path to the interest-profile markdown
-	Provider  string   `yaml:"provider"`   // ollama | vllm | heuristic
-	ChatHost  string   `yaml:"chat_host"`  // inference server URL
-	ChatModel string   `yaml:"chat_model"` // chat model name
-	APIKey    string   `yaml:"api_key"`    // optional bearer token
-	BatchSize int      `yaml:"batch_size"` // items per scoring request
-	TopN      int      `yaml:"top_n"`      // max items in a digest
-	MinScore  int      `yaml:"min_score"`  // inclusion threshold (0-10)
-	Since     Duration `yaml:"since"`      // lookback window (e.g. 14d, 168h)
-	OutputDir string   `yaml:"output_dir"` // digest output directory
-	DBPath    string   `yaml:"db_path"`    // sqlite database path
-	Feeds     []Feed   `yaml:"feeds"`
+	Profile     string   `yaml:"profile"`      // path to the interest-profile markdown
+	Provider    string   `yaml:"provider"`     // ollama | vllm | heuristic
+	ChatHost    string   `yaml:"chat_host"`    // inference server URL
+	ChatModel   string   `yaml:"chat_model"`   // chat model name
+	APIKey      string   `yaml:"api_key"`      // optional bearer token
+	BatchSize   int      `yaml:"batch_size"`   // items per scoring request
+	MaxParallel int      `yaml:"max_parallel"` // concurrent scoring requests in flight
+	TopN        int      `yaml:"top_n"`        // max items in a digest
+	MinScore    int      `yaml:"min_score"`    // inclusion threshold (0-10)
+	Since       Duration `yaml:"since"`        // lookback window (e.g. 14d, 168h)
+	OutputDir   string   `yaml:"output_dir"`   // digest output directory
+	DBPath      string   `yaml:"db_path"`      // sqlite database path
+	Feeds       []Feed   `yaml:"feeds"`
 }
 
 // Defaults mirror go-to-rag conventions (Ollama on localhost).
 const (
-	defaultProvider  = "ollama"
-	defaultChatHost  = "http://localhost:11434"
-	defaultChatModel = "qwen3:4b"
-	defaultBatchSize = 5
-	defaultTopN      = 30
-	defaultMinScore  = 6
-	defaultSince     = 14 * 24 * time.Hour
-	defaultOutputDir = "./data/digests"
+	defaultProvider    = "ollama"
+	defaultChatHost    = "http://localhost:11434"
+	defaultChatModel   = "qwen3:4b"
+	defaultBatchSize   = 5
+	defaultMaxParallel = 4
+	defaultTopN        = 30
+	defaultMinScore    = 6
+	defaultSince       = 14 * 24 * time.Hour
+	defaultOutputDir   = "./data/digests"
 )
 
 // Load reads and validates the config at path, applying defaults for unset fields.
@@ -120,6 +122,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.BatchSize <= 0 {
 		c.BatchSize = defaultBatchSize
+	}
+	if c.MaxParallel <= 0 {
+		c.MaxParallel = defaultMaxParallel
 	}
 	if c.TopN <= 0 {
 		c.TopN = defaultTopN

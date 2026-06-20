@@ -121,21 +121,46 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 
 	start := time.Now()
 	var sb strings.Builder
+	var doneReason string
+	var evalCount int
+	var sawDone bool
 	err := c.api.Chat(ctx, req, func(resp api.ChatResponse) error {
 		sb.WriteString(resp.Message.Content)
+		if resp.Done {
+			sawDone = true
+			doneReason = resp.DoneReason
+			evalCount = resp.EvalCount
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ollama chat: %w", err)
 	}
+	if !sawDone {
+		// The stream closed without a done chunk at all (not a "length"/"stop"
+		// done_reason, which would mean Ollama did report a reason) - distinct
+		// from the zero value so logs don't read as a reported-but-empty reason.
+		doneReason = "no done signal (stream closed early)"
+	}
 
+	// Logged as completion_tokens, not Ollama's own eval_count, to match vllm.Client's log key.
 	log.Debug().
 		Str("elapsed", time.Since(start).Round(time.Millisecond).String()).
 		Int("response_bytes", sb.Len()).
+		Str("done_reason", doneReason).
+		Int("completion_tokens", evalCount).
 		Msg("ollama: scoring response received")
 	log.Trace().Str("response", sb.String()).Msg("ollama: raw response")
 
-	return rank.ParseScores(sb.String(), items)
+	scores, err := rank.ParseScores(sb.String(), items)
+	if err != nil {
+		// done_reason "length" means Ollama cut generation off at num_predict/
+		// num_ctx mid-answer; "stop" means the model emitted its own stop
+		// token and still produced unparseable output. Distinguishing the two
+		// tells us whether to raise the token budget or suspect the model.
+		return nil, fmt.Errorf("%w (done_reason=%q, completion_tokens=%d)", err, doneReason, evalCount)
+	}
+	return scores, nil
 }
 
 func normalize(m string) string {

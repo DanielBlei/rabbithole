@@ -72,11 +72,11 @@ func Run(ctx context.Context, cfg *config.Config, profile string, db *store.Stor
 	}
 	batches := (len(unseen) + cfg.BatchSize - 1) / cfg.BatchSize
 	log.Info().Str("provider", cfg.Provider).Int("items", len(unseen)).
-		Int("batches", batches).Int("batch_size", cfg.BatchSize).Bool("think", opts.Think).
-		Msg("scoring items")
+		Int("batches", batches).Int("batch_size", cfg.BatchSize).Int("max_parallel", cfg.MaxParallel).
+		Bool("think", opts.Think).Msg("scoring items")
 
 	scoreStart := time.Now()
-	scores := rank.ScoreAll(ctx, scorer, profile, unseen, cfg.BatchSize)
+	scores := rank.ScoreAll(ctx, scorer, profile, unseen, cfg.BatchSize, cfg.MaxParallel)
 	log.Info().Int("scored", len(scores)).Int("of", len(unseen)).
 		Str("elapsed", time.Since(scoreStart).Round(time.Millisecond).String()).Msg("scoring complete")
 
