@@ -36,7 +36,11 @@ func NewValidator(name string, attempts int, backoff time.Duration) *Validator {
 
 // Validate confirms model is present among list's results. hint is appended
 // to the error when the backend is reachable but model isn't found there.
-func (v *Validator) Validate(ctx context.Context, model, hint string, list func(ctx context.Context) ([]string, error)) error {
+func (v *Validator) Validate(
+	ctx context.Context,
+	model, hint string,
+	list func(ctx context.Context) ([]string, error),
+) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.ok {

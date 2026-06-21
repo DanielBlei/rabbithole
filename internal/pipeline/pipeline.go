@@ -33,7 +33,14 @@ type Outcome struct {
 // profile, and, if opts.Record is set, records the cycle in db under day:
 // every unseen item as seen, plus the selected results with their score and
 // reason.
-func Run(ctx context.Context, cfg *config.Config, profile string, db *store.Store, day time.Time, opts Options) (Outcome, error) {
+func Run(
+	ctx context.Context,
+	cfg *config.Config,
+	profile string,
+	db *store.Store,
+	day time.Time,
+	opts Options,
+) (Outcome, error) {
 	sources := make([]feeds.Source, len(cfg.Feeds))
 	for i, f := range cfg.Feeds {
 		sources[i] = feeds.Source{Name: f.Name, URL: f.URL}

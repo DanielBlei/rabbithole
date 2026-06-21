@@ -67,7 +67,12 @@ func TestScoreAllRetriesItemsMissingFromPartialResponse(t *testing.T) {
 	got := ScoreAll(context.Background(), scorer, "profile", items, 3, 4)
 
 	if len(got) != len(items) {
-		t.Fatalf("got %d scores, want %d (all items should eventually be scored): calls=%v", len(got), len(items), calls)
+		t.Fatalf(
+			"got %d scores, want %d (all items should eventually be scored): calls=%v",
+			len(got),
+			len(items),
+			calls,
+		)
 	}
 	for _, it := range items {
 		if _, ok := got[it.ID]; !ok {
