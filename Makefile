@@ -3,6 +3,7 @@ CONFIG   ?= ./configs/config.example.yaml
 PKG      := ./...
 NO_THINK ?=
 THINK_FLAG := $(if $(NO_THINK),--no-think,)
+ADDR     ?= :8080
 
 .DEFAULT_GOAL := help
 
@@ -45,6 +46,10 @@ dry-run: ## Print the digest to stdout without writing files or recording items
 .PHONY: heuristic
 heuristic: ## Offline run with the model-free keyword scorer (no Ollama needed)
 	go run . run --config $(CONFIG) --provider heuristic $(THINK_FLAG)
+
+.PHONY: serve
+serve: ## Serve the items API over HTTP (uses CONFIG, ADDR; JSON only, no frontend yet)
+	go run . serve --config $(CONFIG) --addr $(ADDR)
 
 ##@ Test
 

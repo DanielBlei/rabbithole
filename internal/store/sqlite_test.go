@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -232,6 +233,22 @@ func TestList(t *testing.T) {
 		t.Fatalf("UpdateUserState: %v", err)
 	}
 
+	// Spread created_at across distinct days (oldest a -> newest d) so
+	// After/Before windows and SortByDate have something to distinguish.
+	// Record always stamps created_at with time.Now(), so this is set
+	// directly — there's no public API for backdating it.
+	now := time.Now()
+	for id, age := range map[string]time.Duration{
+		"a": 4 * 24 * time.Hour,
+		"b": 3 * 24 * time.Hour,
+		"c": 2 * 24 * time.Hour,
+		"d": 1 * 24 * time.Hour,
+	} {
+		if _, err := db.db.ExecContext(ctx, "UPDATE items SET created_at = ? WHERE id = ?", now.Add(-age), id); err != nil {
+			t.Fatalf("backdate %s: %v", id, err)
+		}
+	}
+
 	tests := []struct {
 		name    string
 		filter  ListFilter
@@ -268,6 +285,31 @@ func TestList(t *testing.T) {
 			filter:  ListFilter{Status: "archived"},
 			wantErr: true,
 		},
+		{
+			name:    "after filter, recent items only",
+			filter:  ListFilter{After: now.Add(-60 * time.Hour)}, // > 2.5 days ago
+			wantIDs: []string{"d", "c"},
+		},
+		{
+			name:    "before filter, older items only",
+			filter:  ListFilter{Before: now.Add(-60 * time.Hour)},
+			wantIDs: []string{"b", "a"},
+		},
+		{
+			name:    "after and before, bounded window",
+			filter:  ListFilter{After: now.Add(-84 * time.Hour), Before: now.Add(-36 * time.Hour)},
+			wantIDs: []string{"b", "c"},
+		},
+		{
+			name:    "sort by date, newest first regardless of score",
+			filter:  ListFilter{SortBy: SortByDate},
+			wantIDs: []string{"d", "c", "b", "a"},
+		},
+		{
+			name:    "invalid sort filter",
+			filter:  ListFilter{SortBy: "newest"},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -289,6 +331,33 @@ func TestList(t *testing.T) {
 				t.Errorf("List() ids = %v, want %v", gotIDs, tt.wantIDs)
 			}
 		})
+	}
+}
+
+func TestListLimitClamp(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	items := make([]feeds.Item, maxListLimit+5)
+	for i := range items {
+		id := strconv.Itoa(i)
+		items[i] = feeds.Item{ID: id, Source: "S", Title: id, Link: "https://x/" + id}
+	}
+	if err := db.Record(ctx, items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	// A caller asking for more than maxListLimit is capped, not honored.
+	rows, err := db.List(ctx, ListFilter{Limit: maxListLimit * 10})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != maxListLimit {
+		t.Errorf("got %d rows, want clamp to %d", len(rows), maxListLimit)
 	}
 }
 

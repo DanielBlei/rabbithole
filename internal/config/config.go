@@ -75,6 +75,7 @@ type Config struct {
 	TopN        int      `yaml:"top_n"`        // max items in a digest
 	MinScore    int      `yaml:"min_score"`    // inclusion threshold (0-10)
 	Since       Duration `yaml:"since"`        // lookback window (e.g. 14d, 168h)
+	ListSince   Duration `yaml:"list_since"`   // default display window for `items list`/serve (e.g. 3d)
 	OutputDir   string   `yaml:"output_dir"`   // digest output directory
 	DBPath      string   `yaml:"db_path"`      // sqlite database path
 	Feeds       []Feed   `yaml:"feeds"`
@@ -90,6 +91,7 @@ const (
 	defaultTopN        = 30
 	defaultMinScore    = 6
 	defaultSince       = 14 * 24 * time.Hour
+	defaultListSince   = 3 * 24 * time.Hour
 	defaultOutputDir   = "./data/digests"
 )
 
@@ -134,6 +136,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Since == 0 {
 		c.Since = Duration(defaultSince)
+	}
+	if c.ListSince == 0 {
+		c.ListSince = Duration(defaultListSince)
 	}
 	if c.OutputDir == "" {
 		c.OutputDir = defaultOutputDir

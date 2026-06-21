@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -23,6 +24,9 @@ var (
 	listStatus string
 	listSource string
 	listLimit  int
+	listSince  string
+	listBefore string
+	listSort   string
 )
 
 func init() {
@@ -35,6 +39,9 @@ func init() {
 	listCmd.Flags().StringVar(&listStatus, "status", "", "filter by status (unread|read|skipped)")
 	listCmd.Flags().StringVar(&listSource, "source", "", "filter by source name")
 	listCmd.Flags().IntVar(&listLimit, "limit", 50, "max items to show")
+	listCmd.Flags().StringVar(&listSince, "since", "", "only items recorded within this long ago, e.g. 3d, 12h (default: config list_since)")
+	listCmd.Flags().StringVar(&listBefore, "before", "", "only items recorded earlier than this long ago, e.g. 3d (default: unbounded)")
+	listCmd.Flags().StringVar(&listSort, "sort", "", "sort order: score (default, best first) or date (newest first)")
 
 	sourcesCmd := &cobra.Command{
 		Use:   "sources",
@@ -77,8 +84,10 @@ func init() {
 	rootCmd.AddCommand(itemsCmd)
 }
 
-// withStore opens the configured store, runs fn, and closes it.
-func withStore(cmd *cobra.Command, fn func(ctx context.Context, db *store.Store) error) error {
+// withStore opens the configured store, runs fn, and closes it. The loaded
+// config is passed through so callers can apply config-driven defaults (e.g.
+// `items list`'s default window) without reloading it.
+func withStore(cmd *cobra.Command, fn func(ctx context.Context, db *store.Store, cfg *config.Config) error) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
@@ -88,7 +97,7 @@ func withStore(cmd *cobra.Command, fn func(ctx context.Context, db *store.Store)
 		return err
 	}
 	defer func() { _ = db.Close() }()
-	return fn(cmd.Context(), db)
+	return fn(cmd.Context(), db, cfg)
 }
 
 // applyToEach runs fn for every identifier, continuing past per-item errors
@@ -111,7 +120,7 @@ func applyToEach(identifiers []string, fn func(string) error) error {
 
 func statusRunE(status, verb string) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		return withStore(cmd, func(ctx context.Context, db *store.Store) error {
+		return withStore(cmd, func(ctx context.Context, db *store.Store, _ *config.Config) error {
 			return applyToEach(args, func(identifier string) error {
 				s := status
 				if err := db.UpdateUserState(ctx, identifier, store.UserPatch{Status: &s}); err != nil {
@@ -130,7 +139,7 @@ func runRate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("score must be an integer, got %q", args[1])
 	}
-	return withStore(cmd, func(ctx context.Context, db *store.Store) error {
+	return withStore(cmd, func(ctx context.Context, db *store.Store, _ *config.Config) error {
 		if err := db.UpdateUserState(ctx, identifier, store.UserPatch{UserScore: &score}); err != nil {
 			return err
 		}
@@ -142,7 +151,7 @@ func runRate(cmd *cobra.Command, args []string) error {
 func runNote(cmd *cobra.Command, args []string) error {
 	identifier := args[0]
 	note := strings.Join(args[1:], " ")
-	return withStore(cmd, func(ctx context.Context, db *store.Store) error {
+	return withStore(cmd, func(ctx context.Context, db *store.Store, _ *config.Config) error {
 		if err := db.UpdateUserState(ctx, identifier, store.UserPatch{UserNote: &note}); err != nil {
 			return err
 		}
@@ -155,9 +164,44 @@ func runNote(cmd *cobra.Command, args []string) error {
 // doesn't push id/link off a normal terminal width.
 const listTitleWidth = 50
 
+// resolveListFilter turns the `items list` flags into a store.ListFilter,
+// converting --since/--before (durations relative to now) into the absolute
+// After/Before timestamps List expects. defaultSince is the configured
+// list_since window: a bare `items list` (no --since/--before) shows that
+// recent slice rather than the whole history; an explicit --since overrides
+// it, and --before pages older without re-imposing the default.
+func resolveListFilter(defaultSince time.Duration) (store.ListFilter, error) {
+	filter := store.ListFilter{Status: listStatus, Source: listSource, Limit: listLimit, SortBy: listSort}
+	now := time.Now()
+
+	switch {
+	case listSince != "":
+		d, err := config.ParseDuration(listSince)
+		if err != nil {
+			return store.ListFilter{}, fmt.Errorf("--since: %w", err)
+		}
+		filter.After = now.Add(-d)
+	case listBefore == "":
+		filter.After = now.Add(-defaultSince)
+	}
+
+	if listBefore != "" {
+		d, err := config.ParseDuration(listBefore)
+		if err != nil {
+			return store.ListFilter{}, fmt.Errorf("--before: %w", err)
+		}
+		filter.Before = now.Add(-d)
+	}
+	return filter, nil
+}
+
 func runList(cmd *cobra.Command, _ []string) error {
-	return withStore(cmd, func(ctx context.Context, db *store.Store) error {
-		rows, err := db.List(ctx, store.ListFilter{Status: listStatus, Source: listSource, Limit: listLimit})
+	return withStore(cmd, func(ctx context.Context, db *store.Store, cfg *config.Config) error {
+		filter, err := resolveListFilter(cfg.ListSince.Std())
+		if err != nil {
+			return err
+		}
+		rows, err := db.List(ctx, filter)
 		if err != nil {
 			return err
 		}
@@ -176,7 +220,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 }
 
 func runSources(cmd *cobra.Command, _ []string) error {
-	return withStore(cmd, func(ctx context.Context, db *store.Store) error {
+	return withStore(cmd, func(ctx context.Context, db *store.Store, _ *config.Config) error {
 		counts, err := db.Sources(ctx)
 		if err != nil {
 			return err

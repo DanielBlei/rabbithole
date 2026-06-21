@@ -76,3 +76,21 @@ func TestLoadSinceInvalid(t *testing.T) {
 		t.Error("expected error for invalid since value")
 	}
 }
+
+func TestLoadListSinceDefaultAndOverride(t *testing.T) {
+	for _, tc := range []struct {
+		listSince string
+		want      time.Duration
+	}{
+		{"list_since: 7d\n", 7 * 24 * time.Hour},
+		{"", 3 * 24 * time.Hour}, // omitted -> default 3d, independent of `since`
+	} {
+		cfg, err := Load(writeConfig(t, baseFeeds+tc.listSince))
+		if err != nil {
+			t.Fatalf("Load(list_since=%q): %v", tc.listSince, err)
+		}
+		if cfg.ListSince.Std() != tc.want {
+			t.Errorf("list_since=%q -> %s, want %s", tc.listSince, cfg.ListSince, tc.want)
+		}
+	}
+}
