@@ -48,7 +48,7 @@ const (
 const minUserScore, maxUserScore = 0, 10
 
 // ErrItemNotFound is returned by UpdateUserState when no item matches the
-// given link.
+// given identifier.
 var ErrItemNotFound = errors.New("item not found")
 
 const (
@@ -193,16 +193,25 @@ type UserPatch struct {
 	UserNote  *string
 }
 
-// UpdateUserState applies patch to the item identified by link. It is the
-// single mutation path for user-owned state: CLI commands and any future
-// API handler both call it directly.
-func (s *Store) UpdateUserState(ctx context.Context, link string, patch UserPatch) error {
-	if patch.Status != nil {
-		switch *patch.Status {
-		case StatusUnread, StatusRead, StatusSkipped:
-		default:
-			return fmt.Errorf("invalid status %q", *patch.Status)
-		}
+// isValidStatus reports whether status is one of the recognized items.status
+// values. Shared by UpdateUserState and List so the set of valid statuses
+// has a single home.
+func isValidStatus(status string) bool {
+	switch status {
+	case StatusUnread, StatusRead, StatusSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
+// UpdateUserState applies patch to the item identified by identifier, which
+// may be either an item's id or its link. It is the single mutation path for
+// user-owned state: CLI commands and any future API handler both call it
+// directly.
+func (s *Store) UpdateUserState(ctx context.Context, identifier string, patch UserPatch) error {
+	if patch.Status != nil && !isValidStatus(*patch.Status) {
+		return fmt.Errorf("invalid status %q", *patch.Status)
 	}
 	if patch.UserScore != nil && (*patch.UserScore < minUserScore || *patch.UserScore > maxUserScore) {
 		return fmt.Errorf("user score %d out of range %d-%d", *patch.UserScore, minUserScore, maxUserScore)
@@ -222,19 +231,129 @@ func (s *Store) UpdateUserState(ctx context.Context, link string, patch UserPatc
 		sets = append(sets, "user_note = ?")
 		args = append(args, *patch.UserNote)
 	}
-	args = append(args, link)
+	args = append(args, identifier, identifier)
 
-	q := fmt.Sprintf("UPDATE items SET %s WHERE link = ?", strings.Join(sets, ", "))
+	q := fmt.Sprintf("UPDATE items SET %s WHERE link = ? OR id = ?", strings.Join(sets, ", "))
 	res, err := s.db.ExecContext(ctx, q, args...)
 	if err != nil {
-		return fmt.Errorf("update item %s: %w", link, err)
+		return fmt.Errorf("update item %s: %w", identifier, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("rows affected: %w", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("%w: %s", ErrItemNotFound, link)
+		return fmt.Errorf("%w: %s", ErrItemNotFound, identifier)
 	}
 	return nil
+}
+
+// ItemRow is a compact, read-only view of an item for display (e.g. the
+// `items list` CLI command).
+type ItemRow struct {
+	ID        string
+	Source    string
+	Title     string
+	Link      string
+	Status    string
+	LLMScore  *int
+	UserScore *int
+}
+
+// ListFilter narrows List's results. Zero-value fields are unfiltered: an
+// empty Status or Source matches anything, and Limit<=0 falls back to
+// defaultListLimit.
+type ListFilter struct {
+	Status string
+	Source string
+	Limit  int
+}
+
+// defaultListLimit caps List's results when ListFilter.Limit is unset.
+const defaultListLimit = 50
+
+// List returns items matching filter, ranked best-first: highest of
+// user_score/llm_score (whichever is set; user_score wins when both are),
+// with source as a tiebreak.
+func (s *Store) List(ctx context.Context, filter ListFilter) ([]ItemRow, error) {
+	if filter.Status != "" && !isValidStatus(filter.Status) {
+		return nil, fmt.Errorf("invalid status %q", filter.Status)
+	}
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = defaultListLimit
+	}
+
+	var where []string
+	var args []any
+	if filter.Status != "" {
+		where = append(where, "status = ?")
+		args = append(args, filter.Status)
+	}
+	if filter.Source != "" {
+		where = append(where, "source = ?")
+		args = append(args, filter.Source)
+	}
+
+	q := "SELECT id, source, title, link, status, llm_score, user_score FROM items"
+	if len(where) > 0 {
+		q += " WHERE " + strings.Join(where, " AND ")
+	}
+	q += " ORDER BY COALESCE(user_score, llm_score) DESC, source ASC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query list: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var items []ItemRow
+	for rows.Next() {
+		var (
+			r         ItemRow
+			llmScore  sql.NullInt64
+			userScore sql.NullInt64
+		)
+		if err := rows.Scan(&r.ID, &r.Source, &r.Title, &r.Link, &r.Status, &llmScore, &userScore); err != nil {
+			return nil, fmt.Errorf("scan list: %w", err)
+		}
+		if llmScore.Valid {
+			v := int(llmScore.Int64)
+			r.LLMScore = &v
+		}
+		if userScore.Valid {
+			v := int(userScore.Int64)
+			r.UserScore = &v
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+// SourceCount pairs a source name with how many items are recorded for it.
+type SourceCount struct {
+	Source string
+	Count  int
+}
+
+// Sources returns the distinct sources present in the store, each with its
+// item count, ordered by source name. This is the domain of values that
+// ListFilter.Source can match against.
+func (s *Store) Sources(ctx context.Context) ([]SourceCount, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT source, COUNT(*) FROM items GROUP BY source ORDER BY source")
+	if err != nil {
+		return nil, fmt.Errorf("query sources: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var counts []SourceCount
+	for rows.Next() {
+		var c SourceCount
+		if err := rows.Scan(&c.Source, &c.Count); err != nil {
+			return nil, fmt.Errorf("scan sources: %w", err)
+		}
+		counts = append(counts, c)
+	}
+	return counts, rows.Err()
 }

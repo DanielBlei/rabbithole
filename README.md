@@ -71,16 +71,22 @@ ai-searcher run [--config PATH] [--provider P] [--dry-run] [--think] [--debug]
   batch and per-item score, selection, and write — with timings.
 
 ```
-ai-searcher item read|skip|unread <link>
-ai-searcher item rate <link> <0-10>
-ai-searcher item note <link> <text>...
+ai-searcher items list [--status S] [--source NAME] [--limit N]
+ai-searcher items sources
+ai-searcher items read|skip|unread <id|link>...
+ai-searcher items rate <id|link> <0-10>
+ai-searcher items note <id|link> <text>...
 ```
 
-Record your own take on a digest item, identified by the link printed in the digest —
-separate from `llm_score`/`llm_score_reason`, which are the model's verdict. `read`/`skip`/`unread` set
-`status`; `rate` sets `user_score` (0-10); `note` sets `user_note` (no quoting needed, all
-trailing words are joined). These call `internal/store.UpdateUserState` directly, the same
-method a future `serve` command's frontend would call.
+`list` shows items ranked best-first (highest of `user_score`/`llm_score`, whichever is set),
+optionally filtered by status or source; `sources` lists the distinct source names in the
+store with item counts, for use with `list --source` and the commands below. Every item is
+identified by either its `id` or its `link` (both printed by `list`) — separate from
+`llm_score`/`llm_score_reason`, which are the model's verdict. `read`/`skip`/`unread` accept
+multiple ids/links at once and set `status`; `rate` sets `user_score` (0-10); `note` sets
+`user_note` (no quoting needed, all trailing words are joined) — these two stay single-item
+since one value can't sensibly apply to many items. These call `internal/store.UpdateUserState`
+directly, the same method a future `serve` command's frontend would call.
 
 ## Layout
 

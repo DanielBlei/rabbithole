@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -170,5 +171,150 @@ func TestUpdateUserStateErrors(t *testing.T) {
 				t.Error("UpdateUserState() error = nil, want non-nil")
 			}
 		})
+	}
+}
+
+func TestUpdateUserStateByID(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	items := []feeds.Item{{ID: "a", Source: "S", Title: "A", Link: "https://x/a"}}
+	if err := db.Record(ctx, items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	// "a" is the item's id, not its link — UpdateUserState must resolve either.
+	status := StatusRead
+	if err := db.UpdateUserState(ctx, "a", UserPatch{Status: &status}); err != nil {
+		t.Fatalf("UpdateUserState by id: %v", err)
+	}
+
+	var got string
+	row := db.db.QueryRowContext(ctx, "SELECT status FROM items WHERE link = ?", "https://x/a")
+	if err := row.Scan(&got); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if got != StatusRead {
+		t.Errorf("got status=%q, want %q", got, StatusRead)
+	}
+}
+
+func TestList(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	items := []feeds.Item{
+		{ID: "a", Source: "S1", Title: "A", Link: "https://x/a"},
+		{ID: "b", Source: "S1", Title: "B", Link: "https://x/b"},
+		{ID: "c", Source: "S2", Title: "C", Link: "https://x/c"},
+		{ID: "d", Source: "S2", Title: "D", Link: "https://x/d"},
+	}
+	digested := []DigestEntry{
+		{Item: items[0], Score: 5, Reason: "ok"},
+		{Item: items[1], Score: 9, Reason: "great"},
+	}
+	if err := db.Record(ctx, items, digested, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	// d: a user_score that outranks every llm_score, plus status=read.
+	// c: left seen-only, no score at all — must sort last.
+	userScore := 10
+	readStatus := StatusRead
+	if err := db.UpdateUserState(ctx, "https://x/d", UserPatch{UserScore: &userScore, Status: &readStatus}); err != nil {
+		t.Fatalf("UpdateUserState: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		filter  ListFilter
+		wantIDs []string
+		wantErr bool
+	}{
+		{
+			name:    "no filter, best score first, nulls last",
+			filter:  ListFilter{},
+			wantIDs: []string{"d", "b", "a", "c"},
+		},
+		{
+			name:    "status filter",
+			filter:  ListFilter{Status: StatusRead},
+			wantIDs: []string{"d"},
+		},
+		{
+			name:    "source filter, still best score first within it",
+			filter:  ListFilter{Source: "S1"},
+			wantIDs: []string{"b", "a"},
+		},
+		{
+			name:    "limit caps results",
+			filter:  ListFilter{Limit: 2},
+			wantIDs: []string{"d", "b"},
+		},
+		{
+			name:    "zero limit falls back to default, not zero rows",
+			filter:  ListFilter{Limit: 0},
+			wantIDs: []string{"d", "b", "a", "c"},
+		},
+		{
+			name:    "invalid status filter",
+			filter:  ListFilter{Status: "archived"},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows, err := db.List(ctx, tt.filter)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("List() error = nil, want non-nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			gotIDs := make([]string, len(rows))
+			for i, r := range rows {
+				gotIDs[i] = r.ID
+			}
+			if !slices.Equal(gotIDs, tt.wantIDs) {
+				t.Errorf("List() ids = %v, want %v", gotIDs, tt.wantIDs)
+			}
+		})
+	}
+}
+
+func TestSources(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	items := []feeds.Item{
+		{ID: "a", Source: "S1", Title: "A", Link: "https://x/a"},
+		{ID: "b", Source: "S1", Title: "B", Link: "https://x/b"},
+		{ID: "c", Source: "S2", Title: "C", Link: "https://x/c"},
+	}
+	if err := db.Record(ctx, items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	counts, err := db.Sources(ctx)
+	if err != nil {
+		t.Fatalf("Sources: %v", err)
+	}
+	want := []SourceCount{{Source: "S1", Count: 2}, {Source: "S2", Count: 1}}
+	if !slices.Equal(counts, want) {
+		t.Errorf("Sources() = %+v, want %+v", counts, want)
 	}
 }
