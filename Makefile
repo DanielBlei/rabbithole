@@ -84,6 +84,11 @@ fmt: ## Format all Go source
 lint: ## Run golangci-lint if installed, else fall back to vet
 	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run; else echo "golangci-lint not found; running go vet"; go vet $(PKG); fi
 
+.PHONY: lint-fix
+lint-fix: ## Run golangci-lint with --fix (formats + autofixes lint issues)
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not found"; exit 1; }
+	golangci-lint run --fix
+
 .PHONY: check
 check: fmt vet test ## fmt + vet + test (run before committing)
 

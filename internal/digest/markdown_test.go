@@ -14,7 +14,11 @@ import (
 func TestRenderIncludesItems(t *testing.T) {
 	day := time.Date(2026, 6, 16, 9, 0, 0, 0, time.UTC)
 	results := []rank.Result{
-		{Item: feeds.Item{Title: "Scaling vLLM", Link: "https://x.com/vllm", Source: "Medium"}, Score: 9, Reason: "deep"},
+		{
+			Item:   feeds.Item{Title: "Scaling vLLM", Link: "https://x.com/vllm", Source: "Medium"},
+			Score:  9,
+			Reason: "deep",
+		},
 	}
 	out := Render(day, results)
 	for _, want := range []string{"Scaling vLLM", "https://x.com/vllm", "[9/10]", "deep", "Medium"} {

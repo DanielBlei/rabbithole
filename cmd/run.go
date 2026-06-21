@@ -26,8 +26,10 @@ var runCmd = &cobra.Command{
 
 func init() {
 	runCmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the digest to stdout; do not write files or record items")
-	runCmd.Flags().StringVar(&providerOverride, "provider", "", "override the configured provider (ollama|vllm|heuristic)")
-	runCmd.Flags().BoolVar(&noThink, "no-think", false, "disable model reasoning/thinking during scoring (use for models without thinking support)")
+	runCmd.Flags().
+		StringVar(&providerOverride, "provider", "", "override the configured provider (ollama|vllm|heuristic)")
+	runCmd.Flags().
+		BoolVar(&noThink, "no-think", false, "disable model reasoning/thinking during scoring (use for models without thinking support)")
 }
 
 func runE(cmd *cobra.Command, _ []string) error {

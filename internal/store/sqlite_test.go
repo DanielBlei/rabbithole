@@ -81,7 +81,8 @@ func TestRecordIgnoresDuplicateLink(t *testing.T) {
 	}
 
 	var count int
-	if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM items WHERE link = ?", "https://x/dup").Scan(&count); err != nil {
+	if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM items WHERE link = ?", "https://x/dup").
+		Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if count != 1 {
@@ -105,7 +106,11 @@ func TestUpdateUserState(t *testing.T) {
 	status := StatusRead
 	score := 8
 	note := "worth a reread"
-	if err := db.UpdateUserState(ctx, "https://x/a", UserPatch{Status: &status, UserScore: &score, UserNote: &note}); err != nil {
+	if err := db.UpdateUserState(
+		ctx,
+		"https://x/a",
+		UserPatch{Status: &status, UserScore: &score, UserNote: &note},
+	); err != nil {
 		t.Fatalf("UpdateUserState: %v", err)
 	}
 
@@ -229,7 +234,11 @@ func TestList(t *testing.T) {
 	// c: left seen-only, no score at all — must sort last.
 	userScore := 10
 	readStatus := StatusRead
-	if err := db.UpdateUserState(ctx, "https://x/d", UserPatch{UserScore: &userScore, Status: &readStatus}); err != nil {
+	if err := db.UpdateUserState(
+		ctx,
+		"https://x/d",
+		UserPatch{UserScore: &userScore, Status: &readStatus},
+	); err != nil {
 		t.Fatalf("UpdateUserState: %v", err)
 	}
 
@@ -244,7 +253,12 @@ func TestList(t *testing.T) {
 		"c": 2 * 24 * time.Hour,
 		"d": 1 * 24 * time.Hour,
 	} {
-		if _, err := db.db.ExecContext(ctx, "UPDATE items SET created_at = ? WHERE id = ?", now.Add(-age), id); err != nil {
+		if _, err := db.db.ExecContext(
+			ctx,
+			"UPDATE items SET created_at = ? WHERE id = ?",
+			now.Add(-age),
+			id,
+		); err != nil {
 			t.Fatalf("backdate %s: %v", id, err)
 		}
 	}

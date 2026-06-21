@@ -40,7 +40,8 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath, "path to config YAML")
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug logging")
-	rootCmd.PersistentFlags().BoolVar(&trace, "trace", false, "enable trace logging (raw model prompts/responses, implies --debug)")
+	rootCmd.PersistentFlags().
+		BoolVar(&trace, "trace", false, "enable trace logging (raw model prompts/responses, implies --debug)")
 	rootCmd.AddCommand(runCmd)
 }
 

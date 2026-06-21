@@ -21,7 +21,13 @@ type Result struct {
 // ScoreAll scores every item in batches of batchSize, running up to maxParallel
 // batches concurrently. A batch that fails to score is retried item-by-item;
 // items that still fail are omitted from the result.
-func ScoreAll(ctx context.Context, s Scorer, profile string, items []feeds.Item, batchSize, maxParallel int) map[string]ItemScore {
+func ScoreAll(
+	ctx context.Context,
+	s Scorer,
+	profile string,
+	items []feeds.Item,
+	batchSize, maxParallel int,
+) map[string]ItemScore {
 	if batchSize < 1 {
 		batchSize = 1
 	}

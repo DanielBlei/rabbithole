@@ -39,8 +39,10 @@ func init() {
 	listCmd.Flags().StringVar(&listStatus, "status", "", "filter by status (unread|read|skipped)")
 	listCmd.Flags().StringVar(&listSource, "source", "", "filter by source name")
 	listCmd.Flags().IntVar(&listLimit, "limit", 50, "max items to show")
-	listCmd.Flags().StringVar(&listSince, "since", "", "only items recorded within this long ago, e.g. 3d, 12h (default: config list_since)")
-	listCmd.Flags().StringVar(&listBefore, "before", "", "only items recorded earlier than this long ago, e.g. 3d (default: unbounded)")
+	listCmd.Flags().
+		StringVar(&listSince, "since", "", "only items recorded within this long ago, e.g. 3d, 12h (default: config list_since)")
+	listCmd.Flags().
+		StringVar(&listBefore, "before", "", "only items recorded earlier than this long ago, e.g. 3d (default: unbounded)")
 	listCmd.Flags().StringVar(&listSort, "sort", "", "sort order: score (default, best first) or date (newest first)")
 
 	sourcesCmd := &cobra.Command{
@@ -210,10 +212,14 @@ func runList(cmd *cobra.Command, _ []string) error {
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		fmt.Fprintln(w, "SCORE\tSTATUS\tSOURCE\tTITLE\tID\tLINK")
+		if _, err := fmt.Fprintln(w, "SCORE\tSTATUS\tSOURCE\tTITLE\tID\tLINK"); err != nil {
+			return err
+		}
 		for _, r := range rows {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				scoreCell(r), r.Status, r.Source, truncate(r.Title, listTitleWidth), r.ID, r.Link)
+			if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				scoreCell(r), r.Status, r.Source, truncate(r.Title, listTitleWidth), r.ID, r.Link); err != nil {
+				return err
+			}
 		}
 		return w.Flush()
 	})
@@ -230,9 +236,13 @@ func runSources(cmd *cobra.Command, _ []string) error {
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		fmt.Fprintln(w, "SOURCE\tCOUNT")
+		if _, err := fmt.Fprintln(w, "SOURCE\tCOUNT"); err != nil {
+			return err
+		}
 		for _, c := range counts {
-			fmt.Fprintf(w, "%s\t%d\n", c.Source, c.Count)
+			if _, err := fmt.Fprintf(w, "%s\t%d\n", c.Source, c.Count); err != nil {
+				return err
+			}
 		}
 		return w.Flush()
 	})

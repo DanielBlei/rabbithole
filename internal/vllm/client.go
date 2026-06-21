@@ -202,7 +202,12 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 		// budget mid-answer; "stop" means the model emitted its own stop
 		// token and still produced unparseable output. Distinguishing the two
 		// tells us whether to raise the token budget or suspect the model.
-		return nil, fmt.Errorf("%w (finish_reason=%q, completion_tokens=%d)", err, finishReason, completion.Usage.CompletionTokens)
+		return nil, fmt.Errorf(
+			"%w (finish_reason=%q, completion_tokens=%d)",
+			err,
+			finishReason,
+			completion.Usage.CompletionTokens,
+		)
 	}
 	return scores, nil
 }
