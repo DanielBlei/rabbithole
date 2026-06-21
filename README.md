@@ -1,120 +1,56 @@
 # ai-searcher
 
-A personal RSS reading assistant. It fetches your RSS/Atom feeds (Medium, arXiv, blogs,
-…), scores each new item against an editable interest profile using an LLM, and writes a
-dated markdown digest of **what to read today** — best first, each with a one-line reason.
+A personal RSS reading assistant. It fetches your RSS/Atom feeds (Medium, arXiv, blogs, …),
+scores each new item against an editable interest profile using an LLM, and writes a dated
+markdown digest of **what to read today** — best first, each with a one-line reason. The
+same data is also available as a small JSON API via `ai-searcher serve`.
 
-Built to keep up with AI engineering without manually triaging titles. Pluggable model
-backend: **Ollama** by default, any **OpenAI-compatible** endpoint (vLLM) as a drop-in, or
-a model-free **heuristic** for offline testing.
+Pluggable model backend: **Ollama** by default, any **OpenAI-compatible** endpoint (vLLM) as
+a drop-in, or a model-free **heuristic** for offline use.
 
-## How it works
+## Requirements
 
-```
-feeds (RSS/Atom) ──▶ fetch + normalize ──▶ drop seen/old ──▶ LLM scores each item
-                                                                      │
-        markdown digest  ◀── select top-N over threshold ◀───────────┘
-```
+- Go 1.26+
+- One of:
+  - [Ollama](https://ollama.com) running locally (default provider), or
+  - an OpenAI-compatible chat endpoint (e.g. vLLM), or
+  - nothing — the `heuristic` provider needs no model, useful for a first run or offline testing
 
-State (seen items, scores, digest history) lives in a local SQLite file, so re-runs only
-score genuinely new items.
+State is a local SQLite file via a pure-Go driver — no database server or cgo toolchain
+required.
 
-## Quick start
+## Getting started
 
 ```bash
-# 1. Configure
 cp configs/config.example.yaml configs/config.yaml
 cp configs/profile.example.md  configs/profile.md
 $EDITOR configs/profile.md      # describe what you care about — this drives ranking
 
-# 2a. With Ollama (default)
 ollama serve
 ollama pull qwen3:4b
 go run . run
-
-# 2b. Offline smoke test (no model needed)
-go run . run --provider heuristic
-
-# Preview without writing files or recording items
-go run . run --dry-run
 ```
 
-The digest is written to `data/digests/YYYY-MM-DD.md`.
+This writes a digest to `data/digests/YYYY-MM-DD.md`. For everything else — full config
+reference, the `run`/`items`/`serve` commands, the HTTP API, and how the pieces fit
+together — see [docs/](docs):
 
-## Configuration
+- [docs/configuration.md](docs/configuration.md)
+- [docs/cli.md](docs/cli.md)
+- [docs/api.md](docs/api.md)
+- [docs/architecture.md](docs/architecture.md)
 
-See `configs/config.example.yaml`. Key fields:
+## Contributing
 
-| Field | Meaning |
-|-------|---------|
-| `profile` | Path to your interest-profile markdown (injected into the scoring prompt) |
-| `provider` | `ollama` \| `vllm` \| `heuristic` |
-| `chat_host` / `chat_model` | Inference endpoint and model |
-| `api_key` | Optional bearer token (vLLM prod / Ollama Cloud) |
-| `batch_size` | Items per scoring request |
-| `top_n` / `min_score` | Digest size cap and inclusion threshold (0–10) |
-| `since` | Lookback window (e.g. `168h`) |
-| `feeds` | List of `{ name, url }` RSS/Atom sources |
-
-Medium feeds: `https://medium.com/feed/tag/<tag>`, `.../@<user>`, `.../<publication>`.
-
-## Commands
-
-```
-ai-searcher run [--config PATH] [--provider P] [--dry-run] [--think] [--debug]
-```
-
-- `--think` enables the model's reasoning mode during scoring. On by default. Pass
-  `--think=false` for models without a capable think mode, or if you want faster scoring
-  without chain-of-thought before the JSON.
-- `--debug` logs every stage: config, per-feed fetches, age/dedup filtering, each scoring
-  batch and per-item score, selection, and write — with timings.
-
-```
-ai-searcher items list [--status S] [--source NAME] [--limit N]
-ai-searcher items sources
-ai-searcher items read|skip|unread <id|link>...
-ai-searcher items rate <id|link> <0-10>
-ai-searcher items note <id|link> <text>...
-```
-
-`list` shows items ranked best-first (highest of `user_score`/`llm_score`, whichever is set),
-optionally filtered by status or source; `sources` lists the distinct source names in the
-store with item counts, for use with `list --source` and the commands below. Every item is
-identified by either its `id` or its `link` (both printed by `list`) — separate from
-`llm_score`/`llm_score_reason`, which are the model's verdict. `read`/`skip`/`unread` accept
-multiple ids/links at once and set `status`; `rate` sets `user_score` (0-10); `note` sets
-`user_note` (no quoting needed, all trailing words are joined) — these two stay single-item
-since one value can't sensibly apply to many items. These call `internal/store.UpdateUserState`
-directly, the same method a future `serve` command's frontend would call.
-
-## Layout
-
-```
-cmd/                 cobra CLI (root + run)
-internal/config      YAML config + profile loading
-internal/pipeline    fetch -> score -> record cycle, shared by run and (later) serve
-internal/feeds       concurrent RSS/Atom fetch + normalization (gofeed)
-internal/rank        Scorer interface, prompt/JSON parsing, batching, selection, heuristic
-internal/inference   provider factory (ollama | vllm | heuristic)
-internal/ollama      Ollama JSON-mode client
-internal/vllm        OpenAI-compatible JSON-mode client
-internal/digest      markdown renderer
-internal/store       SQLite (seen dedup, digest history, user status/notes)
-```
-
-## Roadmap
-
-- **Adaptive ranking** — feed `status`/`user_score`/`user_note` history (recorded via
-  `ai-searcher item`) back into the scoring prompt as liked/disliked examples.
-- **Serve command** — a local web frontend calling the same `internal/pipeline` and
-  `internal/store` functions the CLI calls, no client/server split.
-- **Full-text crawl** — fetch article bodies for richer scoring beyond title+summary.
-- **Embeddings pre-filter** — cheap shortlist → LLM rerank for large feed sets.
-- **Scheduling & delivery** — systemd timer / cron, plus email or chat delivery.
-
-## Testing
+Issues and PRs are welcome. Before submitting a change:
 
 ```bash
-go test ./...
+make check   # gofmt + go vet + go test ./...
 ```
+
+Keep changes focused and add tests for new behavior — see
+[docs/architecture.md](docs/architecture.md) for the package layout.
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
