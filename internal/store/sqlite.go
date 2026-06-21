@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS items (
 	user_note        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_items_digested ON items(digested_on);
+CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
 `
 
 // Status values for the items.status column. llm_score/llm_score_reason are
@@ -45,11 +46,32 @@ const (
 	StatusSkipped = "skipped"
 )
 
+// Sort values for ListFilter.SortBy: SortByScore (default) ranks best-first
+// by user/llm score; SortByDate ranks newest-first by created_at.
+const (
+	SortByScore = "score"
+	SortByDate  = "date"
+)
+
+// unscoredSentinel stands in for a NULL score in ORDER BY so result order
+// doesn't depend on the SQL engine's NULL-ordering default. SQLite (the only
+// engine today) always sorts NULL smallest, so this is belt-and-suspenders
+// here; it matters only if we ever add Postgres, whose default flips to NULLS
+// FIRST under DESC. The value sits below the valid 0-10 score range, so
+// unscored items sort last under SortByScore regardless.
+const unscoredSentinel = -1
+
 const minUserScore, maxUserScore = 0, 10
 
 // ErrItemNotFound is returned by UpdateUserState when no item matches the
 // given identifier.
 var ErrItemNotFound = errors.New("item not found")
+
+// ErrInvalidFilter is returned by List when a ListFilter holds an invalid
+// value (an unrecognized status or sort mode). It wraps a more specific
+// message; callers can errors.Is against it to tell a caller error (e.g. an
+// HTTP 400) apart from an execution failure (HTTP 500).
+var ErrInvalidFilter = errors.New("invalid list filter")
 
 const (
 	pragmaWAL         = "PRAGMA journal_mode=WAL"
@@ -251,37 +273,69 @@ func (s *Store) UpdateUserState(ctx context.Context, identifier string, patch Us
 // ItemRow is a compact, read-only view of an item for display (e.g. the
 // `items list` CLI command).
 type ItemRow struct {
-	ID        string
-	Source    string
-	Title     string
-	Link      string
-	Status    string
-	LLMScore  *int
-	UserScore *int
+	ID             string
+	Source         string
+	Title          string
+	Link           string
+	Status         string
+	LLMScore       *int
+	LLMScoreReason *string
+	UserScore      *int
+	PublishedAt    *time.Time
 }
 
 // ListFilter narrows List's results. Zero-value fields are unfiltered: an
-// empty Status or Source matches anything, and Limit<=0 falls back to
-// defaultListLimit.
+// empty Status or Source matches anything, a zero After/Before leaves that
+// side of the created_at window open, an empty SortBy falls back to
+// SortByScore, and Limit<=0 falls back to defaultListLimit.
+//
+// After/Before are plain absolute timestamps, not durations — pagination is
+// the caller's concern (compute the next window's bounds and call List
+// again), not something List tracks via a cursor.
 type ListFilter struct {
 	Status string
 	Source string
+	After  time.Time
+	Before time.Time
+	SortBy string
 	Limit  int
 }
 
-// defaultListLimit caps List's results when ListFilter.Limit is unset.
-const defaultListLimit = 50
+// List's result-count bounds: defaultListLimit applies when ListFilter.Limit
+// is unset (<=0); maxListLimit caps any caller-supplied value so an API client
+// can't request an unbounded result set.
+const (
+	defaultListLimit = 50
+	maxListLimit     = 200
+)
 
-// List returns items matching filter, ranked best-first: highest of
-// user_score/llm_score (whichever is set; user_score wins when both are),
-// with source as a tiebreak.
+// isValidSortBy reports whether sortBy is one of the recognized ListFilter
+// sort modes, or empty (meaning "use the default").
+func isValidSortBy(sortBy string) bool {
+	switch sortBy {
+	case "", SortByScore, SortByDate:
+		return true
+	default:
+		return false
+	}
+}
+
+// List returns items matching filter. By default (SortByScore) results are
+// ranked best-first: highest of user_score/llm_score (whichever is set;
+// user_score wins when both are), with source as a tiebreak; unscored items
+// sort last. SortByDate instead ranks newest-first by created_at.
 func (s *Store) List(ctx context.Context, filter ListFilter) ([]ItemRow, error) {
 	if filter.Status != "" && !isValidStatus(filter.Status) {
-		return nil, fmt.Errorf("invalid status %q", filter.Status)
+		return nil, fmt.Errorf("%w: status %q", ErrInvalidFilter, filter.Status)
+	}
+	if !isValidSortBy(filter.SortBy) {
+		return nil, fmt.Errorf("%w: sort %q", ErrInvalidFilter, filter.SortBy)
 	}
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = defaultListLimit
+	} else if limit > maxListLimit {
+		limit = maxListLimit
 	}
 
 	var where []string
@@ -294,12 +348,26 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]ItemRow, error) 
 		where = append(where, "source = ?")
 		args = append(args, filter.Source)
 	}
+	if !filter.After.IsZero() {
+		where = append(where, "created_at >= ?")
+		args = append(args, filter.After)
+	}
+	if !filter.Before.IsZero() {
+		where = append(where, "created_at < ?")
+		args = append(args, filter.Before)
+	}
 
-	q := "SELECT id, source, title, link, status, llm_score, user_score FROM items"
+	q := "SELECT id, source, title, link, status, llm_score, llm_score_reason, user_score, published_at FROM items"
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
-	q += " ORDER BY COALESCE(user_score, llm_score) DESC, source ASC LIMIT ?"
+	if filter.SortBy == SortByDate {
+		q += " ORDER BY created_at DESC"
+	} else {
+		q += " ORDER BY COALESCE(user_score, llm_score, ?) DESC, source ASC"
+		args = append(args, unscoredSentinel)
+	}
+	q += " LIMIT ?"
 	args = append(args, limit)
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -311,20 +379,29 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]ItemRow, error) 
 	var items []ItemRow
 	for rows.Next() {
 		var (
-			r         ItemRow
-			llmScore  sql.NullInt64
-			userScore sql.NullInt64
+			r           ItemRow
+			llmScore    sql.NullInt64
+			llmReason   sql.NullString
+			userScore   sql.NullInt64
+			publishedAt sql.NullTime
 		)
-		if err := rows.Scan(&r.ID, &r.Source, &r.Title, &r.Link, &r.Status, &llmScore, &userScore); err != nil {
+		if err := rows.Scan(&r.ID, &r.Source, &r.Title, &r.Link, &r.Status,
+			&llmScore, &llmReason, &userScore, &publishedAt); err != nil {
 			return nil, fmt.Errorf("scan list: %w", err)
 		}
 		if llmScore.Valid {
 			v := int(llmScore.Int64)
 			r.LLMScore = &v
 		}
+		if llmReason.Valid {
+			r.LLMScoreReason = &llmReason.String
+		}
 		if userScore.Valid {
 			v := int(userScore.Int64)
 			r.UserScore = &v
+		}
+		if publishedAt.Valid {
+			r.PublishedAt = &publishedAt.Time
 		}
 		items = append(items, r)
 	}
