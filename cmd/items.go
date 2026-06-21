@@ -1,0 +1,216 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"text/tabwriter"
+
+	"github.com/spf13/cobra"
+
+	"github.com/DanielBlei/ai-searcher/internal/config"
+	"github.com/DanielBlei/ai-searcher/internal/store"
+)
+
+var itemsCmd = &cobra.Command{
+	Use:   "items",
+	Short: "Browse and record your own read/skip/rating/notes for digest items, by id or link",
+}
+
+var (
+	listStatus string
+	listSource string
+	listLimit  int
+)
+
+func init() {
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List items, best score first",
+		Args:  cobra.NoArgs,
+		RunE:  runList,
+	}
+	listCmd.Flags().StringVar(&listStatus, "status", "", "filter by status (unread|read|skipped)")
+	listCmd.Flags().StringVar(&listSource, "source", "", "filter by source name")
+	listCmd.Flags().IntVar(&listLimit, "limit", 50, "max items to show")
+
+	sourcesCmd := &cobra.Command{
+		Use:   "sources",
+		Short: "List sources with item counts",
+		Args:  cobra.NoArgs,
+		RunE:  runSources,
+	}
+
+	readCmd := &cobra.Command{
+		Use:   "read <id|link>...",
+		Short: "Mark item(s) as read",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  statusRunE(store.StatusRead, "read"),
+	}
+	skipCmd := &cobra.Command{
+		Use:   "skip <id|link>...",
+		Short: "Mark item(s) as skipped",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  statusRunE(store.StatusSkipped, "skipped"),
+	}
+	unreadCmd := &cobra.Command{
+		Use:   "unread <id|link>...",
+		Short: "Reset item(s) back to unread",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  statusRunE(store.StatusUnread, "unread"),
+	}
+	rateCmd := &cobra.Command{
+		Use:   "rate <id|link> <0-10>",
+		Short: "Give an item your own relevance score",
+		Args:  cobra.ExactArgs(2),
+		RunE:  runRate,
+	}
+	noteCmd := &cobra.Command{
+		Use:   "note <id|link> <text>...",
+		Short: "Attach a free-text note to an item",
+		Args:  cobra.MinimumNArgs(2),
+		RunE:  runNote,
+	}
+	itemsCmd.AddCommand(listCmd, sourcesCmd, readCmd, skipCmd, unreadCmd, rateCmd, noteCmd)
+	rootCmd.AddCommand(itemsCmd)
+}
+
+// withStore opens the configured store, runs fn, and closes it.
+func withStore(cmd *cobra.Command, fn func(ctx context.Context, db *store.Store) error) error {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+	db, err := store.Open(cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	return fn(cmd.Context(), db)
+}
+
+// applyToEach runs fn for every identifier, continuing past per-item errors
+// (mirroring `kubectl delete`'s behavior for multiple resource names) and
+// printing each failure to stderr as it happens. Once every identifier has
+// been tried, it returns a non-nil error summarizing how many failed.
+func applyToEach(identifiers []string, fn func(string) error) error {
+	var failed int
+	for _, id := range identifiers {
+		if err := fn(id); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s: %v\n", id, err)
+			failed++
+		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d of %d item(s) failed", failed, len(identifiers))
+	}
+	return nil
+}
+
+func statusRunE(status, verb string) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		return withStore(cmd, func(ctx context.Context, db *store.Store) error {
+			return applyToEach(args, func(identifier string) error {
+				s := status
+				if err := db.UpdateUserState(ctx, identifier, store.UserPatch{Status: &s}); err != nil {
+					return err
+				}
+				fmt.Printf("Marked %s: %s\n", verb, identifier)
+				return nil
+			})
+		})
+	}
+}
+
+func runRate(cmd *cobra.Command, args []string) error {
+	identifier := args[0]
+	score, err := strconv.Atoi(args[1])
+	if err != nil {
+		return fmt.Errorf("score must be an integer, got %q", args[1])
+	}
+	return withStore(cmd, func(ctx context.Context, db *store.Store) error {
+		if err := db.UpdateUserState(ctx, identifier, store.UserPatch{UserScore: &score}); err != nil {
+			return err
+		}
+		fmt.Printf("Rated %s: %d/10\n", identifier, score)
+		return nil
+	})
+}
+
+func runNote(cmd *cobra.Command, args []string) error {
+	identifier := args[0]
+	note := strings.Join(args[1:], " ")
+	return withStore(cmd, func(ctx context.Context, db *store.Store) error {
+		if err := db.UpdateUserState(ctx, identifier, store.UserPatch{UserNote: &note}); err != nil {
+			return err
+		}
+		fmt.Printf("Noted: %s\n", identifier)
+		return nil
+	})
+}
+
+// listTitleWidth caps the TITLE column in `items list` so a long headline
+// doesn't push id/link off a normal terminal width.
+const listTitleWidth = 50
+
+func runList(cmd *cobra.Command, _ []string) error {
+	return withStore(cmd, func(ctx context.Context, db *store.Store) error {
+		rows, err := db.List(ctx, store.ListFilter{Status: listStatus, Source: listSource, Limit: listLimit})
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			fmt.Println("No items.")
+			return nil
+		}
+		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+		fmt.Fprintln(w, "SCORE\tSTATUS\tSOURCE\tTITLE\tID\tLINK")
+		for _, r := range rows {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				scoreCell(r), r.Status, r.Source, truncate(r.Title, listTitleWidth), r.ID, r.Link)
+		}
+		return w.Flush()
+	})
+}
+
+func runSources(cmd *cobra.Command, _ []string) error {
+	return withStore(cmd, func(ctx context.Context, db *store.Store) error {
+		counts, err := db.Sources(ctx)
+		if err != nil {
+			return err
+		}
+		if len(counts) == 0 {
+			fmt.Println("No sources.")
+			return nil
+		}
+		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+		fmt.Fprintln(w, "SOURCE\tCOUNT")
+		for _, c := range counts {
+			fmt.Fprintf(w, "%s\t%d\n", c.Source, c.Count)
+		}
+		return w.Flush()
+	})
+}
+
+// scoreCell renders an item's best-available score (user_score if set, else
+// llm_score), matching the ordering List uses.
+func scoreCell(r store.ItemRow) string {
+	if r.UserScore != nil {
+		return strconv.Itoa(*r.UserScore)
+	}
+	if r.LLMScore != nil {
+		return strconv.Itoa(*r.LLMScore)
+	}
+	return "-"
+}
+
+// truncate shortens s to at most n runes, appending "…" when it does.
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
+}
