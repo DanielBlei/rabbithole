@@ -1,0 +1,52 @@
+{{define "pane"}}
+<section class="pane" id="pane">
+  <div class="pane__bar">
+    <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+    &nbsp;triage@ai-searcher:~$ tail -f queue.log<span class="blink">_</span>
+  </div>
+
+  <form class="pane__filters" method="get" action="/">
+    <label class="filter">
+      <span class="filter__key">source</span>
+      <select class="filter__select" name="source" onchange="this.form.submit()">
+        <option value="" {{if eq .FilterSource ""}}selected{{end}}>all</option>
+        {{range .Sources}}<option value="{{.}}" {{if eq $.FilterSource .}}selected{{end}}>{{.}}</option>{{end}}
+      </select>
+    </label>
+    <div class="filter filter--published">
+      <span class="filter__key">published</span>
+      <div class="pills">
+        <label class="pill"><input type="radio" name="published" value="today" {{if and (not .FilterCustom) (eq .FilterPublished "today")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>today</span></label>
+        <label class="pill"><input type="radio" name="published" value="7d" {{if and (not .FilterCustom) (eq .FilterPublished "7d")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>7d</span></label>
+        <label class="pill"><input type="radio" name="published" value="14d" {{if and (not .FilterCustom) (eq .FilterPublished "14d")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>14d</span></label>
+        <label class="pill"><input type="radio" name="published" value="30d" {{if and (not .FilterCustom) (eq .FilterPublished "30d")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>30d</span></label>
+        <label class="pill"><input type="radio" name="published" value="custom" id="pubCustom" {{if .FilterCustom}}checked{{end}}><span>custom</span></label>
+      </div>
+      <div class="date-popover">
+        <label class="date-popover__field">from<input class="date-input" id="filterFrom" type="date" name="from" value="{{.FilterFrom}}" onchange="this.form.submit()"></label>
+        <label class="date-popover__field">to<input class="date-input" id="filterTo" type="date" name="to" value="{{.FilterTo}}" onchange="this.form.submit()"></label>
+      </div>
+    </div>
+    <label class="filter">
+      <span class="filter__key">sort</span>
+      <select class="filter__select" name="sort" onchange="this.form.submit()">
+        <option value="score" {{if eq .FilterSort "score"}}selected{{end}}>score</option>
+        <option value="date" {{if eq .FilterSort "date"}}selected{{end}}>date</option>
+      </select>
+    </label>
+  </form>
+
+  <div class="pane__nav">
+    <button class="nav-btn" id="btnFirst" title="Jump to first page">&laquo; first</button>
+    <span class="pageinfo" id="pageInfo"></span>
+    <div class="nav-right">
+      <button class="nav-btn" id="btnPrev">&lsaquo; prev</button>
+      <button class="nav-btn" id="btnNext">next &rsaquo;</button>
+    </div>
+  </div>
+
+  <div class="pane__body">
+    {{range .Rows}}{{template "row" .}}{{end}}
+  </div>
+</section>
+{{end}}

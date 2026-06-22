@@ -18,7 +18,8 @@ batch_size: 5    # items sent per scoring request
 max_parallel: 1  # concurrent scoring requests in flight;
 top_n: 15        # max items in a digest
 min_score: 6     # only include items scoring >= this (0-10)
-since: 21d       # ignore items older than this; accepts 'd' (days) or 'h' (e.g. 14d, 168h)
+since: 7d       # ignore items older than this; accepts 'd' (days) or 'h' (e.g. 14d, 168h)
+list_since: 3d  # default display window for `items list`/serve (separate from `since` above)
 
 # Output
 output_dir: ./data/digests
@@ -34,5 +35,5 @@ feeds:
 #  - { name: "Medium — ML",          url: "https://medium.com/feed/tag/machine-learning" }
 #  - { name: "arXiv cs.AI",          url: "http://export.arxiv.org/rss/cs.AI" }
 #  - { name: "arXiv cs.LG",          url: "http://export.arxiv.org/rss/cs.LG" }
-  - { name: "Hugging Face blog",    url: "https://huggingface.co/blog/feed.xml" }
+#  - { name: "Hugging Face blog",    url: "https://huggingface.co/blog/feed.xml" }
   - { name: "Red Hat Emerging Tech", url: "https://next.redhat.com/feed/" }

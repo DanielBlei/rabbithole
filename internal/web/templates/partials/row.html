@@ -1,0 +1,10 @@
+{{define "row"}}
+<div class="row">
+  <div class="line1"><span class="time">{{.Time}}</span><span class="title"><a href="{{.Link}}">{{.Title}}</a></span></div>
+  <div class="gauge"><span class="gauge-bar" tabindex="0" aria-label="Score {{.Score}} out of 10" data-tip="score {{.Score}} / 10"><span class="bar {{.Tier}}">{{.GaugeBar}}</span></span><span>{{.Source}} &middot; {{.Date}}</span></div>
+  <div class="toggles">
+    <details class="why"><summary>why</summary><p>{{.Reason}}</p></details>
+    <details class="note{{if not .HasNote}} empty{{end}}"><summary>note</summary><p>{{if .HasNote}}{{.Note}}{{else}}No note yet &mdash; click to add.{{end}}</p></details>
+  </div>
+</div>
+{{end}}
