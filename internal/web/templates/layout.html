@@ -1,0 +1,62 @@
+{{define "layout"}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{{.Title}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__left">
+      <span class="wordmark"><b>ai-searcher</b></span>
+      <span class="breaker">/</span>
+      <nav class="topbar__nav">
+        <a class="{{if eq .Active "home"}}active{{end}}" href="/">Home</a>
+      </nav>
+    </div>
+    <div class="topbar__right">
+      <button class="settings-btn" id="settingsToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Settings">
+        <span class="gear">&#9881;</span>
+      </button>
+      <div class="settings-panel" id="settingsPanel" hidden>
+        <a class="settings-panel__item" href="#">View config</a>
+      </div>
+    </div>
+  </header>
+  <div class="content">
+    {{block "content" .}}{{end}}
+  </div>
+  <script>
+  (function(){
+    var btn = document.getElementById('settingsToggle');
+    var panel = document.getElementById('settingsPanel');
+
+    function close(){
+      panel.hidden = true;
+      btn.setAttribute('aria-expanded', 'false');
+    }
+    function open(){
+      panel.hidden = false;
+      btn.setAttribute('aria-expanded', 'true');
+    }
+
+    btn.addEventListener('click', function(e){
+      e.stopPropagation();
+      if (panel.hidden) { open(); } else { close(); }
+    });
+    document.addEventListener('click', function(e){
+      if (!panel.hidden && !panel.contains(e.target) && e.target !== btn) close();
+    });
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape') close();
+    });
+  })();
+  </script>
+  {{block "scripts" .}}{{end}}
+</body>
+</html>
+{{end}}

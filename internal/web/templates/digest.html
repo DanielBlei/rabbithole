@@ -1,0 +1,56 @@
+{{define "content"}}
+<div class="stats-row">
+  <div class="tile"><div class="num">{{.Stats.UnreadToday}}</div><div class="label">unread today</div></div>
+  <div class="tile"><div class="num">{{printf "%.1f" .Stats.AvgScore}}</div><div class="label">avg score</div></div>
+  <div class="tile"><div class="num">{{.Stats.SourcesActive}}</div><div class="label">sources active</div></div>
+  <div class="tile placeholder"><div class="num">&gt;</div><div class="label">awaiting more widgets<span class="blink">_</span></div></div>
+</div>
+
+{{template "pane" .}}
+{{end}}
+
+{{define "scripts"}}
+<script>
+(function(){
+  // Mockup-era client-side pagination, kept only so this page is interactive
+  // to evaluate. Replaced by real server-side after/before/limit paging +
+  // htmx once backend work starts — see .claude/frontend-goals.md.
+  var PAGE_SIZE = 10;
+  var rows = Array.prototype.slice.call(document.querySelectorAll('.pane__body .row'));
+  var total = rows.length;
+  var totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  var page = 1;
+
+  var btnFirst = document.getElementById('btnFirst');
+  var btnPrev = document.getElementById('btnPrev');
+  var btnNext = document.getElementById('btnNext');
+  var pageInfo = document.getElementById('pageInfo');
+  var pane = document.getElementById('pane');
+
+  function render(){
+    var start = (page - 1) * PAGE_SIZE;
+    var end = Math.min(start + PAGE_SIZE, total);
+    rows.forEach(function(row, i){
+      row.style.display = (i >= start && i < end) ? '' : 'none';
+    });
+    pageInfo.textContent = 'items ' + (start + 1) + '–' + end + ' of ' + total;
+    btnFirst.disabled = page === 1;
+    btnPrev.disabled = page === 1;
+    btnNext.disabled = page === totalPages;
+  }
+
+  function goTo(target){
+    page = Math.min(Math.max(1, target), totalPages);
+    render();
+    var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    pane.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+  }
+
+  btnFirst.addEventListener('click', function(){ goTo(1); });
+  btnPrev.addEventListener('click', function(){ goTo(page - 1); });
+  btnNext.addEventListener('click', function(){ goTo(page + 1); });
+
+  render();
+})();
+</script>
+{{end}}

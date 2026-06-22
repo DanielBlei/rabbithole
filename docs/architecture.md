@@ -36,7 +36,7 @@ internal/logger       zerolog setup for --debug/--trace
 
 - **Adaptive ranking** — feed `status`/`user_score`/`user_note` history (recorded via
   `items` or the API) back into the scoring prompt as liked/disliked examples.
-- **HTML frontend** — a thin UI over the existing `serve` JSON API, no client/server split.
+- **HTML frontend** — server-rendered htmx UI (`internal/web`), digest page first.
 - **Full-text crawl** — fetch article bodies for richer scoring beyond title+summary.
 - **Embeddings pre-filter** — cheap shortlist → LLM rerank for large feed sets.
-- **Scheduling & delivery** — systemd timer / cron, plus email or chat delivery.
+- **Scheduling & delivery** — systemd timer / cron, plus[architecture.md](architecture.md) email or chat delivery.
