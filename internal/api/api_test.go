@@ -1,4 +1,4 @@
-package server
+package api
 
 import (
 	"context"
@@ -108,7 +108,7 @@ func TestParseListFilter(t *testing.T) {
 	}
 }
 
-func newTestServer(t *testing.T) *Server {
+func newTestServer(t *testing.T) *API {
 	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
