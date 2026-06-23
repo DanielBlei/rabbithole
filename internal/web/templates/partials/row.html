@@ -1,10 +1,30 @@
 {{define "row"}}
 <div class="row">
   <div class="line1"><span class="time">{{.Time}}</span><span class="title"><a href="{{.Link}}">{{.Title}}</a></span></div>
-  <div class="gauge"><span class="gauge-bar" tabindex="0" aria-label="Score {{.Score}} out of 10" data-tip="score {{.Score}} / 10"><span class="bar {{.Tier}}">{{.GaugeBar}}</span></span><span>{{.Source}} &middot; {{.Date}}</span></div>
+  <div class="gauge"><span class="gauge-bar" style="--score:{{.Score}};" tabindex="0" aria-label="Score {{.Score}} out of 10" data-tip="score {{.Score}} / 10"><span class="bar {{.Tier}}">{{.GaugeBar}}</span></span><span>{{.Source}} &middot; {{.Date}}</span></div>
   <div class="toggles">
-    <details class="why"><summary>why</summary><p>{{.Reason}}</p></details>
-    <details class="note{{if not .HasNote}} empty{{end}}"><summary>note</summary><p>{{if .HasNote}}{{.Note}}{{else}}No note yet &mdash; click to add.{{end}}</p></details>
+    <input type="radio" name="tg{{.ID}}" id="tg-why-{{.ID}}" class="tg-radio tg-radio-why">
+    <input type="radio" name="tg{{.ID}}" id="tg-note-{{.ID}}" class="tg-radio tg-radio-note">
+    <div class="tg-tabs">
+      <label class="tg-tab tg-tab-why" for="tg-why-{{.ID}}">why</label>
+      <span class="tg-sep">/</span>
+      <label class="tg-tab tg-tab-note" for="tg-note-{{.ID}}">note</label>
+    </div>
+    <div class="tg-panel tg-panel-why"><p>{{.Reason}}</p></div>
+    <div class="tg-panel tg-panel-note{{if not .HasNote}} empty{{end}}">
+      <input type="checkbox" id="note-edit-{{.ID}}" class="note-toggle">
+      <div class="note-view">
+        <p>{{if .HasNote}}{{.Note}}{{else}}No note yet.{{end}}</p>
+        <label class="note-edit-btn" for="note-edit-{{.ID}}">{{if .HasNote}}edit{{else}}+ add{{end}}</label>
+      </div>
+      <div class="note-form">
+        <textarea class="note-input" rows="3" placeholder="Write a note&hellip;">{{.Note}}</textarea>
+        <div class="note-actions">
+          <button type="button" class="note-apply">apply</button>
+          <label class="note-cancel" for="note-edit-{{.ID}}">cancel</label>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 {{end}}
