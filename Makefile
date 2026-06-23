@@ -33,22 +33,28 @@ clean: ## Remove the binary, coverage, and generated data
 	rm -f $(BINARY) coverage.out
 	rm -rf data
 
-##@ Run
+##@ Digest
 
-.PHONY: run
-run: ## Fetch, rank, and write today's digest (uses CONFIG, NO_THINK=1 to disable thinking)
-	go run . run --config $(CONFIG) $(THINK_FLAG)
+.PHONY: digest
+digest: ## Fetch, rank, record, and write today's markdown digest (uses CONFIG, NO_THINK=1 to disable thinking)
+	go run . digest --config $(CONFIG) --markdown $(THINK_FLAG)
+
+.PHONY: db-only
+db-only: ## Fetch, rank, and record to the store only (no markdown file)
+	go run . digest --config $(CONFIG) $(THINK_FLAG)
 
 .PHONY: dry-run
 dry-run: ## Print the digest to stdout without writing files or recording items
-	go run . run --config $(CONFIG) --dry-run $(THINK_FLAG)
+	go run . digest --config $(CONFIG) --dry-run $(THINK_FLAG)
 
 .PHONY: heuristic
-heuristic: ## Offline run with the model-free keyword scorer (no Ollama needed)
-	go run . run --config $(CONFIG) --provider heuristic $(THINK_FLAG)
+heuristic: ## Offline digest with the model-free keyword scorer (no Ollama needed)
+	go run . digest --config $(CONFIG) --provider heuristic --markdown $(THINK_FLAG)
+
+##@ Serve
 
 .PHONY: serve
-serve: ## Serve the items API over HTTP (uses CONFIG, ADDR; JSON only, no frontend yet)
+serve: ## Serve the items API over HTTP (uses CONFIG, ADDR; JSON only, web UI is being wired up)
 	go run . serve --config $(CONFIG) --addr $(ADDR)
 
 ##@ Test
@@ -95,12 +101,12 @@ check: fmt vet test ## fmt + vet + test (run before committing)
 ##@ Debug
 
 .PHONY: debug
-debug: ## Run with verbose logging
-	go run . run --config $(CONFIG) --debug $(THINK_FLAG)
+debug: ## Run the digest with verbose logging
+	go run . digest --config $(CONFIG) --debug $(THINK_FLAG)
 
 .PHONY: trace
-trace: ## Run with trace logging (raw model prompts/responses)
-	go run . run --config $(CONFIG) --trace $(THINK_FLAG)
+trace: ## Run the digest with trace logging (raw model prompts/responses)
+	go run . digest --config $(CONFIG) --trace $(THINK_FLAG)
 
 .PHONY: db-dump
 db-dump: ## Dump the items table via the sqlite3 CLI (requires DB=path)
