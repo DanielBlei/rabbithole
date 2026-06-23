@@ -1,7 +1,7 @@
 // Package server is the HTTP composition root for the serve command: it builds
-// the root mux and mounts the route sets that live in their own packages. Today
-// it mounts the JSON API (internal/api) under /api/; the HTML web UI
-// (internal/web) and its /static/ assets are mounted here in a later pass.
+// the root mux and mounts the route sets that live in their own packages — the
+// JSON API (internal/api) under /api/, and the HTML web UI (internal/web,
+// serving its own /static/ assets) at /.
 package server
 
 import (
@@ -10,6 +10,7 @@ import (
 	"github.com/DanielBlei/ai-searcher/internal/api"
 	"github.com/DanielBlei/ai-searcher/internal/config"
 	"github.com/DanielBlei/ai-searcher/internal/store"
+	"github.com/DanielBlei/ai-searcher/internal/web"
 )
 
 // Server holds the dependencies shared by every mounted route set.
@@ -29,7 +30,8 @@ func New(db *store.Store, cfg *config.Config) *Server {
 func (s *Server) Routes() http.Handler {
 	root := http.NewServeMux()
 	root.Handle("/api/", api.New(s.db, s.cfg).Routes())
-	// TODO: mount the HTML web UI (internal/web) at "/" and its embedded
-	// /static/ assets once the digest page is wired up.
+	// The web mux owns "/" (digest page) and "/static/" (embedded assets);
+	// the more specific "/api/" pattern above still wins for API requests.
+	root.Handle("/", web.New(s.db, s.cfg).Routes())
 	return root
 }
