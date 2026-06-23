@@ -1,6 +1,8 @@
-// Package pipeline implements the fetch -> score -> record cycle shared by
-// the run command today and a future serve command's API/scheduler.
-package pipeline
+// Package ingest implements the fetch -> score -> record cycle shared by the
+// digest command today and a future serve command's API/scheduler. Writing the
+// markdown digest is an opt-in final step (Options.Markdown), so flows that only
+// need to update the store can stop before it.
+package ingest
 
 import (
 	"context"
@@ -17,16 +19,19 @@ import (
 
 // Options configures a single cycle.
 type Options struct {
-	Think  bool // enable model reasoning during scoring
-	Record bool // write the cycle's items and results to the store
+	Think     bool   // enable model reasoning during scoring
+	Record    bool   // write the cycle's items and results to the store
+	Markdown  bool   // also write the dated markdown digest file (needs Record)
+	OutputDir string // directory the Markdown digest is written to
 }
 
 // Outcome is the result of one cycle. Rendering it (markdown file, stdout,
 // JSON response, ...) is the caller's concern.
 type Outcome struct {
-	Fetched int           // items fetched across all feeds
-	Unseen  []feeds.Item  // fresh, not-yet-seen items considered for scoring
-	Results []rank.Result // items that cleared min_score, sorted best-first
+	Fetched    int           // items fetched across all feeds
+	Unseen     []feeds.Item  // fresh, not-yet-seen items considered for scoring
+	Results    []rank.Result // items that cleared min_score, sorted best-first
+	DigestPath string        // path of the markdown digest written, or "" if none
 }
 
 // Run fetches every feed in cfg, scores items not already in db against
@@ -99,6 +104,15 @@ func Run(
 		return outcome, err
 	}
 	log.Debug().Int("recorded", len(unseen)).Int("digested", len(results)).Msg("items recorded in store")
+
+	if opts.Markdown {
+		path, err := Write(opts.OutputDir, day, results)
+		if err != nil {
+			return outcome, err
+		}
+		outcome.DigestPath = path
+		log.Debug().Str("path", path).Int("items", len(results)).Msg("digest written")
+	}
 	return outcome, nil
 }
 
