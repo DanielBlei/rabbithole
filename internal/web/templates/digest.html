@@ -52,5 +52,48 @@
 
   render();
 })();
+
+(function(){
+  // why/note switcher: clicking the already-open tab collapses the shared box.
+  // The panels are shown via CSS :checked; radios can't uncheck themselves, so
+  // this only handles the collapse-on-re-click case.
+  document.querySelectorAll('.toggles').forEach(function(group){
+    group.querySelectorAll('.tg-tab').forEach(function(tab){
+      var input = document.getElementById(tab.getAttribute('for'));
+      if (!input) return;
+      // capture the radio's state before the click toggles it
+      tab.addEventListener('mousedown', function(){ tab._open = input.checked; });
+      tab.addEventListener('click', function(e){
+        if (tab._open){ e.preventDefault(); input.checked = false; }
+      });
+    });
+  });
+
+  // Note edit -> apply. Real persistence is the note mutation route: apply will
+  // hx-post to it and swap in the server-rendered row fragment (already in view
+  // mode). Until that backend lands this updates the view optimistically so the
+  // flow is demoable; cancel restores the last saved text.
+  document.querySelectorAll('.tg-panel-note').forEach(function(panel){
+    var toggle  = panel.querySelector('.note-toggle');
+    var input   = panel.querySelector('.note-input');
+    var viewP   = panel.querySelector('.note-view p');
+    var editBtn = panel.querySelector('.note-edit-btn');
+    var apply   = panel.querySelector('.note-apply');
+    var cancel  = panel.querySelector('.note-cancel');
+    if (!toggle || !input || !apply) return;
+
+    var saved = panel.classList.contains('empty') ? '' : viewP.textContent;
+
+    apply.addEventListener('click', function(){
+      // TODO(backend): hx-post to the note route instead of mutating here.
+      saved = input.value.trim();
+      if (saved){ viewP.textContent = saved; panel.classList.remove('empty'); editBtn.textContent = 'edit'; }
+      else      { viewP.textContent = 'No note yet.'; panel.classList.add('empty'); editBtn.textContent = '+ add'; }
+      toggle.checked = false; // flip back to view mode
+    });
+
+    if (cancel) cancel.addEventListener('click', function(){ input.value = saved; });
+  });
+})();
 </script>
 {{end}}

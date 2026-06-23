@@ -1,17 +1,20 @@
 :root{
   font-size:10px;
 
-  --bg:#0B0E0C;
-  --pane:#10140F;
-  --line:#232925;
-  --amber:#FFB000;
-  --amber-dim:#8A6B2A;
-  --warn:#B2483A;
-  --score-high:#FFB000;
-  --score-mid:#FF8C3B;
-  --score-low:#FF5C49;
-  --text:#C9CFC6;
-  --text-dim:#5C6760;
+  /* Material "Oceanic" palette */
+  --bg:#1A2327;
+  --pane:#263238;
+  --line:#37474F;
+  --card:#2E3C43;          /* elevated row surface, lighter than --pane */
+  --amber:#80CBC4;         /* primary accent — Oceanic teal */
+  --amber-dim:#4D6A66;
+  --warn:#FF5370;
+  --score-high:#C3E88D;
+  --score-mid:#FFCB6B;
+  --score-low:#FF5370;
+  --text:#B0BEC5;
+  --text-dim:#607D8B;
+  --title:#D7DEE3;         /* article titles — brighter + medium weight for readability */
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
@@ -37,7 +40,7 @@ header.topbar{
 .settings-btn{
   display:flex;align-items:center;justify-content:center;
   background:transparent;border:1px solid var(--line);color:var(--text-dim);
-  width:30px;height:30px;border-radius:4px;cursor:pointer;font-size:1.5rem;font-family:inherit;
+  width:30px;height:30px;border-radius:10px;cursor:pointer;font-size:1.5rem;font-family:inherit;
 }
 .settings-btn:hover{color:var(--amber);border-color:var(--amber-dim);}
 .settings-btn:focus-visible{outline:1px solid var(--amber);outline-offset:2px;}
@@ -45,22 +48,22 @@ header.topbar{
 
 .settings-panel{
   position:absolute;right:0;top:calc(100% + 8px);min-width:160px;
-  background:var(--pane);border:1px solid var(--line);
+  background:var(--pane);border:1px solid var(--line);border-radius:10px;
   box-shadow:0 12px 30px rgba(0,0,0,.5);
   padding:6px;z-index:10;
 }
 .settings-panel[hidden]{display:none;}
 .settings-panel__item{
-  display:block;padding:8px 10px;font-size:1.3rem;color:var(--text-dim);border-radius:3px;
+  display:block;padding:8px 10px;font-size:1.3rem;color:var(--text-dim);border-radius:7px;
 }
-.settings-panel__item:hover{color:var(--amber);background:rgba(255,176,0,.06);}
+.settings-panel__item:hover{color:var(--amber);background:rgba(128,203,196,.07);}
 .settings-panel__item:focus-visible{outline:1px solid var(--amber);outline-offset:-2px;}
 
 .content{max-width:980px;margin:0 auto;padding:28px 30px 80px;}
 
 .stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;}
-.tile{border:1px solid var(--line);background:var(--pane);padding:12px 14px;}
-.tile .num{font-size:2.4rem;font-weight:600;color:var(--amber);text-shadow:0 0 8px rgba(255,176,0,.25);}
+.tile{border:1px solid var(--line);background:var(--pane);padding:12px 14px;border-radius:12px;}
+.tile .num{font-size:2.4rem;font-weight:600;color:var(--amber);text-shadow:0 0 8px rgba(128,203,196,.25);}
 .tile .label{font-size:1.1rem;letter-spacing:.05em;text-transform:uppercase;color:var(--text-dim);margin-top:2px;}
 .tile.placeholder{border:1px dashed var(--text-dim);background:transparent;color:var(--text-dim);}
 .tile.placeholder .num{color:var(--text-dim);font-size:1.7rem;}
@@ -69,16 +72,16 @@ header.topbar{
 @keyframes blink{50%{opacity:0;}}
 
 .pane{
-  background:var(--pane);border:1px solid var(--line);
-  box-shadow:0 0 0 1px rgba(255,176,0,.03), 0 20px 50px rgba(0,0,0,.5);
+  background:var(--pane);border:1px solid var(--line);border-radius:14px;
+  box-shadow:0 0 0 1px rgba(128,203,196,.04), 0 18px 44px rgba(0,0,0,.5);
 }
 .pane__bar{
   display:flex;align-items:center;gap:8px;
   padding:9px 14px;border-bottom:1px solid var(--line);
   font-size:1.25rem;color:var(--text-dim);
 }
-.dot{width:9px;height:9px;border-radius:50%;}
-.dot.r{background:#B2483A;}.dot.y{background:#8A6B2A;}.dot.g{background:#3F7A4F;}
+.dot{width:9px;height:9px;border-radius:50%;box-shadow:inset 0 1px 0 rgba(255,255,255,.28);}
+.dot.r{background:#FF5370;}.dot.y{background:#FFCB6B;}.dot.g{background:#C3E88D;}
 
 .pane__filters{
   display:flex;flex-wrap:wrap;align-items:center;gap:18px;
@@ -89,7 +92,7 @@ header.topbar{
 .filter__key{letter-spacing:.05em;text-transform:uppercase;font-size:1.05rem;}
 .filter__select{
   background:transparent;border:1px solid var(--line);color:var(--text);
-  font-family:inherit;font-size:1.2rem;padding:3px 6px;border-radius:3px;cursor:pointer;
+  font-family:inherit;font-size:1.2rem;padding:3px 6px;border-radius:8px;cursor:pointer;
 }
 .filter__select:hover{border-color:var(--amber-dim);color:var(--amber);}
 .filter__select:focus-visible{outline:1px solid var(--amber);outline-offset:2px;}
@@ -99,7 +102,7 @@ header.topbar{
 .pill{position:relative;display:inline-flex;cursor:pointer;}
 .pill input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;}
 .pill span{
-  display:inline-block;padding:4px 9px;border:1px solid var(--line);border-radius:3px;
+  display:inline-block;padding:4px 12px;border:1px solid var(--line);border-radius:999px;
   color:var(--text-dim);font-size:1.1rem;
 }
 .pill input:hover ~ span{border-color:var(--amber-dim);}
@@ -109,7 +112,7 @@ header.topbar{
 .date-popover{
   display:none;position:absolute;left:0;top:calc(100% + 8px);
   align-items:center;gap:10px;min-width:max-content;
-  background:var(--pane);border:1px solid var(--line);
+  background:var(--pane);border:1px solid var(--line);border-radius:10px;
   box-shadow:0 12px 30px rgba(0,0,0,.5);
   padding:10px 12px;z-index:10;
 }
@@ -120,7 +123,7 @@ header.topbar{
 }
 .date-input{
   background:transparent;border:1px solid var(--line);color:var(--text);
-  font-family:inherit;font-size:1.15rem;padding:3px 6px;border-radius:3px;
+  font-family:inherit;font-size:1.15rem;padding:3px 6px;border-radius:8px;
   color-scheme:dark;
 }
 .date-input:focus-visible{outline:1px solid var(--amber);outline-offset:2px;}
@@ -133,44 +136,111 @@ header.topbar{
 .pane__nav .nav-right{display:flex;gap:8px;}
 .nav-btn{
   background:transparent;border:1px solid var(--line);color:var(--text-dim);
-  font-family:inherit;font-size:1.3rem;padding:5px 10px;border-radius:3px;cursor:pointer;
+  font-family:inherit;font-size:1.3rem;padding:5px 10px;border-radius:8px;cursor:pointer;
 }
 .nav-btn:hover:not(:disabled){color:var(--amber);border-color:var(--amber-dim);}
 .nav-btn:focus-visible{outline:1px solid var(--amber);outline-offset:2px;}
 .nav-btn:disabled{opacity:.3;cursor:not-allowed;}
 
-.pane__body{padding:20px 24px 8px;font-size:1.4rem;line-height:1.55;}
-.row{margin-bottom:18px;}
+.pane__body{padding:18px 18px 6px;font-size:1.4rem;line-height:1.55;}
+
+/* Rows are elevated cards */
+.row{
+  background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:14px 16px;margin-bottom:14px;
+  box-shadow:0 2px 8px rgba(0,0,0,.35);
+  transition:transform .12s, box-shadow .12s;
+}
+.row:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.45);}
+@media (prefers-reduced-motion: reduce){
+  .row{transition:none;}
+  .row:hover{transform:none;}
+}
 .row .line1{color:var(--text);}
 .row .time{color:var(--text-dim);margin-right:10px;}
+.row .title a{color:var(--title);font-weight:500;}
 .row .title a:hover{text-decoration:underline;text-decoration-color:var(--amber);}
+
 .gauge{display:flex;align-items:center;gap:10px;margin:5px 0 2px 0;color:var(--text-dim);font-size:1.3rem;}
-.gauge-bar{position:relative;display:inline-block;cursor:default;border-radius:2px;}
+
+/* Smooth rounded progress-bar gauge.
+   .gauge-bar is the track; the inner .bar is the fill, width from the --score
+   custom property set per-row on .gauge-bar in partials/row.html. Tier color
+   comes from the .bar.high/.mid/.low classes via currentColor. */
+.gauge-bar{
+  position:relative;display:inline-block;width:200px;height:9px;vertical-align:middle;
+  background:var(--line);border-radius:999px;cursor:default;
+}
 .gauge-bar:focus-visible{outline:1px solid var(--amber);outline-offset:3px;}
 .gauge-bar::after{
-  content:attr(data-tip);position:absolute;left:0;bottom:135%;
-  background:#000;color:var(--amber);border:1px solid var(--line);
+  content:attr(data-tip);position:absolute;left:0;bottom:200%;
+  background:#000;color:var(--amber);border:1px solid var(--line);border-radius:6px;
   padding:2px 7px;font-size:1.2rem;white-space:nowrap;
   opacity:0;pointer-events:none;transition:opacity .12s;
 }
 .gauge-bar:hover::after,.gauge-bar:focus-visible::after{opacity:1;}
 @media (prefers-reduced-motion: reduce){ .gauge-bar::after{transition:none;} }
-.gauge .bar{letter-spacing:-1px;opacity:.6;}
+.gauge .bar{
+  display:block;height:100%;width:calc(var(--score, 0) * 10%);
+  border-radius:999px;background:currentColor;font-size:0;
+}
 .gauge .bar.high{color:var(--score-high);}
 .gauge .bar.mid{color:var(--score-mid);}
 .gauge .bar.low{color:var(--score-low);}
-.toggles{display:flex;gap:16px;margin:6px 0 0;font-size:1.25rem;}
-.toggles details{color:var(--text-dim);}
-.toggles summary{cursor:pointer;list-style:none;color:inherit;}
-.toggles summary:focus-visible{outline:1px solid var(--amber);outline-offset:2px;}
-.toggles summary::-webkit-details-marker{display:none;}
-.toggles summary::before{content:"+ --";color:var(--text-dim);}
-.toggles details[open] summary{color:var(--amber);}
-.toggles details[open] summary::before{content:"- --";color:var(--amber);}
-.toggles p{margin:6px 0 0;max-width:520px;font-size:1.35rem;}
-.toggles .why p{color:#7C8A77;}
-.toggles .note p{color:var(--text);}
-.toggles .note.empty p{color:var(--text-dim);font-style:italic;}
+/* why / note share one box via a prompt-style switcher: "❯ why / note". Two
+   hidden radios (exclusive by name) decide which of the two shared-position
+   panels shows below — only one open at a time, in one fixed spot, no JS.
+   why is read-only LLM text; note carries its own view↔edit lifecycle. */
+.toggles{margin:6px 0 0;font-size:1.25rem;}
+.tg-radio{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;}
+
+.tg-tabs{display:flex;align-items:center;gap:8px;}
+.tg-tabs::before{content:"\276f";color:var(--text-dim);} /* ❯ leading prompt */
+.tg-tab{cursor:pointer;color:var(--text-dim);}
+.tg-tab:hover{color:var(--amber);}
+.tg-sep{color:var(--line);}
+
+/* active tab — the one whose radio is checked — lights amber */
+.tg-radio-why:checked ~ .tg-tabs .tg-tab-why,
+.tg-radio-note:checked ~ .tg-tabs .tg-tab-note{color:var(--amber);}
+.tg-radio-why:focus-visible ~ .tg-tabs .tg-tab-why,
+.tg-radio-note:focus-visible ~ .tg-tabs .tg-tab-note{outline:1px solid var(--amber);outline-offset:2px;}
+
+/* one shared panel area below the tabs; only the checked one displays */
+.tg-panel{display:none;margin:7px 0 0;}
+.tg-radio-why:checked ~ .tg-panel-why{display:block;}
+.tg-radio-note:checked ~ .tg-panel-note{display:block;}
+.tg-panel p{margin:0;max-width:520px;font-size:1.35rem;}
+.tg-panel-why p{color:#809B7E;}
+
+/* note panel: view mode shows the note + an edit/add trigger; the hidden
+   note-toggle checkbox flips to the edit form (textarea + apply/cancel). The
+   apply button is a placeholder until the note mutation route is wired. */
+.note-toggle{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;}
+.note-view{display:flex;align-items:baseline;gap:12px;}
+.note-view p{color:var(--text);}
+.tg-panel-note.empty .note-view p{color:var(--text-dim);font-style:italic;}
+.note-edit-btn{cursor:pointer;color:var(--text-dim);font-size:1.15rem;flex:none;}
+.note-edit-btn:hover{color:var(--amber);}
+
+.note-form{display:none;}
+.note-toggle:checked ~ .note-view{display:none;}
+.note-toggle:checked ~ .note-form{display:block;}
+.note-input{
+  width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);
+  font-family:inherit;font-size:1.3rem;line-height:1.5;padding:7px 9px;border-radius:8px;resize:vertical;
+}
+.note-input:focus-visible{outline:1px solid var(--amber);outline-offset:2px;}
+.note-input::placeholder{color:var(--text-dim);}
+.note-actions{display:flex;gap:8px;margin-top:7px;}
+.note-apply,.note-cancel{
+  font-family:inherit;font-size:1.15rem;padding:4px 14px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--line);background:transparent;
+}
+.note-apply{color:var(--amber);border-color:var(--amber-dim);}
+.note-apply:hover{background:rgba(128,203,196,.08);}
+.note-cancel{color:var(--text-dim);}
+.note-cancel:hover{color:var(--amber);border-color:var(--amber-dim);}
 
 @media (max-width: 720px){
   header.topbar{padding:14px 18px;}
