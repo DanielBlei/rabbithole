@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS items (
 	updated_at       TIMESTAMP NOT NULL,
 	llm_score        INTEGER,
 	llm_score_reason TEXT,
+	llm_score_model  TEXT,
 	digested_on      DATE,
 	status           TEXT NOT NULL DEFAULT 'unread',
 	user_score       INTEGER,
@@ -106,7 +107,28 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
+	for _, stmt := range addColumns {
+		// Additive migrations for databases created before a column existed.
+		// CREATE TABLE IF NOT EXISTS above leaves an existing table untouched,
+		// so these backfill new columns. Idempotent: a "duplicate column"
+		// error (column already present, e.g. on a fresh DB) is expected.
+		if _, err := db.Exec(stmt); err != nil && !isDuplicateColumn(err) {
+			_ = db.Close()
+			return nil, fmt.Errorf("migrate schema: %w", err)
+		}
+	}
 	return &Store{db: db}, nil
+}
+
+// addColumns holds additive column migrations applied after the base schema.
+// Each must be safe to re-run; see Open for how duplicate-column errors are
+// tolerated.
+var addColumns = []string{
+	"ALTER TABLE items ADD COLUMN llm_score_model TEXT",
+}
+
+func isDuplicateColumn(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "duplicate column name")
 }
 
 // Close releases the database handle.
@@ -149,11 +171,14 @@ func (s *Store) seenChunk(ctx context.Context, ids []string, seen map[string]boo
 	return rows.Err()
 }
 
-// DigestEntry is an item selected for a digest, with its score.
+// DigestEntry is an item selected for a digest, with its score. Model names the
+// LLM that produced Score/Reason, captured at digest time so a later config
+// change doesn't misattribute an older score.
 type DigestEntry struct {
 	Item   feeds.Item
 	Score  int
 	Reason string
+	Model  string
 }
 
 // Record inserts newly seen items in one transaction. Digested entries are
@@ -172,8 +197,8 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, digested []DigestE
 	defer func() { _ = tx.Rollback() }()
 
 	const q = `INSERT OR IGNORE INTO items
-		(id, source, title, link, summary, published_at, created_at, updated_at, llm_score, llm_score_reason, digested_on)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		(id, source, title, link, summary, published_at, created_at, updated_at, llm_score, llm_score_reason, llm_score_model, digested_on)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	stmt, err := tx.PrepareContext(ctx, q)
 	if err != nil {
 		return fmt.Errorf("prepare insert: %w", err)
@@ -186,11 +211,15 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, digested []DigestE
 		var (
 			llmScore       any
 			llmScoreReason any
+			llmScoreModel  any
 			digestDay      any
 		)
 		if d, ok := scored[it.ID]; ok {
 			llmScore = d.Score
 			llmScoreReason = d.Reason
+			if d.Model != "" {
+				llmScoreModel = d.Model
+			}
 			digestDay = dayStr
 		}
 		var publishedAt any
@@ -198,7 +227,7 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, digested []DigestE
 			publishedAt = it.Published
 		}
 		if _, err := stmt.ExecContext(ctx, it.ID, it.Source, it.Title, it.Link,
-			it.Summary, publishedAt, now, now, llmScore, llmScoreReason, digestDay); err != nil {
+			it.Summary, publishedAt, now, now, llmScore, llmScoreReason, llmScoreModel, digestDay); err != nil {
 			return fmt.Errorf("insert item %s: %w", it.ID, err)
 		}
 	}
@@ -280,6 +309,7 @@ type ItemRow struct {
 	Status         string
 	LLMScore       *int
 	LLMScoreReason *string
+	LLMScoreModel  *string
 	UserScore      *int
 	UserNote       *string
 	PublishedAt    *time.Time
@@ -287,7 +317,7 @@ type ItemRow struct {
 
 // itemRowColumns is the SELECT list backing both List and Get, kept in one place
 // so the column order stays in lockstep with scanItemRow's destinations.
-const itemRowColumns = "id, source, title, link, status, llm_score, llm_score_reason, user_score, user_note, published_at"
+const itemRowColumns = "id, source, title, link, status, llm_score, llm_score_reason, llm_score_model, user_score, user_note, published_at"
 
 // rowScanner is satisfied by both *sql.Row (Get) and *sql.Rows (List), letting
 // scanItemRow serve the single-row and multi-row reads from one mapping.
@@ -303,12 +333,13 @@ func scanItemRow(sc rowScanner) (ItemRow, error) {
 		r           ItemRow
 		llmScore    sql.NullInt64
 		llmReason   sql.NullString
+		llmModel    sql.NullString
 		userScore   sql.NullInt64
 		userNote    sql.NullString
 		publishedAt sql.NullTime
 	)
 	if err := sc.Scan(&r.ID, &r.Source, &r.Title, &r.Link, &r.Status,
-		&llmScore, &llmReason, &userScore, &userNote, &publishedAt); err != nil {
+		&llmScore, &llmReason, &llmModel, &userScore, &userNote, &publishedAt); err != nil {
 		return ItemRow{}, err
 	}
 	if llmScore.Valid {
@@ -317,6 +348,9 @@ func scanItemRow(sc rowScanner) (ItemRow, error) {
 	}
 	if llmReason.Valid {
 		r.LLMScoreReason = &llmReason.String
+	}
+	if llmModel.Valid {
+		r.LLMScoreModel = &llmModel.String
 	}
 	if userScore.Valid {
 		v := int(userScore.Int64)

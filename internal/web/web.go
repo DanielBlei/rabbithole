@@ -85,8 +85,13 @@ type rowData struct {
 	Source   string
 	Date     string
 	Reason   string
-	HasNote  bool
-	Note     string
+	// LLM-specific attribution for the "why" footnote, kept separate from Score
+	// (which is the effective score — user's rating wins over the model's).
+	HasLLMScore bool
+	LLMScore    int
+	ScoreModel  string
+	HasNote     bool
+	Note        string
 }
 
 func (s *Web) handleDigest(w http.ResponseWriter, r *http.Request) {
@@ -228,6 +233,13 @@ func toRow(row store.ItemRow) rowData {
 		Source:   row.Source,
 		Date:     dateOf(row.PublishedAt),
 		Reason:   strOf(row.LLMScoreReason),
+	}
+	// The "why" footnote attributes the reason to the model's own score, not the
+	// effective Score above — so the user can see "model said 8, I rated 3".
+	if row.LLMScore != nil {
+		rd.HasLLMScore = true
+		rd.LLMScore = *row.LLMScore
+		rd.ScoreModel = strOf(row.LLMScoreModel)
 	}
 	// A stored empty note reads the same as no note at all — both show the
 	// "No note yet" placeholder and the "+ add" affordance.
