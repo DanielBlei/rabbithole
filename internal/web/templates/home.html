@@ -1,8 +1,8 @@
 {{define "content"}}
 <div class="stats-row">
-  <div class="tile"><div class="num">{{.Stats.Available}}</div><div class="label">available</div></div>
+  <div class="tile"><div class="num">{{.Stats.Available}}</div><div class="label">total</div></div>
+  <div class="tile"><div class="num num--high" id="statHigh">{{.Stats.HighSignal}}</div><div class="label">high signal &ge;7</div></div>
   <div class="tile"><div class="num" id="statAvg">{{printf "%.1f" .Stats.AvgScore}}</div><div class="label">avg score</div></div>
-  <div class="tile"><div class="num">{{.Stats.SourcesActive}}</div><div class="label">sources active</div></div>
   <div class="tile placeholder"><div class="num">&gt;</div><div class="label">awaiting more widgets<span class="blink">_</span></div></div>
 </div>
 
@@ -130,7 +130,20 @@
       if (t < 1) requestAnimationFrame(step);
     });
   }
-  function remove(row){ row.remove(); tweenAvg(); }
+  // High Signal tile: count of visible scored rows in the high tier (>=7),
+  // matching the server's stats() gate. Recomputed from the live DOM whenever a
+  // row leaves so it tracks the shown set without a reload.
+  function setHigh(){
+    var el = document.getElementById('statHigh');
+    if (!el) return;
+    var n = 0;
+    document.querySelectorAll('.pane__body .row').forEach(function(row){
+      var s = row.getAttribute('data-score');
+      if (s !== null && parseFloat(s) >= 7) n++;
+    });
+    el.textContent = n;
+  }
+  function remove(row){ row.remove(); tweenAvg(); setHigh(); }
   function leave(row){
     if (row._leaving) return;
     row._leaving = true;

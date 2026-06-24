@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"os/user"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -27,20 +28,36 @@ const listLimit = 100
 
 // Web renders the HTML frontend over the same store the JSON API uses.
 type Web struct {
-	db  *store.Store
-	cfg *config.Config
+	db   *store.Store
+	cfg  *config.Config
+	addr string // the serve listen address, shown in the faux shell prompt
+	user string // shell-prompt name: cfg.User, or the OS user when blank
 }
 
-// New returns a Web backed by db, using cfg for request defaults.
-func New(db *store.Store, cfg *config.Config) *Web {
-	return &Web{db: db, cfg: cfg}
+// New returns a Web backed by db, using cfg for request defaults. addr is the
+// listen address the serve command bound, surfaced in the page's shell prompt.
+func New(db *store.Store, cfg *config.Config, addr string) *Web {
+	return &Web{db: db, cfg: cfg, addr: addr, user: promptUser(cfg.User)}
+}
+
+// promptUser picks the shell-prompt name: the configured user, or the OS login
+// name when config leaves it blank. If even that can't be read, it stays empty
+// and the prompt renders as just "@ai-searcher".
+func promptUser(configured string) string {
+	if configured != "" {
+		return configured
+	}
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return ""
 }
 
 // Routes returns the web handler: the digest page at "/" (exact) plus the
 // embedded static assets at "/static/".
 func (s *Web) Routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", s.handleDigest)
+	mux.HandleFunc("GET /{$}", s.handleHome)
 	mux.HandleFunc("POST /items/{id}/note", s.handleNote)
 	mux.HandleFunc("POST /items/{id}/seen", s.handleSeen)
 	mux.HandleFunc("POST /items/{id}/hide", s.handleHide)
@@ -58,6 +75,8 @@ func (s *Web) Routes() http.Handler {
 type pageData struct {
 	Title            string
 	Active           string
+	PromptUser       string // shell-prompt user in the pane title bar
+	ServeCmd         string // the command the prompt shows running, incl. the real --addr
 	Stats            statsData
 	Sources          []string
 	FilterSource     string
@@ -73,37 +92,40 @@ type pageData struct {
 
 type statsData struct {
 	Available     int
+	HighSignal    int // count of shown items scoring >=7 (the "read these" set)
 	AvgScore      float64
 	SourcesActive int
 }
 
 // rowData is the per-item view model consumed by partials/row.html.
 type rowData struct {
-	ID       string // item id; scopes the per-row why/note radio group and field ids
-	Time     string
-	Title    string
-	Link     string
-	Score    int    // 0-10; drives the gauge bar width (--score)
-	Scored   bool   // whether the item has any score; gates data-score for the live avg recalc
-	Tier     string // high | mid | low — gauge colour class
-	GaugeBar string // bar glyphs (visually hidden; kept for the markup)
-	Source   string
-	Date     string
-	Reason   string
+	ID         string // item id; scopes the per-row why/note radio group and field ids
+	Time       string
+	Title      string
+	Link       string
+	Score      int    // 0-10; drives the gauge bar width (--score)
+	Scored     bool   // whether the item has any score; gates data-score for the live avg recalc
+	Tier       string // high | mid | low — gauge colour class
+	GaugeBar   string // bar glyphs (visually hidden; kept for the markup)
+	Source     string
+	Date       string
+	Reason     string        // raw markdown source
+	ReasonHTML template.HTML // Reason rendered to sanitised HTML for display
 	// LLM-specific attribution for the "why" footnote, kept separate from Score
 	// (which is the effective score — user's rating wins over the model's).
 	HasLLMScore bool
 	LLMScore    int
 	ScoreModel  string
 	HasNote     bool
-	Note        string
+	Note        string        // raw markdown source (also the textarea value)
+	NoteHTML    template.HTML // Note rendered to sanitised HTML for the view
 	// Triage state, derived from the item's Status: Seen == read, Hidden ==
 	// skipped. Read-only here; the seen/hide mutation routes are a follow-up.
 	Seen   bool
 	Hidden bool
 }
 
-func (s *Web) handleDigest(w http.ResponseWriter, r *http.Request) {
+func (s *Web) handleHome(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	published := q.Get("published")
 	from, to := q.Get("from"), q.Get("to")
@@ -156,6 +178,8 @@ func (s *Web) handleDigest(w http.ResponseWriter, r *http.Request) {
 	data := pageData{
 		Title:            "ai-searcher",
 		Active:           "home",
+		PromptUser:       s.user,
+		ServeCmd:         "go run . serve --addr " + s.addr,
 		Stats:            s.stats(r, rows, len(counts), store.ListFilter{Source: source, After: after, Before: before}),
 		Sources:          sources,
 		FilterSource:     source,
@@ -172,7 +196,7 @@ func (s *Web) handleDigest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.ExecuteTemplate(w, "layout", data); err != nil {
 		// Status is likely already written; log rather than double-write.
-		log.Error().Err(err).Msg("render digest")
+		log.Error().Err(err).Msg("render home")
 	}
 }
 
@@ -270,6 +294,9 @@ func (s *Web) stats(r *http.Request, rows []store.ItemRow, sourcesActive int, co
 		if sc, ok := score(row); ok {
 			sum += sc
 			n++
+			if sc >= 7 { // high tier — see tierOf
+				st.HighSignal++
+			}
 		}
 	}
 	if n > 0 {
@@ -305,6 +332,7 @@ func toRow(row store.ItemRow) rowData {
 		Seen:     row.Status == store.StatusRead,
 		Hidden:   row.Status == store.StatusSkipped,
 	}
+	rd.ReasonHTML = renderMarkdown(rd.Reason)
 	// The "why" footnote attributes the reason to the model's own score, not the
 	// effective Score above — so the user can see "model said 8, I rated 3".
 	if row.LLMScore != nil {
@@ -317,6 +345,7 @@ func toRow(row store.ItemRow) rowData {
 	if row.UserNote != nil && *row.UserNote != "" {
 		rd.HasNote = true
 		rd.Note = *row.UserNote
+		rd.NoteHTML = renderMarkdown(rd.Note)
 	}
 	return rd
 }

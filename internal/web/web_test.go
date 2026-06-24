@@ -26,7 +26,7 @@ func newTestWeb(t *testing.T) *Web {
 		nil, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	return New(db, &config.Config{})
+	return New(db, &config.Config{}, ":8080")
 }
 
 func post(t *testing.T, w *Web, path string) *httptest.ResponseRecorder {

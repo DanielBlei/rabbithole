@@ -65,6 +65,7 @@ type Feed struct {
 
 // Config is the full run configuration loaded from YAML.
 type Config struct {
+	User        string   `yaml:"user"`         // shell-prompt name on the web UI; blank falls back to the OS user
 	Profile     string   `yaml:"profile"`      // path to the interest-profile markdown
 	Provider    string   `yaml:"provider"`     // ollama | vllm | heuristic
 	ChatHost    string   `yaml:"chat_host"`    // inference server URL
