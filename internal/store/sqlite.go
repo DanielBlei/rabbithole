@@ -281,7 +281,69 @@ type ItemRow struct {
 	LLMScore       *int
 	LLMScoreReason *string
 	UserScore      *int
+	UserNote       *string
 	PublishedAt    *time.Time
+}
+
+// itemRowColumns is the SELECT list backing both List and Get, kept in one place
+// so the column order stays in lockstep with scanItemRow's destinations.
+const itemRowColumns = "id, source, title, link, status, llm_score, llm_score_reason, user_score, user_note, published_at"
+
+// rowScanner is satisfied by both *sql.Row (Get) and *sql.Rows (List), letting
+// scanItemRow serve the single-row and multi-row reads from one mapping.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanItemRow maps one row of itemRowColumns onto an ItemRow, threading the
+// nullable columns through the sql.Null* wrappers. Column order here must match
+// itemRowColumns exactly.
+func scanItemRow(sc rowScanner) (ItemRow, error) {
+	var (
+		r           ItemRow
+		llmScore    sql.NullInt64
+		llmReason   sql.NullString
+		userScore   sql.NullInt64
+		userNote    sql.NullString
+		publishedAt sql.NullTime
+	)
+	if err := sc.Scan(&r.ID, &r.Source, &r.Title, &r.Link, &r.Status,
+		&llmScore, &llmReason, &userScore, &userNote, &publishedAt); err != nil {
+		return ItemRow{}, err
+	}
+	if llmScore.Valid {
+		v := int(llmScore.Int64)
+		r.LLMScore = &v
+	}
+	if llmReason.Valid {
+		r.LLMScoreReason = &llmReason.String
+	}
+	if userScore.Valid {
+		v := int(userScore.Int64)
+		r.UserScore = &v
+	}
+	if userNote.Valid {
+		r.UserNote = &userNote.String
+	}
+	if publishedAt.Valid {
+		r.PublishedAt = &publishedAt.Time
+	}
+	return r, nil
+}
+
+// Get returns the single item identified by identifier, which may be either an
+// item's id or its link (the same lookup UpdateUserState uses). It returns
+// ErrItemNotFound when nothing matches.
+func (s *Store) Get(ctx context.Context, identifier string) (ItemRow, error) {
+	q := "SELECT " + itemRowColumns + " FROM items WHERE link = ? OR id = ?"
+	r, err := scanItemRow(s.db.QueryRowContext(ctx, q, identifier, identifier))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ItemRow{}, fmt.Errorf("%w: %s", ErrItemNotFound, identifier)
+		}
+		return ItemRow{}, fmt.Errorf("get item %s: %w", identifier, err)
+	}
+	return r, nil
 }
 
 // ListFilter narrows List's results. Zero-value fields are unfiltered: an
@@ -357,7 +419,7 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]ItemRow, error) 
 		args = append(args, filter.Before)
 	}
 
-	q := "SELECT id, source, title, link, status, llm_score, llm_score_reason, user_score, published_at FROM items"
+	q := "SELECT " + itemRowColumns + " FROM items"
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -378,30 +440,9 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]ItemRow, error) 
 
 	var items []ItemRow
 	for rows.Next() {
-		var (
-			r           ItemRow
-			llmScore    sql.NullInt64
-			llmReason   sql.NullString
-			userScore   sql.NullInt64
-			publishedAt sql.NullTime
-		)
-		if err := rows.Scan(&r.ID, &r.Source, &r.Title, &r.Link, &r.Status,
-			&llmScore, &llmReason, &userScore, &publishedAt); err != nil {
+		r, err := scanItemRow(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan list: %w", err)
-		}
-		if llmScore.Valid {
-			v := int(llmScore.Int64)
-			r.LLMScore = &v
-		}
-		if llmReason.Valid {
-			r.LLMScoreReason = &llmReason.String
-		}
-		if userScore.Valid {
-			v := int(userScore.Int64)
-			r.UserScore = &v
-		}
-		if publishedAt.Valid {
-			r.PublishedAt = &publishedAt.Time
 		}
 		items = append(items, r)
 	}
