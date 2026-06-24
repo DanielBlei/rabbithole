@@ -1,4 +1,4 @@
-package ingest
+package digest
 
 import (
 	"os"

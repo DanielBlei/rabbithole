@@ -1,5 +1,5 @@
-// Render and Write turn ranked results into a dated markdown digest file.
-package ingest
+// Package digest turns ranked results into a dated markdown digest file.
+package digest
 
 import (
 	"fmt"

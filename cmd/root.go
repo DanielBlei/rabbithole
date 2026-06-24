@@ -42,7 +42,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug logging")
 	rootCmd.PersistentFlags().
 		BoolVar(&trace, "trace", false, "enable trace logging (raw model prompts/responses, implies --debug)")
-	rootCmd.AddCommand(digestCmd)
+	rootCmd.AddCommand(ingestCmd)
 }
 
 // withSignalCancel returns a context cancelled on SIGINT/SIGTERM.

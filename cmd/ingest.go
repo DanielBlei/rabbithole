@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/DanielBlei/ai-searcher/internal/config"
+	"github.com/DanielBlei/ai-searcher/internal/digest"
 	"github.com/DanielBlei/ai-searcher/internal/ingest"
 	"github.com/DanielBlei/ai-searcher/internal/store"
 )
@@ -18,24 +19,24 @@ var (
 	writeMarkdown    bool
 )
 
-var digestCmd = &cobra.Command{
-	Use:   "digest",
+var ingestCmd = &cobra.Command{
+	Use:   "ingest",
 	Short: "Fetch feeds, rank new items, update the store, and optionally write the markdown digest",
-	RunE:  digestE,
+	RunE:  ingestE,
 }
 
 func init() {
-	digestCmd.Flags().
+	ingestCmd.Flags().
 		BoolVar(&dryRun, "dry-run", false, "print the digest to stdout; do not write files or record items")
-	digestCmd.Flags().
+	ingestCmd.Flags().
 		StringVar(&providerOverride, "provider", "", "override the configured provider (ollama|vllm|heuristic)")
-	digestCmd.Flags().
+	ingestCmd.Flags().
 		BoolVar(&noThink, "no-think", false, "disable model reasoning/thinking during scoring (use for models without thinking support)")
-	digestCmd.Flags().
+	ingestCmd.Flags().
 		BoolVar(&writeMarkdown, "markdown", false, "also write the dated markdown digest to the output dir (default: update the store only)")
 }
 
-func digestE(cmd *cobra.Command, _ []string) error {
+func ingestE(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
 	cfg, err := config.Load(configPath)
@@ -52,7 +53,6 @@ func digestE(cmd *cobra.Command, _ []string) error {
 		Str("chat_host", cfg.ChatHost).
 		Int("batch_size", cfg.BatchSize).
 		Int("min_score", cfg.MinScore).
-		Int("top_n", cfg.TopN).
 		Str("since", cfg.Since.String()).
 		Bool("think", !noThink).
 		Msg("config loaded")
@@ -72,10 +72,8 @@ func digestE(cmd *cobra.Command, _ []string) error {
 
 	day := time.Now()
 	outcome, err := ingest.Run(ctx, cfg, profile, db, day, ingest.Options{
-		Think:     !noThink,
-		Record:    !dryRun,
-		Markdown:  writeMarkdown && !dryRun,
-		OutputDir: cfg.OutputDir,
+		Think:  !noThink,
+		Record: !dryRun,
 	})
 	if err != nil {
 		return err
@@ -87,14 +85,20 @@ func digestE(cmd *cobra.Command, _ []string) error {
 
 	if dryRun {
 		log.Debug().Msg("dry-run: printing digest, not writing or recording")
-		fmt.Println(ingest.Render(day, outcome.Results))
+		fmt.Println(digest.Render(day, outcome.Results))
 		return nil
 	}
 
-	if outcome.DigestPath != "" {
-		fmt.Printf("Recorded %d item(s); wrote digest to %s\n", len(outcome.Results), outcome.DigestPath)
-	} else {
-		fmt.Printf("Recorded %d item(s) to the store.\n", len(outcome.Results))
+	if writeMarkdown {
+		path, err := digest.Write(cfg.OutputDir, day, outcome.Results)
+		if err != nil {
+			return err
+		}
+		log.Debug().Str("path", path).Int("items", len(outcome.Results)).Msg("digest written")
+		fmt.Printf("Recorded %d item(s); wrote digest to %s\n", len(outcome.Results), path)
+		return nil
 	}
+
+	fmt.Printf("Recorded %d item(s) to the store.\n", len(outcome.Results))
 	return nil
 }
