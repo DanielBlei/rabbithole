@@ -48,13 +48,13 @@ header.topbar{
 
 .settings-panel{
   position:absolute;right:0;top:calc(100% + 8px);min-width:160px;
-  background:var(--pane);border:1px solid var(--line);border-radius:10px;
-  box-shadow:0 12px 30px rgba(0,0,0,.5);
-  padding:6px;z-index:10;
+  background:var(--pane);border:1px solid var(--line);border-radius:16px;
+  box-shadow:0 16px 38px rgba(0,0,0,.55);
+  padding:7px;z-index:10;
 }
 .settings-panel[hidden]{display:none;}
 .settings-panel__item{
-  display:block;padding:8px 10px;font-size:1.3rem;color:var(--text-dim);border-radius:7px;
+  display:block;padding:8px 12px;font-size:1.3rem;color:var(--text-dim);border-radius:999px;
 }
 .settings-panel__item:hover{color:var(--amber);background:rgba(128,203,196,.07);}
 .settings-panel__item:focus-visible{outline:1px solid var(--amber);outline-offset:-2px;}
@@ -91,8 +91,10 @@ header.topbar{
 .filter{display:flex;align-items:center;gap:6px;color:var(--text-dim);}
 .filter__key{letter-spacing:.05em;text-transform:uppercase;font-size:1.05rem;}
 .filter__select{
-  background:transparent;border:1px solid var(--line);color:var(--text);
-  font-family:inherit;font-size:1.2rem;padding:3px 6px;border-radius:8px;cursor:pointer;
+  appearance:none;-webkit-appearance:none;
+  background:var(--card) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23607D8B' d='M0 0l5 6 5-6z'/></svg>") no-repeat right 11px center;
+  border:1px solid var(--line);color:var(--text);
+  font-family:inherit;font-size:1.2rem;padding:5px 28px 5px 13px;border-radius:999px;cursor:pointer;
 }
 .filter__select:hover{border-color:var(--amber-dim);color:var(--amber);}
 .filter__select:focus-visible{outline:1px solid var(--amber);outline-offset:2px;}
@@ -102,8 +104,8 @@ header.topbar{
 .pill{position:relative;display:inline-flex;cursor:pointer;}
 .pill input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;}
 .pill span{
-  display:inline-block;padding:4px 12px;border:1px solid var(--line);border-radius:999px;
-  color:var(--text-dim);font-size:1.1rem;
+  display:inline-block;padding:5px 13px;border:1px solid var(--line);border-radius:999px;
+  background:var(--card);color:var(--text-dim);font-size:1.1rem;
 }
 .pill input:hover ~ span{border-color:var(--amber-dim);}
 .pill input:checked ~ span{color:var(--amber);border-color:var(--amber-dim);}
@@ -112,9 +114,9 @@ header.topbar{
 .date-popover{
   display:none;position:absolute;left:0;top:calc(100% + 8px);
   align-items:center;gap:10px;min-width:max-content;
-  background:var(--pane);border:1px solid var(--line);border-radius:10px;
-  box-shadow:0 12px 30px rgba(0,0,0,.5);
-  padding:10px 12px;z-index:10;
+  background:var(--pane);border:1px solid var(--line);border-radius:16px;
+  box-shadow:0 16px 38px rgba(0,0,0,.55);
+  padding:11px 13px;z-index:10;
 }
 .pills:has(#pubCustom:checked) ~ .date-popover{display:flex;}
 .date-popover__field{
@@ -122,11 +124,60 @@ header.topbar{
   color:var(--text-dim);font-size:1.1rem;letter-spacing:.05em;text-transform:uppercase;
 }
 .date-input{
-  background:transparent;border:1px solid var(--line);color:var(--text);
-  font-family:inherit;font-size:1.15rem;padding:3px 6px;border-radius:8px;
+  background:var(--card);border:1px solid var(--line);color:var(--text);
+  font-family:inherit;font-size:1.15rem;padding:5px 11px;border-radius:999px;
   color-scheme:dark;
 }
 .date-input:focus-visible{outline:1px solid var(--amber);outline-offset:2px;}
+
+/* "view" toggles: two independent checkbox chips (reusing .pill) that bring
+   seen/hidden items into the list. Each lights in the same accent its per-card
+   control uses — Seen green, Hidden red — so the bar reads as the same triage
+   vocabulary, not a generic filter. */
+.pill__ic{font-style:normal;margin-right:5px;font-size:1.05em;}
+.pill--seen input:checked ~ span{
+  color:var(--score-high);border-color:var(--score-high);background:rgba(195,232,141,.12);
+}
+.pill--hide input:checked ~ span{
+  color:var(--warn);border-color:var(--warn);background:rgba(255,83,112,.12);
+}
+.pill--seen input:hover ~ span{border-color:var(--score-high);}
+.pill--hide input:hover ~ span{border-color:var(--warn);}
+.pill--seen input:focus-visible ~ span{outline-color:var(--score-high);}
+.pill--hide input:focus-visible ~ span{outline-color:var(--warn);}
+
+/* popmenu: a compact trigger that sits inline with the other filter controls
+   (so the bar stays one level) and opens a small popover of chips. Used by both
+   "View" (seen/hidden checkbox chips) and "Sort" (latest/oldest/score radios).
+   The button mirrors filter__select; an optional dot flags an active selection
+   while it's closed. */
+.popmenu{position:relative;}
+.popmenu__btn{
+  display:inline-flex;align-items:center;gap:7px;list-style:none;cursor:pointer;
+  background:var(--card);border:1px solid var(--line);color:var(--text);
+  font-family:inherit;font-size:1.2rem;padding:5px 13px;border-radius:999px;
+}
+.popmenu__btn::-webkit-details-marker{display:none;}
+.popmenu__btn::after{content:"\25be";color:var(--text-dim);font-size:1rem;}
+.popmenu__btn:hover,.popmenu[open] .popmenu__btn{color:var(--amber);border-color:var(--amber-dim);}
+.popmenu[open] .popmenu__btn::after{color:var(--amber);}
+.popmenu__btn:focus-visible{outline:1px solid var(--amber);outline-offset:2px;}
+.popmenu__dot{width:6px;height:6px;border-radius:50%;background:var(--amber);box-shadow:0 0 6px rgba(128,203,196,.6);}
+/* Semantic View dots: green flags Seen active, red flags Hidden — both show
+   when both are on, mirroring the chip accents inside the popover. */
+.popmenu__dot--seen{background:var(--score-high);box-shadow:0 0 6px rgba(195,232,141,.6);}
+.popmenu__dot--hide{background:var(--warn);box-shadow:0 0 6px rgba(255,83,112,.6);}
+.popmenu__panel{
+  position:absolute;right:0;top:calc(100% + 8px);z-index:10;min-width:130px;
+  display:flex;flex-direction:column;gap:7px;align-items:stretch;
+  background:var(--pane);border:1px solid var(--line);border-radius:16px;
+  box-shadow:0 16px 38px rgba(0,0,0,.55);padding:9px;
+}
+.popmenu__panel .pill{align-self:stretch;}
+.popmenu__panel .pill span{display:flex;align-items:center;width:100%;}
+/* Sort chips are single-select; the checked one fills with the primary accent
+   to match the filled look of the View chips. */
+.pill--sort input:checked ~ span{background:rgba(128,203,196,.12);}
 
 .pane__nav{
   display:flex;align-items:center;justify-content:space-between;
@@ -146,10 +197,11 @@ header.topbar{
 
 /* Rows are elevated cards */
 .row{
+  position:relative;
   background:var(--card);border:1px solid var(--line);border-radius:12px;
   padding:14px 16px;margin-bottom:14px;
   box-shadow:0 2px 8px rgba(0,0,0,.35);
-  transition:transform .12s, box-shadow .12s;
+  transition:transform .12s, box-shadow .12s, opacity .12s;
 }
 .row:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.45);}
 @media (prefers-reduced-motion: reduce){
@@ -157,6 +209,54 @@ header.topbar{
   .row:hover{transform:none;}
 }
 .row .line1{color:var(--text);}
+
+/* Per-row triage controls, parked top-right. Discreet by default (dim, no
+   chrome); the row-hover/focus-within brightens them, an active toggle stays
+   lit. .line1 reserves right padding so a long title can't slide under them. */
+.row .line1{padding-right:128px;}
+.row__actions{
+  position:absolute;top:11px;right:13px;display:flex;gap:6px;
+  opacity:.32;transition:opacity .12s;
+}
+.row:hover .row__actions,.row:focus-within .row__actions{opacity:1;}
+@media (prefers-reduced-motion: reduce){ .row__actions{transition:none;} }
+.act{
+  display:inline-flex;align-items:center;gap:4px;
+  background:transparent;border:1px solid transparent;color:var(--text-dim);
+  font-family:inherit;font-size:1.05rem;letter-spacing:.04em;text-transform:uppercase;
+  padding:2px 7px;border-radius:7px;cursor:pointer;
+}
+.act__icon{font-size:1.1rem;line-height:1;}
+.act:hover{color:var(--amber);border-color:var(--amber-dim);}
+.act-hide:hover{color:var(--warn);border-color:var(--warn);}
+.act:focus-visible{outline:1px solid var(--amber);outline-offset:2px;}
+.act-seen.is-active{color:var(--score-high);border-color:var(--score-high);}
+.act-hide.is-active{color:var(--warn);border-color:var(--warn);}
+
+/* A seen row recedes — desaturated title, slightly dimmed card — so the
+   not-yet-triaged items stay visually dominant. A hidden row recedes harder
+   and strikes its title; it only renders at all when "show hidden" is on. */
+.row.is-seen{opacity:.66;}
+.row.is-seen:hover{opacity:1;}
+.row.is-seen .title a{color:var(--text-dim);font-weight:400;}
+.row.is-hidden{opacity:.45;border-style:dashed;}
+.row.is-hidden:hover{opacity:.9;}
+.row.is-hidden .title a{color:var(--text-dim);font-weight:400;text-decoration:line-through;text-decoration-color:var(--text-dim);}
+
+/* Leave animation: when a seen/hide mutation moves a row to a status the active
+   View filter doesn't show, it animates out (after a brief hold in JS) instead
+   of lingering dimmed. JS sets an inline max-height first so the collapse can
+   transition from a real height down to 0. */
+.row--leaving{
+  overflow:hidden;
+  transition:opacity .3s ease, transform .3s ease,
+             max-height .35s ease .03s, margin .35s ease .03s,
+             padding .35s ease .03s, border-width .35s ease .03s;
+  opacity:0 !important;transform:translateX(16px);
+  max-height:0 !important;margin-top:0;margin-bottom:0;
+  padding-top:0;padding-bottom:0;border-width:0;
+}
+@media (prefers-reduced-motion: reduce){ .row--leaving{transition:none;} }
 .row .time{color:var(--text-dim);margin-right:10px;}
 .row .title a{color:var(--title);font-weight:500;}
 .row .title a:hover{text-decoration:underline;text-decoration-color:var(--amber);}

@@ -42,6 +42,8 @@ func (s *Web) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleDigest)
 	mux.HandleFunc("POST /items/{id}/note", s.handleNote)
+	mux.HandleFunc("POST /items/{id}/seen", s.handleSeen)
+	mux.HandleFunc("POST /items/{id}/hide", s.handleHide)
 
 	static, err := fs.Sub(staticFS, "static")
 	if err != nil {
@@ -54,21 +56,23 @@ func (s *Web) Routes() http.Handler {
 
 // pageData is the top-level template model passed to layout.html.
 type pageData struct {
-	Title           string
-	Active          string
-	Stats           statsData
-	Sources         []string
-	FilterSource    string
-	FilterPublished string
-	FilterCustom    bool
-	FilterFrom      string
-	FilterTo        string
-	FilterSort      string
-	Rows            []rowData
+	Title            string
+	Active           string
+	Stats            statsData
+	Sources          []string
+	FilterSource     string
+	FilterPublished  string
+	FilterCustom     bool
+	FilterFrom       string
+	FilterTo         string
+	FilterSort       string
+	FilterShowSeen   bool
+	FilterShowHidden bool
+	Rows             []rowData
 }
 
 type statsData struct {
-	UnreadToday   int
+	Available     int
 	AvgScore      float64
 	SourcesActive int
 }
@@ -80,6 +84,7 @@ type rowData struct {
 	Title    string
 	Link     string
 	Score    int    // 0-10; drives the gauge bar width (--score)
+	Scored   bool   // whether the item has any score; gates data-score for the live avg recalc
 	Tier     string // high | mid | low — gauge colour class
 	GaugeBar string // bar glyphs (visually hidden; kept for the markup)
 	Source   string
@@ -92,6 +97,10 @@ type rowData struct {
 	ScoreModel  string
 	HasNote     bool
 	Note        string
+	// Triage state, derived from the item's Status: Seen == read, Hidden ==
+	// skipped. Read-only here; the seen/hide mutation routes are a follow-up.
+	Seen   bool
+	Hidden bool
 }
 
 func (s *Web) handleDigest(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +109,7 @@ func (s *Web) handleDigest(w http.ResponseWriter, r *http.Request) {
 	from, to := q.Get("from"), q.Get("to")
 	sort := q.Get("sort")
 	if sort == "" {
-		sort = store.SortByScore
+		sort = store.SortByLatest
 	}
 	source := q.Get("source")
 
@@ -109,12 +118,25 @@ func (s *Web) handleDigest(w http.ResponseWriter, r *http.Request) {
 		published = ""
 	}
 
+	// Triage visibility: un-triaged (unread) items always show; seen (read) and
+	// hidden (skipped) items join the set only when their "show" toggle is on.
+	showSeen := q.Get("seen") == "1"
+	showHidden := q.Get("hidden") == "1"
+	statuses := []string{store.StatusUnread}
+	if showSeen {
+		statuses = append(statuses, store.StatusRead)
+	}
+	if showHidden {
+		statuses = append(statuses, store.StatusSkipped)
+	}
+
 	rows, err := s.db.List(r.Context(), store.ListFilter{
-		Source: source,
-		After:  after,
-		Before: before,
-		SortBy: sort,
-		Limit:  listLimit,
+		Statuses: statuses,
+		Source:   source,
+		After:    after,
+		Before:   before,
+		SortBy:   sort,
+		Limit:    listLimit,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -132,17 +154,19 @@ func (s *Web) handleDigest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := pageData{
-		Title:           "ai-searcher",
-		Active:          "home",
-		Stats:           s.stats(r, rows, len(counts)),
-		Sources:         sources,
-		FilterSource:    source,
-		FilterPublished: published,
-		FilterCustom:    custom,
-		FilterFrom:      from,
-		FilterTo:        to,
-		FilterSort:      sort,
-		Rows:            toRows(rows),
+		Title:            "ai-searcher",
+		Active:           "home",
+		Stats:            s.stats(r, rows, len(counts), store.ListFilter{Source: source, After: after, Before: before}),
+		Sources:          sources,
+		FilterSource:     source,
+		FilterPublished:  published,
+		FilterCustom:     custom,
+		FilterFrom:       from,
+		FilterTo:         to,
+		FilterSort:       sort,
+		FilterShowSeen:   showSeen,
+		FilterShowHidden: showHidden,
+		Rows:             toRows(rows),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -182,19 +206,63 @@ func (s *Web) handleNote(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleSeen toggles an item between read (seen) and unread; handleHide toggles
+// between skipped (hidden) and unread. Both re-render the row fragment so htmx
+// can swap the new state in place.
+func (s *Web) handleSeen(w http.ResponseWriter, r *http.Request) {
+	s.toggleStatus(w, r, store.StatusRead)
+}
+
+func (s *Web) handleHide(w http.ResponseWriter, r *http.Request) {
+	s.toggleStatus(w, r, store.StatusSkipped)
+}
+
+// toggleStatus flips the item's status: if it already equals target, it returns
+// to unread (so the same control un-toggles); otherwise it's set to target.
+// seen and hide are mutually exclusive states off the unread baseline — setting
+// one clears the other. The re-rendered row shows the new state.
+func (s *Web) toggleStatus(w http.ResponseWriter, r *http.Request, target string) {
+	id := r.PathValue("id")
+
+	cur, err := s.db.Get(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrItemNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	next := target
+	if cur.Status == target {
+		next = store.StatusUnread
+	}
+	if err := s.db.UpdateUserState(r.Context(), id, store.UserPatch{Status: &next}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Only status changed, so render the in-memory row rather than re-fetching.
+	cur.Status = next
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, "row", toRow(cur)); err != nil {
+		// Status is likely already written; log rather than double-write.
+		log.Error().Err(err).Msg("render toggle row")
+	}
+}
+
 // stats computes the dashboard tiles. UnreadToday is a dedicated count;
 // AvgScore is the mean score over the rows currently shown; SourcesActive is
-// the number of distinct sources in the store. (Rough v1 — refine later.)
-func (s *Web) stats(r *http.Request, rows []store.ItemRow, sourcesActive int) statsData {
+// the number of distinct sources in the store. Available is the total item
+// count under the active source/date selection (pool stat via Store.Count,
+// passed in as countFilter), regardless of triage status. (Rough v1 — refine
+// later.)
+func (s *Web) stats(r *http.Request, rows []store.ItemRow, sourcesActive int, countFilter store.ListFilter) statsData {
 	st := statsData{SourcesActive: sourcesActive}
 
-	unread, err := s.db.List(r.Context(), store.ListFilter{
-		Status: store.StatusUnread,
-		After:  startOfDay(time.Now()),
-		Limit:  listLimit, // good enough for a count tile in v1
-	})
-	if err == nil {
-		st.UnreadToday = len(unread)
+	if n, err := s.db.Count(r.Context(), countFilter); err == nil {
+		st.Available = n
 	}
 
 	var sum, n int
@@ -221,18 +289,21 @@ func toRows(rows []store.ItemRow) []rowData {
 // toRow builds the view model for a single item. Used both for the full page
 // render and for the row fragment a mutation handler swaps back via htmx.
 func toRow(row store.ItemRow) rowData {
-	sc, _ := score(row)
+	sc, scored := score(row)
 	rd := rowData{
 		ID:       row.ID,
 		Time:     timeOf(row.PublishedAt),
 		Title:    row.Title,
 		Link:     row.Link,
 		Score:    sc,
+		Scored:   scored,
 		Tier:     tierOf(sc),
 		GaugeBar: "",
 		Source:   row.Source,
 		Date:     dateOf(row.PublishedAt),
 		Reason:   strOf(row.LLMScoreReason),
+		Seen:     row.Status == store.StatusRead,
+		Hidden:   row.Status == store.StatusSkipped,
 	}
 	// The "why" footnote attributes the reason to the model's own score, not the
 	// effective Score above — so the user can see "model said 8, I rated 3".

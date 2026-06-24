@@ -1,5 +1,15 @@
 {{define "row"}}
-<div class="row">
+<div class="row{{if .Seen}} is-seen{{end}}{{if .Hidden}} is-hidden{{end}}"{{if .Scored}} data-score="{{.Score}}"{{end}}>
+  <div class="row__actions">
+    <button type="button" class="act act-seen{{if .Seen}} is-active{{end}}"
+      hx-post="/items/{{.ID}}/seen" hx-target="closest .row" hx-swap="outerHTML"
+      aria-pressed="{{if .Seen}}true{{else}}false{{end}}"
+      title="{{if .Seen}}Mark unseen{{else}}Mark as seen{{end}}"><span class="act__icon">&#10003;</span>seen</button>
+    <button type="button" class="act act-hide{{if .Hidden}} is-active{{end}}"
+      hx-post="/items/{{.ID}}/hide" hx-target="closest .row" hx-swap="outerHTML"
+      aria-pressed="{{if .Hidden}}true{{else}}false{{end}}"
+      title="{{if .Hidden}}Unhide{{else}}Hide this item{{end}}"><span class="act__icon">&#8856;</span>hide</button>
+  </div>
   <div class="line1"><span class="time">{{.Time}}</span><span class="title"><a href="{{.Link}}">{{.Title}}</a></span></div>
   <div class="gauge"><span class="gauge-bar" style="--score:{{.Score}};" tabindex="0" aria-label="Score {{.Score}} out of 10" data-tip="score {{.Score}} / 10"><span class="bar {{.Tier}}">{{.GaugeBar}}</span></span><span>{{.Source}} &middot; {{.Date}}</span></div>
   <div class="toggles">
