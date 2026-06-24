@@ -243,7 +243,7 @@ func TestList(t *testing.T) {
 	}
 
 	// Spread created_at across distinct days (oldest a -> newest d) so
-	// After/Before windows and SortByDate have something to distinguish.
+	// After/Before windows and SortByLatest have something to distinguish.
 	// Record always stamps created_at with time.Now(), so this is set
 	// directly — there's no public API for backdating it.
 	now := time.Now()
@@ -315,9 +315,24 @@ func TestList(t *testing.T) {
 			wantIDs: []string{"b", "c"},
 		},
 		{
-			name:    "sort by date, newest first regardless of score",
-			filter:  ListFilter{SortBy: SortByDate},
+			name:    "sort by latest, newest first regardless of score",
+			filter:  ListFilter{SortBy: SortByLatest},
 			wantIDs: []string{"d", "c", "b", "a"},
+		},
+		{
+			name:    "sort by oldest, oldest first regardless of score",
+			filter:  ListFilter{SortBy: SortByOldest},
+			wantIDs: []string{"a", "b", "c", "d"},
+		},
+		{
+			name:    "filter by multiple statuses, excludes the read item",
+			filter:  ListFilter{Statuses: []string{StatusUnread, StatusSkipped}, SortBy: SortByOldest},
+			wantIDs: []string{"a", "b", "c"},
+		},
+		{
+			name:    "invalid status in set",
+			filter:  ListFilter{Statuses: []string{StatusUnread, "bogus"}},
+			wantErr: true,
 		},
 		{
 			name:    "invalid sort filter",
@@ -372,6 +387,69 @@ func TestListLimitClamp(t *testing.T) {
 	}
 	if len(rows) != maxListLimit {
 		t.Errorf("got %d rows, want clamp to %d", len(rows), maxListLimit)
+	}
+
+	// Count is not bound by the list limit — it returns the true total.
+	n, err := db.Count(ctx, ListFilter{})
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if n != len(items) {
+		t.Errorf("Count() = %d, want %d (uncapped)", n, len(items))
+	}
+}
+
+func TestCount(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	items := []feeds.Item{
+		{ID: "a", Source: "S1", Title: "A", Link: "https://x/a"},
+		{ID: "b", Source: "S1", Title: "B", Link: "https://x/b"},
+		{ID: "c", Source: "S2", Title: "C", Link: "https://x/c"},
+		{ID: "d", Source: "S2", Title: "D", Link: "https://x/d"},
+	}
+	if err := db.Record(ctx, items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	readStatus := StatusRead
+	if err := db.UpdateUserState(ctx, "https://x/d", UserPatch{Status: &readStatus}); err != nil {
+		t.Fatalf("UpdateUserState: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		filter  ListFilter
+		want    int
+		wantErr bool
+	}{
+		{name: "all items, status-agnostic", filter: ListFilter{}, want: 4},
+		{name: "filter by source", filter: ListFilter{Source: "S1"}, want: 2},
+		{name: "filter by status read", filter: ListFilter{Status: StatusRead}, want: 1},
+		{name: "filter by status unread", filter: ListFilter{Status: StatusUnread}, want: 3},
+		{name: "multi-status set", filter: ListFilter{Statuses: []string{StatusRead, StatusUnread}}, want: 4},
+		{name: "invalid status", filter: ListFilter{Status: "bogus"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := db.Count(ctx, tt.filter)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("Count() error = nil, want non-nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Count: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("Count() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
 

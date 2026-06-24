@@ -47,11 +47,13 @@ const (
 	StatusSkipped = "skipped"
 )
 
-// Sort values for ListFilter.SortBy: SortByScore (default) ranks best-first
-// by user/llm score; SortByDate ranks newest-first by created_at.
+// Sort values for ListFilter.SortBy: SortByScore (the default for an empty
+// SortBy) ranks best-first by user/llm score; SortByLatest ranks newest-first
+// by created_at; SortByOldest ranks oldest-first by created_at.
 const (
-	SortByScore = "score"
-	SortByDate  = "date"
+	SortByScore  = "score"
+	SortByLatest = "latest"
+	SortByOldest = "oldest"
 )
 
 // unscoredSentinel stands in for a NULL score in ORDER BY so result order
@@ -381,20 +383,25 @@ func (s *Store) Get(ctx context.Context, identifier string) (ItemRow, error) {
 }
 
 // ListFilter narrows List's results. Zero-value fields are unfiltered: an
-// empty Status or Source matches anything, a zero After/Before leaves that
-// side of the created_at window open, an empty SortBy falls back to
+// empty Status/Statuses or Source matches anything, a zero After/Before leaves
+// that side of the created_at window open, an empty SortBy falls back to
 // SortByScore, and Limit<=0 falls back to defaultListLimit.
+//
+// Status and Statuses both restrict by items.status; Statuses (an OR-set, via
+// SQL IN) takes precedence when non-empty, with Status the single-value
+// shorthand. Each value must be a recognized status.
 //
 // After/Before are plain absolute timestamps, not durations — pagination is
 // the caller's concern (compute the next window's bounds and call List
 // again), not something List tracks via a cursor.
 type ListFilter struct {
-	Status string
-	Source string
-	After  time.Time
-	Before time.Time
-	SortBy string
-	Limit  int
+	Status   string
+	Statuses []string
+	Source   string
+	After    time.Time
+	Before   time.Time
+	SortBy   string
+	Limit    int
 }
 
 // List's result-count bounds: defaultListLimit applies when ListFilter.Limit
@@ -409,7 +416,7 @@ const (
 // sort modes, or empty (meaning "use the default").
 func isValidSortBy(sortBy string) bool {
 	switch sortBy {
-	case "", SortByScore, SortByDate:
+	case "", SortByScore, SortByLatest, SortByOldest:
 		return true
 	default:
 		return false
@@ -419,24 +426,38 @@ func isValidSortBy(sortBy string) bool {
 // List returns items matching filter. By default (SortByScore) results are
 // ranked best-first: highest of user_score/llm_score (whichever is set;
 // user_score wins when both are), with source as a tiebreak; unscored items
-// sort last. SortByDate instead ranks newest-first by created_at.
-func (s *Store) List(ctx context.Context, filter ListFilter) ([]ItemRow, error) {
+// sort last. SortByLatest ranks newest-first by created_at, SortByOldest
+// oldest-first.
+// validate reports whether the filter's status/sort values are recognized,
+// returning an ErrInvalidFilter-wrapped error otherwise. Shared by List and
+// Count so both reject bad input identically.
+func (filter ListFilter) validate() error {
 	if filter.Status != "" && !isValidStatus(filter.Status) {
-		return nil, fmt.Errorf("%w: status %q", ErrInvalidFilter, filter.Status)
+		return fmt.Errorf("%w: status %q", ErrInvalidFilter, filter.Status)
+	}
+	for _, st := range filter.Statuses {
+		if !isValidStatus(st) {
+			return fmt.Errorf("%w: status %q", ErrInvalidFilter, st)
+		}
 	}
 	if !isValidSortBy(filter.SortBy) {
-		return nil, fmt.Errorf("%w: sort %q", ErrInvalidFilter, filter.SortBy)
+		return fmt.Errorf("%w: sort %q", ErrInvalidFilter, filter.SortBy)
 	}
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = defaultListLimit
-	} else if limit > maxListLimit {
-		limit = maxListLimit
-	}
+	return nil
+}
 
-	var where []string
-	var args []any
-	if filter.Status != "" {
+// whereClause builds the shared WHERE fragments and their args from the
+// filter's status/source/time bounds — everything except sort and limit — so
+// List and Count restrict rows identically.
+func (filter ListFilter) whereClause() (where []string, args []any) {
+	if len(filter.Statuses) > 0 {
+		placeholders := make([]string, len(filter.Statuses))
+		for i, st := range filter.Statuses {
+			placeholders[i] = "?"
+			args = append(args, st)
+		}
+		where = append(where, "status IN ("+strings.Join(placeholders, ", ")+")")
+	} else if filter.Status != "" {
 		where = append(where, "status = ?")
 		args = append(args, filter.Status)
 	}
@@ -452,14 +473,50 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]ItemRow, error) 
 		where = append(where, "created_at < ?")
 		args = append(args, filter.Before)
 	}
+	return where, args
+}
 
+// Count returns how many items match filter's status/source/time bounds,
+// ignoring SortBy and Limit. Unlike len(List(...)) it isn't capped by the list
+// limit, so it's the right call for a total-pool stat (e.g. "available").
+func (s *Store) Count(ctx context.Context, filter ListFilter) (int, error) {
+	if err := filter.validate(); err != nil {
+		return 0, err
+	}
+	where, args := filter.whereClause()
+	q := "SELECT COUNT(*) FROM items"
+	if len(where) > 0 {
+		q += " WHERE " + strings.Join(where, " AND ")
+	}
+	var n int
+	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count items: %w", err)
+	}
+	return n, nil
+}
+
+func (s *Store) List(ctx context.Context, filter ListFilter) ([]ItemRow, error) {
+	if err := filter.validate(); err != nil {
+		return nil, err
+	}
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = defaultListLimit
+	} else if limit > maxListLimit {
+		limit = maxListLimit
+	}
+
+	where, args := filter.whereClause()
 	q := "SELECT " + itemRowColumns + " FROM items"
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
-	if filter.SortBy == SortByDate {
+	switch filter.SortBy {
+	case SortByLatest:
 		q += " ORDER BY created_at DESC"
-	} else {
+	case SortByOldest:
+		q += " ORDER BY created_at ASC"
+	default:
 		q += " ORDER BY COALESCE(user_score, llm_score, ?) DESC, source ASC"
 		args = append(args, unscoredSentinel)
 	}

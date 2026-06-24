@@ -29,7 +29,7 @@ Browse and record your own read/skip/rating/notes for digest items, by id or lin
 shown by `items list`).
 
 ```
-ai-searcher items list [--status S] [--source NAME] [--limit N] [--since D] [--before D] [--sort score|date]
+ai-searcher items list [--status S] [--source NAME] [--limit N] [--since D] [--before D] [--sort score|latest|oldest]
 ai-searcher items sources
 ai-searcher items read|skip|unread <id|link>...
 ai-searcher items rate <id|link> <0-10>
@@ -40,7 +40,7 @@ ai-searcher items note <id|link> <text>...
   whichever is set), optionally filtered by `--status` or `--source`. `--since`/`--before`
   are durations relative to now (e.g. `3d`, `12h`); with neither set, it defaults to the
   config's `list_since` window — `--before` pages older without re-imposing that default.
-  `--sort date` shows newest first instead.
+  `--sort latest` shows newest first instead; `--sort oldest` shows oldest first.
 - `sources` lists distinct source names with item counts, for use with `list --source`.
 - `read`/`skip`/`unread` accept multiple ids/links at once and set `status`, continuing past
   per-item failures (like `kubectl delete`) and printing a summary of how many failed.

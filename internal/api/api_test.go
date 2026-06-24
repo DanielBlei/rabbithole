@@ -81,9 +81,9 @@ func TestParseListFilter(t *testing.T) {
 		{name: "invalid limit", query: "limit=abc", wantErr: true},
 		{
 			name:  "status/source/sort/limit pass through unchanged",
-			query: "status=read&source=S1&sort=date&limit=5",
+			query: "status=read&source=S1&sort=latest&limit=5",
 			check: func(t *testing.T, f store.ListFilter) {
-				if f.Status != store.StatusRead || f.Source != "S1" || f.SortBy != store.SortByDate || f.Limit != 5 {
+				if f.Status != store.StatusRead || f.Source != "S1" || f.SortBy != store.SortByLatest || f.Limit != 5 {
 					t.Errorf("got %+v", f)
 				}
 			},
