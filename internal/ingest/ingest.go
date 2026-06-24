@@ -1,7 +1,7 @@
 // Package ingest implements the fetch -> score -> record cycle shared by the
-// digest command today and a future serve command's API/scheduler. Writing the
-// markdown digest is an opt-in final step (Options.Markdown), so flows that only
-// need to update the store can stop before it.
+// ingest command today and a future serve command's API/scheduler. It returns
+// the cycle's Outcome as data; rendering it (markdown digest, stdout, JSON, ...)
+// is the caller's concern (see the digest package).
 package ingest
 
 import (
@@ -19,19 +19,16 @@ import (
 
 // Options configures a single cycle.
 type Options struct {
-	Think     bool   // enable model reasoning during scoring
-	Record    bool   // write the cycle's items and results to the store
-	Markdown  bool   // also write the dated markdown digest file (needs Record)
-	OutputDir string // directory the Markdown digest is written to
+	Think  bool // enable model reasoning during scoring
+	Record bool // write the cycle's items and results to the store
 }
 
 // Outcome is the result of one cycle. Rendering it (markdown file, stdout,
 // JSON response, ...) is the caller's concern.
 type Outcome struct {
-	Fetched    int           // items fetched across all feeds
-	Unseen     []feeds.Item  // fresh, not-yet-seen items considered for scoring
-	Results    []rank.Result // items that cleared min_score, sorted best-first
-	DigestPath string        // path of the markdown digest written, or "" if none
+	Fetched int           // items fetched across all feeds
+	Unseen  []feeds.Item  // fresh, not-yet-seen items considered for scoring
+	Results []rank.Result // items that cleared min_score, sorted best-first
 }
 
 // Run fetches every feed in cfg, scores items not already in db against
@@ -92,27 +89,19 @@ func Run(
 	log.Info().Int("scored", len(scores)).Int("of", len(unseen)).
 		Str("elapsed", time.Since(scoreStart).Round(time.Millisecond).String()).Msg("scoring complete")
 
-	results := rank.Select(unseen, scores, cfg.MinScore, cfg.TopN)
+	results := rank.Select(unseen, scores, cfg.MinScore)
 	log.Info().Int("selected", len(results)).Int("min_score", cfg.MinScore).
-		Int("top_n", cfg.TopN).Msg("items selected for digest")
+		Msg("items selected for digest")
 
 	outcome := Outcome{Fetched: len(items), Unseen: unseen, Results: results}
 	if !opts.Record {
 		return outcome, nil
 	}
-	if err := record(ctx, db, unseen, results, cfg.ChatModel, day); err != nil {
+	if err := record(ctx, db, unseen, scores, results, cfg.ChatModel, day); err != nil {
 		return outcome, err
 	}
 	log.Debug().Int("recorded", len(unseen)).Int("digested", len(results)).Msg("items recorded in store")
 
-	if opts.Markdown {
-		path, err := Write(opts.OutputDir, day, results)
-		if err != nil {
-			return outcome, err
-		}
-		outcome.DigestPath = path
-		log.Debug().Str("path", path).Int("items", len(results)).Msg("digest written")
-	}
 	return outcome, nil
 }
 
@@ -147,10 +136,27 @@ func filterSeen(ctx context.Context, db *store.Store, items []feeds.Item) ([]fee
 	return out, nil
 }
 
-func record(ctx context.Context, db *store.Store, all []feeds.Item, results []rank.Result, model string, day time.Time) error {
-	entries := make([]store.DigestEntry, len(results))
-	for i, r := range results {
-		entries[i] = store.DigestEntry{Item: r.Item, Score: r.Score, Reason: r.Reason, Model: model}
+// record persists every scored item's verdict, flagging the subset that made
+// the digest. Selection (min_score) governs only what gets a digest date, not
+// which scores are kept — every score we computed is persisted.
+func record(ctx context.Context, db *store.Store, all []feeds.Item, scores map[string]rank.ItemScore, results []rank.Result, model string, day time.Time) error {
+	digested := make(map[string]bool, len(results))
+	for _, r := range results {
+		digested[r.Item.ID] = true
+	}
+	var entries []store.DigestEntry
+	for _, it := range all {
+		sc, ok := scores[it.ID]
+		if !ok {
+			continue
+		}
+		entries = append(entries, store.DigestEntry{
+			Item:     it,
+			Score:    sc.Score,
+			Reason:   sc.Reason,
+			Model:    model,
+			Digested: digested[it.ID],
+		})
 	}
 	return db.Record(ctx, all, entries, day)
 }
