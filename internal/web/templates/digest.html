@@ -1,7 +1,7 @@
 {{define "content"}}
 <div class="stats-row">
-  <div class="tile"><div class="num">{{.Stats.UnreadToday}}</div><div class="label">unread today</div></div>
-  <div class="tile"><div class="num">{{printf "%.1f" .Stats.AvgScore}}</div><div class="label">avg score</div></div>
+  <div class="tile"><div class="num">{{.Stats.Available}}</div><div class="label">available</div></div>
+  <div class="tile"><div class="num" id="statAvg">{{printf "%.1f" .Stats.AvgScore}}</div><div class="label">avg score</div></div>
   <div class="tile"><div class="num">{{.Stats.SourcesActive}}</div><div class="label">sources active</div></div>
   <div class="tile placeholder"><div class="num">&gt;</div><div class="label">awaiting more widgets<span class="blink">_</span></div></div>
 </div>
@@ -86,6 +86,69 @@
     var input = panel.querySelector('.note-input');
     var viewP = panel.querySelector('.note-view p');
     if (input) input.value = panel.classList.contains('empty') ? '' : viewP.textContent;
+  });
+})();
+
+(function(){
+  // After a seen/hide mutation re-renders a row, if its new status falls outside
+  // the active View filter (e.g. you hid an item while not viewing hidden), hold
+  // it a beat so the change registers, then animate it out — rather than leaving
+  // it lingering dimmed in a list it no longer belongs to. Unread always stays.
+  function viewState(){
+    var seen = document.querySelector('input[name="seen"]');
+    var hidden = document.querySelector('input[name="hidden"]');
+    return { seen: !!(seen && seen.checked), hidden: !!(hidden && hidden.checked) };
+  }
+  function outOfView(row, vs){
+    if (row.classList.contains('is-hidden')) return !vs.hidden;
+    if (row.classList.contains('is-seen')) return !vs.seen;
+    return false; // unread is always in view
+  }
+  // Avg Score is the mean over the rows currently shown (data-score is present
+  // only on scored rows, matching the server's score() gate). Recomputed from
+  // the live DOM when a row leaves, so the tile tracks the visible set without
+  // a reload. Tweened so the number eases to its new value as the row goes.
+  function currentAvg(){
+    var sum = 0, n = 0;
+    document.querySelectorAll('.pane__body .row').forEach(function(row){
+      var s = row.getAttribute('data-score');
+      if (s !== null){ sum += parseFloat(s); n++; }
+    });
+    return n ? sum / n : 0;
+  }
+  function tweenAvg(){
+    var el = document.getElementById('statAvg');
+    if (!el) return;
+    var to = currentAvg(), from = parseFloat(el.textContent);
+    if (isNaN(from)) from = to;
+    var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduced || from === to){ el.textContent = to.toFixed(1); return; }
+    var start = performance.now(), dur = 350;
+    requestAnimationFrame(function step(now){
+      var t = Math.min(1, (now - start) / dur);
+      el.textContent = (from + (to - from) * t).toFixed(1);
+      if (t < 1) requestAnimationFrame(step);
+    });
+  }
+  function remove(row){ row.remove(); tweenAvg(); }
+  function leave(row){
+    if (row._leaving) return;
+    row._leaving = true;
+    var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    setTimeout(function(){
+      if (reduced){ remove(row); return; }
+      row.style.maxHeight = row.scrollHeight + 'px';
+      requestAnimationFrame(function(){ row.classList.add('row--leaving'); });
+      setTimeout(function(){ remove(row); }, 400);
+    }, 450);
+  }
+  // Scan after every swap: only the just-mutated row can now fall out of view
+  // (the rest were server-rendered to match the filter), so this stays cheap.
+  document.addEventListener('htmx:afterSwap', function(){
+    var vs = viewState();
+    document.querySelectorAll('.pane__body .row').forEach(function(row){
+      if (outOfView(row, vs)) leave(row);
+    });
   });
 })();
 </script>
