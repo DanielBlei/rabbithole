@@ -73,7 +73,6 @@ type Config struct {
 	APIKey      string   `yaml:"api_key"`      // optional bearer token
 	BatchSize   int      `yaml:"batch_size"`   // items per scoring request
 	MaxParallel int      `yaml:"max_parallel"` // concurrent scoring requests in flight
-	TopN        int      `yaml:"top_n"`        // max items in a digest
 	MinScore    int      `yaml:"min_score"`    // inclusion threshold (0-10)
 	Since       Duration `yaml:"since"`        // lookback window (e.g. 14d, 168h)
 	ListSince   Duration `yaml:"list_since"`   // default display window for `items list`/serve (e.g. 3d)
@@ -89,7 +88,6 @@ const (
 	defaultChatModel   = "qwen3:4b"
 	defaultBatchSize   = 5
 	defaultMaxParallel = 4
-	defaultTopN        = 30
 	defaultMinScore    = 6
 	defaultSince       = 14 * 24 * time.Hour
 	defaultListSince   = 3 * 24 * time.Hour
@@ -128,9 +126,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.MaxParallel <= 0 {
 		c.MaxParallel = defaultMaxParallel
-	}
-	if c.TopN <= 0 {
-		c.TopN = defaultTopN
 	}
 	if c.MinScore == 0 {
 		c.MinScore = defaultMinScore

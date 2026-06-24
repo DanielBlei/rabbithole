@@ -12,7 +12,6 @@ plus the profile copy, if both files are missing).
 | `api_key` | Optional bearer token (vLLM prod / Ollama Cloud) | `""` |
 | `batch_size` | Items sent per scoring request | `5` |
 | `max_parallel` | Concurrent scoring requests in flight | `4` |
-| `top_n` | Max items in a digest | `30` |
 | `min_score` | Inclusion threshold, 0–10 | `6` |
 | `since` | Ignore items older than this when fetching | `14d` |
 | `list_since` | Default display window for `items list` / `serve`, independent of `since` | `3d` |

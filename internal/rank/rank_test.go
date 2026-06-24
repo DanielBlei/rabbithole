@@ -27,25 +27,12 @@ func TestSelectFiltersAndSorts(t *testing.T) {
 		"b": {ID: "b", Score: 9},
 		"c": {ID: "c", Score: 7},
 	}
-	got := Select(items, scores, 6, 10)
+	got := Select(items, scores, 6)
 	if len(got) != 2 {
 		t.Fatalf("got %d results, want 2 (min score 6)", len(got))
 	}
 	if got[0].Item.ID != "b" || got[1].Item.ID != "c" {
 		t.Errorf("wrong order: %s, %s", got[0].Item.ID, got[1].Item.ID)
-	}
-}
-
-func TestSelectRespectsTopN(t *testing.T) {
-	items := []feeds.Item{{ID: "a"}, {ID: "b"}, {ID: "c"}}
-	scores := map[string]ItemScore{
-		"a": {ID: "a", Score: 8},
-		"b": {ID: "b", Score: 9},
-		"c": {ID: "c", Score: 10},
-	}
-	got := Select(items, scores, 1, 2)
-	if len(got) != 2 {
-		t.Fatalf("got %d, want topN=2", len(got))
 	}
 }
 
@@ -82,10 +69,13 @@ func TestScoreAllRetriesItemsMissingFromPartialResponse(t *testing.T) {
 }
 
 func TestScoreBatchSkipsItemModelNeverScores(t *testing.T) {
+	noBackoff(t)
 	items := []feeds.Item{{ID: "a", Title: "a"}, {ID: "b", Title: "b"}}
+	var aCalls int
 	scorer := &stubScorer{fn: func(batch []feeds.Item) ([]ItemScore, error) {
 		for _, it := range batch {
 			if it.ID == "a" {
+				aCalls++
 				return nil, errors.New("model refuses to score item a")
 			}
 		}
@@ -97,6 +87,41 @@ func TestScoreBatchSkipsItemModelNeverScores(t *testing.T) {
 	if len(got) != 1 || got[0].ID != "b" {
 		t.Fatalf("got %+v, want only item b scored", got)
 	}
+	// The batch call counts once, then scoreOne retries item a up to retryAttempts.
+	if want := 1 + retryAttempts; aCalls != want {
+		t.Errorf("item a scored %d times, want %d (1 batch + %d retries)", aCalls, want, retryAttempts)
+	}
+}
+
+func TestScoreOneRetriesTransientFailure(t *testing.T) {
+	noBackoff(t)
+	item := feeds.Item{ID: "a", Title: "a"}
+	var calls int
+	scorer := &stubScorer{fn: func(batch []feeds.Item) ([]ItemScore, error) {
+		calls++
+		if calls < retryAttempts {
+			return nil, errors.New("transient timeout")
+		}
+		return []ItemScore{{ID: batch[0].ID, Score: 7, Reason: "ok"}}, nil
+	}}
+
+	got := scoreOne(context.Background(), scorer, "profile", item)
+
+	if len(got) != 1 || got[0].ID != "a" || got[0].Score != 7 {
+		t.Fatalf("got %+v, want item a recovered with score 7", got)
+	}
+	if calls != retryAttempts {
+		t.Errorf("scored %d times, want %d (recovered on final attempt)", calls, retryAttempts)
+	}
+}
+
+// noBackoff zeros the per-item retry backoff for the duration of a test so
+// retries don't sleep, restoring it afterward.
+func noBackoff(t *testing.T) {
+	t.Helper()
+	prev := retryBackoff
+	retryBackoff = 0
+	t.Cleanup(func() { retryBackoff = prev })
 }
 
 func TestFailureVerbDistinguishesTimeout(t *testing.T) {

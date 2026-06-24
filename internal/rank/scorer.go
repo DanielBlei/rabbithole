@@ -41,7 +41,7 @@ Scoring guide (0-10):
 Reward depth, novelty and concrete technical substance. Penalize clickbait, beginner
 tutorials, vendor marketing and listicles.
 
-Respond with ONLY a JSON object, no prose, no code fences:
+Respond with ONLY a valid JSON object, no prose, no code fences:
 {"scores":[{"index":<int>,"score":<int 0-10>,"reason":"<=15 word rationale"}]}
 Include exactly one entry per article, using the article's index.`
 
