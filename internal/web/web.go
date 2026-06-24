@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"html/template"
 	"io/fs"
 	"net/http"
@@ -40,6 +41,7 @@ func New(db *store.Store, cfg *config.Config) *Web {
 func (s *Web) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleDigest)
+	mux.HandleFunc("POST /items/{id}/note", s.handleNote)
 
 	static, err := fs.Sub(staticFS, "static")
 	if err != nil {
@@ -73,6 +75,7 @@ type statsData struct {
 
 // rowData is the per-item view model consumed by partials/row.html.
 type rowData struct {
+	ID       string // item id; scopes the per-row why/note radio group and field ids
 	Time     string
 	Title    string
 	Link     string
@@ -144,6 +147,36 @@ func (s *Web) handleDigest(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleNote persists a user note for one item, then renders that item's row
+// fragment back so htmx can swap it in place. The fragment comes back in view
+// mode showing the just-saved note, so a later click on the note tab pulls the
+// user's own text from the store rather than the placeholder.
+func (s *Web) handleNote(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	note := r.FormValue("note")
+
+	if err := s.db.UpdateUserState(r.Context(), id, store.UserPatch{UserNote: &note}); err != nil {
+		if errors.Is(err, store.ErrItemNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	row, err := s.db.Get(r.Context(), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, "row", toRow(row)); err != nil {
+		// Status is likely already written; log rather than double-write.
+		log.Error().Err(err).Msg("render note row")
+	}
+}
+
 // stats computes the dashboard tiles. UnreadToday is a dedicated count;
 // AvgScore is the mean score over the rows currently shown; SourcesActive is
 // the number of distinct sources in the store. (Rough v1 — refine later.)
@@ -175,20 +208,34 @@ func (s *Web) stats(r *http.Request, rows []store.ItemRow, sourcesActive int) st
 func toRows(rows []store.ItemRow) []rowData {
 	out := make([]rowData, len(rows))
 	for i, row := range rows {
-		sc, _ := score(row)
-		out[i] = rowData{
-			Time:     timeOf(row.PublishedAt),
-			Title:    row.Title,
-			Link:     row.Link,
-			Score:    sc,
-			Tier:     tierOf(sc),
-			GaugeBar: "",
-			Source:   row.Source,
-			Date:     dateOf(row.PublishedAt),
-			Reason:   strOf(row.LLMScoreReason),
-		}
+		out[i] = toRow(row)
 	}
 	return out
+}
+
+// toRow builds the view model for a single item. Used both for the full page
+// render and for the row fragment a mutation handler swaps back via htmx.
+func toRow(row store.ItemRow) rowData {
+	sc, _ := score(row)
+	rd := rowData{
+		ID:       row.ID,
+		Time:     timeOf(row.PublishedAt),
+		Title:    row.Title,
+		Link:     row.Link,
+		Score:    sc,
+		Tier:     tierOf(sc),
+		GaugeBar: "",
+		Source:   row.Source,
+		Date:     dateOf(row.PublishedAt),
+		Reason:   strOf(row.LLMScoreReason),
+	}
+	// A stored empty note reads the same as no note at all — both show the
+	// "No note yet" placeholder and the "+ add" affordance.
+	if row.UserNote != nil && *row.UserNote != "" {
+		rd.HasNote = true
+		rd.Note = *row.UserNote
+	}
+	return rd
 }
 
 // score returns the effective 0-10 score (user score wins over the model's) and
