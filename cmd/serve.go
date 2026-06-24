@@ -56,13 +56,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	httpSrv := &http.Server{
 		Addr:              serveAddr,
-		Handler:           server.New(db, cfg).Routes(),
+		Handler:           server.New(db, cfg, serveAddr).Routes(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info().Str("addr", serveAddr).Msg("serving")
+		log.Info().Msg(fmt.Sprintf("serving at http://localhost%s", serveAddr))
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 			return

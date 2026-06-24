@@ -20,13 +20,15 @@
       <label class="tg-tab tg-tab-note" for="tg-note-{{.ID}}">note</label>
     </div>
     <div class="tg-panel tg-panel-why">
-      <p>{{.Reason}}</p>
+      {{if .Reason}}<div class="md">{{.ReasonHTML}}</div>
+      {{else if .HasLLMScore}}<p class="tg-why-msg tg-why-msg--error">Scored, but no explanation was recorded &mdash; an error may have occurred.</p>
+      {{else}}<p class="tg-why-msg">No score computed for this item yet.</p>{{end}}
       {{if .HasLLMScore}}<p class="tg-footnote">LLM Score {{.LLMScore}}/10{{if .ScoreModel}} &middot; {{.ScoreModel}}{{end}}</p>{{end}}
     </div>
     <div class="tg-panel tg-panel-note{{if not .HasNote}} empty{{end}}">
       <input type="checkbox" id="note-edit-{{.ID}}" class="note-toggle">
       <div class="note-view">
-        <p>{{if .HasNote}}{{.Note}}{{else}}No note yet.{{end}}</p>
+        {{if .HasNote}}<div class="md">{{.NoteHTML}}</div>{{else}}<p class="note-empty">No note yet.</p>{{end}}
         <label class="note-edit-btn" for="note-edit-{{.ID}}">{{if .HasNote}}edit{{else}}+ add{{end}}</label>
       </div>
       <form class="note-form" hx-post="/items/{{.ID}}/note" hx-target="closest .row" hx-swap="outerHTML">

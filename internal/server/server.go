@@ -15,13 +15,15 @@ import (
 
 // Server holds the dependencies shared by every mounted route set.
 type Server struct {
-	db  *store.Store
-	cfg *config.Config
+	db   *store.Store
+	cfg  *config.Config
+	addr string // listen address, passed to the web UI for its shell prompt
 }
 
-// New returns a Server backed by db, using cfg for request defaults.
-func New(db *store.Store, cfg *config.Config) *Server {
-	return &Server{db: db, cfg: cfg}
+// New returns a Server backed by db, using cfg for request defaults. addr is the
+// bound listen address, forwarded to the web UI for display only.
+func New(db *store.Store, cfg *config.Config, addr string) *Server {
+	return &Server{db: db, cfg: cfg, addr: addr}
 }
 
 // Routes builds the root handler. The API sub-mux keeps its full /api/ patterns,
@@ -32,6 +34,6 @@ func (s *Server) Routes() http.Handler {
 	root.Handle("/api/", api.New(s.db, s.cfg).Routes())
 	// The web mux owns "/" (digest page) and "/static/" (embedded assets);
 	// the more specific "/api/" pattern above still wins for API requests.
-	root.Handle("/", web.New(s.db, s.cfg).Routes())
+	root.Handle("/", web.New(s.db, s.cfg, s.addr).Routes())
 	return root
 }

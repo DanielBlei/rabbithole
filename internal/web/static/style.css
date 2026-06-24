@@ -59,11 +59,20 @@ header.topbar{
 .settings-panel__item:hover{color:var(--amber);background:rgba(128,203,196,.07);}
 .settings-panel__item:focus-visible{outline:1px solid var(--amber);outline-offset:-2px;}
 
-.content{max-width:980px;margin:0 auto;padding:28px 30px 80px;}
+.content{max-width:1120px;margin:0 auto;padding:28px 30px 80px;}
 
-.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;}
-.tile{border:1px solid var(--line);background:var(--pane);padding:12px 14px;border-radius:12px;}
+/* Tiles split the full section width evenly, whatever the count: flex:1 1 0 on
+   each gives equal shares that grow to fill the row, so 3 / 4 / 5+ tiles each
+   stretch edge-to-edge (matching the pane below). min-width lets them wrap to a
+   new line on narrow screens instead of crushing. */
+.stats-row{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:24px;}
+.tile{
+  flex:1 1 0;min-width:140px;
+  border:1px solid var(--line);background:var(--pane);
+  padding:11px 12px;border-radius:12px;text-align:center;
+}
 .tile .num{font-size:2.4rem;font-weight:600;color:var(--amber);text-shadow:0 0 8px rgba(128,203,196,.25);}
+.tile .num--high{color:var(--score-high);text-shadow:0 0 8px rgba(195,232,141,.28);}
 .tile .label{font-size:1.1rem;letter-spacing:.05em;text-transform:uppercase;color:var(--text-dim);margin-top:2px;}
 .tile.placeholder{border:1px dashed var(--text-dim);background:transparent;color:var(--text-dim);}
 .tile.placeholder .num{color:var(--text-dim);font-size:1.7rem;}
@@ -76,12 +85,15 @@ header.topbar{
   box-shadow:0 0 0 1px rgba(128,203,196,.04), 0 18px 44px rgba(0,0,0,.5);
 }
 .pane__bar{
-  display:flex;align-items:center;gap:8px;
+  display:flex;align-items:center;
   padding:9px 14px;border-bottom:1px solid var(--line);
   font-size:1.25rem;color:var(--text-dim);
 }
-.dot{width:9px;height:9px;border-radius:50%;box-shadow:inset 0 1px 0 rgba(255,255,255,.28);}
-.dot.r{background:#FF5370;}.dot.y{background:#FFCB6B;}.dot.g{background:#C3E88D;}
+/* Faux shell prompt: user@host in accent, the run command brighter, so the bar
+   reads as this project's own terminal rather than generic chrome. */
+.pane__prompt{color:var(--amber);}
+.pane__path{color:var(--text-dim);}
+.pane__cmd{color:var(--text);}
 
 .pane__filters{
   display:flex;flex-wrap:wrap;align-items:center;gap:18px;
@@ -312,8 +324,30 @@ header.topbar{
 .tg-panel{display:none;margin:7px 0 0;}
 .tg-radio-why:checked ~ .tg-panel-why{display:block;}
 .tg-radio-note:checked ~ .tg-panel-note{display:block;}
-.tg-panel p{margin:0;max-width:520px;font-size:1.35rem;}
-.tg-panel-why p{color:#809B7E;}
+/* .md wraps server-rendered markdown (why text + saved notes). goldmark emits
+   real block elements — paragraphs, lists, code — so style those rather than a
+   single <p>. Last child loses its trailing margin so the block ends flush. */
+.tg-panel .md{font-size:1.35rem;}
+.tg-panel .md > :first-child{margin-top:0;}
+.tg-panel .md > :last-child{margin-bottom:0;}
+.md p{margin:0 0 .7em;}
+.md ul,.md ol{margin:.3em 0 .7em;padding-left:1.7em;}
+.md li{margin:.15em 0;}
+.md h1,.md h2,.md h3,.md h4{margin:.6em 0 .35em;font-size:1.15em;font-weight:600;color:var(--title);}
+.md a{color:var(--amber);text-decoration:underline;text-decoration-color:var(--amber-dim);}
+.md a:hover{text-decoration-color:var(--amber);}
+.md code{background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:.05em .4em;font-size:.92em;}
+.md pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 11px;overflow:auto;margin:.3em 0 .7em;}
+.md pre code{background:none;border:0;padding:0;}
+.md blockquote{margin:.3em 0 .7em;padding-left:11px;border-left:2px solid var(--line);color:var(--text-dim);}
+.md strong{color:var(--title);font-weight:600;}
+.tg-panel-why .md{color:#809B7E;}
+/* Empty-state lines for the why panel: a dim italic note when nothing was
+   scored, and a warn-tinted one when a score exists but its reason is missing
+   (a likely scoring error worth flagging). */
+.tg-why-msg{margin:0;font-size:1.35rem;font-style:italic;color:var(--text-dim);}
+.tg-why-msg--error{color:var(--warn);font-style:normal;}
+.tg-panel-why .md strong,.tg-panel-why .md h1,.tg-panel-why .md h2,.tg-panel-why .md h3,.tg-panel-why .md h4{color:#9DBF9B;}
 /* attribution footnote under the why text: which model scored it, and what it
    gave — dimmer and smaller than the reason it annotates. */
 .tg-panel-why .tg-footnote{margin-top:12px;color:var(--text-dim);font-size:1.1rem;}
@@ -322,9 +356,9 @@ header.topbar{
    note-toggle checkbox flips to the edit form (textarea + apply/cancel). Apply
    persists via the form's hx-post to the note mutation route. */
 .note-toggle{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;}
-.note-view{display:flex;align-items:baseline;gap:12px;}
-.note-view p{color:var(--text);}
-.tg-panel-note.empty .note-view p{color:var(--text-dim);font-style:italic;}
+.note-view{display:flex;align-items:flex-start;gap:12px;}
+.note-view .md{flex:1;min-width:0;color:var(--text);}
+.note-view .note-empty{flex:1;margin:0;color:var(--text-dim);font-style:italic;}
 .note-edit-btn{cursor:pointer;color:var(--text-dim);font-size:1.15rem;flex:none;}
 .note-edit-btn:hover{color:var(--amber);}
 
@@ -350,7 +384,6 @@ header.topbar{
 @media (max-width: 720px){
   header.topbar{padding:14px 18px;}
   .content{padding:20px 16px 60px;}
-  .stats-row{grid-template-columns:repeat(2,1fr);}
   .pane__body{padding:16px 16px 4px;}
   .pane__nav{flex-wrap:wrap;gap:8px;}
 }
