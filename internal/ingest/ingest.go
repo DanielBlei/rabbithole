@@ -31,10 +31,15 @@ type Outcome struct {
 	Results []rank.Result // items that cleared min_score, sorted best-first
 }
 
-// Run fetches every feed in cfg, scores items not already in db against
-// profile, and, if opts.Record is set, records the cycle in db under day:
-// every unseen item as seen, plus the selected results with their score and
-// reason.
+// Run fetches every feed in cfg, then processes the feeds one at a time: each
+// feed's fresh items whose link isn't already scored in db are scored against
+// profile and, if opts.Record is set, recorded under day in their own
+// transaction (every item with its score, plus a digest date for the selected
+// ones). Dedup keys on link, so a feed re-issuing a different id for the same
+// article doesn't trigger a needless re-score. Processing per feed keeps each
+// feed's work isolated and durable — a feed that fails to score or record is
+// logged and skipped without losing the feeds already committed. The returned
+// Outcome aggregates every feed, with Results sorted best-first across all.
 func Run(
 	ctx context.Context,
 	cfg *config.Config,
@@ -48,59 +53,111 @@ func Run(
 		sources[i] = feeds.Source{Name: f.Name, URL: f.URL}
 		log.Debug().Str("feed", f.Name).Str("url", f.URL).Msg("configured feed")
 	}
-	log.Info().Int("feeds", len(sources)).Msg("fetching feeds")
+	log.Info().Int("feeds", len(sources)).Msg("ingesting feeds")
+
 	fetchStart := time.Now()
 	items := feeds.FetchAll(ctx, sources)
 	log.Info().Int("items", len(items)).
-		Str("elapsed", time.Since(fetchStart).Round(time.Millisecond).String()).Msg("fetched items")
+		Str("elapsed", time.Since(fetchStart).Round(100*time.Millisecond).String()).Msg("fetched items")
 
-	fresh := filterByAge(items, cfg.Since.Std())
-	log.Debug().Int("before", len(items)).Int("after", len(fresh)).
-		Int("dropped_old", len(items)-len(fresh)).Msg("age filter applied")
-
-	unseen, err := filterSeen(ctx, db, fresh)
-	if err != nil {
-		return Outcome{Fetched: len(items)}, err
-	}
-	log.Debug().Int("fresh", len(fresh)).Int("already_seen", len(fresh)-len(unseen)).
-		Msg("dedup filter applied")
-	log.Info().Int("new", len(unseen)).Msg("new items to score")
-	if len(unseen) == 0 {
-		return Outcome{Fetched: len(items)}, nil
+	// Group the fetched union back by feed so each feed is processed as a unit.
+	// Items carry their feed name in Source (set in feeds.fetchOne).
+	byFeed := make(map[string][]feeds.Item, len(sources))
+	for _, it := range items {
+		byFeed[it.Source] = append(byFeed[it.Source], it)
 	}
 
-	scorer, err := inference.Resolve(ctx, inference.Config{
-		Provider: cfg.Provider,
-		ChatHost: cfg.ChatHost,
-		Model:    cfg.ChatModel,
-		APIKey:   cfg.APIKey,
-		Think:    opts.Think,
-	})
-	if err != nil {
-		return Outcome{Fetched: len(items), Unseen: unseen}, err
+	// resolveScorer builds the backend lazily on the first feed with items to
+	// score, so a run with nothing new never validates (and hits) the backend.
+	var (
+		scorer   rank.Scorer
+		resolved bool
+	)
+	resolveScorer := func() (rank.Scorer, error) {
+		if resolved {
+			return scorer, nil
+		}
+		s, err := inference.Resolve(ctx, inference.Config{
+			Provider: cfg.Provider,
+			ChatHost: cfg.ChatHost,
+			Model:    cfg.ChatModel,
+			APIKey:   cfg.APIKey,
+			Think:    opts.Think,
+		})
+		if err != nil {
+			return nil, err
+		}
+		scorer, resolved = s, true
+		return scorer, nil
 	}
-	batches := (len(unseen) + cfg.BatchSize - 1) / cfg.BatchSize
-	log.Info().Str("provider", cfg.Provider).Int("items", len(unseen)).
-		Int("batches", batches).Int("batch_size", cfg.BatchSize).Int("max_parallel", cfg.MaxParallel).
-		Bool("think", opts.Think).Msg("scoring items")
 
-	scoreStart := time.Now()
-	scores := rank.ScoreAll(ctx, scorer, profile, unseen, cfg.BatchSize, cfg.MaxParallel)
-	log.Info().Int("scored", len(scores)).Int("of", len(unseen)).
-		Str("elapsed", time.Since(scoreStart).Round(time.Millisecond).String()).Msg("scoring complete")
+	runStart := time.Now()
+	outcome := Outcome{Fetched: len(items)}
+	var totalScored, totalSkipped, totalFailed int
+	for _, f := range cfg.Feeds {
+		feedItems := byFeed[f.Name]
+		if len(feedItems) == 0 {
+			continue
+		}
+		feedStart := time.Now()
 
-	results := rank.Select(unseen, scores, cfg.MinScore)
-	log.Info().Int("selected", len(results)).Int("min_score", cfg.MinScore).
-		Msg("items selected for digest")
+		fresh := filterByAge(feedItems, cfg.Since.Std())
+		log.Debug().Str("feed", f.Name).Int("before", len(feedItems)).Int("after", len(fresh)).
+			Int("dropped_old", len(feedItems)-len(fresh)).Msg("age filter applied")
 
-	outcome := Outcome{Fetched: len(items), Unseen: unseen, Results: results}
-	if !opts.Record {
-		return outcome, nil
+		// dedup against the store before scoring: items already scored never
+		// reach the (expensive) scoring phase. A read failure here is a
+		// run-wide DB problem, so it aborts rather than skipping one feed.
+		unseen, err := filterUnscored(ctx, db, fresh)
+		if err != nil {
+			return outcome, err
+		}
+		skipped := len(fresh) - len(unseen)
+		totalSkipped += skipped
+
+		// One line per feed says what there is to do: how many new items to
+		// score and how many were skipped as already scored. new=0 means there
+		// was nothing to process for this feed.
+		log.Info().Str("feed", f.Name).Int("new", len(unseen)).Int("skipped", skipped).
+			Msg("processing feed")
+		if len(unseen) == 0 {
+			continue
+		}
+
+		s, err := resolveScorer()
+		if err != nil {
+			return outcome, err
+		}
+
+		scores := rank.ScoreAll(ctx, s, profile, unseen, cfg.BatchSize, cfg.MaxParallel)
+		failed := len(unseen) - len(scores)
+		totalFailed += failed
+		log.Info().Str("feed", f.Name).Int("processed", len(scores)).Int("failed", failed).
+			Msg("items processed")
+		results := rank.Select(unseen, scores, cfg.MinScore)
+
+		if opts.Record {
+			if err := record(ctx, db, unseen, scores, results, cfg.ChatModel, day); err != nil {
+				log.Warn().Str("feed", f.Name).Err(err).Msg("recording feed failed, skipping")
+				continue
+			}
+			log.Info().Str("feed", f.Name).Int("recorded", len(unseen)).Int("scored", len(scores)).
+				Int("selected", len(results)).Int("failed", failed).
+				Str("elapsed", time.Since(feedStart).Round(100*time.Millisecond).String()).Msg("ingested to db")
+		}
+
+		outcome.Unseen = append(outcome.Unseen, unseen...)
+		outcome.Results = append(outcome.Results, results...)
+		totalScored += len(scores)
 	}
-	if err := record(ctx, db, unseen, scores, results, cfg.ChatModel, day); err != nil {
-		return outcome, err
-	}
-	log.Debug().Int("recorded", len(unseen)).Int("digested", len(results)).Msg("items recorded in store")
+
+	// Each feed selected its own results; re-sort the merged set so the digest
+	// is ordered best-first across every feed.
+	rank.SortResults(outcome.Results)
+	log.Info().Int("feeds", len(cfg.Feeds)).Int("fetched", outcome.Fetched).
+		Int("scored", totalScored).Int("skipped", totalSkipped).Int("failed", totalFailed).
+		Int("selected", len(outcome.Results)).
+		Str("elapsed", time.Since(runStart).Round(100*time.Millisecond).String()).Msg("ingest complete")
 
 	return outcome, nil
 }
@@ -118,18 +175,23 @@ func filterByAge(items []feeds.Item, since time.Duration) []feeds.Item {
 	return out
 }
 
-func filterSeen(ctx context.Context, db *store.Store, items []feeds.Item) ([]feeds.Item, error) {
-	ids := make([]string, len(items))
+// filterUnscored drops items whose link already carries an LLM score, keeping
+// the ones still worth scoring: links the store has never seen, plus links it
+// recorded without a score (a prior run that failed to score them). Keying on
+// link rather than the derived id means a feed re-issuing a different GUID for
+// the same article no longer slips past dedup and gets needlessly re-scored.
+func filterUnscored(ctx context.Context, db *store.Store, items []feeds.Item) ([]feeds.Item, error) {
+	links := make([]string, len(items))
 	for i, it := range items {
-		ids[i] = it.ID
+		links[i] = it.Link
 	}
-	seen, err := db.Seen(ctx, ids)
+	scored, err := db.ScoredLinks(ctx, links)
 	if err != nil {
 		return nil, err
 	}
 	out := items[:0:0]
 	for _, it := range items {
-		if !seen[it.ID] {
+		if !scored[it.Link] {
 			out = append(out, it)
 		}
 	}

@@ -50,7 +50,7 @@ func FetchAll(ctx context.Context, sources []Source) []Item {
 				return
 			}
 			log.Debug().Str("feed", src.Name).Int("items", len(items)).
-				Str("elapsed", time.Since(start).Round(time.Millisecond).String()).Msg("feed fetched")
+				Str("elapsed", time.Since(start).Round(100*time.Millisecond).String()).Msg("feed fetched")
 			mu.Lock()
 			all = append(all, items...)
 			mu.Unlock()

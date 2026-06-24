@@ -136,39 +136,45 @@ func isDuplicateColumn(err error) bool {
 // Close releases the database handle.
 func (s *Store) Close() error { return s.db.Close() }
 
-// seenChunkSize caps how many ids go into a single "IN (...)" query, well
+// linkChunkSize caps how many links go into a single "IN (...)" query, well
 // under SQLite's default bound parameter limit.
-const seenChunkSize = 500
+const linkChunkSize = 500
 
-// Seen returns the set of ids in ids that are already present in the store.
-func (s *Store) Seen(ctx context.Context, ids []string) (map[string]bool, error) {
-	seen := make(map[string]bool, len(ids))
-	for start := 0; start < len(ids); start += seenChunkSize {
-		chunk := ids[start:min(start+seenChunkSize, len(ids))]
-		if err := s.seenChunk(ctx, chunk, seen); err != nil {
+// ScoredLinks returns the subset of links that already carry an LLM score.
+// Dedup keys on link — the canonical UNIQUE column — rather than the derived id,
+// which can shift when a feed re-issues a different GUID for the same article.
+// Only an already-scored link counts as "done": a link recorded without a score
+// is reported absent so the caller re-scores it. This stops re-sending scored
+// items to the model while still retrying ones whose scoring never landed.
+func (s *Store) ScoredLinks(ctx context.Context, links []string) (map[string]bool, error) {
+	scored := make(map[string]bool, len(links))
+	for start := 0; start < len(links); start += linkChunkSize {
+		chunk := links[start:min(start+linkChunkSize, len(links))]
+		if err := s.scoredChunk(ctx, chunk, scored); err != nil {
 			return nil, err
 		}
 	}
-	return seen, nil
+	return scored, nil
 }
 
-func (s *Store) seenChunk(ctx context.Context, ids []string, seen map[string]bool) error {
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
+func (s *Store) scoredChunk(ctx context.Context, links []string, scored map[string]bool) error {
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(links)), ",")
+	args := make([]any, len(links))
+	for i, l := range links {
+		args[i] = l
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT id FROM items WHERE id IN ("+placeholders+")", args...)
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT link FROM items WHERE llm_score IS NOT NULL AND link IN ("+placeholders+")", args...)
 	if err != nil {
-		return fmt.Errorf("query seen: %w", err)
+		return fmt.Errorf("query scored links: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return fmt.Errorf("scan seen: %w", err)
+		var link string
+		if err := rows.Scan(&link); err != nil {
+			return fmt.Errorf("scan scored link: %w", err)
 		}
-		seen[id] = true
+		scored[link] = true
 	}
 	return rows.Err()
 }
@@ -186,10 +192,17 @@ type DigestEntry struct {
 	Digested bool
 }
 
-// Record inserts newly seen items in one transaction. Scored entries are
-// written with their score, reason and model; those also flagged Digested get
-// the digest date too. Items with no scored entry are recorded as seen-only so
-// they are skipped on future runs. Existing IDs are ignored.
+// Record writes items in one transaction, keyed on link (the canonical UNIQUE
+// column). A link not yet present is inserted; a link already present is updated
+// in place with the fresh score — so re-scoring an item whose earlier run left
+// it unscored overwrites the placeholder instead of being dropped. Scored
+// entries are written with their score, reason and model; those also flagged
+// Digested get the digest date too. Items with no scored entry are inserted
+// seen-only (NULL score) so they show up in lists and get retried next run.
+//
+// The conflict update is guarded so it never clobbers a real score with NULL,
+// and it touches only the llm_* / digested_on / updated_at columns: a row's
+// id, created_at and user-owned status/user_score/user_note are preserved.
 func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEntry, day time.Time) error {
 	byID := make(map[string]DigestEntry, len(scored))
 	for _, d := range scored {
@@ -202,9 +215,16 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEnt
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	const q = `INSERT OR IGNORE INTO items
+	const q = `INSERT INTO items
 		(id, source, title, link, summary, published_at, created_at, updated_at, llm_score, llm_score_reason, llm_score_model, digested_on)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(link) DO UPDATE SET
+			llm_score        = excluded.llm_score,
+			llm_score_reason = excluded.llm_score_reason,
+			llm_score_model  = excluded.llm_score_model,
+			digested_on      = COALESCE(excluded.digested_on, digested_on),
+			updated_at       = excluded.updated_at
+		WHERE excluded.llm_score IS NOT NULL`
 	stmt, err := tx.PrepareContext(ctx, q)
 	if err != nil {
 		return fmt.Errorf("prepare insert: %w", err)

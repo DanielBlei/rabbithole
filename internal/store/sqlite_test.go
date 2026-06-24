@@ -12,7 +12,7 @@ import (
 	"github.com/DanielBlei/ai-searcher/internal/feeds"
 )
 
-func TestRecordAndSeenRoundTrip(t *testing.T) {
+func TestRecordAndScoredLinksRoundTrip(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -24,21 +24,80 @@ func TestRecordAndSeenRoundTrip(t *testing.T) {
 		{ID: "a", Source: "S", Title: "A", Link: "https://x/a"},
 		{ID: "b", Source: "S", Title: "B", Link: "https://x/b"},
 	}
+	// a is scored; b is recorded seen-only (no score).
 	digested := []DigestEntry{{Item: items[0], Score: 9, Reason: "good"}}
 
 	if err := db.Record(ctx, items, digested, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
 
-	seen, err := db.Seen(ctx, []string{"a", "b", "c"})
+	scored, err := db.ScoredLinks(ctx, []string{"https://x/a", "https://x/b", "https://x/c"})
 	if err != nil {
-		t.Fatalf("Seen: %v", err)
+		t.Fatalf("ScoredLinks: %v", err)
 	}
-	if !seen["a"] || !seen["b"] {
-		t.Errorf("recorded items should be seen: %+v", seen)
+	if !scored["https://x/a"] {
+		t.Error("scored item's link should be reported scored")
 	}
-	if seen["c"] {
-		t.Error("unrecorded item should not be seen")
+	if scored["https://x/b"] {
+		t.Error("seen-only item (no score) must be reported unscored so it gets re-scored")
+	}
+	if scored["https://x/c"] {
+		t.Error("absent link must be reported unscored")
+	}
+}
+
+func TestRecordReScoresUnscoredLink(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	item := feeds.Item{ID: "a", Source: "S", Title: "A", Link: "https://x/a"}
+
+	// First run records it seen-only (scoring failed, no score).
+	if err := db.Record(ctx, []feeds.Item{item}, nil, time.Now()); err != nil {
+		t.Fatalf("first Record: %v", err)
+	}
+
+	score := func() *int {
+		var s *int
+		if err := db.db.QueryRowContext(ctx, "SELECT llm_score FROM items WHERE link = ?", item.Link).Scan(&s); err != nil {
+			t.Fatalf("query score: %v", err)
+		}
+		return s
+	}
+	if s := score(); s != nil {
+		t.Fatalf("after seen-only record llm_score = %v, want NULL", *s)
+	}
+
+	// Second run scores it — a different id (changed GUID) but the same link
+	// must update the existing row in place, not be dropped.
+	rescored := feeds.Item{ID: "different-guid", Source: "S", Title: "A", Link: "https://x/a"}
+	if err := db.Record(ctx, []feeds.Item{rescored},
+		[]DigestEntry{{Item: rescored, Score: 7, Reason: "ok", Model: "m"}}, time.Now()); err != nil {
+		t.Fatalf("second Record: %v", err)
+	}
+	if s := score(); s == nil || *s != 7 {
+		t.Fatalf("after re-score llm_score = %v, want 7", s)
+	}
+
+	// A later seen-only write for the same link must NOT wipe the real score.
+	if err := db.Record(ctx, []feeds.Item{item}, nil, time.Now()); err != nil {
+		t.Fatalf("third Record: %v", err)
+	}
+	if s := score(); s == nil || *s != 7 {
+		t.Fatalf("seen-only re-write clobbered the score: got %v, want 7", s)
+	}
+
+	// Still exactly one row for the link.
+	var count int
+	if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM items WHERE link = ?", item.Link).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("want 1 row for link, got %d", count)
 	}
 }
 
@@ -109,7 +168,7 @@ func TestRecordIsIdempotent(t *testing.T) {
 	if err := db.Record(ctx, items, nil, time.Now()); err != nil {
 		t.Fatalf("first Record: %v", err)
 	}
-	// Re-recording the same item must not error (INSERT OR IGNORE).
+	// Re-recording the same item must not error (upsert on link).
 	if err := db.Record(ctx, items, nil, time.Now()); err != nil {
 		t.Fatalf("second Record: %v", err)
 	}
