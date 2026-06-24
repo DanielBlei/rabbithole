@@ -12,7 +12,7 @@ Query params (all optional):
 |---|---|
 | `status` | filter by status: `unread` \| `read` \| `skipped` |
 | `source` | filter by source name |
-| `sort` | `score` (default, best first) or `date` (newest first) |
+| `sort` | `score` (default, best first), `latest` (newest first), or `oldest` (oldest first) |
 | `after` | RFC3339 timestamp; only items at or after this |
 | `before` | RFC3339 timestamp; only items before this |
 | `limit` | max items to return |

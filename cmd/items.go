@@ -43,7 +43,7 @@ func init() {
 		StringVar(&listSince, "since", "", "only items recorded within this long ago, e.g. 3d, 12h (default: config list_since)")
 	listCmd.Flags().
 		StringVar(&listBefore, "before", "", "only items recorded earlier than this long ago, e.g. 3d (default: unbounded)")
-	listCmd.Flags().StringVar(&listSort, "sort", "", "sort order: score (default, best first) or date (newest first)")
+	listCmd.Flags().StringVar(&listSort, "sort", "", "sort order: score (default, best first), latest (newest first), or oldest (oldest first)")
 
 	sourcesCmd := &cobra.Command{
 		Use:   "sources",
