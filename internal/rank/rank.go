@@ -180,13 +180,13 @@ func missingItems(batch []feeds.Item, scores []ItemScore) []feeds.Item {
 	return missing
 }
 
-// Select keeps items scoring at least minScore, sorted by score descending
-// (newest first as a tie-break).
-func Select(items []feeds.Item, scores map[string]ItemScore, minScore int) []Result {
+// Select turns every scored item into a Result, sorted by score descending
+// (newest first as a tie-break). Items that failed to score are dropped.
+func Select(items []feeds.Item, scores map[string]ItemScore) []Result {
 	var results []Result
 	for _, it := range items {
 		sc, ok := scores[it.ID]
-		if !ok || sc.Score < minScore {
+		if !ok {
 			continue
 		}
 		results = append(results, Result{Item: it, Score: sc.Score, Reason: sc.Reason})

@@ -33,23 +33,23 @@ clean: ## Remove the binary, coverage, and generated data
 	rm -f $(BINARY) coverage.out
 	rm -rf data
 
-##@ Digest
+##@ ingest
 
-.PHONY: digest
-digest: ## Fetch, rank, record, and write today's markdown digest (uses CONFIG, NO_THINK=1 to disable thinking)
-	go run . digest --config $(CONFIG) --markdown $(THINK_FLAG)
+.PHONY: ingest
+ingest: ## Fetch, rank, record, and write today's markdown ingest (uses CONFIG, NO_THINK=1 to disable thinking)
+	go run . ingest --config $(CONFIG) --markdown $(THINK_FLAG)
 
 .PHONY: db-only
 db-only: ## Fetch, rank, and record to the store only (no markdown file)
-	go run . digest --config $(CONFIG) $(THINK_FLAG)
+	go run . ingest --config $(CONFIG) $(THINK_FLAG)
 
 .PHONY: dry-run
-dry-run: ## Print the digest to stdout without writing files or recording items
-	go run . digest --config $(CONFIG) --dry-run $(THINK_FLAG)
+dry-run: ## Print the ingest to stdout without writing files or recording items
+	go run . ingest --config $(CONFIG) --dry-run $(THINK_FLAG)
 
 .PHONY: heuristic
-heuristic: ## Offline digest with the model-free keyword scorer (no Ollama needed)
-	go run . digest --config $(CONFIG) --provider heuristic --markdown $(THINK_FLAG)
+heuristic: ## Offline ingest with the model-free keyword scorer (no Ollama needed)
+	go run . ingest --config $(CONFIG) --provider heuristic --markdown $(THINK_FLAG)
 
 ##@ Serve
 
@@ -101,16 +101,16 @@ check: fmt vet test ## fmt + vet + test (run before committing)
 ##@ Debug
 
 .PHONY: debug
-debug: ## Run the digest with verbose logging
-	go run . digest --config $(CONFIG) --debug $(THINK_FLAG)
+debug: ## Run the ingest with verbose logging
+	go run . ingest --config $(CONFIG) --debug $(THINK_FLAG)
 
 .PHONY: trace
-trace: ## Run the digest with trace logging (raw model prompts/responses)
-	go run . digest --config $(CONFIG) --trace $(THINK_FLAG)
+trace: ## Run the ingest with trace logging (raw model prompts/responses)
+	go run . ingest --config $(CONFIG) --trace $(THINK_FLAG)
 
 .PHONY: db-dump
 db-dump: ## Dump the items table via the sqlite3 CLI (requires DB=path)
 	@test -n "$(DB)" || { echo "usage: make db-dump DB=./data/ai-searcher.db" >&2; exit 1; }
-	sqlite3 -header -column $(DB) "SELECT id, source, title, status, llm_score, user_score, digested_on, created_at FROM items ORDER BY created_at;"
+	sqlite3 -header -column $(DB) "SELECT id, source, title, status, llm_score, user_score, ingested_on, created_at FROM items ORDER BY created_at;"
 
 

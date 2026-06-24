@@ -12,20 +12,21 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/DanielBlei/ai-searcher/internal/config"
 	"github.com/DanielBlei/ai-searcher/internal/store"
 )
 
-// API wires the JSON HTTP handlers to a Store and the config that supplies
-// their defaults (e.g. the default list window width).
+// defaultListWindow is the lookback a bare /api/items list (no after/before)
+// returns, and the page width when paging older via before.
+const defaultListWindow = 3 * 24 * time.Hour
+
+// API wires the JSON HTTP handlers to a Store.
 type API struct {
-	db  *store.Store
-	cfg *config.Config
+	db *store.Store
 }
 
-// New returns an API backed by db, using cfg for request defaults.
-func New(db *store.Store, cfg *config.Config) *API {
-	return &API{db: db, cfg: cfg}
+// New returns an API backed by db.
+func New(db *store.Store) *API {
+	return &API{db: db}
 }
 
 // Routes builds the JSON API handler. Uses the stdlib's method+wildcard
@@ -84,7 +85,7 @@ type listResponse struct {
 }
 
 func (s *API) handleListItems(w http.ResponseWriter, r *http.Request) {
-	filter, err := parseListFilter(r, s.cfg.ListSince.Std())
+	filter, err := parseListFilter(r, defaultListWindow)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

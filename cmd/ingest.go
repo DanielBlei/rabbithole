@@ -31,7 +31,7 @@ func init() {
 	ingestCmd.Flags().
 		StringVar(&providerOverride, "provider", "", "override the configured provider (ollama|vllm|heuristic)")
 	ingestCmd.Flags().
-		BoolVar(&noThink, "no-think", false, "disable model reasoning/thinking during scoring (use for models without thinking support)")
+		BoolVar(&noThink, "no-think", false, "override config to disable model reasoning/thinking for this run (use for models without thinking support)")
 	ingestCmd.Flags().
 		BoolVar(&writeMarkdown, "markdown", false, "also write the dated markdown digest to the output dir (default: update the store only)")
 }
@@ -44,17 +44,22 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if providerOverride != "" {
-		cfg.Provider = providerOverride
+		cfg.Inference.Provider = providerOverride
+	}
+	// think comes from config; --no-think overrides it for one-off runs without
+	// editing the config (precedence: flag if passed → config → default true).
+	think := *cfg.Inference.Think
+	if cmd.Flags().Changed("no-think") {
+		think = !noThink
 	}
 	log.Debug().
 		Str("config", configPath).
-		Str("provider", cfg.Provider).
-		Str("model", cfg.ChatModel).
-		Str("chat_host", cfg.ChatHost).
-		Int("batch_size", cfg.BatchSize).
-		Int("min_score", cfg.MinScore).
-		Str("since", cfg.Since.String()).
-		Bool("think", !noThink).
+		Str("provider", cfg.Inference.Provider).
+		Str("model", cfg.Inference.Model).
+		Str("host", cfg.Inference.Host).
+		Int("batch_size", cfg.Scoring.BatchSize).
+		Str("since", cfg.Ingest.Since.String()).
+		Bool("think", think).
 		Msg("config loaded")
 
 	profile, err := cfg.LoadProfile()
@@ -63,16 +68,16 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 	}
 	log.Debug().Str("path", cfg.Profile).Int("chars", len(profile)).Msg("interest profile loaded")
 
-	db, err := store.Open(cfg.DBPath)
+	db, err := store.Open(cfg.Store.DBPath)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = db.Close() }()
-	log.Debug().Str("db", cfg.DBPath).Msg("store opened")
+	log.Debug().Str("db", cfg.Store.DBPath).Msg("store opened")
 
 	day := time.Now()
 	outcome, err := ingest.Run(ctx, cfg, profile, db, day, ingest.Options{
-		Think:  !noThink,
+		Think:  think,
 		Record: !dryRun,
 	})
 	if err != nil {
@@ -90,7 +95,10 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 	}
 
 	if writeMarkdown {
-		path, err := digest.Write(cfg.OutputDir, day, outcome.Results)
+		if cfg.Ingest.DigestDir == "" {
+			return fmt.Errorf("--markdown set but ingest.digest_dir is empty; set it in the config")
+		}
+		path, err := digest.Write(cfg.Ingest.DigestDir, day, outcome.Results)
 		if err != nil {
 			return err
 		}

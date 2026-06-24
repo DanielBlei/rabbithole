@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DanielBlei/ai-searcher/internal/config"
 	"github.com/DanielBlei/ai-searcher/internal/feeds"
 	"github.com/DanielBlei/ai-searcher/internal/store"
 )
@@ -115,7 +114,7 @@ func newTestServer(t *testing.T) *API {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return New(db, &config.Config{ListSince: config.Duration(72 * time.Hour)})
+	return New(db)
 }
 
 func TestHandleListItems(t *testing.T) {

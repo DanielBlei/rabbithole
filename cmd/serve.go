@@ -44,19 +44,18 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	log.Debug().Str("config", configPath).Str("addr", serveAddr).
-		Str("list_since", cfg.ListSince.String()).Msg("config loaded")
+	log.Debug().Str("config", configPath).Str("addr", serveAddr).Msg("config loaded")
 
-	db, err := store.Open(cfg.DBPath)
+	db, err := store.Open(cfg.Store.DBPath)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = db.Close() }()
-	log.Debug().Str("db", cfg.DBPath).Msg("store opened")
+	log.Debug().Str("db", cfg.Store.DBPath).Msg("store opened")
 
 	httpSrv := &http.Server{
 		Addr:              serveAddr,
-		Handler:           server.New(db, cfg, serveAddr).Routes(),
+		Handler:           server.New(db, cfg, serveAddr, configPath).Routes(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

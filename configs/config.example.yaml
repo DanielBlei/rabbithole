@@ -8,25 +8,31 @@ user: danielblei
 # scoring prompt and is the main personalization knob.
 profile: ./configs/profile.example.md
 
-# Inference backend: ollama | vllm | heuristic
-#   ollama    - local Ollama server (default)
-#   vllm      - any OpenAI-compatible endpoint (vLLM, etc.)
-#   heuristic - keyword overlap, no model (offline testing)
-provider: ollama
-chat_host: http://localhost:11434
-chat_model: gemma3:1b # qwen3:1.7b # qwen3:0.6b
-api_key: "" # optional bearer token (vLLM prod / Ollama cloud)
+# Inference backend: the model and how to reach it.
+#   provider: ollama | vllm | heuristic
+#     ollama    - local Ollama server (default)
+#     vllm      - any OpenAI-compatible endpoint (vLLM, etc.)
+#     heuristic - keyword overlap, no model (offline testing)
+inference:
+  provider: ollama
+  host: http://localhost:11434
+  model: gemma3:1b # qwen3:1.7b # qwen3:0.6b
+  api_key: "" # optional bearer token (vLLM prod / Ollama cloud)
+  think: false # model reasoning during scoring; omit to default on. gemma3:1b has no thinking mode, so disabled here
 
-# Ranking and selection
-batch_size: 5    # items sent per scoring request
-max_parallel: 1  # concurrent scoring requests in flight;
-min_score: 6     # only include items scoring >= this (0-10)
-since: 7d       # ignore items older than this; accepts 'd' (days) or 'h' (e.g. 14d, 168h)
-list_since: 3d  # default display window for `items list`/serve (separate from `since` above)
+# How items are batched through the scorer.
+scoring:
+  batch_size: 5   # items sent per scoring request
+  max_parallel: 1 # concurrent scoring requests in flight
 
-# Output
-output_dir: ./data/digests
-db_path: ./data/ai-searcher.db
+# Fetch/score run settings.
+ingest:
+  since: 7d  # ignore items older than this; accepts 'd' (days) or 'h' (e.g. 14d, 168h)
+  # digest_dir: ./data/digests  # set only to export a markdown digest via `ingest --markdown`
+
+# Item persistence.
+store:
+  db_path: ./data/ai-searcher.db
 
 # Feeds (any RSS/Atom URL). Medium tag/author/publication feeds:
 #   https://medium.com/feed/tag/<tag>

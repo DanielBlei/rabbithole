@@ -50,47 +50,51 @@ func writeConfig(t *testing.T, body string) string {
 	return p
 }
 
-const baseFeeds = "profile: ./p.md\ndb_path: ./test.db\nfeeds:\n  - { name: x, url: http://x }\n"
+const baseFeeds = "profile: ./p.md\nstore:\n  db_path: ./test.db\nfeeds:\n  - { name: x, url: http://x }\n"
 
 func TestLoadSinceDaysAndHours(t *testing.T) {
 	for _, tc := range []struct {
 		since string
 		want  time.Duration
 	}{
-		{"since: 14d\n", 14 * 24 * time.Hour},
-		{"since: 168h\n", 168 * time.Hour},
+		{"ingest:\n  since: 14d\n", 14 * 24 * time.Hour},
+		{"ingest:\n  since: 168h\n", 168 * time.Hour},
 		{"", 14 * 24 * time.Hour}, // omitted -> default 14d
 	} {
 		cfg, err := Load(writeConfig(t, baseFeeds+tc.since))
 		if err != nil {
 			t.Fatalf("Load(since=%q): %v", tc.since, err)
 		}
-		if cfg.Since.Std() != tc.want {
-			t.Errorf("since=%q -> %s, want %s", tc.since, cfg.Since, tc.want)
+		if cfg.Ingest.Since.Std() != tc.want {
+			t.Errorf("since=%q -> %s, want %s", tc.since, cfg.Ingest.Since, tc.want)
 		}
 	}
 }
 
 func TestLoadSinceInvalid(t *testing.T) {
-	if _, err := Load(writeConfig(t, baseFeeds+"since: 14x\n")); err == nil {
+	if _, err := Load(writeConfig(t, baseFeeds+"ingest:\n  since: 14x\n")); err == nil {
 		t.Error("expected error for invalid since value")
 	}
 }
 
-func TestLoadListSinceDefaultAndOverride(t *testing.T) {
+func TestLoadThinkDefaultsAndOverride(t *testing.T) {
 	for _, tc := range []struct {
-		listSince string
-		want      time.Duration
+		think string
+		want  bool
 	}{
-		{"list_since: 7d\n", 7 * 24 * time.Hour},
-		{"", 3 * 24 * time.Hour}, // omitted -> default 3d, independent of `since`
+		{"", true},                              // omitted -> default true
+		{"inference:\n  think: true\n", true},   // explicit on
+		{"inference:\n  think: false\n", false}, // explicit off must not read as the default
 	} {
-		cfg, err := Load(writeConfig(t, baseFeeds+tc.listSince))
+		cfg, err := Load(writeConfig(t, baseFeeds+tc.think))
 		if err != nil {
-			t.Fatalf("Load(list_since=%q): %v", tc.listSince, err)
+			t.Fatalf("Load(think=%q): %v", tc.think, err)
 		}
-		if cfg.ListSince.Std() != tc.want {
-			t.Errorf("list_since=%q -> %s, want %s", tc.listSince, cfg.ListSince, tc.want)
+		if cfg.Inference.Think == nil {
+			t.Fatalf("think=%q -> nil, want non-nil after defaults", tc.think)
+		}
+		if *cfg.Inference.Think != tc.want {
+			t.Errorf("think=%q -> %v, want %v", tc.think, *cfg.Inference.Think, tc.want)
 		}
 	}
 }

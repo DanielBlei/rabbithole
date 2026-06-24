@@ -20,19 +20,20 @@ func (s *stubScorer) Score(_ context.Context, _ string, items []feeds.Item) ([]I
 
 func (s *stubScorer) Validate(context.Context) error { return nil }
 
-func TestSelectFiltersAndSorts(t *testing.T) {
-	items := []feeds.Item{{ID: "a"}, {ID: "b"}, {ID: "c"}}
+func TestSelectKeepsScoredAndSorts(t *testing.T) {
+	items := []feeds.Item{{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"}}
 	scores := map[string]ItemScore{
 		"a": {ID: "a", Score: 4},
 		"b": {ID: "b", Score: 9},
 		"c": {ID: "c", Score: 7},
+		// "d" failed to score and must be dropped.
 	}
-	got := Select(items, scores, 6)
-	if len(got) != 2 {
-		t.Fatalf("got %d results, want 2 (min score 6)", len(got))
+	got := Select(items, scores)
+	if len(got) != 3 {
+		t.Fatalf("got %d results, want 3 (every scored item)", len(got))
 	}
-	if got[0].Item.ID != "b" || got[1].Item.ID != "c" {
-		t.Errorf("wrong order: %s, %s", got[0].Item.ID, got[1].Item.ID)
+	if got[0].Item.ID != "b" || got[1].Item.ID != "c" || got[2].Item.ID != "a" {
+		t.Errorf("wrong order: %s, %s, %s", got[0].Item.ID, got[1].Item.ID, got[2].Item.ID)
 	}
 }
 

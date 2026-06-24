@@ -40,7 +40,7 @@ func init() {
 	listCmd.Flags().StringVar(&listSource, "source", "", "filter by source name")
 	listCmd.Flags().IntVar(&listLimit, "limit", 50, "max items to show")
 	listCmd.Flags().
-		StringVar(&listSince, "since", "", "only items recorded within this long ago, e.g. 3d, 12h (default: config list_since)")
+		StringVar(&listSince, "since", "", "only items recorded within this long ago, e.g. 3d, 12h (default: 3d)")
 	listCmd.Flags().
 		StringVar(&listBefore, "before", "", "only items recorded earlier than this long ago, e.g. 3d (default: unbounded)")
 	listCmd.Flags().StringVar(&listSort, "sort", "", "sort order: score (default, best first), latest (newest first), or oldest (oldest first)")
@@ -94,7 +94,7 @@ func withStore(cmd *cobra.Command, fn func(ctx context.Context, db *store.Store,
 	if err != nil {
 		return err
 	}
-	db, err := store.Open(cfg.DBPath)
+	db, err := store.Open(cfg.Store.DBPath)
 	if err != nil {
 		return err
 	}
@@ -166,12 +166,15 @@ func runNote(cmd *cobra.Command, args []string) error {
 // doesn't push id/link off a normal terminal width.
 const listTitleWidth = 50
 
+// defaultListSince is the window a bare `items list` (no --since/--before)
+// shows: a recent slice rather than the whole history.
+const defaultListSince = 3 * 24 * time.Hour
+
 // resolveListFilter turns the `items list` flags into a store.ListFilter,
 // converting --since/--before (durations relative to now) into the absolute
-// After/Before timestamps List expects. defaultSince is the configured
-// list_since window: a bare `items list` (no --since/--before) shows that
-// recent slice rather than the whole history; an explicit --since overrides
-// it, and --before pages older without re-imposing the default.
+// After/Before timestamps List expects. defaultSince is the default lookback
+// for a bare `items list`; an explicit --since overrides it, and --before pages
+// older without re-imposing the default.
 func resolveListFilter(defaultSince time.Duration) (store.ListFilter, error) {
 	filter := store.ListFilter{Status: listStatus, Source: listSource, Limit: listLimit, SortBy: listSort}
 	now := time.Now()
@@ -199,7 +202,7 @@ func resolveListFilter(defaultSince time.Duration) (store.ListFilter, error) {
 
 func runList(cmd *cobra.Command, _ []string) error {
 	return withStore(cmd, func(ctx context.Context, db *store.Store, cfg *config.Config) error {
-		filter, err := resolveListFilter(cfg.ListSince.Std())
+		filter, err := resolveListFilter(defaultListSince)
 		if err != nil {
 			return err
 		}

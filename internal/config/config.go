@@ -65,33 +65,50 @@ type Feed struct {
 
 // Config is the full run configuration loaded from YAML.
 type Config struct {
-	User        string   `yaml:"user"`         // shell-prompt name on the web UI; blank falls back to the OS user
-	Profile     string   `yaml:"profile"`      // path to the interest-profile markdown
-	Provider    string   `yaml:"provider"`     // ollama | vllm | heuristic
-	ChatHost    string   `yaml:"chat_host"`    // inference server URL
-	ChatModel   string   `yaml:"chat_model"`   // chat model name
-	APIKey      string   `yaml:"api_key"`      // optional bearer token
-	BatchSize   int      `yaml:"batch_size"`   // items per scoring request
-	MaxParallel int      `yaml:"max_parallel"` // concurrent scoring requests in flight
-	MinScore    int      `yaml:"min_score"`    // inclusion threshold (0-10)
-	Since       Duration `yaml:"since"`        // lookback window (e.g. 14d, 168h)
-	ListSince   Duration `yaml:"list_since"`   // default display window for `items list`/serve (e.g. 3d)
-	OutputDir   string   `yaml:"output_dir"`   // digest output directory
-	DBPath      string   `yaml:"db_path"`      // sqlite database path
-	Feeds       []Feed   `yaml:"feeds"`
+	User      string          `yaml:"user"`    // shell-prompt name on the web UI; blank falls back to the OS user
+	Profile   string          `yaml:"profile"` // path to the interest-profile markdown
+	Inference InferenceConfig `yaml:"inference"`
+	Scoring   ScoringConfig   `yaml:"scoring"`
+	Ingest    IngestConfig    `yaml:"ingest"`
+	Store     StoreConfig     `yaml:"store"`
+	Feeds     []Feed          `yaml:"feeds"`
+}
+
+// InferenceConfig configures the scoring backend (the model and how to reach it).
+type InferenceConfig struct {
+	Provider string `yaml:"provider"` // ollama | vllm | heuristic
+	Host     string `yaml:"host"`     // inference server URL
+	Model    string `yaml:"model"`    // chat model name
+	APIKey   string `yaml:"api_key"`  // optional bearer token
+	Think    *bool  `yaml:"think"`    // model reasoning during scoring; defaults true when not set in the config
+}
+
+// ScoringConfig tunes how items are batched through the scorer.
+type ScoringConfig struct {
+	BatchSize   int `yaml:"batch_size"`   // items per scoring request
+	MaxParallel int `yaml:"max_parallel"` // concurrent scoring requests in flight
+}
+
+// IngestConfig governs the fetch/score run.
+type IngestConfig struct {
+	Since     Duration `yaml:"since"`      // lookback window (e.g. 14d, 168h)
+	DigestDir string   `yaml:"digest_dir"` // optional: where `ingest --markdown` writes the digest; no default
+}
+
+// StoreConfig configures item persistence. Local sqlite for now; host/credentials
+// can join here if a remote store is added.
+type StoreConfig struct {
+	DBPath string `yaml:"db_path"` // sqlite database path
 }
 
 // Defaults mirror go-to-rag conventions (Ollama on localhost).
 const (
 	defaultProvider    = "ollama"
-	defaultChatHost    = "http://localhost:11434"
-	defaultChatModel   = "qwen3:4b"
+	defaultHost        = "http://localhost:11434"
+	defaultModel       = "qwen3:4b"
 	defaultBatchSize   = 5
 	defaultMaxParallel = 4
-	defaultMinScore    = 6
 	defaultSince       = 14 * 24 * time.Hour
-	defaultListSince   = 3 * 24 * time.Hour
-	defaultOutputDir   = "./data/digests"
 )
 
 // Load reads and validates the config at path, applying defaults for unset fields.
@@ -112,46 +129,41 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
-	if c.Provider == "" {
-		c.Provider = defaultProvider
+	if c.Inference.Provider == "" {
+		c.Inference.Provider = defaultProvider
 	}
-	if c.ChatHost == "" {
-		c.ChatHost = defaultChatHost
+	if c.Inference.Host == "" {
+		c.Inference.Host = defaultHost
 	}
-	if c.ChatModel == "" {
-		c.ChatModel = defaultChatModel
+	if c.Inference.Model == "" {
+		c.Inference.Model = defaultModel
 	}
-	if c.BatchSize <= 0 {
-		c.BatchSize = defaultBatchSize
+	if c.Inference.Think == nil {
+		t := true
+		c.Inference.Think = &t
 	}
-	if c.MaxParallel <= 0 {
-		c.MaxParallel = defaultMaxParallel
+	if c.Scoring.BatchSize <= 0 {
+		c.Scoring.BatchSize = defaultBatchSize
 	}
-	if c.MinScore == 0 {
-		c.MinScore = defaultMinScore
+	if c.Scoring.MaxParallel <= 0 {
+		c.Scoring.MaxParallel = defaultMaxParallel
 	}
-	if c.Since == 0 {
-		c.Since = Duration(defaultSince)
-	}
-	if c.ListSince == 0 {
-		c.ListSince = Duration(defaultListSince)
-	}
-	if c.OutputDir == "" {
-		c.OutputDir = defaultOutputDir
+	if c.Ingest.Since == 0 {
+		c.Ingest.Since = Duration(defaultSince)
 	}
 }
 
 func (c *Config) validate() error {
-	switch c.Provider {
+	switch c.Inference.Provider {
 	case "ollama", "vllm", "heuristic":
 	default:
-		return fmt.Errorf("invalid provider %q, must be ollama, vllm or heuristic", c.Provider)
+		return fmt.Errorf("invalid provider %q, must be ollama, vllm or heuristic", c.Inference.Provider)
 	}
 	if c.Profile == "" {
 		return fmt.Errorf("profile path is required")
 	}
-	if c.DBPath == "" {
-		return fmt.Errorf("db_path is required")
+	if c.Store.DBPath == "" {
+		return fmt.Errorf("store.db_path is required")
 	}
 	if len(c.Feeds) == 0 {
 		return fmt.Errorf("at least one feed is required")
@@ -161,8 +173,8 @@ func (c *Config) validate() error {
 			return fmt.Errorf("feed %d (%q) has no url", i, f.Name)
 		}
 	}
-	if c.Since < 0 {
-		return fmt.Errorf("since must be positive, got %s", c.Since)
+	if c.Ingest.Since < 0 {
+		return fmt.Errorf("since must be positive, got %s", c.Ingest.Since)
 	}
 	return nil
 }

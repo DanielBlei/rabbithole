@@ -39,20 +39,17 @@ func serveRSS(t *testing.T, body string) string {
 func testConfig(t *testing.T, feeds ...config.Feed) *config.Config {
 	t.Helper()
 	return &config.Config{
-		Provider:    "heuristic",
-		ChatModel:   "test-model",
-		BatchSize:   2,
-		MaxParallel: 2,
-		MinScore:    1,
-		Since:       config.Duration(365 * 24 * time.Hour),
-		DBPath:      filepath.Join(t.TempDir(), "test.db"),
-		Feeds:       feeds,
+		Inference: config.InferenceConfig{Provider: "heuristic", Model: "test-model"},
+		Scoring:   config.ScoringConfig{BatchSize: 2, MaxParallel: 2},
+		Ingest:    config.IngestConfig{Since: config.Duration(365 * 24 * time.Hour)},
+		Store:     config.StoreConfig{DBPath: filepath.Join(t.TempDir(), "test.db")},
+		Feeds:     feeds,
 	}
 }
 
 func openStore(t *testing.T, cfg *config.Config) *store.Store {
 	t.Helper()
-	db, err := store.Open(cfg.DBPath)
+	db, err := store.Open(cfg.Store.DBPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
