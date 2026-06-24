@@ -191,13 +191,20 @@ func Select(items []feeds.Item, scores map[string]ItemScore, minScore int) []Res
 		}
 		results = append(results, Result{Item: it, Score: sc.Score, Reason: sc.Reason})
 	}
+	SortResults(results)
+	return results
+}
+
+// SortResults orders results best-first: by score descending, newest published
+// first as a tie-break. Select sorts each feed's results with it; an ingest that
+// processes feeds one at a time reuses it to re-order the merged set globally.
+func SortResults(results []Result) {
 	sort.SliceStable(results, func(i, j int) bool {
 		if results[i].Score != results[j].Score {
 			return results[i].Score > results[j].Score
 		}
 		return results[i].Item.Published.After(results[j].Item.Published)
 	})
-	return results
 }
 
 func chunk(items []feeds.Item, size int) [][]feeds.Item {
