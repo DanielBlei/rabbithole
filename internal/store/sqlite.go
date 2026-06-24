@@ -181,9 +181,8 @@ func (s *Store) scoredChunk(ctx context.Context, links []string, scored map[stri
 
 // DigestEntry is a scored item. Model names the LLM that produced Score/Reason,
 // captured at scoring time so a later config change doesn't misattribute an
-// older score. Digested marks the subset that actually made the day's digest
-// (top-N over the threshold); only those carry a digest date. Every scored
-// item still persists its score so nothing computed is thrown away.
+// older score. Digested stamps the entry with the run day (digested_on),
+// recording when the score was produced; entries left un-Digested carry no date.
 type DigestEntry struct {
 	Item     feeds.Item
 	Score    int

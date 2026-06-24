@@ -28,7 +28,7 @@ type Options struct {
 type Outcome struct {
 	Fetched int           // items fetched across all feeds
 	Unseen  []feeds.Item  // fresh, not-yet-seen items considered for scoring
-	Results []rank.Result // items that cleared min_score, sorted best-first
+	Results []rank.Result // every scored item, sorted best-first
 }
 
 // Run fetches every feed in cfg, then processes the feeds one at a time: each
@@ -78,10 +78,10 @@ func Run(
 			return scorer, nil
 		}
 		s, err := inference.Resolve(ctx, inference.Config{
-			Provider: cfg.Provider,
-			ChatHost: cfg.ChatHost,
-			Model:    cfg.ChatModel,
-			APIKey:   cfg.APIKey,
+			Provider: cfg.Inference.Provider,
+			ChatHost: cfg.Inference.Host,
+			Model:    cfg.Inference.Model,
+			APIKey:   cfg.Inference.APIKey,
 			Think:    opts.Think,
 		})
 		if err != nil {
@@ -101,7 +101,7 @@ func Run(
 		}
 		feedStart := time.Now()
 
-		fresh := filterByAge(feedItems, cfg.Since.Std())
+		fresh := filterByAge(feedItems, cfg.Ingest.Since.Std())
 		log.Debug().Str("feed", f.Name).Int("before", len(feedItems)).Int("after", len(fresh)).
 			Int("dropped_old", len(feedItems)-len(fresh)).Msg("age filter applied")
 
@@ -129,15 +129,15 @@ func Run(
 			return outcome, err
 		}
 
-		scores := rank.ScoreAll(ctx, s, profile, unseen, cfg.BatchSize, cfg.MaxParallel)
+		scores := rank.ScoreAll(ctx, s, profile, unseen, cfg.Scoring.BatchSize, cfg.Scoring.MaxParallel)
 		failed := len(unseen) - len(scores)
 		totalFailed += failed
 		log.Info().Str("feed", f.Name).Int("processed", len(scores)).Int("failed", failed).
 			Msg("items processed")
-		results := rank.Select(unseen, scores, cfg.MinScore)
+		results := rank.Select(unseen, scores)
 
 		if opts.Record {
-			if err := record(ctx, db, unseen, scores, results, cfg.ChatModel, day); err != nil {
+			if err := record(ctx, db, unseen, scores, cfg.Inference.Model, day); err != nil {
 				log.Warn().Str("feed", f.Name).Err(err).Msg("recording feed failed, skipping")
 				continue
 			}
@@ -198,14 +198,9 @@ func filterUnscored(ctx context.Context, db *store.Store, items []feeds.Item) ([
 	return out, nil
 }
 
-// record persists every scored item's verdict, flagging the subset that made
-// the digest. Selection (min_score) governs only what gets a digest date, not
-// which scores are kept — every score we computed is persisted.
-func record(ctx context.Context, db *store.Store, all []feeds.Item, scores map[string]rank.ItemScore, results []rank.Result, model string, day time.Time) error {
-	digested := make(map[string]bool, len(results))
-	for _, r := range results {
-		digested[r.Item.ID] = true
-	}
+// record persists every scored item's verdict. Each scored item is stamped with
+// the run day (digested_on), so the store retains when a score was produced.
+func record(ctx context.Context, db *store.Store, all []feeds.Item, scores map[string]rank.ItemScore, model string, day time.Time) error {
 	var entries []store.DigestEntry
 	for _, it := range all {
 		sc, ok := scores[it.ID]
@@ -217,7 +212,7 @@ func record(ctx context.Context, db *store.Store, all []feeds.Item, scores map[s
 			Score:    sc.Score,
 			Reason:   sc.Reason,
 			Model:    model,
-			Digested: digested[it.ID],
+			Digested: true,
 		})
 	}
 	return db.Record(ctx, all, entries, day)
