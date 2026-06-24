@@ -187,18 +187,20 @@ header.topbar{
 .gauge .bar.high{color:var(--score-high);}
 .gauge .bar.mid{color:var(--score-mid);}
 .gauge .bar.low{color:var(--score-low);}
-/* why / note share one box via a prompt-style switcher: "❯ why / note". Two
-   hidden radios (exclusive by name) decide which of the two shared-position
-   panels shows below — only one open at a time, in one fixed spot, no JS.
-   why is read-only LLM text; note carries its own view↔edit lifecycle. */
+/* why / note share one box via a switcher: each is a "▾ why" / "▾ note" tab
+   (the ❯ chevron rotated to point down at its panel). Two hidden radios
+   (exclusive by name) decide which of the two shared-position panels shows
+   below — only one open at a time, in one fixed spot, no JS. why is read-only
+   LLM text; note carries its own view↔edit lifecycle. */
 .toggles{margin:6px 0 0;font-size:1.25rem;}
 .tg-radio{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;}
 
-.tg-tabs{display:flex;align-items:center;gap:8px;}
-.tg-tabs::before{content:"\276f";color:var(--text-dim);} /* ❯ leading prompt */
+.tg-tabs{display:flex;align-items:center;gap:16px;}
 .tg-tab{cursor:pointer;color:var(--text-dim);}
+/* per-tab down arrow: the right-pointing ❯ rotated 90° so it points at the
+   panel it opens. Inherits the tab's colour, so it lights amber when active. */
+.tg-tab::before{content:"\276f";display:inline-block;transform:rotate(90deg);margin-right:6px;font-size:0.85em;}
 .tg-tab:hover{color:var(--amber);}
-.tg-sep{color:var(--line);}
 
 /* active tab — the one whose radio is checked — lights amber */
 .tg-radio-why:checked ~ .tg-tabs .tg-tab-why,
@@ -212,10 +214,13 @@ header.topbar{
 .tg-radio-note:checked ~ .tg-panel-note{display:block;}
 .tg-panel p{margin:0;max-width:520px;font-size:1.35rem;}
 .tg-panel-why p{color:#809B7E;}
+/* attribution footnote under the why text: which model scored it, and what it
+   gave — dimmer and smaller than the reason it annotates. */
+.tg-panel-why .tg-footnote{margin-top:12px;color:var(--text-dim);font-size:1.1rem;}
 
 /* note panel: view mode shows the note + an edit/add trigger; the hidden
-   note-toggle checkbox flips to the edit form (textarea + apply/cancel). The
-   apply button is a placeholder until the note mutation route is wired. */
+   note-toggle checkbox flips to the edit form (textarea + apply/cancel). Apply
+   persists via the form's hx-post to the note mutation route. */
 .note-toggle{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;}
 .note-view{display:flex;align-items:baseline;gap:12px;}
 .note-view p{color:var(--text);}

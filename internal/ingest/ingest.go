@@ -100,7 +100,7 @@ func Run(
 	if !opts.Record {
 		return outcome, nil
 	}
-	if err := record(ctx, db, unseen, results, day); err != nil {
+	if err := record(ctx, db, unseen, results, cfg.ChatModel, day); err != nil {
 		return outcome, err
 	}
 	log.Debug().Int("recorded", len(unseen)).Int("digested", len(results)).Msg("items recorded in store")
@@ -147,10 +147,10 @@ func filterSeen(ctx context.Context, db *store.Store, items []feeds.Item) ([]fee
 	return out, nil
 }
 
-func record(ctx context.Context, db *store.Store, all []feeds.Item, results []rank.Result, day time.Time) error {
+func record(ctx context.Context, db *store.Store, all []feeds.Item, results []rank.Result, model string, day time.Time) error {
 	entries := make([]store.DigestEntry, len(results))
 	for i, r := range results {
-		entries[i] = store.DigestEntry{Item: r.Item, Score: r.Score, Reason: r.Reason}
+		entries[i] = store.DigestEntry{Item: r.Item, Score: r.Score, Reason: r.Reason, Model: model}
 	}
 	return db.Record(ctx, all, entries, day)
 }
