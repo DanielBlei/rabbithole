@@ -3,12 +3,26 @@ package rank
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/ai-searcher/internal/feeds"
+	"github.com/DanielBlei/ai-searcher/internal/retry"
+)
+
+// retryAttempts/retryBackoff bound how many times a single item is re-scored
+// before it's dropped. Scoring is non-deterministic, so a transient failure (a
+// timeout, a momentary connection blip, or a one-shot unparseable response)
+// usually clears on a re-ask; without this a single hiccup drops the article
+// from the digest entirely. Kept short since it runs inline per item: 3 tries
+// with 1s, then 2s, between them.
+var (
+	retryAttempts = 3
+	retryBackoff  = 1 * time.Second
 )
 
 // Result pairs an item with its relevance verdict.
@@ -81,11 +95,15 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
-// scoreBatch scores a batch, falling back to individual scoring on failure or
-// on a response that's missing entries for some of the batch's items — small
-// models in particular sometimes return a verdict for only part of a batch
-// without erroring.
+// scoreBatch scores a multi-item batch, decomposing to per-item scoring on
+// failure or on a response that's missing entries for some of the batch's
+// items — small models in particular sometimes return a verdict for only part
+// of a batch without erroring. Decomposition isolates the problem item; the
+// actual retrying happens once, at the leaf, in scoreOne.
 func scoreBatch(ctx context.Context, s Scorer, profile string, batch []feeds.Item) []ItemScore {
+	if len(batch) == 1 {
+		return scoreOne(ctx, s, profile, batch[0])
+	}
 	scores, err := s.Score(ctx, profile, batch)
 	if err == nil {
 		missing := missingItems(batch, scores)
@@ -96,12 +114,37 @@ func scoreBatch(ctx context.Context, s Scorer, profile string, batch []feeds.Ite
 			Msg("batch response missing scores for some items, retrying individually")
 		return append(scores, retryEach(ctx, s, profile, missing)...)
 	}
-	if len(batch) == 1 {
-		log.Warn().Str("item", batch[0].Title).Err(err).Msg(failureVerb(err) + ", skipping")
-		return nil
-	}
 	log.Warn().Int("items", len(batch)).Err(err).Msg("batch " + failureVerb(err) + ", retrying individually")
 	return retryEach(ctx, s, profile, batch)
+}
+
+// scoreOne is the single retry point for scoring. It re-asks the model for one
+// item with exponential backoff before giving up, since scoring is
+// non-deterministic and a transient failure (a timeout, a momentary connection
+// blip, or a one-shot unparseable response) usually clears on a re-ask.
+// Without this, a single hiccup drops the article from the digest entirely.
+func scoreOne(ctx context.Context, s Scorer, profile string, item feeds.Item) []ItemScore {
+	var scores []ItemScore
+	err := retry.Do(ctx, retryAttempts, retryBackoff, func() error {
+		got, err := s.Score(ctx, profile, []feeds.Item{item})
+		if err != nil {
+			return err
+		}
+		if len(got) == 0 {
+			return fmt.Errorf("no score returned for item")
+		}
+		scores = got
+		return nil
+	}, func(attempt int, err error, delay time.Duration) {
+		log.Warn().Str("item", truncate(item.Title, 80)).Int("attempt", attempt).
+			Str("retry_in", delay.String()).Err(err).Msg(failureVerb(err) + ", retrying item")
+	})
+	if err != nil {
+		log.Warn().Str("item", truncate(item.Title, 80)).Int("attempts", retryAttempts).
+			Err(err).Msg(failureVerb(err) + ", skipping after retries")
+		return nil
+	}
+	return scores
 }
 
 // failureVerb labels why scoring a batch/item didn't produce a usable result,
@@ -137,9 +180,9 @@ func missingItems(batch []feeds.Item, scores []ItemScore) []feeds.Item {
 	return missing
 }
 
-// Select keeps items scoring at least minScore, sorts by score descending
-// (newest first as a tie-break), and returns at most topN results.
-func Select(items []feeds.Item, scores map[string]ItemScore, minScore, topN int) []Result {
+// Select keeps items scoring at least minScore, sorted by score descending
+// (newest first as a tie-break).
+func Select(items []feeds.Item, scores map[string]ItemScore, minScore int) []Result {
 	var results []Result
 	for _, it := range items {
 		sc, ok := scores[it.ID]
@@ -154,9 +197,6 @@ func Select(items []feeds.Item, scores map[string]ItemScore, minScore, topN int)
 		}
 		return results[i].Item.Published.After(results[j].Item.Published)
 	})
-	if topN > 0 && len(results) > topN {
-		results = results[:topN]
-	}
 	return results
 }
 

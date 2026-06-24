@@ -173,23 +173,27 @@ func (s *Store) seenChunk(ctx context.Context, ids []string, seen map[string]boo
 	return rows.Err()
 }
 
-// DigestEntry is an item selected for a digest, with its score. Model names the
-// LLM that produced Score/Reason, captured at digest time so a later config
-// change doesn't misattribute an older score.
+// DigestEntry is a scored item. Model names the LLM that produced Score/Reason,
+// captured at scoring time so a later config change doesn't misattribute an
+// older score. Digested marks the subset that actually made the day's digest
+// (top-N over the threshold); only those carry a digest date. Every scored
+// item still persists its score so nothing computed is thrown away.
 type DigestEntry struct {
-	Item   feeds.Item
-	Score  int
-	Reason string
-	Model  string
+	Item     feeds.Item
+	Score    int
+	Reason   string
+	Model    string
+	Digested bool
 }
 
-// Record inserts newly seen items in one transaction. Digested entries are
-// written with their score, reason and digest date; the rest are recorded as
-// seen-only so they are skipped on future runs. Existing IDs are ignored.
-func (s *Store) Record(ctx context.Context, all []feeds.Item, digested []DigestEntry, day time.Time) error {
-	scored := make(map[string]DigestEntry, len(digested))
-	for _, d := range digested {
-		scored[d.Item.ID] = d
+// Record inserts newly seen items in one transaction. Scored entries are
+// written with their score, reason and model; those also flagged Digested get
+// the digest date too. Items with no scored entry are recorded as seen-only so
+// they are skipped on future runs. Existing IDs are ignored.
+func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEntry, day time.Time) error {
+	byID := make(map[string]DigestEntry, len(scored))
+	for _, d := range scored {
+		byID[d.Item.ID] = d
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -216,13 +220,15 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, digested []DigestE
 			llmScoreModel  any
 			digestDay      any
 		)
-		if d, ok := scored[it.ID]; ok {
+		if d, ok := byID[it.ID]; ok {
 			llmScore = d.Score
 			llmScoreReason = d.Reason
 			if d.Model != "" {
 				llmScoreModel = d.Model
 			}
-			digestDay = dayStr
+			if d.Digested {
+				digestDay = dayStr
+			}
 		}
 		var publishedAt any
 		if !it.Published.IsZero() {

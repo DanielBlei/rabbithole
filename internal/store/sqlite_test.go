@@ -42,6 +42,61 @@ func TestRecordAndSeenRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRecordPersistsScoresWithoutDigesting(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	items := []feeds.Item{
+		{ID: "a", Source: "S", Title: "A", Link: "https://x/a"},
+		{ID: "b", Source: "S", Title: "B", Link: "https://x/b"},
+		{ID: "c", Source: "S", Title: "C", Link: "https://x/c"},
+	}
+	// a made the digest; b was scored but fell below the cut; c never scored.
+	scored := []DigestEntry{
+		{Item: items[0], Score: 9, Reason: "good", Model: "m", Digested: true},
+		{Item: items[1], Score: 4, Reason: "meh", Model: "m"},
+	}
+	if err := db.Record(ctx, items, scored, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	type row struct {
+		score     *int
+		digestDay *string
+	}
+	get := func(id string) row {
+		var r row
+		if err := db.db.QueryRowContext(ctx,
+			"SELECT llm_score, digested_on FROM items WHERE id = ?", id).
+			Scan(&r.score, &r.digestDay); err != nil {
+			t.Fatalf("query %s: %v", id, err)
+		}
+		return r
+	}
+
+	// b: scored but not digested — keeps its score, no digest date.
+	b := get("b")
+	if b.score == nil || *b.score != 4 {
+		t.Errorf("item b llm_score = %v, want 4 (score must persist even when not digested)", b.score)
+	}
+	if b.digestDay != nil {
+		t.Errorf("item b digested_on = %v, want NULL (it didn't make the digest)", *b.digestDay)
+	}
+	// a: digested — has both score and digest date.
+	a := get("a")
+	if a.score == nil || *a.score != 9 || a.digestDay == nil {
+		t.Errorf("item a = %+v, want score 9 and a digest date", a)
+	}
+	// c: never scored — seen-only.
+	if c := get("c"); c.score != nil {
+		t.Errorf("item c llm_score = %v, want NULL (never scored)", *c.score)
+	}
+}
+
 func TestRecordIsIdempotent(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
