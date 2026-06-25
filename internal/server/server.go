@@ -7,10 +7,10 @@ package server
 import (
 	"net/http"
 
-	"github.com/DanielBlei/ai-searcher/internal/api"
-	"github.com/DanielBlei/ai-searcher/internal/config"
-	"github.com/DanielBlei/ai-searcher/internal/store"
-	"github.com/DanielBlei/ai-searcher/internal/web"
+	"github.com/DanielBlei/rabbithole/internal/api"
+	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/store"
+	"github.com/DanielBlei/rabbithole/internal/web"
 )
 
 // Server holds the dependencies shared by every mounted route set.

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DanielBlei/ai-searcher/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
 
 func testItems() []feeds.Item {

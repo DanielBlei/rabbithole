@@ -16,7 +16,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/DanielBlei/ai-searcher
+        - github.com/DanielBlei/rabbithole
     golines:
       max-len: 120
 

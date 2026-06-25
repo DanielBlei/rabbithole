@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DanielBlei/ai-searcher/internal/store"
+	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
 func TestResolveListFilter(t *testing.T) {

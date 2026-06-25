@@ -10,8 +10,8 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/DanielBlei/ai-searcher/internal/config"
-	"github.com/DanielBlei/ai-searcher/internal/store"
+	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
 // tmpl is parsed once at startup. The assets are embedded, so a parse failure is
@@ -44,7 +44,7 @@ func New(db *store.Store, cfg *config.Config, addr, cfgPath string) *Web {
 
 // promptUser picks the shell-prompt name: the configured user, or the OS login
 // name when config leaves it blank. If even that can't be read, it stays empty
-// and the prompt renders as just "@ai-searcher".
+// and the prompt renders as just "@rabbithole".
 func promptUser(configured string) string {
 	if configured != "" {
 		return configured
@@ -179,7 +179,7 @@ func (s *Web) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := pageData{
-		Title:            "ai-searcher",
+		Title:            "The Rabbit Hole",
 		Active:           "home",
 		PromptUser:       s.user,
 		ServeCmd:         "go run . serve --addr " + s.addr,

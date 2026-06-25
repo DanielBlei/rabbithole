@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DanielBlei/ai-searcher/internal/config"
-	"github.com/DanielBlei/ai-searcher/internal/store"
+	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
 // feedRSS renders a one-item RSS feed for a test server.

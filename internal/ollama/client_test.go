@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DanielBlei/ai-searcher/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
 
 func withFastValidateRetry(t *testing.T) {

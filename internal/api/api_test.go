@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DanielBlei/ai-searcher/internal/feeds"
-	"github.com/DanielBlei/ai-searcher/internal/store"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
 // These tests focus on HTTP-specific behavior (query parsing/validation,

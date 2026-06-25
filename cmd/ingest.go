@@ -6,10 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/DanielBlei/ai-searcher/internal/config"
-	"github.com/DanielBlei/ai-searcher/internal/digest"
-	"github.com/DanielBlei/ai-searcher/internal/ingest"
-	"github.com/DanielBlei/ai-searcher/internal/store"
+	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/digest"
+	"github.com/DanielBlei/rabbithole/internal/ingest"
+	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
 var (

@@ -9,7 +9,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/DanielBlei/ai-searcher/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
 
 // ItemScore is the relevance verdict for a single item.

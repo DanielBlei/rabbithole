@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/DanielBlei/ai-searcher/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
 
 // Heuristic is a model-free Scorer that ranks by keyword overlap with the

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DanielBlei/ai-searcher/internal/config"
-	"github.com/DanielBlei/ai-searcher/internal/feeds"
-	"github.com/DanielBlei/ai-searcher/internal/store"
+	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
 func newTestWeb(t *testing.T) *Web {

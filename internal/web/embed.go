@@ -1,4 +1,4 @@
-// Package web serves ai-searcher's HTML frontend: the digest "triage" page,
+// Package web serves The Rabbit Hole's HTML frontend: the digest "triage" page,
 // rendered server-side from the same internal/store the JSON API reads. Its
 // templates and static assets are embedded via go:embed (this file), so the
 // whole UI ships inside the single Go binary. internal/server mounts it.

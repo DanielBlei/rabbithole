@@ -1,4 +1,4 @@
-BINARY   := ai-searcher
+BINARY   := rabbithole
 CONFIG   ?= ./configs/config.example.yaml
 PKG      := ./...
 NO_THINK ?=
@@ -21,7 +21,7 @@ setup: ## Create config.yaml and profile.md from the examples (if missing)
 ##@ Build
 
 .PHONY: build
-build: ## Compile the binary to ./ai-searcher
+build: ## Compile the binary to ./rabbithole
 	go build -o $(BINARY) .
 
 .PHONY: tidy
@@ -110,7 +110,7 @@ trace: ## Run the ingest with trace logging (raw model prompts/responses)
 
 .PHONY: db-dump
 db-dump: ## Dump the items table via the sqlite3 CLI (requires DB=path)
-	@test -n "$(DB)" || { echo "usage: make db-dump DB=./data/ai-searcher.db" >&2; exit 1; }
+	@test -n "$(DB)" || { echo "usage: make db-dump DB=./data/rabbithole.db" >&2; exit 1; }
 	sqlite3 -header -column $(DB) "SELECT id, source, title, status, llm_score, user_score, ingested_on, created_at FROM items ORDER BY created_at;"
 
 

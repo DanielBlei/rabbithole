@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DanielBlei/ai-searcher/internal/rank"
+	"github.com/DanielBlei/rabbithole/internal/rank"
 )
 
 // Render builds the markdown document for a day's digest.

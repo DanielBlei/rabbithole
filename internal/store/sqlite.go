@@ -13,7 +13,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/DanielBlei/ai-searcher/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
 
 const schema = `

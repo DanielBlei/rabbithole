@@ -1,7 +1,7 @@
 # CLI reference
 
 ```
-ai-searcher [--config PATH] [--debug] [--trace]
+rabbithole [--config PATH] [--debug] [--trace]
 ```
 
 `--config` defaults to `./configs/config.yaml`. `--debug` logs every stage — config, per-feed
@@ -11,7 +11,7 @@ with timings. `--trace` additionally logs raw model prompts/responses and implie
 ## run
 
 ```
-ai-searcher run [--provider P] [--dry-run] [--no-think]
+rabbithole run [--provider P] [--dry-run] [--no-think]
 ```
 
 Fetches feeds, scores new items against the interest profile, and writes today's digest to
@@ -29,11 +29,11 @@ Browse and record your own read/skip/rating/notes for digest items, by id or lin
 shown by `items list`).
 
 ```
-ai-searcher items list [--status S] [--source NAME] [--limit N] [--since D] [--before D] [--sort score|latest|oldest]
-ai-searcher items sources
-ai-searcher items read|skip|unread <id|link>...
-ai-searcher items rate <id|link> <0-10>
-ai-searcher items note <id|link> <text>...
+rabbithole items list [--status S] [--source NAME] [--limit N] [--since D] [--before D] [--sort score|latest|oldest]
+rabbithole items sources
+rabbithole items read|skip|unread <id|link>...
+rabbithole items rate <id|link> <0-10>
+rabbithole items note <id|link> <text>...
 ```
 
 - `list` shows items best-score-first by default (the highest of `user_score`/`llm_score`,
@@ -53,7 +53,7 @@ HTTP handlers call (see [docs/api.md](api.md)).
 ## serve
 
 ```
-ai-searcher serve [--addr ADDR]
+rabbithole serve [--addr ADDR]
 ```
 
 Serves the items store over HTTP as JSON. `--addr` defaults to `:8080`. There's no frontend
