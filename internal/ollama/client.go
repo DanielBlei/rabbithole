@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ollama/ollama/api"
@@ -20,9 +21,15 @@ import (
 )
 
 const (
-	listTimeout = 30 * time.Second
-	chatTimeout = 5 * time.Minute
+	listTimeout  = 30 * time.Second
+	chatTimeout  = 5 * time.Minute
+	probeTimeout = 1 * time.Minute // think-support probe; allows a cold model load
 )
+
+// thinkUnsupported is the substring Ollama returns when a model without a
+// reasoning mode is sent a think request (e.g. 'gemma3:1b' does not support
+// thinking). Matched to fall back to think-off rather than fail every score.
+const thinkUnsupported = "does not support thinking"
 
 // validateAttempts/validateBackoff bound how long Validate waits for Ollama
 // to come up: 3 tries with exponential backoff starting at 30s (30s, 60s).
@@ -37,6 +44,7 @@ type Client struct {
 	model     string
 	think     bool
 	validator *retry.Validator
+	thinkOnce sync.Once // gates the one-time think-support probe in Validate
 }
 
 // New connects to host using the given chat model. apiKey is optional (Bearer).
@@ -65,9 +73,59 @@ func New(host, model, apiKey string, think bool) (*Client, error) {
 // Validate confirms Ollama is reachable and the chat model is available.
 // Connectivity is retried with backoff since Ollama may still be starting up;
 // a model that's reachable but missing the tag fails immediately instead.
+//
+// When think mode is on, it then probes once that the model actually supports
+// reasoning: Ollama 400s a think request for models without it, so rather than
+// let every scoring request fail we fall back to think-off here.
 func (c *Client) Validate(ctx context.Context) error {
-	return c.validator.Validate(ctx, normalize(c.model),
-		fmt.Sprintf("run: ollama pull %s", c.model), c.listModelNames)
+	if err := c.validator.Validate(ctx, normalize(c.model),
+		fmt.Sprintf("run: ollama pull %s", c.model), c.listModelNames); err != nil {
+		return err
+	}
+	c.thinkOnce.Do(func() {
+		if c.think {
+			c.checkThinkSupport(ctx)
+		}
+	})
+	return nil
+}
+
+// checkThinkSupport sends a minimal think-enabled request to confirm the model
+// has a reasoning mode. On the specific "does not support thinking" rejection it
+// disables think (a warning, not a hard failure). Any other error is treated as
+// inconclusive — think stays on and the real scoring request will surface and
+// retry the problem. The write to c.think is safe: Validate runs to completion
+// before any concurrent Score call (inference.Resolve validates, then scoring
+// fans out).
+func (c *Client) checkThinkSupport(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+
+	stream := false
+	think := &api.ThinkValue{}
+	if err := think.UnmarshalJSON([]byte("true")); err != nil {
+		return
+	}
+	req := &api.ChatRequest{
+		Model:    c.model,
+		Stream:   &stream,
+		Think:    think,
+		Messages: []api.Message{{Role: "user", Content: "ping"}},
+		Options:  map[string]any{"num_predict": 1}, // keep the probe cheap when think is supported
+	}
+
+	err := c.api.Chat(ctx, req, func(api.ChatResponse) error { return nil })
+	switch {
+	case err == nil:
+		// Model accepts think — leave it on.
+	case strings.Contains(err.Error(), thinkUnsupported):
+		c.think = false
+		log.Warn().Str("model", c.model).
+			Msg("ollama: model does not support thinking, disabling think mode for scoring")
+	default:
+		log.Debug().Err(err).Str("model", c.model).
+			Msg("ollama: think-support probe inconclusive, leaving think enabled")
+	}
 }
 
 func (c *Client) listModelNames(ctx context.Context) ([]string, error) {
