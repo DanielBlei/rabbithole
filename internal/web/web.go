@@ -28,16 +28,18 @@ const listLimit = 100
 
 // Web renders the HTML frontend over the same store the JSON API uses.
 type Web struct {
-	db   *store.Store
-	cfg  *config.Config
-	addr string // the serve listen address, shown in the faux shell prompt
-	user string // shell-prompt name: cfg.User, or the OS user when blank
+	db      *store.Store
+	cfg     *config.Config
+	addr    string // the serve listen address, shown in the faux shell prompt
+	user    string // shell-prompt name: cfg.User, or the OS user when blank
+	cfgPath string // config file path, read on demand by the config viewer
 }
 
 // New returns a Web backed by db, using cfg for request defaults. addr is the
 // listen address the serve command bound, surfaced in the page's shell prompt.
-func New(db *store.Store, cfg *config.Config, addr string) *Web {
-	return &Web{db: db, cfg: cfg, addr: addr, user: promptUser(cfg.User)}
+// cfgPath is the config file the viewer reads and displays read-only.
+func New(db *store.Store, cfg *config.Config, addr, cfgPath string) *Web {
+	return &Web{db: db, cfg: cfg, addr: addr, user: promptUser(cfg.User), cfgPath: cfgPath}
 }
 
 // promptUser picks the shell-prompt name: the configured user, or the OS login
@@ -58,6 +60,7 @@ func promptUser(configured string) string {
 func (s *Web) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleHome)
+	mux.HandleFunc("GET /config", s.handleConfig)
 	mux.HandleFunc("POST /items/{id}/note", s.handleNote)
 	mux.HandleFunc("POST /items/{id}/seen", s.handleSeen)
 	mux.HandleFunc("POST /items/{id}/hide", s.handleHide)

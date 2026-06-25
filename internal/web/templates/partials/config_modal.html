@@ -1,0 +1,17 @@
+{{define "configModal"}}
+<div class="modal" id="configModal">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__frame" role="dialog" aria-modal="true" aria-label="Running configuration">
+    <div class="modal__bar">
+      <span class="modal__title">config — <span class="modal__path">{{.Path}}</span></span>
+      <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+    </div>
+    {{if .Error}}
+      <div class="modal__error">could not read config: {{.Error}}</div>
+    {{else}}
+      <pre class="yml"><code>{{.YAML}}</code></pre>
+    {{end}}
+    <div class="modal__foot">read-only view of the config this server is running against</div>
+  </div>
+</div>
+{{end}}

@@ -24,13 +24,14 @@
         <span class="gear">&#9881;</span>
       </button>
       <div class="settings-panel" id="settingsPanel" hidden>
-        <a class="settings-panel__item" href="#">View config</a>
+        <a class="settings-panel__item" href="#" hx-get="/config" hx-target="#modal" hx-swap="innerHTML">View config</a>
       </div>
     </div>
   </header>
   <div class="content">
     {{block "content" .}}{{end}}
   </div>
+  <div id="modal"></div>
   <script>
   (function(){
     var btn = document.getElementById('settingsToggle');
@@ -54,6 +55,20 @@
     });
     document.addEventListener('keydown', function(e){
       if (e.key === 'Escape') close();
+    });
+  })();
+
+  // Config viewer modal: htmx swaps the fragment into #modal; this clears it on
+  // backdrop click, the close button, or Escape. The "View config" link also
+  // closes the settings dropdown so the modal isn't left under it.
+  (function(){
+    var modal = document.getElementById('modal');
+    function dismiss(){ modal.innerHTML = ''; }
+    modal.addEventListener('click', function(e){
+      if (e.target.closest('[data-modal-close]')) dismiss();
+    });
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape' && modal.firstElementChild) dismiss();
     });
   })();
   </script>
