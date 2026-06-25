@@ -98,7 +98,11 @@ func withStore(cmd *cobra.Command, fn func(ctx context.Context, db *store.Store,
 	if err != nil {
 		return err
 	}
-	defer func() { _ = db.Close() }()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Warn().Err(err).Msg("db close failed")
+		}
+	}()
 	return fn(cmd.Context(), db, cfg)
 }
 
@@ -179,14 +183,14 @@ func resolveListFilter(defaultSince time.Duration) (store.ListFilter, error) {
 	filter := store.ListFilter{Status: listStatus, Source: listSource, Limit: listLimit, SortBy: listSort}
 	now := time.Now()
 
-	switch {
-	case listSince != "":
+	if listSince != "" {
 		d, err := config.ParseDuration(listSince)
 		if err != nil {
 			return store.ListFilter{}, fmt.Errorf("--since: %w", err)
 		}
 		filter.After = now.Add(-d)
-	case listBefore == "":
+	} else if listBefore == "" {
+		// No --since and no --before: fall back to the default recent window.
 		filter.After = now.Add(-defaultSince)
 	}
 

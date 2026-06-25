@@ -203,6 +203,16 @@ func (s *Web) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// httpStoreError maps a store error to an HTTP response: a missing item is a
+// 404, anything else a 500.
+func httpStoreError(w http.ResponseWriter, err error) {
+	if errors.Is(err, store.ErrItemNotFound) {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	http.Error(w, err.Error(), http.StatusInternalServerError)
+}
+
 // handleNote persists a user note for one item, then renders that item's row
 // fragment back so htmx can swap it in place. The fragment comes back in view
 // mode showing the just-saved note, so a later click on the note tab pulls the
@@ -212,11 +222,7 @@ func (s *Web) handleNote(w http.ResponseWriter, r *http.Request) {
 	note := r.FormValue("note")
 
 	if err := s.db.UpdateUserState(r.Context(), id, store.UserPatch{UserNote: &note}); err != nil {
-		if errors.Is(err, store.ErrItemNotFound) {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpStoreError(w, err)
 		return
 	}
 
@@ -253,11 +259,7 @@ func (s *Web) toggleStatus(w http.ResponseWriter, r *http.Request, target string
 
 	cur, err := s.db.Get(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, store.ErrItemNotFound) {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpStoreError(w, err)
 		return
 	}
 

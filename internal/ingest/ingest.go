@@ -77,13 +77,7 @@ func Run(
 		if resolved {
 			return scorer, nil
 		}
-		s, err := inference.Resolve(ctx, inference.Config{
-			Provider: cfg.Inference.Provider,
-			ChatHost: cfg.Inference.Host,
-			Model:    cfg.Inference.Model,
-			APIKey:   cfg.Inference.APIKey,
-			Think:    opts.Think,
-		})
+		s, err := inference.Resolve(ctx, cfg.Inference, opts.Think)
 		if err != nil {
 			return nil, err
 		}

@@ -35,7 +35,7 @@ func (h *Heuristic) Score(_ context.Context, profile string, items []feeds.Item)
 	keywords := tokenize(profile)
 	out := make([]ItemScore, 0, len(items))
 	for _, it := range items {
-		text := tokenizeText(it.Title + " " + it.Summary)
+		text := tokenize(it.Title + " " + it.Summary)
 		var matched []string
 		for kw := range keywords {
 			if text[kw] {
@@ -66,5 +66,3 @@ func tokenize(s string) map[string]bool {
 	}
 	return set
 }
-
-func tokenizeText(s string) map[string]bool { return tokenize(s) }
