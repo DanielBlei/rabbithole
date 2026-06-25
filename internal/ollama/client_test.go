@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,52 @@ func TestValidate(t *testing.T) {
 			}
 			if !tt.wantErr && err != nil {
 				t.Fatalf("Validate() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestValidateThinkProbe(t *testing.T) {
+	withFastValidateRetry(t)
+
+	const listBody = `{"models":[{"model":"llama3:latest"}]}`
+
+	tests := []struct {
+		name      string
+		chatErr   string // chat-endpoint error body; empty means the model accepts think
+		wantThink bool
+	}{
+		{name: "supported model keeps think on", wantThink: true},
+		{name: "unsupported model falls back to think off", chatErr: `"llama3:latest" does not support thinking`},
+		{name: "other chat error leaves think on", chatErr: "some transient failure", wantThink: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/api/chat") {
+					if tt.chatErr != "" {
+						w.WriteHeader(http.StatusBadRequest)
+						_, _ = w.Write([]byte(`{"error":` + strconv.Quote(tt.chatErr) + `}`))
+						return
+					}
+					w.Header().Set("Content-Type", "application/x-ndjson")
+					_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"hi"},"done":true}` + "\n"))
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(listBody))
+			}))
+			defer srv.Close()
+
+			c, err := New(srv.URL, "llama3:latest", "", true)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			if err := c.Validate(t.Context()); err != nil {
+				t.Fatalf("Validate() error = %v, want nil", err)
+			}
+			if c.think != tt.wantThink {
+				t.Fatalf("think = %v after Validate, want %v", c.think, tt.wantThink)
 			}
 		})
 	}
