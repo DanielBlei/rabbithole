@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/DanielBlei/ai-searcher/cmd"
+	"github.com/DanielBlei/rabbithole/cmd"
 )
 
 func main() {

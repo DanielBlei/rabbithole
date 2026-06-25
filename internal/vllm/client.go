@@ -15,10 +15,10 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/DanielBlei/ai-searcher/internal/feeds"
-	"github.com/DanielBlei/ai-searcher/internal/httpclient"
-	"github.com/DanielBlei/ai-searcher/internal/rank"
-	"github.com/DanielBlei/ai-searcher/internal/retry"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/httpclient"
+	"github.com/DanielBlei/rabbithole/internal/rank"
+	"github.com/DanielBlei/rabbithole/internal/retry"
 )
 
 const (

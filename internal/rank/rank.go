@@ -10,8 +10,8 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/DanielBlei/ai-searcher/internal/feeds"
-	"github.com/DanielBlei/ai-searcher/internal/retry"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/retry"
 )
 
 // retryAttempts/retryBackoff bound how many times a single item is re-scored

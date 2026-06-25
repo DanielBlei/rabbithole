@@ -5,10 +5,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/DanielBlei/ai-searcher/internal/config"
-	"github.com/DanielBlei/ai-searcher/internal/ollama"
-	"github.com/DanielBlei/ai-searcher/internal/rank"
-	"github.com/DanielBlei/ai-searcher/internal/vllm"
+	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/ollama"
+	"github.com/DanielBlei/rabbithole/internal/rank"
+	"github.com/DanielBlei/rabbithole/internal/vllm"
 )
 
 // Resolve constructs and validates the Scorer for the configured provider.

@@ -1,4 +1,4 @@
-// Package api exposes ai-searcher's item store over HTTP as JSON — the stable
+// Package api exposes The Rabbit Hole's item store over HTTP as JSON — the stable
 // /api/* contract (see docs/api.md). Handlers call the same internal/store
 // functions the CLI calls. It is mounted by internal/server alongside the HTML
 // web UI; the two are separate route sets over the same store.
@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/DanielBlei/ai-searcher/internal/store"
+	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
 // defaultListWindow is the lookback a bare /api/items list (no after/before)

@@ -1,4 +1,4 @@
-// Package cmd wires the ai-searcher CLI.
+// Package cmd wires the rabbithole CLI.
 package cmd
 
 import (
@@ -11,7 +11,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
-	"github.com/DanielBlei/ai-searcher/internal/logger"
+	"github.com/DanielBlei/rabbithole/internal/logger"
 )
 
 var (
@@ -24,9 +24,9 @@ var (
 const defaultConfigPath = "./configs/config.yaml"
 
 var rootCmd = &cobra.Command{
-	Use:   "ai-searcher",
+	Use:   "rabbithole",
 	Short: "Personal RSS reading assistant: ranks feeds against your interests",
-	Long: "ai-searcher fetches your RSS/Atom feeds, scores each new item against an " +
+	Long: "The Rabbit Hole fetches your RSS/Atom feeds, scores each new item against an " +
 		"interest profile using an LLM, and writes a daily markdown digest of what to read.",
 	Version:       "0.1.0",
 	SilenceErrors: true,

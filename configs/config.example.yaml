@@ -1,6 +1,6 @@
-# ai-searcher configuration. Copy to configs/config.yaml and edit.
+# The Rabbit Hole configuration. Copy to configs/config.yaml and edit.
 
-# Name shown in the web UI's shell prompt (e.g. "daniel@ai-searcher:~$").
+# Name shown in the web UI's shell prompt (e.g. "daniel@rabbithole:~$").
 # Leave blank/omit to fall back to your OS login name.
 user: danielblei
 
@@ -32,7 +32,7 @@ ingest:
 
 # Item persistence.
 store:
-  db_path: ./data/ai-searcher.db
+  db_path: ./data/rabbithole.db
 
 # Feeds (any RSS/Atom URL). Medium tag/author/publication feeds:
 #   https://medium.com/feed/tag/<tag>

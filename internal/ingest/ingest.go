@@ -10,11 +10,11 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/DanielBlei/ai-searcher/internal/config"
-	"github.com/DanielBlei/ai-searcher/internal/feeds"
-	"github.com/DanielBlei/ai-searcher/internal/inference"
-	"github.com/DanielBlei/ai-searcher/internal/rank"
-	"github.com/DanielBlei/ai-searcher/internal/store"
+	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/inference"
+	"github.com/DanielBlei/rabbithole/internal/rank"
+	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
 // Options configures a single cycle.

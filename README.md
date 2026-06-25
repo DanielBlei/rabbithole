@@ -1,9 +1,9 @@
-# ai-searcher
+# The Rabbit Hole
 
 A personal RSS reading assistant. It fetches your RSS/Atom feeds (Medium, arXiv, blogs, …),
 scores each new item against an editable interest profile using an LLM, and writes a dated
 markdown digest of **what to read today** — best first, each with a one-line reason. The
-same data is also available as a small JSON API via `ai-searcher serve`.
+same data is also available as a small JSON API via `rabbithole serve`.
 
 Pluggable model backend: **Ollama** by default, any **OpenAI-compatible** endpoint (vLLM) as
 a drop-in, or a model-free **heuristic** for offline use.

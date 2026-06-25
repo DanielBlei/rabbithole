@@ -1,4 +1,4 @@
-module github.com/DanielBlei/ai-searcher
+module github.com/DanielBlei/rabbithole
 
 go 1.26.0
 
