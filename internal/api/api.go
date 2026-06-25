@@ -53,6 +53,7 @@ type Item struct {
 	Status         string     `json:"status"`
 	LLMScore       *int       `json:"llm_score,omitempty"`
 	LLMScoreReason *string    `json:"llm_score_reason,omitempty"`
+	LLMScoreModel  *string    `json:"llm_score_model,omitempty"`
 	UserScore      *int       `json:"user_score,omitempty"`
 	PublishedAt    *time.Time `json:"published_at,omitempty"`
 }
@@ -66,6 +67,7 @@ func fromItemRow(r store.ItemRow) Item {
 		Status:         r.Status,
 		LLMScore:       r.LLMScore,
 		LLMScoreReason: r.LLMScoreReason,
+		LLMScoreModel:  r.LLMScoreModel,
 		UserScore:      r.UserScore,
 		PublishedAt:    r.PublishedAt,
 	}

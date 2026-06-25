@@ -4,7 +4,8 @@
 *.dll
 *.so
 *.dylib
-/ai-searcher
+ai-searcher
+preview
 bin/
 
 # Test binary and coverage

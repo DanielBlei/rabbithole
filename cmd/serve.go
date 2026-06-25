@@ -50,7 +50,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = db.Close() }()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Warn().Err(err).Msg("db close failed")
+		}
+	}()
 	log.Debug().Str("db", cfg.Store.DBPath).Msg("store opened")
 
 	httpSrv := &http.Server{

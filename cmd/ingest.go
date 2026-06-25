@@ -50,7 +50,7 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 	// editing the config (precedence: flag if passed → config → default true).
 	think := *cfg.Inference.Think
 	if cmd.Flags().Changed("no-think") {
-		think = !noThink
+		think = false // --no-think always disables reasoning
 	}
 	log.Debug().
 		Str("config", configPath).
@@ -72,7 +72,11 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = db.Close() }()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Warn().Err(err).Msg("db close failed")
+		}
+	}()
 	log.Debug().Str("db", cfg.Store.DBPath).Msg("store opened")
 
 	day := time.Now()

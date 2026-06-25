@@ -5,31 +5,25 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/DanielBlei/ai-searcher/internal/config"
 	"github.com/DanielBlei/ai-searcher/internal/ollama"
 	"github.com/DanielBlei/ai-searcher/internal/rank"
 	"github.com/DanielBlei/ai-searcher/internal/vllm"
 )
 
-// Config carries the parameters needed to build a backend client.
-type Config struct {
-	Provider string // ollama | vllm | heuristic
-	ChatHost string
-	Model    string
-	APIKey   string
-	Think    bool // enable model reasoning mode during scoring
-}
-
 // Resolve constructs and validates the Scorer for the configured provider.
-func Resolve(ctx context.Context, cfg Config) (rank.Scorer, error) {
+// think is passed separately from cfg because a single run can override the
+// configured default (e.g. via --no-think) without editing the config.
+func Resolve(ctx context.Context, cfg config.InferenceConfig, think bool) (rank.Scorer, error) {
 	var (
 		s   rank.Scorer
 		err error
 	)
 	switch cfg.Provider {
 	case "ollama":
-		s, err = ollama.New(cfg.ChatHost, cfg.Model, cfg.APIKey, cfg.Think)
+		s, err = ollama.New(cfg.Host, cfg.Model, cfg.APIKey, think)
 	case "vllm":
-		s, err = vllm.New(cfg.ChatHost, cfg.Model, cfg.APIKey, cfg.Think)
+		s, err = vllm.New(cfg.Host, cfg.Model, cfg.APIKey, think)
 	case "heuristic":
 		s = rank.NewHeuristic()
 	default:
