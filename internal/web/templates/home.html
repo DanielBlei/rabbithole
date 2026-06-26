@@ -97,9 +97,21 @@
   function viewState(){
     var seen = document.querySelector('input[name="seen"]');
     var hidden = document.querySelector('input[name="hidden"]');
-    return { seen: !!(seen && seen.checked), hidden: !!(hidden && hidden.checked) };
+    var bookmarked = document.querySelector('input[name="bookmarked"]');
+    return {
+      seen: !!(seen && seen.checked),
+      hidden: !!(hidden && hidden.checked),
+      bookmarked: !!(bookmarked && bookmarked.checked),
+    };
   }
   function outOfView(row, vs){
+    // In the bookmark view the list spans all triage states (seen/hidden don't
+    // narrow it server-side), so membership is purely "is it still saved?" —
+    // un-bookmarking a row drops it from the library.
+    if (vs.bookmarked){
+      var bm = row.querySelector('.bookmark');
+      return !(bm && bm.classList.contains('is-saved'));
+    }
     if (row.classList.contains('is-hidden')) return !vs.hidden;
     if (row.classList.contains('is-seen')) return !vs.seen;
     return false; // unread is always in view
