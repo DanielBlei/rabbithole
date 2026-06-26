@@ -64,6 +64,7 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /items/{id}/note", s.handleNote)
 	mux.HandleFunc("POST /items/{id}/seen", s.handleSeen)
 	mux.HandleFunc("POST /items/{id}/hide", s.handleHide)
+	mux.HandleFunc("POST /items/{id}/bookmark", s.handleBookmark)
 
 	static, err := fs.Sub(staticFS, "static")
 	if err != nil {
@@ -126,6 +127,9 @@ type rowData struct {
 	// skipped. Read-only here; the seen/hide mutation routes are a follow-up.
 	Seen   bool
 	Hidden bool
+	// Bookmarked is the "keep for later" flag — orthogonal to triage status,
+	// toggled via the bookmark route, and the basis for the future library page.
+	Bookmarked bool
 }
 
 func (s *Web) handleHome(w http.ResponseWriter, r *http.Request) {
@@ -281,6 +285,34 @@ func (s *Web) toggleStatus(w http.ResponseWriter, r *http.Request, target string
 	}
 }
 
+// handleBookmark toggles an item's "keep for later" flag, then re-renders the
+// row fragment so htmx can swap the new state (the gold corner fold) in place.
+// Bookmarking is orthogonal to triage status, so unlike toggleStatus it leaves
+// read/skip alone — it only flips bookmarked.
+func (s *Web) handleBookmark(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	cur, err := s.db.Get(r.Context(), id)
+	if err != nil {
+		httpStoreError(w, err)
+		return
+	}
+
+	next := !cur.Bookmarked
+	if err := s.db.UpdateUserState(r.Context(), id, store.UserPatch{Bookmarked: &next}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Only the bookmark flag changed, so render the in-memory row.
+	cur.Bookmarked = next
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, "row", toRow(cur)); err != nil {
+		// Status is likely already written; log rather than double-write.
+		log.Error().Err(err).Msg("render bookmark row")
+	}
+}
+
 // stats computes the dashboard tiles. UnreadToday is a dedicated count;
 // AvgScore is the mean score over the rows currently shown; SourcesActive is
 // the number of distinct sources in the store. Available is the total item
@@ -323,19 +355,20 @@ func toRows(rows []store.ItemRow) []rowData {
 func toRow(row store.ItemRow) rowData {
 	sc, scored := score(row)
 	rd := rowData{
-		ID:       row.ID,
-		Time:     timeOf(row.PublishedAt),
-		Title:    row.Title,
-		Link:     row.Link,
-		Score:    sc,
-		Scored:   scored,
-		Tier:     tierOf(sc),
-		GaugeBar: "",
-		Source:   row.Source,
-		Date:     dateOf(row.PublishedAt),
-		Reason:   strOf(row.LLMScoreReason),
-		Seen:     row.Status == store.StatusRead,
-		Hidden:   row.Status == store.StatusSkipped,
+		ID:         row.ID,
+		Time:       timeOf(row.PublishedAt),
+		Title:      row.Title,
+		Link:       row.Link,
+		Score:      sc,
+		Scored:     scored,
+		Tier:       tierOf(sc),
+		GaugeBar:   "",
+		Source:     row.Source,
+		Date:       dateOf(row.PublishedAt),
+		Reason:     strOf(row.LLMScoreReason),
+		Seen:       row.Status == store.StatusRead,
+		Hidden:     row.Status == store.StatusSkipped,
+		Bookmarked: row.Bookmarked,
 	}
 	rd.ReasonHTML = renderMarkdown(rd.Reason)
 	// The "why" footnote attributes the reason to the model's own score, not the

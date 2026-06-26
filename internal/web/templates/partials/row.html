@@ -40,5 +40,10 @@
       </form>
     </div>
   </div>
+  <button type="button" class="bookmark{{if .Bookmarked}} is-saved{{end}}"
+    hx-post="/items/{{.ID}}/bookmark" hx-target="closest .row" hx-swap="outerHTML"
+    aria-pressed="{{if .Bookmarked}}true{{else}}false{{end}}"
+    aria-label="{{if .Bookmarked}}Remove bookmark{{else}}Bookmark to read later{{end}}"
+    title="{{if .Bookmarked}}Saved &mdash; click to remove{{else}}Bookmark to read later{{end}}"></button>
 </div>
 {{end}}

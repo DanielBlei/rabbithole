@@ -9,6 +9,8 @@
   --amber:#80CBC4;         /* primary accent — Oceanic teal */
   --amber-dim:#4D6A66;
   --warn:#FF5370;
+  --gold:#FFCB6B;          /* bookmark accent — warm "keep for later", set apart from teal/green/red */
+  --gold-dim:#7C6A41;
   --score-high:#C3E88D;
   --score-mid:#FFCB6B;
   --score-low:#FF5370;
@@ -245,6 +247,34 @@ header.topbar{
 .act-seen.is-active{color:var(--score-high);border-color:var(--score-high);}
 .act-hide.is-active{color:var(--warn);border-color:var(--warn);}
 
+/* Bookmark — a folded "dog-ear" in the card's clear bottom-right corner. It
+   sits apart from the seen/hide triage chips (top-right) on purpose: saving an
+   item for the future library is a keep-for-later act, not triage, so it gets
+   its own warm gold accent and the corner you'd actually fold on a page.
+   Resting state is a muted fold that brightens on row-hover; saved is solid
+   gold with a soft outward glow (drop-shadow follows the clipped triangle, a
+   box-shadow would be clipped away). */
+.bookmark{
+  position:absolute;right:0;bottom:0;width:30px;height:30px;
+  padding:0;border:0;cursor:pointer;background:var(--gold-dim);
+  clip-path:polygon(100% 0,100% 100%,0 100%);
+  border-bottom-right-radius:12px;            /* match the card corner */
+  opacity:.45;transition:opacity .12s,background .12s,filter .12s,transform .12s;
+}
+/* a faint sheen along the fold's diagonal sells the "folded page" read */
+.bookmark::before{
+  content:"";position:absolute;inset:0;
+  background:linear-gradient(135deg, rgba(255,255,255,.16), transparent 42%);
+}
+.row:hover .bookmark,.row:focus-within .bookmark{opacity:.8;}
+.bookmark:hover{opacity:1;background:var(--gold);}
+.bookmark:focus-visible{outline:1px solid var(--gold);outline-offset:2px;}
+.bookmark.is-saved{opacity:1;background:var(--gold);filter:drop-shadow(0 0 6px rgba(255,203,107,.55));}
+@media (prefers-reduced-motion: no-preference){
+  .bookmark.is-saved{animation:bm-pop .18s ease-out;}
+}
+@keyframes bm-pop{from{transform:scale(.6);}to{transform:scale(1);}}
+
 /* A seen row recedes — desaturated title, slightly dimmed card — so the
    not-yet-triaged items stay visually dominant. A hidden row recedes harder
    and strikes its title; it only renders at all when "show hidden" is on. */
@@ -320,8 +350,10 @@ header.topbar{
 .tg-radio-why:focus-visible ~ .tg-tabs .tg-tab-why,
 .tg-radio-note:focus-visible ~ .tg-tabs .tg-tab-note{outline:1px solid var(--amber);outline-offset:2px;}
 
-/* one shared panel area below the tabs; only the checked one displays */
-.tg-panel{display:none;margin:7px 0 0;}
+/* one shared panel area below the tabs; only the checked one displays. The
+   bottom padding keeps an expanded panel's last line clear of the bookmark
+   fold tucked into the card's bottom-right corner. */
+.tg-panel{display:none;margin:7px 0 0;padding-bottom:14px;}
 .tg-radio-why:checked ~ .tg-panel-why{display:block;}
 .tg-radio-note:checked ~ .tg-panel-note{display:block;}
 /* .md wraps server-rendered markdown (why text + saved notes). goldmark emits
