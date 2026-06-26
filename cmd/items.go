@@ -24,9 +24,10 @@ var (
 	listStatus string
 	listSource string
 	listLimit  int
-	listSince  string
-	listBefore string
-	listSort   string
+	listSince      string
+	listBefore     string
+	listSort       string
+	listBookmarked bool
 )
 
 func init() {
@@ -44,6 +45,7 @@ func init() {
 	listCmd.Flags().
 		StringVar(&listBefore, "before", "", "only items recorded earlier than this long ago, e.g. 3d (default: unbounded)")
 	listCmd.Flags().StringVar(&listSort, "sort", "", "sort order: score (default, best first), latest (newest first), or oldest (oldest first)")
+	listCmd.Flags().BoolVar(&listBookmarked, "bookmarked", false, "show only bookmarked items")
 
 	sourcesCmd := &cobra.Command{
 		Use:   "sources",
@@ -82,7 +84,19 @@ func init() {
 		Args:  cobra.MinimumNArgs(2),
 		RunE:  runNote,
 	}
-	itemsCmd.AddCommand(listCmd, sourcesCmd, readCmd, skipCmd, unreadCmd, rateCmd, noteCmd)
+	bookmarkCmd := &cobra.Command{
+		Use:   "bookmark <id|link>...",
+		Short: "Bookmark item(s) to revisit later",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  bookmarkRunE(true, "bookmarked"),
+	}
+	unbookmarkCmd := &cobra.Command{
+		Use:   "unbookmark <id|link>...",
+		Short: "Remove item(s) from bookmarks",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  bookmarkRunE(false, "unbookmarked"),
+	}
+	itemsCmd.AddCommand(listCmd, sourcesCmd, readCmd, skipCmd, unreadCmd, rateCmd, noteCmd, bookmarkCmd, unbookmarkCmd)
 	rootCmd.AddCommand(itemsCmd)
 }
 
@@ -139,6 +153,21 @@ func statusRunE(status, verb string) func(*cobra.Command, []string) error {
 	}
 }
 
+func bookmarkRunE(value bool, verb string) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		return withStore(cmd, func(ctx context.Context, db *store.Store, _ *config.Config) error {
+			return applyToEach(args, func(identifier string) error {
+				v := value
+				if err := db.UpdateUserState(ctx, identifier, store.UserPatch{Bookmarked: &v}); err != nil {
+					return err
+				}
+				fmt.Printf("Marked %s: %s\n", verb, identifier)
+				return nil
+			})
+		})
+	}
+}
+
 func runRate(cmd *cobra.Command, args []string) error {
 	identifier := args[0]
 	score, err := strconv.Atoi(args[1])
@@ -180,7 +209,7 @@ const defaultListSince = 3 * 24 * time.Hour
 // for a bare `items list`; an explicit --since overrides it, and --before pages
 // older without re-imposing the default.
 func resolveListFilter(defaultSince time.Duration) (store.ListFilter, error) {
-	filter := store.ListFilter{Status: listStatus, Source: listSource, Limit: listLimit, SortBy: listSort}
+	filter := store.ListFilter{Status: listStatus, Source: listSource, Limit: listLimit, SortBy: listSort, Bookmarked: listBookmarked}
 	now := time.Now()
 
 	if listSince != "" {
@@ -219,12 +248,12 @@ func runList(cmd *cobra.Command, _ []string) error {
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		if _, err := fmt.Fprintln(w, "SCORE\tSTATUS\tSOURCE\tTITLE\tID\tLINK"); err != nil {
+		if _, err := fmt.Fprintln(w, "SCORE\tSTATUS\tMARK\tSOURCE\tTITLE\tID\tLINK"); err != nil {
 			return err
 		}
 		for _, r := range rows {
-			if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				scoreCell(r), r.Status, r.Source, truncate(r.Title, listTitleWidth), r.ID, r.Link); err != nil {
+			if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				scoreCell(r), r.Status, bookmarkCell(r), r.Source, truncate(r.Title, listTitleWidth), r.ID, r.Link); err != nil {
 				return err
 			}
 		}
@@ -265,6 +294,15 @@ func scoreCell(r store.ItemRow) string {
 		return strconv.Itoa(*r.LLMScore)
 	}
 	return "-"
+}
+
+// bookmarkCell renders a star for a bookmarked item, empty otherwise, for the
+// MARK column in `items list`.
+func bookmarkCell(r store.ItemRow) string {
+	if r.Bookmarked {
+		return "★"
+	}
+	return ""
 }
 
 // truncate shortens s to at most n runes, appending "…" when it does.

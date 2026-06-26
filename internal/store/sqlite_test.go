@@ -239,6 +239,63 @@ func TestUpdateUserState(t *testing.T) {
 	}
 }
 
+func TestBookmark(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	items := []feeds.Item{
+		{ID: "a", Source: "S", Title: "A", Link: "https://x/a"},
+		{ID: "b", Source: "S", Title: "B", Link: "https://x/b"},
+	}
+	if err := db.Record(ctx, items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	// Fresh items are not bookmarked.
+	if r, err := db.Get(ctx, "a"); err != nil {
+		t.Fatalf("Get: %v", err)
+	} else if r.Bookmarked {
+		t.Error("freshly recorded item should not be bookmarked")
+	}
+
+	// Bookmark a; b stays un-bookmarked.
+	bookmark := true
+	if err := db.UpdateUserState(ctx, "https://x/a", UserPatch{Bookmarked: &bookmark}); err != nil {
+		t.Fatalf("bookmark: %v", err)
+	}
+	if r, err := db.Get(ctx, "a"); err != nil {
+		t.Fatalf("Get: %v", err)
+	} else if !r.Bookmarked {
+		t.Error("item a should be bookmarked after UpdateUserState")
+	}
+
+	// The Bookmarked filter narrows to bookmarked items only.
+	rows, err := db.List(ctx, ListFilter{Bookmarked: true})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != "a" {
+		t.Errorf("bookmarked list = %+v, want only item a", rows)
+	}
+
+	// Un-bookmarking clears it; the filter then returns nothing.
+	unbookmark := false
+	if err := db.UpdateUserState(ctx, "a", UserPatch{Bookmarked: &unbookmark}); err != nil {
+		t.Fatalf("unbookmark: %v", err)
+	}
+	rows, err = db.List(ctx, ListFilter{Bookmarked: true})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("bookmarked list after unbookmark = %+v, want empty", rows)
+	}
+}
+
 func TestUpdateUserStateErrors(t *testing.T) {
 	readStatus := StatusRead
 	badStatus := "archived"
