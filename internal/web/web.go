@@ -55,11 +55,15 @@ func promptUser(configured string) string {
 	return ""
 }
 
-// Routes returns the web handler: the digest page at "/" (exact) plus the
-// embedded static assets at "/static/".
+// Routes returns the web handler: the digest ("feed") page at "/feed" plus the
+// embedded static assets at "/static/". "/" redirects to "/feed" for now, so the
+// root stays free for a future home (dashboard, login, settings, …).
 func (s *Web) Routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", s.handleHome)
+	mux.HandleFunc("GET /feed", s.handleFeed)
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/feed", http.StatusFound)
+	})
 	mux.HandleFunc("GET /config", s.handleConfig)
 	mux.HandleFunc("POST /items/{id}/note", s.handleNote)
 	mux.HandleFunc("POST /items/{id}/seen", s.handleSeen)
@@ -134,7 +138,7 @@ type rowData struct {
 	Bookmarked bool
 }
 
-func (s *Web) handleHome(w http.ResponseWriter, r *http.Request) {
+func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	published := q.Get("published")
 	from, to := q.Get("from"), q.Get("to")
@@ -209,7 +213,7 @@ func (s *Web) handleHome(w http.ResponseWriter, r *http.Request) {
 
 	data := pageData{
 		Title:              "The Rabbit Hole",
-		Active:             "home",
+		Active:             "feed",
 		PromptUser:         s.user,
 		ServeCmd:           "go run . serve --addr " + s.addr,
 		Stats:              s.stats(r, rows, len(counts), store.ListFilter{Source: source, After: after, Before: before, Bookmarked: onlyBookmark}),
@@ -230,7 +234,7 @@ func (s *Web) handleHome(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.ExecuteTemplate(w, "layout", data); err != nil {
 		// Status is likely already written; log rather than double-write.
-		log.Error().Err(err).Msg("render home")
+		log.Error().Err(err).Msg("render feed")
 	}
 }
 

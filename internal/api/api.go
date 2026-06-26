@@ -37,8 +37,10 @@ func (s *API) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/items", s.handleListItems)
 	mux.HandleFunc("GET /api/sources", s.handleSources)
-	mux.HandleFunc("POST /api/items/{id}/read", s.handleSetStatus(store.StatusRead))
-	mux.HandleFunc("POST /api/items/{id}/skip", s.handleSetStatus(store.StatusSkipped))
+	// Action verbs mirror the web frontend (seen/hide), not the underlying
+	// store status names (read/skipped) — same transitions, one vocabulary.
+	mux.HandleFunc("POST /api/items/{id}/seen", s.handleSetStatus(store.StatusRead))
+	mux.HandleFunc("POST /api/items/{id}/hide", s.handleSetStatus(store.StatusSkipped))
 	mux.HandleFunc("POST /api/items/{id}/unread", s.handleSetStatus(store.StatusUnread))
 	return mux
 }
