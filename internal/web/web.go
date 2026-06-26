@@ -14,13 +14,28 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
-// tmpl is parsed once at startup. The assets are embedded, so a parse failure is
-// a build-time mistake — fail fast rather than handle it per request.
-var tmpl = template.Must(template.New("web").ParseFS(
-	templatesFS,
-	"templates/*.html",
-	"templates/partials/*.html",
-))
+// Each page gets its own template set — layout + the shared partials + that one
+// page file — rather than one global set. The pages both define "content" and
+// "scripts" blocks for the layout to fill; parsing them into a single set would
+// make the second page's blocks clobber the first's. Per-page sets keep them
+// apart. The partials are uniquely named, so loading all of them into every set
+// is harmless (a page just ignores the ones it doesn't use). Parsed once at
+// startup; a parse failure is a build-time mistake, so fail fast.
+var (
+	feedTmpl = pageTmpl("feed.html")
+	mazeTmpl = pageTmpl("maze.html")
+)
+
+// pageTmpl builds the template set for one page: the shared layout and partials
+// plus the named page file under templates/.
+func pageTmpl(page string) *template.Template {
+	return template.Must(template.New(page).ParseFS(
+		templatesFS,
+		"templates/layout.html",
+		"templates/partials/*.html",
+		"templates/"+page,
+	))
+}
 
 // listLimit bounds how many rows the digest page pulls per render. The current
 // page paginates this set client-side; real server-side paging is a follow-up.
@@ -55,20 +70,23 @@ func promptUser(configured string) string {
 	return ""
 }
 
-// Routes returns the web handler: the digest ("feed") page at "/feed" plus the
-// embedded static assets at "/static/". "/" redirects to "/feed" for now, so the
-// root stays free for a future home (dashboard, login, settings, …).
+// Routes returns the web handler: the digest ("feed") page — the landing page,
+// served at both "/" and "/feed" — the Maze day-to-day tools page at "/maze",
+// their htmx mutation routes, and the embedded static assets at "/static/".
 func (s *Web) Routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", s.handleFeed)
 	mux.HandleFunc("GET /feed", s.handleFeed)
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/feed", http.StatusFound)
-	})
+	mux.HandleFunc("GET /maze", s.handleMaze)
 	mux.HandleFunc("GET /config", s.handleConfig)
 	mux.HandleFunc("POST /items/{id}/note", s.handleNote)
 	mux.HandleFunc("POST /items/{id}/seen", s.handleSeen)
 	mux.HandleFunc("POST /items/{id}/hide", s.handleHide)
 	mux.HandleFunc("POST /items/{id}/bookmark", s.handleBookmark)
+	mux.HandleFunc("POST /todos", s.handleAddTodo)
+	mux.HandleFunc("POST /todos/{id}/toggle", s.handleToggleTodo)
+	mux.HandleFunc("POST /todos/{id}/tags", s.handleSetTodoTags)
+	mux.HandleFunc("DELETE /todos/{id}", s.handleDeleteTodo)
 
 	static, err := fs.Sub(staticFS, "static")
 	if err != nil {
@@ -232,7 +250,7 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.ExecuteTemplate(w, "layout", data); err != nil {
+	if err := feedTmpl.ExecuteTemplate(w, "layout", data); err != nil {
 		// Status is likely already written; log rather than double-write.
 		log.Error().Err(err).Msg("render feed")
 	}
@@ -268,7 +286,7 @@ func (s *Web) handleNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.ExecuteTemplate(w, "row", toRow(row)); err != nil {
+	if err := feedTmpl.ExecuteTemplate(w, "row", toRow(row)); err != nil {
 		// Status is likely already written; log rather than double-write.
 		log.Error().Err(err).Msg("render note row")
 	}
@@ -310,7 +328,7 @@ func (s *Web) toggleStatus(w http.ResponseWriter, r *http.Request, target string
 	// Only status changed, so render the in-memory row rather than re-fetching.
 	cur.Status = next
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.ExecuteTemplate(w, "row", toRow(cur)); err != nil {
+	if err := feedTmpl.ExecuteTemplate(w, "row", toRow(cur)); err != nil {
 		// Status is likely already written; log rather than double-write.
 		log.Error().Err(err).Msg("render toggle row")
 	}
@@ -338,7 +356,7 @@ func (s *Web) handleBookmark(w http.ResponseWriter, r *http.Request) {
 	// Only the bookmark flag changed, so render the in-memory row.
 	cur.Bookmarked = next
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.ExecuteTemplate(w, "row", toRow(cur)); err != nil {
+	if err := feedTmpl.ExecuteTemplate(w, "row", toRow(cur)); err != nil {
 		// Status is likely already written; log rather than double-write.
 		log.Error().Err(err).Msg("render bookmark row")
 	}
