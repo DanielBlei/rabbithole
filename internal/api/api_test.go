@@ -179,10 +179,10 @@ func TestHandleSetStatus(t *testing.T) {
 		wantStatus int
 		wantState  string // "" skips the post-request state check
 	}{
-		{name: "read", path: "/api/items/a/read", wantStatus: http.StatusNoContent, wantState: store.StatusRead},
-		{name: "skip", path: "/api/items/a/skip", wantStatus: http.StatusNoContent, wantState: store.StatusSkipped},
+		{name: "seen", path: "/api/items/a/seen", wantStatus: http.StatusNoContent, wantState: store.StatusRead},
+		{name: "hide", path: "/api/items/a/hide", wantStatus: http.StatusNoContent, wantState: store.StatusSkipped},
 		{name: "unread", path: "/api/items/a/unread", wantStatus: http.StatusNoContent, wantState: store.StatusUnread},
-		{name: "unknown id", path: "/api/items/missing/read", wantStatus: http.StatusNotFound},
+		{name: "unknown id", path: "/api/items/missing/seen", wantStatus: http.StatusNotFound},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

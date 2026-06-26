@@ -54,12 +54,13 @@ Returns distinct source names with item counts:
 [{ "source": "Red Hat Emerging Tech", "count": 12 }]
 ```
 
-## POST /api/items/{id}/read
+## POST /api/items/{id}/seen
 
-## POST /api/items/{id}/skip
+## POST /api/items/{id}/hide
 
 ## POST /api/items/{id}/unread
 
-Sets the item's status. `{id}` is the item's id (not its link, unlike the CLI's
-`items read|skip|unread` which accepts either). Returns `204 No Content` on success, `404` if
-the id doesn't exist.
+Sets the item's status. The action verbs match the web frontend (`seen`/`hide`),
+which map to the store's `read`/`skipped` statuses respectively. `{id}` is the
+item's id (not its link, unlike the CLI's `items read|skip|unread` which accepts
+either). Returns `204 No Content` on success, `404` if the id doesn't exist.
