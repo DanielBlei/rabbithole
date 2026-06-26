@@ -11,6 +11,20 @@
 
 {{define "scripts"}}
 <script>
+// Checking Bookmarked enters the saved-library view; auto-tick all three status
+// units first so the whole library shows on entry (a saved item may be unread,
+// seen, or hidden), then submit. The user narrows from there by unchecking a
+// status. Global (not in an IIFE) so the chip's inline onchange can reach it.
+function viewBookmarkChange(cb){
+  if (cb.checked){
+    ['unread','seen','hidden'].forEach(function(n){
+      var b = cb.form.querySelector('input[name="' + n + '"]');
+      if (b) b.checked = true;
+    });
+  }
+  cb.form.submit();
+}
+
 (function(){
   // Mockup-era client-side pagination, kept only so this page is interactive
   // to evaluate. Replaced by real server-side after/before/limit paging +
@@ -95,26 +109,22 @@
   // it a beat so the change registers, then animate it out — rather than leaving
   // it lingering dimmed in a list it no longer belongs to. Unread always stays.
   function viewState(){
-    var seen = document.querySelector('input[name="seen"]');
-    var hidden = document.querySelector('input[name="hidden"]');
-    var bookmarked = document.querySelector('input[name="bookmarked"]');
-    return {
-      seen: !!(seen && seen.checked),
-      hidden: !!(hidden && hidden.checked),
-      bookmarked: !!(bookmarked && bookmarked.checked),
-    };
+    function on(n){ var el = document.querySelector('input[name="' + n + '"]'); return !!(el && el.checked); }
+    return { unread: on('unread'), seen: on('seen'), hidden: on('hidden'), bookmarked: on('bookmarked') };
   }
   function outOfView(row, vs){
-    // In the bookmark view the list spans all triage states (seen/hidden don't
-    // narrow it server-side), so membership is purely "is it still saved?" —
-    // un-bookmarking a row drops it from the library.
+    // A row stays only if its status unit is currently shown AND, when the
+    // bookmark filter is on, it's still saved — so marking a status the active
+    // chips exclude, or un-bookmarking within the library view, drops it.
+    var statusShown = row.classList.contains('is-hidden') ? vs.hidden
+      : row.classList.contains('is-seen') ? vs.seen
+      : vs.unread;
+    if (!statusShown) return true;
     if (vs.bookmarked){
       var bm = row.querySelector('.bookmark');
-      return !(bm && bm.classList.contains('is-saved'));
+      if (!(bm && bm.classList.contains('is-saved'))) return true;
     }
-    if (row.classList.contains('is-hidden')) return !vs.hidden;
-    if (row.classList.contains('is-seen')) return !vs.seen;
-    return false; // unread is always in view
+    return false;
   }
   // Avg Score is the mean over the rows currently shown (data-score is present
   // only on scored rows, matching the server's score() gate). Recomputed from
