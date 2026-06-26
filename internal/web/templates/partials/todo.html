@@ -1,0 +1,127 @@
+{{define "todoWidget"}}
+<section class="pane todo-pane" id="todoWidget" hx-target="#todoWidget" hx-swap="outerHTML"
+  data-all-tags="{{range $i, $t := .AllTags}}{{if $i}},{{end}}{{$t}}{{end}}">
+  <div class="pane__bar">
+    <span class="pane__prompt">maze</span>:<span class="pane__path">~/todo</span>$&nbsp;<span class="pane__cmd">tasks --open {{.OpenCount}} --done {{.DoneCount}}</span><span class="blink">_</span>
+  </div>
+
+  <!-- Open / Due / Completed tabs: hidden radios + label pills, CSS shows one
+       panel. The widget re-renders whole on each mutation, so the tab resets to
+       Open. Due is a filtered view of Open (the today/overdue subset). -->
+  <input type="radio" name="todoTab" id="todoTabOpen" class="todo-tab-radio" checked>
+  <input type="radio" name="todoTab" id="todoTabDue" class="todo-tab-radio">
+  <input type="radio" name="todoTab" id="todoTabDone" class="todo-tab-radio">
+  <div class="todo-tabs">
+    <label class="todo-tab" for="todoTabOpen">Open <span class="todo-tab__count">{{.OpenCount}}</span></label>
+    <label class="todo-tab todo-tab--due" for="todoTabDue">Due / Overdue <span class="todo-tab__count{{if .DueCount}} todo-tab__count--alert{{end}}">{{.DueCount}}</span></label>
+    <label class="todo-tab" for="todoTabDone">Completed <span class="todo-tab__count">{{.DoneCount}}</span></label>
+
+    <!-- Dynamic tag filter: one chip per tag in use, client-side OR filtering
+         across all three panels (see maze.html scripts). Hidden when no tags. -->
+    {{if .AllTags}}
+    <details class="filter popmenu todo-filter">
+      <summary class="popmenu__btn">Tags<span class="popmenu__dot popmenu__dot--bookmark" data-tag-active hidden></span></summary>
+      <div class="popmenu__panel">
+        {{range .AllTags}}
+        <label class="pill pill--tag"><input type="checkbox" class="todo-filter__chk" value="{{.}}"><span>{{.}}</span></label>
+        {{end}}
+      </div>
+    </details>
+    {{end}}
+  </div>
+
+  <div class="todo-panel todo-panel--open">
+    <form class="todo-add" hx-post="/todos" autocomplete="off">
+      <input class="todo-add__title" type="text" name="title" maxlength="80" placeholder="Add a task&hellip;" aria-label="Task" required>
+      <input class="todo-add__due" type="date" name="due" aria-label="Due date">
+      <!-- Tag-chip input: JS turns typed text into chips and keeps the hidden
+           "tags" field (comma-joined) in sync; suggests existing tags. -->
+      <div class="tagput" data-tagput>
+        <span class="tagput__chips"></span>
+        <input class="tagput__input" type="text" placeholder="+ tag&hellip;" aria-label="Add tag" autocomplete="off">
+        <input type="hidden" name="tags" value="">
+        <div class="tagput__suggest" hidden></div>
+      </div>
+      <button class="todo-add__btn" type="submit">add</button>
+      <details class="todo-add__note">
+        <summary>+ note</summary>
+        <textarea name="note" rows="2" placeholder="Longer details, if 80 chars isn&rsquo;t enough&hellip;"></textarea>
+      </details>
+    </form>
+
+    <div class="todo-list">
+      {{range .Open}}{{template "todo" .}}{{end}}
+      {{if not .Open}}<p class="todo-empty">No open tasks. Nice and clear.</p>{{end}}
+    </div>
+  </div>
+
+  <div class="todo-panel todo-panel--due">
+    <div class="todo-list">
+      {{range .Due}}{{template "todo" .}}{{end}}
+      {{if not .Due}}<p class="todo-empty">Nothing due right now. You&rsquo;re on top of it.</p>{{end}}
+    </div>
+  </div>
+
+  <div class="todo-panel todo-panel--done">
+    {{range .DoneGroups}}
+    <div class="todo-group">
+      <div class="todo-group__label">{{.Label}}</div>
+      {{range .Todos}}{{template "todo" .}}{{end}}
+    </div>
+    {{else}}
+    <p class="todo-empty">Nothing completed yet.</p>
+    {{end}}
+  </div>
+</section>
+{{end}}
+
+{{define "todo"}}
+<div class="todo{{if .Done}} is-done{{end}}" id="todo-{{.ID}}" data-tags="{{.TagsAttr}}">
+  <button type="button" class="todo__check"
+    hx-post="/todos/{{.ID}}/toggle"
+    aria-pressed="{{if .Done}}true{{else}}false{{end}}"
+    aria-label="{{if .Done}}Mark as not done{{else}}Mark as done{{end}}"
+    title="{{if .Done}}Mark as not done{{else}}Mark done{{end}}"></button>
+  <div class="todo__body">
+    <div class="todo__line">
+      <span class="todo__title">{{.Title}}</span>
+      {{if .HasDue}}<span class="{{.DueClass}}">{{.Due}}</span>{{end}}
+      {{range .Tags}}<span class="todo__tag" data-tag="{{.}}" title="Click to recolour">{{.}}</span>{{end}}
+    </div>
+    <!-- note / tags as side-by-side CSS-radio tabs (the Feed why/note idiom).
+         The tags tab is the inline editor: same chip input as the add form,
+         seeded with this row's tags, posting to /todos/{id}/tags. -->
+    <div class="toggles">
+      <input type="radio" name="tgt{{.ID}}" id="tgt-note-{{.ID}}" class="tg-radio tg-radio-why">
+      <input type="radio" name="tgt{{.ID}}" id="tgt-tags-{{.ID}}" class="tg-radio tg-radio-note">
+      <div class="tg-tabs">
+        <label class="tg-tab tg-tab-why" for="tgt-note-{{.ID}}">note</label>
+        <label class="tg-tab tg-tab-note" for="tgt-tags-{{.ID}}">tags</label>
+      </div>
+      <div class="tg-panel tg-panel-why">
+        {{if .HasNote}}<div class="md">{{.NoteHTML}}</div>{{else}}<p class="note-empty">No note.</p>{{end}}
+      </div>
+      <div class="tg-panel tg-panel-note">
+        <form class="todo__tags-form" hx-post="/todos/{{.ID}}/tags" autocomplete="off">
+          <div class="tagput" data-tagput>
+            <span class="tagput__chips"></span>
+            <input class="tagput__input" type="text" placeholder="+ tag&hellip;" aria-label="Add tag" autocomplete="off">
+            <input type="hidden" name="tags" value="{{range $i, $t := .Tags}}{{if $i}},{{end}}{{$t}}{{end}}">
+            <div class="tagput__suggest" hidden></div>
+          </div>
+          <button class="todo__tags-save" type="submit">save tags</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <!-- delete behind a one-click confirm so a stray ✕ can't drop a task -->
+  <span class="todo__del-wrap">
+    <input type="checkbox" id="del-{{.ID}}" class="todo__del-chk">
+    <label class="todo__del" for="del-{{.ID}}" aria-label="Delete task" title="Delete task">&times;</label>
+    <span class="todo__del-confirm" role="group" aria-label="Confirm delete">
+      <button type="button" class="todo__del-yes" hx-delete="/todos/{{.ID}}">delete</button>
+      <label class="todo__del-no" for="del-{{.ID}}">cancel</label>
+    </span>
+  </span>
+</div>
+{{end}}

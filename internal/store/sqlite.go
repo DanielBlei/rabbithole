@@ -120,6 +120,20 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("migrate schema: %w", err)
 		}
 	}
+	if _, err := db.Exec(todoSchema); err != nil {
+		// Maze task board, kept in todos.go; idempotent (IF NOT EXISTS).
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate todos schema: %w", err)
+	}
+	for _, stmt := range todoAddColumns {
+		// Additive todo migrations — run after todoSchema (not in addColumns,
+		// which runs before the todos table exists). Duplicate-column is expected
+		// on a DB that already has the column; tolerate it like addColumns.
+		if _, err := db.Exec(stmt); err != nil && !isDuplicateColumn(err) {
+			_ = db.Close()
+			return nil, fmt.Errorf("migrate todos schema: %w", err)
+		}
+	}
 	return &Store{db: db}, nil
 }
 

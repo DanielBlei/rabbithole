@@ -28,8 +28,10 @@ func (s *Web) handleConfig(w http.ResponseWriter, r *http.Request) {
 		data.YAML = highlightYAML(string(raw))
 	}
 
+	// The config modal is shared chrome (opened from the topbar gear on any
+	// page); render it from any set that has the partial — feedTmpl will do.
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.ExecuteTemplate(w, "configModal", data); err != nil {
+	if err := feedTmpl.ExecuteTemplate(w, "configModal", data); err != nil {
 		// Status is likely already written; log rather than double-write.
 		log.Error().Err(err).Msg("render config modal")
 	}
