@@ -89,6 +89,7 @@ type pageData struct {
 	FilterFrom         string
 	FilterTo           string
 	FilterSort         string
+	FilterShowUnread   bool
 	FilterShowSeen     bool
 	FilterShowHidden   bool
 	FilterShowBookmark bool
@@ -148,38 +149,52 @@ func (s *Web) handleHome(w http.ResponseWriter, r *http.Request) {
 		published = ""
 	}
 
-	// Triage visibility: un-triaged (unread) items always show; seen (read) and
-	// hidden (skipped) items join the set only when their "show" toggle is on.
+	// Status visibility is unit-based multiselect: the Unread/Seen/Hidden chips
+	// each toggle one status independently (rather than unread-always + "show
+	// also" extras). "view" is a hidden marker the filter form always submits,
+	// so an unchecked Unread box reads as "hide unread" instead of being
+	// indistinguishable from a bare GET / — which defaults to unread-only.
+	submitted := q.Get("view") == "1"
+	showUnread := q.Get("unread") == "1"
 	showSeen := q.Get("seen") == "1"
 	showHidden := q.Get("hidden") == "1"
+	if !submitted {
+		showUnread = true // default landing view: unread only
+	}
+	// Bookmarked is an orthogonal AND-filter, independent of the status set. The
+	// chip auto-selects all three statuses client-side so the whole library
+	// shows on entry; the user then narrows by unchecking a status.
 	onlyBookmark := q.Get("bookmarked") == "1"
-	statuses := []string{store.StatusUnread}
+
+	var statuses []string
+	if showUnread {
+		statuses = append(statuses, store.StatusUnread)
+	}
 	if showSeen {
 		statuses = append(statuses, store.StatusRead)
 	}
 	if showHidden {
 		statuses = append(statuses, store.StatusSkipped)
 	}
-	if onlyBookmark {
-		// The bookmark view is your saved library, and a saved item stays in it
-		// whether it's unread, seen, or hidden — so it spans every triage state
-		// rather than the unread-only default. The seen/hidden toggles don't
-		// narrow it further here.
-		statuses = []string{store.StatusUnread, store.StatusRead, store.StatusSkipped}
-	}
 
-	rows, err := s.db.List(r.Context(), store.ListFilter{
-		Statuses:   statuses,
-		Source:     source,
-		After:      after,
-		Before:     before,
-		Bookmarked: onlyBookmark,
-		SortBy:     sort,
-		Limit:      listLimit,
-	})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	// Every status chip cleared → nothing to show; skip the query rather than
+	// pass an empty Statuses set, which List reads as "no status filter" (all).
+	var rows []store.ItemRow
+	if len(statuses) > 0 {
+		got, err := s.db.List(r.Context(), store.ListFilter{
+			Statuses:   statuses,
+			Source:     source,
+			After:      after,
+			Before:     before,
+			Bookmarked: onlyBookmark,
+			SortBy:     sort,
+			Limit:      listLimit,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		rows = got
 	}
 
 	counts, err := s.db.Sources(r.Context())
@@ -205,6 +220,7 @@ func (s *Web) handleHome(w http.ResponseWriter, r *http.Request) {
 		FilterFrom:         from,
 		FilterTo:           to,
 		FilterSort:         sort,
+		FilterShowUnread:   showUnread,
 		FilterShowSeen:     showSeen,
 		FilterShowHidden:   showHidden,
 		FilterShowBookmark: onlyBookmark,

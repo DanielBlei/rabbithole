@@ -158,6 +158,11 @@ header.topbar{
 .pill--bookmark input:checked ~ span{
   color:var(--gold);border-color:var(--gold);background:rgba(255,203,107,.12);
 }
+.pill--unread input:checked ~ span{
+  color:var(--amber);border-color:var(--amber-dim);background:rgba(128,203,196,.12);
+}
+.pill--unread input:hover ~ span{border-color:var(--amber-dim);}
+.pill--unread input:focus-visible ~ span{outline-color:var(--amber);}
 .pill--seen input:hover ~ span{border-color:var(--score-high);}
 .pill--hide input:hover ~ span{border-color:var(--warn);}
 .pill--bookmark input:hover ~ span{border-color:var(--gold);}
@@ -193,6 +198,8 @@ header.topbar{
   background:var(--pane);border:1px solid var(--line);border-radius:16px;
   box-shadow:0 16px 38px rgba(0,0,0,.55);padding:9px;
 }
+/* divider between the orthogonal Bookmarked filter and the status units */
+.popmenu__sep{height:1px;background:var(--line);margin:1px 2px;}
 .popmenu__panel .pill{align-self:stretch;}
 .popmenu__panel .pill span{display:flex;align-items:center;width:100%;}
 /* Sort chips are single-select; the checked one fills with the primary accent

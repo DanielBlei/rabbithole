@@ -5,6 +5,7 @@
   </div>
 
   <form class="pane__filters" method="get" action="/">
+    <input type="hidden" name="view" value="1">
     <label class="filter">
       <span class="filter__key">source</span>
       <select class="filter__select" name="source" onchange="this.form.submit()">
@@ -37,7 +38,9 @@
     <details class="filter popmenu">
       <summary class="popmenu__btn">View{{if .FilterShowBookmark}}<span class="popmenu__dot popmenu__dot--bookmark"></span>{{end}}{{if .FilterShowSeen}}<span class="popmenu__dot popmenu__dot--seen"></span>{{end}}{{if .FilterShowHidden}}<span class="popmenu__dot popmenu__dot--hide"></span>{{end}}</summary>
       <div class="popmenu__panel">
-        <label class="pill pill--bookmark"><input type="checkbox" name="bookmarked" value="1" {{if .FilterShowBookmark}}checked{{end}} onchange="this.form.submit()"><span><i class="pill__ic">&#9873;</i>Bookmarked</span></label>
+        <label class="pill pill--bookmark"><input type="checkbox" name="bookmarked" value="1" {{if .FilterShowBookmark}}checked{{end}} onchange="viewBookmarkChange(this)"><span><i class="pill__ic">&#9873;</i>Bookmarked</span></label>
+        <div class="popmenu__sep" role="separator"></div>
+        <label class="pill pill--unread"><input type="checkbox" name="unread" value="1" {{if .FilterShowUnread}}checked{{end}} onchange="this.form.submit()"><span><i class="pill__ic">&#9675;</i>Unread</span></label>
         <label class="pill pill--seen"><input type="checkbox" name="seen" value="1" {{if .FilterShowSeen}}checked{{end}} onchange="this.form.submit()"><span><i class="pill__ic">&#10003;</i>Seen</span></label>
         <label class="pill pill--hide"><input type="checkbox" name="hidden" value="1" {{if .FilterShowHidden}}checked{{end}} onchange="this.form.submit()"><span><i class="pill__ic">&#8856;</i>Hidden</span></label>
       </div>
