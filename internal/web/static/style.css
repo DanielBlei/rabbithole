@@ -38,7 +38,14 @@ header.topbar{
 .topbar__nav a:hover{color:var(--amber);}
 .topbar__nav a.active{color:var(--amber);}
 
-.topbar__right{position:relative;}
+.topbar__right{position:relative;display:flex;align-items:center;gap:14px;}
+.clock{
+  display:flex;align-items:baseline;gap:8px;
+  font-size:1.3rem;color:var(--text-dim);
+  font-variant-numeric:tabular-nums;user-select:none;
+}
+.clock__time{color:var(--amber);font-weight:500;letter-spacing:.04em;}
+.clock__date{color:var(--text-dim);}
 .settings-btn{
   display:flex;align-items:center;justify-content:center;
   background:transparent;border:1px solid var(--line);color:var(--text-dim);
@@ -49,7 +56,7 @@ header.topbar{
 .settings-btn[aria-expanded="true"]{color:var(--amber);border-color:var(--amber-dim);}
 
 .settings-panel{
-  position:absolute;right:0;top:calc(100% + 8px);min-width:160px;
+  position:absolute;right:0;top:calc(100% + 8px);min-width:168px;
   background:var(--pane);border:1px solid var(--line);border-radius:16px;
   box-shadow:0 16px 38px rgba(0,0,0,.55);
   padding:7px;z-index:10;
@@ -60,6 +67,57 @@ header.topbar{
 }
 .settings-panel__item:hover{color:var(--amber);background:rgba(128,203,196,.07);}
 .settings-panel__item:focus-visible{outline:1px solid var(--amber);outline-offset:-2px;}
+.settings-panel__label{
+  padding:6px 12px 5px;font-size:1.05rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--amber-dim);
+}
+.settings-panel__divider{height:1px;background:var(--line);margin:5px 6px;}
+
+/* "Date & time" sub-menu: hovering/focusing the trigger reveals a flyout that
+   opens to the left of the panel (the panel hugs the right screen edge). */
+.settings-sub{position:relative;}
+.settings-sub__trigger{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.settings-sub__caret{color:var(--text-dim);font-size:1.5rem;line-height:1;}
+.settings-sub__flyout{
+  display:none;position:absolute;right:calc(100% + 9px);top:-7px;min-width:212px;
+  background:var(--pane);border:1px solid var(--line);border-radius:16px;
+  box-shadow:0 16px 38px rgba(0,0,0,.55);padding:8px 10px 11px;z-index:11;
+}
+/* invisible bridge across the gap so the hover doesn't drop mid-travel */
+.settings-sub__flyout::after{content:"";position:absolute;top:0;right:-9px;width:9px;height:100%;}
+.settings-sub:hover .settings-sub__flyout,
+.settings-sub:focus-within .settings-sub__flyout{display:block;}
+.settings-sub:hover .settings-sub__trigger,
+.settings-sub:focus-within .settings-sub__trigger{color:var(--amber);background:rgba(128,203,196,.07);}
+
+.clk-row{display:flex;flex-wrap:wrap;gap:6px;padding:2px 2px 4px;}
+.clk-btn{
+  font-family:inherit;cursor:pointer;
+  padding:5px 13px;border:1px solid var(--line);border-radius:999px;
+  background:var(--card);color:var(--text-dim);font-size:1.1rem;
+}
+.clk-btn:hover{border-color:var(--amber-dim);}
+.clk-btn:focus-visible{outline:1px solid var(--amber);outline-offset:2px;}
+.clk-btn.is-on{color:var(--amber);border-color:var(--amber-dim);background:rgba(128,203,196,.08);}
+
+.clk-slider{display:flex;flex-direction:column;gap:9px;padding:5px 5px 2px;}
+.clk-slider__preview{
+  font-size:1.2rem;color:var(--amber);text-align:center;min-height:1.4em;
+  font-variant-numeric:tabular-nums;
+}
+.clk-slider input[type=range]{
+  -webkit-appearance:none;appearance:none;width:100%;height:3px;
+  background:var(--line);border-radius:999px;cursor:pointer;
+}
+.clk-slider input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--amber);border:2px solid var(--pane);cursor:pointer;
+}
+.clk-slider input[type=range]::-moz-range-thumb{
+  width:14px;height:14px;border:2px solid var(--pane);border-radius:50%;
+  background:var(--amber);cursor:pointer;
+}
+.clk-slider input[type=range]:focus-visible{outline:1px solid var(--amber);outline-offset:4px;}
 
 .content{max-width:1120px;margin:0 auto;padding:28px 30px 80px;}
 
