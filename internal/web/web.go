@@ -77,21 +77,22 @@ func (s *Web) Routes() http.Handler {
 
 // pageData is the top-level template model passed to layout.html.
 type pageData struct {
-	Title            string
-	Active           string
-	PromptUser       string // shell-prompt user in the pane title bar
-	ServeCmd         string // the command the prompt shows running, incl. the real --addr
-	Stats            statsData
-	Sources          []string
-	FilterSource     string
-	FilterPublished  string
-	FilterCustom     bool
-	FilterFrom       string
-	FilterTo         string
-	FilterSort       string
-	FilterShowSeen   bool
-	FilterShowHidden bool
-	Rows             []rowData
+	Title              string
+	Active             string
+	PromptUser         string // shell-prompt user in the pane title bar
+	ServeCmd           string // the command the prompt shows running, incl. the real --addr
+	Stats              statsData
+	Sources            []string
+	FilterSource       string
+	FilterPublished    string
+	FilterCustom       bool
+	FilterFrom         string
+	FilterTo           string
+	FilterSort         string
+	FilterShowSeen     bool
+	FilterShowHidden   bool
+	FilterShowBookmark bool
+	Rows               []rowData
 }
 
 type statsData struct {
@@ -151,6 +152,7 @@ func (s *Web) handleHome(w http.ResponseWriter, r *http.Request) {
 	// hidden (skipped) items join the set only when their "show" toggle is on.
 	showSeen := q.Get("seen") == "1"
 	showHidden := q.Get("hidden") == "1"
+	onlyBookmark := q.Get("bookmarked") == "1"
 	statuses := []string{store.StatusUnread}
 	if showSeen {
 		statuses = append(statuses, store.StatusRead)
@@ -158,14 +160,22 @@ func (s *Web) handleHome(w http.ResponseWriter, r *http.Request) {
 	if showHidden {
 		statuses = append(statuses, store.StatusSkipped)
 	}
+	if onlyBookmark {
+		// The bookmark view is your saved library, and a saved item stays in it
+		// whether it's unread, seen, or hidden — so it spans every triage state
+		// rather than the unread-only default. The seen/hidden toggles don't
+		// narrow it further here.
+		statuses = []string{store.StatusUnread, store.StatusRead, store.StatusSkipped}
+	}
 
 	rows, err := s.db.List(r.Context(), store.ListFilter{
-		Statuses: statuses,
-		Source:   source,
-		After:    after,
-		Before:   before,
-		SortBy:   sort,
-		Limit:    listLimit,
+		Statuses:   statuses,
+		Source:     source,
+		After:      after,
+		Before:     before,
+		Bookmarked: onlyBookmark,
+		SortBy:     sort,
+		Limit:      listLimit,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -183,21 +193,22 @@ func (s *Web) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := pageData{
-		Title:            "The Rabbit Hole",
-		Active:           "home",
-		PromptUser:       s.user,
-		ServeCmd:         "go run . serve --addr " + s.addr,
-		Stats:            s.stats(r, rows, len(counts), store.ListFilter{Source: source, After: after, Before: before}),
-		Sources:          sources,
-		FilterSource:     source,
-		FilterPublished:  published,
-		FilterCustom:     custom,
-		FilterFrom:       from,
-		FilterTo:         to,
-		FilterSort:       sort,
-		FilterShowSeen:   showSeen,
-		FilterShowHidden: showHidden,
-		Rows:             toRows(rows),
+		Title:              "The Rabbit Hole",
+		Active:             "home",
+		PromptUser:         s.user,
+		ServeCmd:           "go run . serve --addr " + s.addr,
+		Stats:              s.stats(r, rows, len(counts), store.ListFilter{Source: source, After: after, Before: before, Bookmarked: onlyBookmark}),
+		Sources:            sources,
+		FilterSource:       source,
+		FilterPublished:    published,
+		FilterCustom:       custom,
+		FilterFrom:         from,
+		FilterTo:           to,
+		FilterSort:         sort,
+		FilterShowSeen:     showSeen,
+		FilterShowHidden:   showHidden,
+		FilterShowBookmark: onlyBookmark,
+		Rows:               toRows(rows),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
