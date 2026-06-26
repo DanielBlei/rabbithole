@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS items (
 	digested_on      DATE,
 	status           TEXT NOT NULL DEFAULT 'unread',
 	user_score       INTEGER,
-	user_note        TEXT
+	user_note        TEXT,
+	bookmarked       BOOLEAN NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_items_digested ON items(digested_on);
 CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
@@ -127,6 +128,12 @@ func Open(path string) (*Store, error) {
 // tolerated.
 var addColumns = []string{
 	"ALTER TABLE items ADD COLUMN llm_score_model TEXT",
+	"ALTER TABLE items ADD COLUMN bookmarked BOOLEAN NOT NULL DEFAULT 0",
+	// Index the bookmark column for the `--bookmarked` filter. This lives here
+	// rather than in the base schema because that block runs before the ALTER
+	// above, so on an existing DB the column wouldn't exist yet. CREATE INDEX
+	// IF NOT EXISTS is idempotent, so a re-run is a harmless no-op.
+	"CREATE INDEX IF NOT EXISTS idx_items_bookmarked ON items(bookmarked)",
 }
 
 func isDuplicateColumn(err error) bool {
@@ -266,9 +273,10 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEnt
 // fields are left unchanged. JSON-shaped so a future HTTP handler can decode
 // a request body straight into it and call UpdateUserState unchanged.
 type UserPatch struct {
-	Status    *string
-	UserScore *int
-	UserNote  *string
+	Status     *string
+	UserScore  *int
+	UserNote   *string
+	Bookmarked *bool
 }
 
 // isValidStatus reports whether status is one of the recognized items.status
@@ -309,6 +317,10 @@ func (s *Store) UpdateUserState(ctx context.Context, identifier string, patch Us
 		sets = append(sets, "user_note = ?")
 		args = append(args, *patch.UserNote)
 	}
+	if patch.Bookmarked != nil {
+		sets = append(sets, "bookmarked = ?")
+		args = append(args, *patch.Bookmarked)
+	}
 	args = append(args, identifier, identifier)
 
 	q := fmt.Sprintf("UPDATE items SET %s WHERE link = ? OR id = ?", strings.Join(sets, ", "))
@@ -340,11 +352,12 @@ type ItemRow struct {
 	UserScore      *int
 	UserNote       *string
 	PublishedAt    *time.Time
+	Bookmarked     bool
 }
 
 // itemRowColumns is the SELECT list backing both List and Get, kept in one place
 // so the column order stays in lockstep with scanItemRow's destinations.
-const itemRowColumns = "id, source, title, link, status, llm_score, llm_score_reason, llm_score_model, user_score, user_note, published_at"
+const itemRowColumns = "id, source, title, link, status, llm_score, llm_score_reason, llm_score_model, user_score, user_note, published_at, bookmarked"
 
 // rowScanner is satisfied by both *sql.Row (Get) and *sql.Rows (List), letting
 // scanItemRow serve the single-row and multi-row reads from one mapping.
@@ -366,7 +379,7 @@ func scanItemRow(sc rowScanner) (ItemRow, error) {
 		publishedAt sql.NullTime
 	)
 	if err := sc.Scan(&r.ID, &r.Source, &r.Title, &r.Link, &r.Status,
-		&llmScore, &llmReason, &llmModel, &userScore, &userNote, &publishedAt); err != nil {
+		&llmScore, &llmReason, &llmModel, &userScore, &userNote, &publishedAt, &r.Bookmarked); err != nil {
 		return ItemRow{}, err
 	}
 	if llmScore.Valid {
@@ -409,24 +422,30 @@ func (s *Store) Get(ctx context.Context, identifier string) (ItemRow, error) {
 
 // ListFilter narrows List's results. Zero-value fields are unfiltered: an
 // empty Status/Statuses or Source matches anything, a zero After/Before leaves
-// that side of the created_at window open, an empty SortBy falls back to
-// SortByScore, and Limit<=0 falls back to defaultListLimit.
+// that side of the created_at window open, a false Bookmarked matches anything,
+// an empty SortBy falls back to SortByScore, and Limit<=0 falls back to
+// defaultListLimit.
 //
 // Status and Statuses both restrict by items.status; Statuses (an OR-set, via
 // SQL IN) takes precedence when non-empty, with Status the single-value
 // shorthand. Each value must be a recognized status.
 //
+// Bookmarked is a one-way filter: true restricts to bookmarked items; false
+// (the zero value) means "don't filter on bookmark" — there's no "only
+// un-bookmarked" mode, since that's not a view anyone asks for.
+//
 // After/Before are plain absolute timestamps, not durations — pagination is
 // the caller's concern (compute the next window's bounds and call List
 // again), not something List tracks via a cursor.
 type ListFilter struct {
-	Status   string
-	Statuses []string
-	Source   string
-	After    time.Time
-	Before   time.Time
-	SortBy   string
-	Limit    int
+	Status     string
+	Statuses   []string
+	Source     string
+	After      time.Time
+	Before     time.Time
+	Bookmarked bool
+	SortBy     string
+	Limit      int
 }
 
 // List's result-count bounds: defaultListLimit applies when ListFilter.Limit
@@ -497,6 +516,9 @@ func (filter ListFilter) whereClause() (where []string, args []any) {
 	if !filter.Before.IsZero() {
 		where = append(where, "created_at < ?")
 		args = append(args, filter.Before)
+	}
+	if filter.Bookmarked {
+		where = append(where, "bookmarked = 1")
 	}
 	return where, args
 }
