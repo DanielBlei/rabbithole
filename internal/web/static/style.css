@@ -110,6 +110,27 @@ header.topbar{
 .clk-btn:focus-visible{outline:1px solid var(--amber);outline-offset:2px;}
 .clk-btn.is-on{color:var(--amber);border-color:var(--amber-dim);background:rgba(128,203,196,.08);}
 
+/* Weather location: a search field + a geocoding-results list + the geolocation
+   button. The text field is allowed here (it's a search box, not a select). */
+.wx-loc{display:flex;flex-direction:column;gap:6px;padding:2px 2px 4px;}
+.wx-loc__input{
+  font-family:inherit;font-size:1.1rem;
+  padding:6px 11px;border:1px solid var(--line);border-radius:999px;
+  background:var(--bg);color:var(--text);
+}
+.wx-loc__input::placeholder{color:var(--text-dim);}
+.wx-loc__input:focus{outline:none;border-color:var(--amber-dim);}
+.wx-loc__results{display:flex;flex-direction:column;gap:2px;max-height:148px;overflow-y:auto;}
+.wx-loc__opt{
+  text-align:left;font-family:inherit;cursor:pointer;font-size:1.1rem;
+  padding:5px 11px;border:1px solid transparent;border-radius:8px;
+  background:none;color:var(--text-dim);
+}
+.wx-loc__opt:hover,.wx-loc__opt:focus-visible{
+  color:var(--amber);background:rgba(128,203,196,.08);outline:none;
+}
+.wx-loc__opt b{color:var(--text);font-weight:500;}
+
 .clk-slider{display:flex;flex-direction:column;gap:9px;padding:5px 5px 2px;}
 .clk-slider__preview{
   font-size:1.2rem;color:var(--amber);text-align:center;min-height:1.4em;
@@ -775,12 +796,104 @@ pre.yml code{font-family:inherit;}
   .todo__check,.todo__del{transition:none;}
 }
 
+/* ============================ Maze: weather widget ======================= */
+/* Four placements, all populated client-side (Open-Meteo + geolocation +
+   localStorage) by the weather IIFE in layout.html and chosen via the Settings
+   → Weather "Layout" pills. The active mode is reflected as data-wx-mode on
+   .maze; the CSS below shows the one matching container and (for rail modes)
+   lays the board column out beside it. Containers stay empty/hidden on Feed. */
+:root{ --rail-w:236px; --rail-gap:18px; }
+
+/* --- shared weather atoms (reused by every mode) --- */
+.wx-icon{font-size:1.5rem;line-height:1;}
+.wx-temp{color:var(--text);font-weight:500;}
+.wx-cond{color:var(--text-dim);}
+.wx-feels{font-size:1.1rem;color:var(--text-dim);}
+.pollen-pill{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:2px 8px;border:1px solid var(--line);border-radius:999px;
+  font-size:1.1rem;white-space:nowrap;
+}
+.pollen--low  {color:var(--amber);border-color:var(--amber-dim);}
+.pollen--mod  {color:var(--gold);border-color:var(--gold-dim);}
+.pollen--high {color:#e07830;border-color:#6b3d18;}
+.pollen--vhigh{color:var(--warn);border-color:#5a1a1a;}
+
+/* --- mode gating: hide every container, then reveal the active one --- */
+.wx-subbar,.wx-chip,.maze-rail{display:none;}
+.maze[data-wx-mode="subbar"] .wx-subbar{
+  display:flex;align-items:center;gap:1.4rem;flex-wrap:wrap;
+  margin:0 0 14px;padding:0 2px 12px;font-size:1.25rem;color:var(--text-dim);
+  border-bottom:1px solid var(--line);
+}
+.wx-subbar .wx-main{display:flex;align-items:center;gap:8px;}
+.wx-subbar .pollen-strip{display:flex;align-items:center;gap:6px;margin-left:auto;flex-wrap:wrap;}
+
+.maze[data-wx-mode="inline"] .wx-chip{
+  display:inline-flex;align-items:center;gap:8px;margin-left:auto;
+  font-size:1.2rem;color:var(--text-dim);
+}
+.wx-chip .wx-icon{font-size:1.4rem;}
+.wx-chip .wx-div{width:1px;height:15px;background:var(--line);}
+
+/* --- rail modes: the rail must NOT move or narrow the centred board. It's
+   floated (absolute) into the side whitespace beside the unchanged column, so
+   the central view is identical to no-rail. On screens too narrow to hold the
+   rail in the gutter it drops in-flow above the board (media query). --- */
+.maze{position:relative;}
+.maze[data-wx-mode^="rail"] .maze-rail{
+  display:block;position:absolute;top:0;width:var(--rail-w);
+  border:1px solid var(--line);border-radius:10px;background:var(--pane);
+  padding:15px 16px;font-size:1.3rem;color:var(--text);
+}
+.maze[data-wx-mode="rail-right"] .maze-rail{left:100%;margin-left:var(--rail-gap);}
+.maze[data-wx-mode="rail-left"]  .maze-rail{right:100%;margin-right:var(--rail-gap);}
+
+.maze-rail .wx-rail-lbl{font-size:1.05rem;letter-spacing:.16em;text-transform:uppercase;color:var(--amber-dim);margin-bottom:10px;}
+.maze-rail .wx-rail-now{display:flex;align-items:center;gap:10px;}
+.maze-rail .wx-rail-now .wx-icon{font-size:2.6rem;}
+.maze-rail .wx-rail-now .wx-temp{font-size:2.6rem;font-weight:600;line-height:1;color:var(--title);}
+.maze-rail .wx-rail-cond{font-size:1.25rem;color:var(--text);}
+.maze-rail .wx-rail-meta{margin-top:7px;font-size:1.2rem;color:var(--text);}
+/* compact hourly strip — tighter cells so more hours fit */
+.maze-rail .wx-rail-hours{display:flex;justify-content:space-between;gap:2px;margin-top:14px;border-top:1px solid var(--line);padding-top:12px;}
+.maze-rail .wx-rail-hours .h{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:1.1rem;color:var(--text);}
+.maze-rail .wx-rail-hours .h .e{font-size:1.5rem;}
+.maze-rail .wx-rail-hours .h .d{color:var(--title);font-weight:500;}
+.maze-rail .wx-rail-days,.maze-rail .wx-rail-pollen{
+  display:flex;flex-direction:column;gap:6px;margin-top:14px;border-top:1px solid var(--line);padding-top:12px;
+}
+.maze-rail .pr{display:flex;justify-content:space-between;gap:8px;font-size:1.2rem;}
+.maze-rail .wx-rail-days .pr{color:var(--text);}
+.maze-rail .wx-rail-days .pr b{color:var(--title);font-weight:600;}
+/* pollen: top 3 visible; the checkbox + arrow label reveal the rest (no JS) */
+.wx-pollen-chk{position:absolute;opacity:0;pointer-events:none;}
+.wx-rail-pollen.has-more .pr:nth-of-type(n+4){display:none;}
+.wx-rail-pollen.has-more .wx-pollen-chk:checked ~ .pr{display:flex;}
+.wx-pollen-more{cursor:pointer;color:var(--amber);font-size:1.1rem;align-self:flex-start;}
+.wx-pollen-more .less{display:none;}
+.wx-pollen-chk:checked ~ .wx-pollen-more .more{display:none;}
+.wx-pollen-chk:checked ~ .wx-pollen-more .less{display:inline;}
+
+/* No room for the rail in the gutter: drop it in-flow above the board (full
+   width) so it never pushes the central column. */
+@media (max-width:1600px){
+  .maze[data-wx-mode^="rail"] .maze-rail{
+    position:static;width:auto;margin:0 0 16px;
+  }
+}
+
 /* ============================ Maze: board switch ========================== */
 /* Top-level Todos | Ideas tabs — a segmented control with the active tab on a
-   translucent teal fill + accent glow ("floating highlighted rectangle"). */
+   translucent teal fill + accent glow ("floating highlighted rectangle"). The
+   tabs/panels now live inside .maze-grid, so the radio combinators descend
+   through it rather than matching direct siblings. */
 .maze-tab-radio{position:absolute;opacity:0;pointer-events:none;}
+/* the tab row: the hugging segmented control + (inline mode) the weather chip
+   pushed to the gutter on the right. */
+.maze-tabline{display:flex;align-items:center;margin:0 0 16px;}
 .maze-tabs{
-  display:inline-flex;gap:3px;margin:0 0 16px;padding:3px;
+  display:inline-flex;align-items:center;gap:3px;padding:3px;
   background:var(--bg);border:1px solid var(--line);border-radius:9px;
 }
 .maze-tab{
@@ -788,13 +901,13 @@ pre.yml code{font-family:inherit;}
   font-size:1.3rem;user-select:none;transition:color .13s ease,background .13s ease,box-shadow .13s ease;
 }
 .maze-tab:hover{color:var(--text);}
-#mazeTabTodos:checked ~ .maze-tabs .maze-tab[for=mazeTabTodos],
-#mazeTabIdeas:checked ~ .maze-tabs .maze-tab[for=mazeTabIdeas]{
+#mazeTabTodos:checked ~ .maze-grid .maze-tab[for=mazeTabTodos],
+#mazeTabIdeas:checked ~ .maze-grid .maze-tab[for=mazeTabIdeas]{
   background:rgba(128,203,196,.16);color:var(--amber);box-shadow:0 0 12px rgba(128,203,196,.20);
 }
 .maze-panel{display:none;}
-#mazeTabTodos:checked ~ .maze-panel--todos,
-#mazeTabIdeas:checked ~ .maze-panel--ideas{display:block;}
+#mazeTabTodos:checked ~ .maze-grid .maze-panel--todos,
+#mazeTabIdeas:checked ~ .maze-grid .maze-panel--ideas{display:block;}
 
 /* ============================ Maze: idea board =========================== */
 .ideaboard{

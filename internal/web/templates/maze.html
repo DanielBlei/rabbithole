@@ -1,15 +1,36 @@
 {{define "content"}}
-<div class="maze">
-  <!-- Top-level board switch: Todos | Ideas. The radios live here (outside both
-       widget fragments) so the active board survives an htmx widget swap. -->
+<!-- data-wx-mode (subbar|inline|rail-right|rail-left|off) is set by the weather
+     IIFE in layout.html from the weather.mode localStorage pref; the CSS shows
+     the one matching weather container and lays out the rail column. -->
+<div class="maze" data-wx-mode="inline">
+  <!-- Top-level board switch: Todos | Ideas. The radios live here (outside the
+       grid + widget fragments) so the active board survives an htmx widget swap. -->
   <input type="radio" name="mazeTab" id="mazeTabTodos" class="maze-tab-radio" checked>
   <input type="radio" name="mazeTab" id="mazeTabIdeas" class="maze-tab-radio">
-  <div class="maze-tabs" role="tablist" aria-label="Maze boards">
-    <label class="maze-tab" for="mazeTabTodos">Tasks</label>
-    <label class="maze-tab" for="mazeTabIdeas">Ideas</label>
+
+  <!-- .maze-grid becomes a two-column grid in the rail modes (rail beside the
+       boards); a plain block otherwise. All weather containers are populated by
+       the weather IIFE in layout.html and stay empty/hidden on the Feed page. -->
+  <div class="maze-grid">
+    <!-- Right/left rail: full weather column. Shown only in rail-* modes. -->
+    <aside class="maze-rail" id="wxRail"></aside>
+
+    <div class="maze-main">
+      <!-- Flat sub-bar under the topbar. Shown only in subbar mode. -->
+      <div class="wx-subbar" id="wxSubbar"></div>
+
+      <div class="maze-tabline">
+        <div class="maze-tabs" role="tablist" aria-label="Maze boards">
+          <label class="maze-tab" for="mazeTabTodos">Tasks</label>
+          <label class="maze-tab" for="mazeTabIdeas">Ideas</label>
+        </div>
+        <!-- Condensed chip in the tab-row gutter. Shown only in inline mode. -->
+        <span class="wx-chip" id="wxChip"></span>
+      </div>
+      <div class="maze-panel maze-panel--todos">{{template "todoWidget" .}}</div>
+      <div class="maze-panel maze-panel--ideas">{{template "ideaWidget" .}}</div>
+    </div>
   </div>
-  <div class="maze-panel maze-panel--todos">{{template "todoWidget" .}}</div>
-  <div class="maze-panel maze-panel--ideas">{{template "ideaWidget" .}}</div>
 </div>
 {{end}}
 
