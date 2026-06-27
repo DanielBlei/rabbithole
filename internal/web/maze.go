@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
 	"sort"
@@ -28,7 +29,26 @@ type mazeData struct {
 	OpenCount  int
 	DueCount   int
 	DoneCount  int
-	AllTags    []string // every tag in use, sorted — drives the dynamic tag filter
+	AllTags    []string   // every tag in use, sorted — drives the dynamic tag filter
+	Ideas      []ideaView // the idea board (sticky notes), manual order
+	IdeaColors []string   // the note palette — drives the compose card's colour picker
+}
+
+// ideaView is the per-note view model for the idea board. Ago is a precomputed
+// relative time; Palette is the colour swatches the edit panel renders (one per
+// IdeaColors entry, with On marking the note's current colour).
+type ideaView struct {
+	ID      int64
+	Body    string
+	Color   string
+	Ago     string
+	Palette []ideaSwatch
+}
+
+// ideaSwatch is one colour option in a note's edit-mode palette.
+type ideaSwatch struct {
+	Name string
+	On   bool
 }
 
 // todoView is the per-task view model. DueClass is precomputed (rather than
@@ -80,6 +100,10 @@ func (s *Web) mazeData(ctx context.Context) (mazeData, error) {
 	if err != nil {
 		return mazeData{}, err
 	}
+	ideas, err := s.db.ListIdeas(ctx)
+	if err != nil {
+		return mazeData{}, err
+	}
 
 	today := startOfDay(time.Now())
 	openViews := make([]todoView, len(open))
@@ -102,7 +126,47 @@ func (s *Web) mazeData(ctx context.Context) (mazeData, error) {
 		DueCount:   len(due),
 		DoneCount:  len(done),
 		AllTags:    collectTags(open, done),
+		Ideas:      toIdeaViews(ideas, time.Now()),
+		IdeaColors: store.IdeaColors,
 	}, nil
+}
+
+// toIdeaViews builds the idea board view models, precomputing each note's
+// relative-time label and colour palette so the template stays declarative.
+func toIdeaViews(ideas []store.Idea, now time.Time) []ideaView {
+	views := make([]ideaView, len(ideas))
+	for i, idea := range ideas {
+		palette := make([]ideaSwatch, len(store.IdeaColors))
+		for j, c := range store.IdeaColors {
+			palette[j] = ideaSwatch{Name: c, On: c == idea.Color}
+		}
+		views[i] = ideaView{
+			ID:      idea.ID,
+			Body:    idea.Body,
+			Color:   idea.Color,
+			Ago:     relTime(idea.UpdatedAt, now),
+			Palette: palette,
+		}
+	}
+	return views
+}
+
+// relTime renders a compact "how long ago" label for a note's last change:
+// "just now", "5m", "2h", "3d", then a calendar date once it's over a week old.
+func relTime(t, now time.Time) string {
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d < 7*24*time.Hour:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	default:
+		return t.Format("2 Jan")
+	}
 }
 
 // collectTags returns the sorted, deduped union of tags across every task — the
@@ -272,6 +336,112 @@ func (s *Web) renderTodoWidget(w http.ResponseWriter, r *http.Request) {
 	if err := mazeTmpl.ExecuteTemplate(w, "todoWidget", data); err != nil {
 		// Status is likely already written; log rather than double-write.
 		log.Error().Err(err).Msg("render todo widget")
+	}
+}
+
+// handleAddIdea creates a sticky note from the composer (just a body — the store
+// assigns a random colour), then re-renders the whole idea widget so the new note
+// lands at the front of the board.
+func (s *Web) handleAddIdea(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.db.AddIdea(r.Context(), r.FormValue("body"), r.FormValue("color")); err != nil {
+		if errors.Is(err, store.ErrInvalidIdea) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.renderIdeaWidget(w, r)
+}
+
+// handleUpdateIdea saves an edited note's body and colour, then re-renders the
+// widget (which returns the note to read mode — the fresh DOM has no edit state).
+func (s *Web) handleUpdateIdea(w http.ResponseWriter, r *http.Request) {
+	id, err := ideaID(r)
+	if err != nil {
+		http.Error(w, "invalid idea id", http.StatusBadRequest)
+		return
+	}
+	if _, err := s.db.UpdateIdea(r.Context(), id, r.FormValue("body"), r.FormValue("color")); err != nil {
+		httpIdeaError(w, err)
+		return
+	}
+	s.renderIdeaWidget(w, r)
+}
+
+// handleDeleteIdea soft-deletes a note (the row stays in the DB, just hidden),
+// then re-renders the widget so the note drops out of the board.
+func (s *Web) handleDeleteIdea(w http.ResponseWriter, r *http.Request) {
+	id, err := ideaID(r)
+	if err != nil {
+		http.Error(w, "invalid idea id", http.StatusBadRequest)
+		return
+	}
+	if err := s.db.DeleteIdea(r.Context(), id); err != nil {
+		httpIdeaError(w, err)
+		return
+	}
+	s.renderIdeaWidget(w, r)
+}
+
+// handleReorderIdeas persists a drag-and-drop reorder. The client posts the new
+// left-to-right id sequence as a comma-joined "ids" field; the DOM is already in
+// that order, so there's nothing to swap back — a 204 keeps htmx from touching
+// the board mid-interaction.
+func (s *Web) handleReorderIdeas(w http.ResponseWriter, r *http.Request) {
+	ids := parseIDs(r.FormValue("ids"))
+	if err := s.db.ReorderIdeas(r.Context(), ids); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// renderIdeaWidget re-renders the idea widget fragment — the swap response shared
+// by the add/edit/delete idea mutations.
+func (s *Web) renderIdeaWidget(w http.ResponseWriter, r *http.Request) {
+	data, err := s.mazeData(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := mazeTmpl.ExecuteTemplate(w, "ideaWidget", data); err != nil {
+		// Status is likely already written; log rather than double-write.
+		log.Error().Err(err).Msg("render idea widget")
+	}
+}
+
+// ideaID reads the {id} path value as an int64.
+func ideaID(r *http.Request) (int64, error) {
+	return strconv.ParseInt(r.PathValue("id"), 10, 64)
+}
+
+// parseIDs splits the comma-joined id list from the reorder request, dropping any
+// non-numeric entries rather than failing the whole reorder.
+func parseIDs(v string) []int64 {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	var ids []int64
+	for _, part := range strings.Split(v, ",") {
+		if n, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64); err == nil {
+			ids = append(ids, n)
+		}
+	}
+	return ids
+}
+
+// httpIdeaError maps a store error to a response: a missing note is a 404, a bad
+// body a 400, anything else a 500.
+func httpIdeaError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, store.ErrIdeaNotFound):
+		http.Error(w, err.Error(), http.StatusNotFound)
+	case errors.Is(err, store.ErrInvalidIdea):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	default:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 

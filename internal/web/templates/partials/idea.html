@@ -1,0 +1,63 @@
+{{define "ideaWidget"}}
+<section class="pane idea-pane" id="ideaWidget" hx-target="#ideaWidget" hx-swap="outerHTML">
+  <div class="pane__bar">
+    <span class="pane__prompt">maze</span>:<span class="pane__path">~/ideas</span>$&nbsp;<span class="pane__cmd">ideas --notes {{len .Ideas}}</span><span class="blink">_</span>
+  </div>
+
+  <!-- Sticky-note grid: a compose card first, then notes newest-first. Each note
+       is draggable (native HTML5 DnD, see maze.html scripts) and reorders within
+       the board; the compose card stays put. -->
+  <div class="ideaboard">
+    <form class="note note--new" hx-post="/ideas" autocomplete="off">
+      <textarea class="note__new-input" name="body" maxlength="280" rows="3" placeholder="+ new note&hellip;" aria-label="New note" required></textarea>
+      <!-- Optional colour: pick one or leave it for a random colour on save. -->
+      <div class="note__new-foot">
+        <div class="idea__palette" role="radiogroup" aria-label="Note colour (optional)">
+          {{range .IdeaColors}}
+          <label class="idea__swatch note--{{.}}" title="{{.}}">
+            <input type="radio" name="color" value="{{.}}" aria-label="{{.}}">
+          </label>
+          {{end}}
+        </div>
+        <button class="note__new-btn" type="submit">add</button>
+      </div>
+    </form>
+    {{range .Ideas}}{{template "idea" .}}{{end}}
+  </div>
+</section>
+{{end}}
+
+{{define "idea"}}
+<!-- Read mode shows just the body + an edit pencil (bottom-right). The hidden
+     checkbox flips the card into edit mode (textarea + colour palette + delete)
+     via CSS only; a save re-renders the widget which resets it to read mode. -->
+<article class="note note--{{.Color}}" id="idea-{{.ID}}" data-id="{{.ID}}" draggable="true">
+  <input type="checkbox" id="idea-edit-{{.ID}}" class="idea__edit-chk">
+
+  <div class="idea__read">
+    <p class="idea__body">{{.Body}}</p>
+    <div class="idea__foot">
+      <span class="idea__ago">{{.Ago}}</span>
+      <label class="idea__edit-btn" for="idea-edit-{{.ID}}" title="Edit note" aria-label="Edit note">&#9998; edit</label>
+    </div>
+  </div>
+
+  <form class="idea__edit" hx-post="/ideas/{{.ID}}" autocomplete="off">
+    <textarea class="idea__input" name="body" maxlength="280" rows="4" aria-label="Note text" required>{{.Body}}</textarea>
+    <div class="idea__palette" role="radiogroup" aria-label="Note colour">
+      {{range .Palette}}
+      <label class="idea__swatch note--{{.Name}}" title="{{.Name}}">
+        <input type="radio" name="color" value="{{.Name}}"{{if .On}} checked{{end}} aria-label="{{.Name}}">
+      </label>
+      {{end}}
+    </div>
+    <div class="idea__actions">
+      <button type="button" class="idea__del" hx-delete="/ideas/{{.ID}}">delete</button>
+      <span class="idea__actions-right">
+        <label class="idea__cancel" for="idea-edit-{{.ID}}">cancel</label>
+        <button type="submit" class="idea__save">save</button>
+      </span>
+    </div>
+  </form>
+</article>
+{{end}}

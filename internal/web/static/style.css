@@ -774,3 +774,132 @@ pre.yml code{font-family:inherit;}
 @media (prefers-reduced-motion: reduce){
   .todo__check,.todo__del{transition:none;}
 }
+
+/* ============================ Maze: board switch ========================== */
+/* Top-level Todos | Ideas tabs — a segmented control with the active tab on a
+   translucent teal fill + accent glow ("floating highlighted rectangle"). */
+.maze-tab-radio{position:absolute;opacity:0;pointer-events:none;}
+.maze-tabs{
+  display:inline-flex;gap:3px;margin:0 0 16px;padding:3px;
+  background:var(--bg);border:1px solid var(--line);border-radius:9px;
+}
+.maze-tab{
+  padding:7px 18px;border-radius:6px;color:var(--text-dim);cursor:pointer;
+  font-size:1.3rem;user-select:none;transition:color .13s ease,background .13s ease,box-shadow .13s ease;
+}
+.maze-tab:hover{color:var(--text);}
+#mazeTabTodos:checked ~ .maze-tabs .maze-tab[for=mazeTabTodos],
+#mazeTabIdeas:checked ~ .maze-tabs .maze-tab[for=mazeTabIdeas]{
+  background:rgba(128,203,196,.16);color:var(--amber);box-shadow:0 0 12px rgba(128,203,196,.20);
+}
+.maze-panel{display:none;}
+#mazeTabTodos:checked ~ .maze-panel--todos,
+#mazeTabIdeas:checked ~ .maze-panel--ideas{display:block;}
+
+/* ============================ Maze: idea board =========================== */
+.ideaboard{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));
+  gap:14px;align-items:start;padding:14px;
+}
+
+/* sticky note card — translucent fill + colour border, same idea as --tag-cN.
+   --nb is the note's accent; --nb-bg / --nb-border its tinted surface. */
+.note{
+  position:relative;display:flex;flex-direction:column;min-height:172px;
+  padding:14px 15px 12px;border-radius:9px;
+  background:var(--nb-bg);border:1px solid var(--nb-border);border-top:3px solid var(--nb);
+  box-shadow:0 2px 10px #0003;transition:transform .12s ease,box-shadow .12s ease;
+  cursor:grab;
+}
+.note:hover{transform:translateY(-2px);box-shadow:0 6px 18px #0005;}
+.note--dragging{opacity:.5;cursor:grabbing;transform:none;box-shadow:0 0 0 1px var(--nb);}
+
+/* read mode: body + a footer with the relative time and an edit pencil */
+.idea__read{display:flex;flex-direction:column;flex:1;}
+/* body text matches a Task title (1.4rem / weight 500) so it reads crisp, not pasty */
+.idea__body{margin:0;color:var(--title);font-size:1.4rem;font-weight:500;line-height:1.5;flex:1;white-space:pre-wrap;word-break:break-word;}
+.idea__foot{display:flex;align-items:center;justify-content:space-between;margin-top:9px;}
+.idea__ago{color:var(--text-dim);font-size:1.0rem;}
+.idea__edit-btn{
+  margin-left:auto;color:var(--text-dim);cursor:pointer;font-size:1.05rem;line-height:1;
+  padding:3px 9px;border-radius:6px;border:1px solid var(--line);opacity:.55;
+  transition:opacity .12s ease,color .12s ease,background .12s ease,border-color .12s ease;
+}
+.note:hover .idea__edit-btn,.idea__edit-btn:focus-visible{opacity:1;}
+.idea__edit-btn:hover{color:var(--amber);background:rgba(128,203,196,.12);border-color:var(--amber-dim);}
+
+/* edit mode: revealed by the per-note checkbox (CSS only) */
+.idea__edit-chk{position:absolute;opacity:0;pointer-events:none;}
+.idea__edit{display:none;flex-direction:column;gap:9px;flex:1;}
+.idea__edit-chk:checked ~ .idea__read{display:none;}
+.idea__edit-chk:checked ~ .idea__edit{display:flex;}
+/* while editing, the card shouldn't look draggable */
+.note:has(.idea__edit-chk:checked){cursor:default;}
+.idea__input{
+  width:100%;resize:vertical;min-height:74px;
+  background:rgba(0,0,0,.18);color:var(--title);border:1px solid var(--nb-border);
+  border-radius:6px;padding:7px 8px;font-family:inherit;font-size:1.2rem;line-height:1.5;
+}
+.idea__input:focus{outline:none;border-color:var(--nb);}
+
+/* colour palette — radios styled as swatches, only shown in edit mode */
+.idea__palette{display:flex;gap:7px;flex-wrap:wrap;}
+.idea__swatch{
+  width:18px;height:18px;border-radius:50%;background:var(--nb);
+  cursor:pointer;border:1px solid #0005;opacity:.55;transition:opacity .12s ease,box-shadow .12s ease;
+}
+.idea__swatch:hover{opacity:.85;}
+/* selection ring follows the actual radio, so a click updates it with no JS */
+.idea__swatch:has(input:checked){opacity:1;box-shadow:0 0 0 2px var(--card),0 0 0 3px var(--nb);}
+.idea__swatch input{position:absolute;opacity:0;pointer-events:none;}
+
+.idea__actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto;}
+.idea__actions-right{display:flex;align-items:center;gap:8px;}
+.idea__save{
+  background:transparent;border:1px solid var(--amber-dim);color:var(--amber);
+  font-family:inherit;font-size:1.1rem;padding:4px 13px;border-radius:999px;cursor:pointer;
+}
+.idea__save:hover{background:rgba(128,203,196,.1);}
+.idea__cancel{color:var(--text-dim);font-size:1.1rem;cursor:pointer;padding:4px 2px;}
+.idea__cancel:hover{color:var(--text);}
+.idea__del{
+  background:transparent;border:0;color:var(--text-dim);font-family:inherit;font-size:1.1rem;
+  cursor:pointer;padding:4px 2px;
+}
+.idea__del:hover{color:var(--warn);}
+
+/* compose card — a dashed sticky that invites a new note */
+.note--new{
+  background:transparent;border:1px dashed var(--line);border-top:1px dashed var(--line);
+  box-shadow:none;cursor:default;gap:8px;transition:background .15s ease,border-color .15s ease;
+}
+.note--new:hover{transform:none;box-shadow:none;border-color:var(--amber-dim);}
+/* once a colour is picked, the compose card adopts it (live preview); stays grey
+   dashed until then. The .note--<colour> class the JS adds resolves --nb. */
+.note--new:has(.idea__palette input:checked){
+  background:var(--nb-bg);border:1px solid var(--nb-border);border-top:3px solid var(--nb);
+}
+.note__new-input{
+  flex:1;resize:none;background:transparent;border:0;color:var(--title);
+  font-family:inherit;font-size:1.4rem;font-weight:500;line-height:1.5;
+}
+.note__new-input::placeholder{color:var(--text-dim);}
+.note__new-input:focus{outline:none;}
+.note__new-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:auto;}
+.note__new-btn{
+  background:transparent;border:1px solid var(--amber-dim);color:var(--amber);
+  font-family:inherit;font-size:1.1rem;padding:4px 14px;border-radius:999px;cursor:pointer;margin-left:auto;
+}
+.note__new-btn:hover{background:rgba(128,203,196,.1);}
+
+/* note colour tokens — shared with store.IdeaColors (amber/rose/green/cyan/violet/coral) */
+.note--amber {--nb:#FFCB6B;--nb-bg:rgba(255,203,107,.09);--nb-border:rgba(255,203,107,.34);}
+.note--rose  {--nb:#F78FB3;--nb-bg:rgba(247,143,179,.09);--nb-border:rgba(247,143,179,.34);}
+.note--green {--nb:#C3E88D;--nb-bg:rgba(195,232,141,.09);--nb-border:rgba(195,232,141,.34);}
+.note--cyan  {--nb:#89DDFF;--nb-bg:rgba(137,221,255,.09);--nb-border:rgba(137,221,255,.34);}
+.note--violet{--nb:#C792EA;--nb-bg:rgba(199,146,234,.09);--nb-border:rgba(199,146,234,.34);}
+.note--coral {--nb:#F78C6C;--nb-bg:rgba(247,140,108,.09);--nb-border:rgba(247,140,108,.34);}
+
+@media (prefers-reduced-motion: reduce){
+  .note,.idea__edit-btn,.idea__swatch,.maze-tab{transition:none;}
+}
