@@ -87,6 +87,10 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /todos/{id}/toggle", s.handleToggleTodo)
 	mux.HandleFunc("POST /todos/{id}/tags", s.handleSetTodoTags)
 	mux.HandleFunc("DELETE /todos/{id}", s.handleDeleteTodo)
+	mux.HandleFunc("POST /ideas", s.handleAddIdea)
+	mux.HandleFunc("POST /ideas/reorder", s.handleReorderIdeas)
+	mux.HandleFunc("POST /ideas/{id}", s.handleUpdateIdea)
+	mux.HandleFunc("DELETE /ideas/{id}", s.handleDeleteIdea)
 
 	static, err := fs.Sub(staticFS, "static")
 	if err != nil {

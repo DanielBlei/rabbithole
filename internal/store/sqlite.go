@@ -134,6 +134,18 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("migrate todos schema: %w", err)
 		}
 	}
+	if _, err := db.Exec(ideaSchema); err != nil {
+		// Maze idea board, kept in ideas.go; idempotent (IF NOT EXISTS).
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate ideas schema: %w", err)
+	}
+	for _, stmt := range ideaAddColumns {
+		// Additive idea migrations — run after ideaSchema, mirroring todoAddColumns.
+		if _, err := db.Exec(stmt); err != nil && !isDuplicateColumn(err) {
+			_ = db.Close()
+			return nil, fmt.Errorf("migrate ideas schema: %w", err)
+		}
+	}
 	return &Store{db: db}, nil
 }
 

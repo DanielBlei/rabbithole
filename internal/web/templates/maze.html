@@ -1,5 +1,16 @@
 {{define "content"}}
-{{template "todoWidget" .}}
+<div class="maze">
+  <!-- Top-level board switch: Todos | Ideas. The radios live here (outside both
+       widget fragments) so the active board survives an htmx widget swap. -->
+  <input type="radio" name="mazeTab" id="mazeTabTodos" class="maze-tab-radio" checked>
+  <input type="radio" name="mazeTab" id="mazeTabIdeas" class="maze-tab-radio">
+  <div class="maze-tabs" role="tablist" aria-label="Maze boards">
+    <label class="maze-tab" for="mazeTabTodos">Tasks</label>
+    <label class="maze-tab" for="mazeTabIdeas">Ideas</label>
+  </div>
+  <div class="maze-panel maze-panel--todos">{{template "todoWidget" .}}</div>
+  <div class="maze-panel maze-panel--ideas">{{template "ideaWidget" .}}</div>
+</div>
 {{end}}
 
 {{define "scripts"}}
@@ -170,6 +181,40 @@
     if (tp) { var input = tp.querySelector('.tagput__input'); tpAdd(tp, input.value); input.value = ''; }
   }, true);
 
+  // ---- idea note: live colour preview ---------------------------------
+  // Picking a swatch recolours its note immediately (the .note--<colour> class is
+  // the single source of the card's look), so editing feels fluid; the server
+  // records the choice on save. Delegated so it works on swapped-in notes too.
+  document.addEventListener('change', function (e) {
+    var inp = e.target;
+    if (!inp.matches || !inp.matches('.idea__palette input[name=color]')) return;
+    var note = inp.closest('.note');
+    if (!note) return;
+    Array.prototype.slice.call(note.classList).forEach(function (c) {
+      if (c.indexOf('note--') === 0 && c !== 'note--new' && c !== 'note--dragging') note.classList.remove(c);
+    });
+    note.classList.add('note--' + inp.value);
+  });
+
+  // ---- swap boards by scrolling the empty frame ------------------------
+  // Wheeling anywhere on the Maze page that ISN'T a board pane or the topbar —
+  // the tab row, the page margins, the area below the panes — flips between Tasks
+  // and Ideas by scroll direction (down → Ideas, up → Tasks), with a short cooldown
+  // so one gesture is one swap. Scrolling over a board pane is left untouched.
+  var lastSwap = 0;
+  document.addEventListener('wheel', function (e) {
+    if (!document.querySelector('.maze') || (e.target.closest && (e.target.closest('.pane') || e.target.closest('.topbar')))) return;
+    var now = Date.now();
+    if (now - lastSwap < 450) { e.preventDefault(); return; }
+    var todos = document.getElementById('mazeTabTodos');
+    var ideas = document.getElementById('mazeTabIdeas');
+    if (!todos || !ideas) return;
+    var changed = false;
+    if (e.deltaY > 0 && !ideas.checked) { ideas.checked = true; changed = true; }
+    else if (e.deltaY < 0 && !todos.checked) { todos.checked = true; changed = true; }
+    if (changed) { lastSwap = now; e.preventDefault(); }
+  }, { passive: false });
+
   // ---- tag filter (client-side OR, across all tab panels) -------------
   var selected = new Set();
   function applyFilter() {
@@ -198,10 +243,69 @@
     applyFilter();
   }
 
+  // ---- idea board: native drag-to-reorder -----------------------------
+  // The whole note is draggable; while a note is in edit mode (its checkbox is
+  // checked) dragging is suppressed so the textarea stays usable. On drop the new
+  // left-to-right order is POSTed to /ideas/reorder — the DOM is already in that
+  // order, so no swap-back is needed. Re-binds when the widget re-renders (guarded
+  // by board.dataset.dragReady so a todo-side swap doesn't double-bind).
+  function afterElement(board, x, y) {
+    var els = Array.prototype.slice.call(board.querySelectorAll('.note[draggable=true]:not(.note--dragging)'));
+    for (var i = 0; i < els.length; i++) {
+      var b = els[i].getBoundingClientRect();
+      if (y < b.top) return els[i];                       // pointer is above this row
+      if (y <= b.bottom && x < b.left + b.width / 2) return els[i]; // same row, left of centre
+    }
+    return null;                                          // past everything → append
+  }
+  function persistOrder(board) {
+    var ids = Array.prototype.slice.call(board.querySelectorAll('.note[draggable=true]'))
+      .map(function (n) { return n.dataset.id; }).filter(Boolean);
+    if (!ids.length) return;
+    fetch('/ideas/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'ids=' + encodeURIComponent(ids.join(','))
+    });
+  }
+  function initIdeas() {
+    var board = document.querySelector('#ideaWidget .ideaboard');
+    if (!board || board.dataset.dragReady) return;
+    board.dataset.dragReady = '1';
+    var dragEl = null;
+    board.addEventListener('dragstart', function (e) {
+      var n = e.target.closest && e.target.closest('.note[draggable=true]');
+      if (!n) return;
+      var chk = n.querySelector('.idea__edit-chk');
+      if (chk && chk.checked) { e.preventDefault(); return; } // don't drag while editing
+      dragEl = n;
+      setTimeout(function () { n.classList.add('note--dragging'); }, 0);
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', n.dataset.id || ''); } catch (_) {}
+      }
+    });
+    board.addEventListener('dragover', function (e) {
+      if (!dragEl) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      var before = afterElement(board, e.clientX, e.clientY);
+      if (before) board.insertBefore(dragEl, before);
+      else board.appendChild(dragEl);
+    });
+    board.addEventListener('dragend', function () {
+      if (!dragEl) return;
+      dragEl.classList.remove('note--dragging');
+      dragEl = null;
+      persistOrder(board);
+    });
+  }
+
   function initMaze() {
     document.querySelectorAll('[data-tagput]').forEach(initTagput);
     initFilter();
     applyTagColors();
+    initIdeas();
   }
   document.addEventListener('DOMContentLoaded', initMaze);
   document.body.addEventListener('htmx:afterSwap', function (e) {
