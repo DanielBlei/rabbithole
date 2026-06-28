@@ -3,6 +3,7 @@
 
   /* Material "Oceanic" palette */
   --bg:#1A2327;
+  --bg-2:#10171A;          /* darker foot of the page background fade */
   --pane:#263238;
   --line:#37474F;
   --card:#2E3C43;          /* elevated row surface, lighter than --pane */
@@ -21,18 +22,38 @@
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
 body{
-  background:var(--bg);color:var(--text);
+  /* radial fade: a faint lift up top easing down into a darker foot — gives the
+     page depth without a flat fill. `fixed` so it doesn't scroll with content. */
+  background:radial-gradient(120% 80% at 50% -10%, #233139 0%, var(--bg) 45%, var(--bg-2) 100%) fixed;
+  color:var(--text);
   font-family:'IBM Plex Mono',Menlo,Consolas,monospace;
   min-height:100vh;
 }
 a{color:inherit;text-decoration:none;}
 header.topbar{
+  position:relative;
   display:flex;align-items:center;justify-content:space-between;
   padding:16px 30px;border-bottom:1px solid var(--line);
 }
+/* Terminal mascot: a tiny ASCII bunny centred over the bar. Absolutely placed so
+   it doesn't affect the bar's height or the left/right clusters; non-interactive.
+   Ears teal, face dim, monospace + tight line-height so the two lines read as one
+   little creature. Hidden where the bar gets tight. */
+.topbar__bunny{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  margin:0;font-family:inherit;font-size:1.1rem;line-height:1.05;
+  text-align:center;letter-spacing:1px;color:var(--amber);
+  user-select:none;pointer-events:none;
+}
+@media (max-width: 920px){ .topbar__bunny{display:none;} }
 .topbar__left{display:flex;align-items:center;gap:10px;}
 .topbar__left .wordmark{font-size:1.4rem;color:var(--text-dim);}
-.topbar__left .wordmark b{color:var(--amber);font-weight:600;}
+/* Brand title: a display face (Archivo) set bright + uppercase so the wordmark
+   leads the bar instead of receding. The one place we step off IBM Plex Mono. */
+.topbar__left .wordmark b{
+  font-family:'Archivo',sans-serif;color:var(--title);font-weight:700;
+  font-size:1.6rem;letter-spacing:.04em;text-transform:uppercase;
+}
 .topbar__left .breaker{color:var(--line);font-size:1.4rem;}
 .topbar__nav{display:flex;align-items:center;gap:14px;font-size:1.2rem;letter-spacing:.05em;text-transform:uppercase;color:var(--text-dim);}
 /* Each page is a tab; the active one is marked with an underscore-style rule
@@ -100,7 +121,9 @@ header.topbar{
 .settings-sub:hover .settings-sub__trigger,
 .settings-sub:focus-within .settings-sub__trigger{color:var(--amber);background:rgba(128,203,196,.07);}
 
-.clk-row{display:flex;flex-wrap:wrap;gap:6px;padding:2px 2px 4px;}
+/* button rows / slider / location share the label's 12px left inset so the
+   controls line up under their section labels instead of sitting looser-left. */
+.clk-row{display:flex;flex-wrap:wrap;gap:6px;padding:2px 12px 6px;}
 .clk-btn{
   font-family:inherit;cursor:pointer;
   padding:5px 13px;border:1px solid var(--line);border-radius:999px;
@@ -112,7 +135,7 @@ header.topbar{
 
 /* Weather location: a search field + a geocoding-results list + the geolocation
    button. The text field is allowed here (it's a search box, not a select). */
-.wx-loc{display:flex;flex-direction:column;gap:6px;padding:2px 2px 4px;}
+.wx-loc{display:flex;flex-direction:column;gap:6px;padding:2px 12px 4px;}
 .wx-loc__input{
   font-family:inherit;font-size:1.1rem;
   padding:6px 11px;border:1px solid var(--line);border-radius:999px;
@@ -131,7 +154,7 @@ header.topbar{
 }
 .wx-loc__opt b{color:var(--text);font-weight:500;}
 
-.clk-slider{display:flex;flex-direction:column;gap:9px;padding:5px 5px 2px;}
+.clk-slider{display:flex;flex-direction:column;gap:9px;padding:5px 12px 2px;}
 .clk-slider__preview{
   font-size:1.2rem;color:var(--amber);text-align:center;min-height:1.4em;
   font-variant-numeric:tabular-nums;
@@ -903,7 +926,10 @@ pre.yml code{font-family:inherit;}
 .maze-tab:hover{color:var(--text);}
 #mazeTabTodos:checked ~ .maze-grid .maze-tab[for=mazeTabTodos],
 #mazeTabIdeas:checked ~ .maze-grid .maze-tab[for=mazeTabIdeas]{
-  background:rgba(128,203,196,.16);color:var(--amber);box-shadow:0 0 12px rgba(128,203,196,.20);
+  background:rgba(128,203,196,.20);color:var(--amber);
+  /* inset ring traces the tab's rounded box so the edges read crisp (the glow
+     follows the box), with a softer outer bloom so it isn't too strong. */
+  box-shadow:inset 0 0 0 1px rgba(128,203,196,.30), 0 0 10px 1px rgba(128,203,196,.20);
 }
 .maze-panel{display:none;}
 #mazeTabTodos:checked ~ .maze-grid .maze-panel--todos,
