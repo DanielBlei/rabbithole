@@ -6,12 +6,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>{{.Title}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/htmx.min.js" defer></script>
 </head>
 <body>
   <header class="topbar">
+    <!-- terminal mascot: a tiny ASCII bunny centred in the bar (absolute overlay,
+         so it never shifts the wordmark/clock); hidden on narrow screens. -->
+    <pre class="topbar__bunny" aria-hidden="true">(\_/)
+(&bull;_&bull;)</pre>
     <div class="topbar__left">
       <span class="wordmark"><b>The Rabbit Hole</b></span>
       <span class="breaker">/</span>
