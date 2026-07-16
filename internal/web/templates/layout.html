@@ -6,7 +6,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>{{.Title}}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Beyond the chrome faces (Archivo wordmark + Plex Mono terminal), the rest
+     are the user-selectable title/text faces; browsers only download the ones
+     the current prefs actually use. -->
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Manrope:wght@400;500;600&family=Space+Grotesk:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet">
+<!-- apply the stored font prefs before first paint so there's no flash of the
+     default face; the footer font IIFE owns the actual UI wiring. -->
+<script>
+(function(){
+  var m={'title':'data-ft','body':'data-fb','titleSize':'data-fts','bodySize':'data-fbs'};
+  for (var k in m){
+    var v=localStorage.getItem('font.'+k);
+    if (v) document.documentElement.setAttribute(m[k], v);
+  }
+})();
+</script>
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/htmx.min.js" defer></script>
 </head>
@@ -68,11 +82,13 @@
               <button type="button" class="clk-btn" data-wx-toggle="showPollen" aria-pressed="true">Pollen</button>
             </div>
             <div class="settings-panel__label">Layout</div>
-            <div class="clk-row">
-              <button type="button" class="clk-btn" data-wx-mode-btn="subbar">Sub-bar</button>
-              <button type="button" class="clk-btn" data-wx-mode-btn="inline">Inline</button>
-              <button type="button" class="clk-btn" data-wx-mode-btn="rail-left">Rail L</button>
-              <button type="button" class="clk-btn" data-wx-mode-btn="rail-right">Rail R</button>
+            <div class="wx-layout-step" data-wx-layout-step>
+              <button type="button" class="font-step__arrow" data-wx-layout-prev aria-label="Previous weather layout">&#8249;</button>
+              <div class="font-step__face">
+                <span class="font-step__name" data-wx-layout-name></span>
+                <span class="font-step__dots" data-wx-layout-dots aria-hidden="true"></span>
+              </div>
+              <button type="button" class="font-step__arrow" data-wx-layout-next aria-label="Next weather layout">&#8250;</button>
             </div>
             <div class="settings-panel__label">Units</div>
             <div class="clk-row">
@@ -88,6 +104,40 @@
               <input type="text" class="wx-loc__input" id="wxLocSearch" placeholder="Search a city&hellip;" autocomplete="off" spellcheck="false">
               <div class="wx-loc__results" id="wxLocResults" hidden></div>
               <button type="button" class="clk-btn" id="wxLocBtn">Use my location</button>
+            </div>
+          </div>
+        </div>
+        <div class="settings-panel__divider"></div>
+        <div class="settings-sub">
+          <a class="settings-panel__item settings-sub__trigger" href="#" role="button" tabindex="0">
+            Fonts <span class="settings-sub__caret">&#8249;</span>
+          </a>
+          <div class="settings-sub__flyout">
+            <div class="settings-panel__label">Titles</div>
+            <div class="font-step" data-font-step="title">
+              <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous titles font">&#8249;</button>
+              <div class="font-step__face">
+                <span class="font-step__name" data-font-name></span>
+                <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
+              </div>
+              <button type="button" class="font-step__arrow" data-font-next aria-label="Next titles font">&#8250;</button>
+            </div>
+            <div class="clk-slider">
+              <div class="clk-slider__preview font-preview--title">Follow the white rabbit</div>
+              <input type="range" min="0" max="4" step="1" value="1" data-font-range="titleSize" aria-label="Title size">
+            </div>
+            <div class="settings-panel__label">Text</div>
+            <div class="font-step" data-font-step="body">
+              <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous text font">&#8249;</button>
+              <div class="font-step__face">
+                <span class="font-step__name" data-font-name></span>
+                <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
+              </div>
+              <button type="button" class="font-step__arrow" data-font-next aria-label="Next text font">&#8250;</button>
+            </div>
+            <div class="clk-slider">
+              <div class="clk-slider__preview font-preview--body">Curiouser and curiouser&hellip;</div>
+              <input type="range" min="0" max="4" step="1" value="1" data-font-range="bodySize" aria-label="Text size">
             </div>
           </div>
         </div>
@@ -253,6 +303,10 @@
   <script>
   (function(){
     var CACHE_TTL = 30 * 60 * 1000;
+
+    // layout stepper cycle order + display names
+    var MODES = ['subbar','inline','rail-left','rail-right'];
+    var MODE_NAMES = {'subbar':'Sub-bar','inline':'Inline','rail-left':'Rail left','rail-right':'Rail right'};
 
     function wxGet(k, def){
       var v = localStorage.getItem('weather.'+k);
@@ -478,20 +532,16 @@
         btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
       var mode = wxGet('mode','inline');
-      document.querySelectorAll('[data-wx-mode-btn]').forEach(function(btn){
-        btn.classList.toggle('is-on', btn.getAttribute('data-wx-mode-btn') === mode);
-      });
+      var mi = MODES.indexOf(mode); if (mi < 0) mi = 1;
+      var layoutName = document.querySelector('[data-wx-layout-name]');
+      if (layoutName) layoutName.textContent = MODE_NAMES[MODES[mi]];
+      var layoutDots = document.querySelectorAll('[data-wx-layout-dots] i');
+      layoutDots.forEach(function(dot, j){ dot.classList.toggle('is-on', j === mi); });
     }
 
     document.addEventListener('click', function(e){
-      var t = e.target.closest && e.target.closest('[data-wx-toggle],[data-wx-mode-btn],[data-wx-unit]');
+      var t = e.target.closest && e.target.closest('[data-wx-toggle],[data-wx-unit]');
       if (!t) return;
-      var mode = t.getAttribute('data-wx-mode-btn');
-      if (mode){
-        wxSet('mode', mode);
-        applyMode(); syncWxControls();
-        return;
-      }
       var unit = t.getAttribute('data-wx-unit');
       if (unit){
         if (wxGet('unit','C') !== unit){
@@ -558,12 +608,96 @@
       });
     }
 
+    var wxLayoutDots = document.querySelector('[data-wx-layout-dots]');
+    if (wxLayoutDots) MODES.forEach(function(){ wxLayoutDots.appendChild(document.createElement('i')); });
+    function stepLayout(dir){
+      var mode = wxGet('mode','inline');
+      var i = MODES.indexOf(mode); if (i < 0) i = 1;
+      var next = MODES[(i + dir + MODES.length) % MODES.length];
+      wxSet('mode', next);
+      applyMode(); syncWxControls();
+    }
+    var wxLayoutPrev = document.querySelector('[data-wx-layout-prev]');
+    var wxLayoutNext = document.querySelector('[data-wx-layout-next]');
+    if (wxLayoutPrev) wxLayoutPrev.addEventListener('click', function(){ stepLayout(-1); });
+    if (wxLayoutNext) wxLayoutNext.addEventListener('click', function(){ stepLayout(1); });
+
     syncWxControls();
     applyMode();
     if (document.querySelector('.maze')) maybeRefresh();
     document.addEventListener('htmx:afterSwap', function(){
       if (document.querySelector('.maze')) renderWeather();
     });
+  })();
+  </script>
+
+  <!-- Font prefs: Titles / Text faces + sizes, edited from Settings → Fonts.
+       Pure presentation in localStorage (font.title/body/titleSize/bodySize),
+       reflected as data-ft/fb/fts/fbs attrs on <html> that the stylesheet's
+       user type layer resolves. Attributes live on the root element, so they
+       survive htmx swaps — no afterSwap re-init needed. The head script
+       already applied stored prefs pre-paint; this owns the UI wiring. -->
+  <script>
+  (function(){
+    var ATTRS    = {title:'data-ft', body:'data-fb', titleSize:'data-fts', bodySize:'data-fbs'};
+    var DEFAULTS = {title:'mono', body:'mono', titleSize:'m', bodySize:'m'};
+    var SIZES    = ['s','m','l','xl','xxl'];
+    // stepper cycle order + display names; the name renders in its own face
+    var FACES = ['mono','inter','plex','manrope','grotesk','serif'];
+    var NAMES = {mono:'Plex Mono', inter:'Inter', plex:'Plex Sans', manrope:'Manrope', grotesk:'Space Grotesk', serif:'Source Serif'};
+    var root = document.documentElement;
+
+    function get(k){ return localStorage.getItem('font.'+k) || DEFAULTS[k]; }
+    function set(k, v){
+      // defaults are stored as absence, so unset users carry no keys or attrs
+      if (v === DEFAULTS[k]) localStorage.removeItem('font.'+k);
+      else localStorage.setItem('font.'+k, v);
+      apply(); syncControls();
+    }
+    function apply(){
+      for (var k in ATTRS){
+        var v = get(k);
+        if (v === DEFAULTS[k]) root.removeAttribute(ATTRS[k]);
+        else root.setAttribute(ATTRS[k], v);
+      }
+    }
+
+    function syncControls(){
+      document.querySelectorAll('.font-step').forEach(function(st){
+        var face = get(st.getAttribute('data-font-step'));
+        var name = st.querySelector('[data-font-name]');
+        name.textContent = NAMES[face] || NAMES.mono;
+        name.className = 'font-step__name ff-' + (NAMES[face] ? face : 'mono');
+        var i = FACES.indexOf(face); if (i < 0) i = 0;
+        st.querySelectorAll('[data-font-dots] i').forEach(function(dot, j){
+          dot.classList.toggle('is-on', j === i);
+        });
+      });
+      document.querySelectorAll('[data-font-range]').forEach(function(range){
+        var i = SIZES.indexOf(get(range.getAttribute('data-font-range')));
+        range.value = i < 0 ? SIZES.indexOf('m') : i;
+      });
+    }
+
+    document.querySelectorAll('.font-step').forEach(function(st){
+      var key  = st.getAttribute('data-font-step');
+      var dots = st.querySelector('[data-font-dots]');
+      FACES.forEach(function(){ dots.appendChild(document.createElement('i')); });
+      function step(dir){
+        var i = FACES.indexOf(get(key)); if (i < 0) i = 0;
+        set(key, FACES[(i + dir + FACES.length) % FACES.length]);
+      }
+      st.querySelector('[data-font-prev]').addEventListener('click', function(){ step(-1); });
+      st.querySelector('[data-font-next]').addEventListener('click', function(){ step(1); });
+    });
+    document.querySelectorAll('[data-font-range]').forEach(function(range){
+      range.addEventListener('input', function(){
+        set(range.getAttribute('data-font-range'), SIZES[parseInt(range.value, 10)] || 'm');
+      });
+    });
+
+    apply();
+    syncControls();
   })();
   </script>
 
