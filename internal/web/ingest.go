@@ -3,9 +3,11 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -13,8 +15,8 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
-// ingestHistoryLimit is how many past runs the modal's history table shows.
-const ingestHistoryLimit = 6
+// ingestHistoryLimit is how many past runs one history page shows.
+const ingestHistoryLimit = 10
 
 // ingestBannerWindow is how long after a successful run the "run complete"
 // banner keeps rendering when the modal is opened.
@@ -47,6 +49,7 @@ type ingestLogLine struct {
 
 // ingestRunView is one ingest_history row shaped for the template.
 type ingestRunView struct {
+	ID      int64
 	Running bool
 	Status  string // running | ok | error | cancelled
 	When    string // relative start time
@@ -54,6 +57,15 @@ type ingestRunView struct {
 	Trigger string // manual | cron
 	Counts  store.IngestCounts
 	Error   string
+}
+
+// ingestHistRowData is one history row rendered on its own — the summary row
+// plus, when Expanded, its captured log. Backs the ingestHistRow fragment the
+// expand/collapse toggle swaps.
+type ingestHistRowData struct {
+	Run      ingestRunView
+	Expanded bool
+	Logs     []ingestLogLine
 }
 
 // ingestBodyData models the runner modal's swappable body: the live state, the
@@ -64,8 +76,14 @@ type ingestBodyData struct {
 	Lines      []ingestLogLine
 	Last       *ingestRunView // newest finished run; nil if never ran
 	ShowBanner bool           // fresh successful finish — offer the feed refresh
-	History    []ingestRunView
+	History    []ingestHistRowData
 	Chip       ingestChipData
+
+	HistPage     int  // zero-based page currently shown (poll re-uses it)
+	HistPrevPage int  // HistPage-1, the "newer" pager target
+	HistNextPage int  // HistPage+1, the "older" pager target and 1-based label
+	HistHasPrev  bool // a newer page exists (page > 0)
+	HistHasNext  bool // an older page exists
 }
 
 // ingestModalData wraps the body for the full-modal render. PromptUser feeds
@@ -93,8 +111,11 @@ type chromeData struct {
 func (s *Web) chrome(ctx context.Context) chromeData {
 	st := s.ing.Status()
 	if st.Running {
-		// A live run only pulses the side menu's dot and edge tab; no topbar chip.
-		return chromeData{IngDot: "run", IngSub: "running…", Running: true}
+		// A live run pulses the topbar chip, the side menu's dot and the edge tab.
+		return chromeData{
+			Chip:   ingestChipData{State: "running"},
+			IngDot: "run", IngSub: "running…", Running: true,
+		}
 	}
 	last, err := s.db.LastIngestRun(ctx)
 	if err != nil {
@@ -126,7 +147,7 @@ func (s *Web) chrome(ctx context.Context) chromeData {
 // handleIngest returns the runner modal fragment (opened from the side menu
 // into #modal), showing the current state — idle summary or live run.
 func (s *Web) handleIngest(w http.ResponseWriter, r *http.Request) {
-	body, err := s.ingestBody(r.Context())
+	body, err := s.ingestBody(r.Context(), histPageFromQuery(r))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -146,28 +167,60 @@ func (s *Web) handleIngestRun(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.renderIngestBody(w, r.Context())
+	s.renderIngestBody(w, r.Context(), histPageFromQuery(r))
 }
 
 // handleIngestCancel cancels the in-flight run, if any, and re-renders the
 // body. The run winds down asynchronously; polling picks up the final state.
 func (s *Web) handleIngestCancel(w http.ResponseWriter, r *http.Request) {
 	s.ing.Cancel()
-	s.renderIngestBody(w, r.Context())
+	s.renderIngestBody(w, r.Context(), histPageFromQuery(r))
 }
 
 // handleIngestStatus is the poll target: the modal body re-renders itself
 // every 2s while a run is live (the hx-get is only emitted in the running
 // state, so polling stops by itself when the run ends).
 func (s *Web) handleIngestStatus(w http.ResponseWriter, r *http.Request) {
-	s.renderIngestBody(w, r.Context())
+	s.renderIngestBody(w, r.Context(), histPageFromQuery(r))
+}
+
+// handleIngestRunLog expands (or collapses) one history row's captured log,
+// re-rendering just that row's ingestHistRow fragment. collapse=1 renders the
+// summary row alone; otherwise the log is fetched and parsed for display.
+func (s *Web) handleIngestRunLog(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad run id", http.StatusBadRequest)
+		return
+	}
+	run, lines, err := s.db.GetIngestRunWithLog(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrIngestRunNotFound) {
+			http.Error(w, "run not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	expanded := r.URL.Query().Get("collapse") != "1"
+	data := ingestHistRowData{Run: toIngestRunView(*run, time.Now()), Expanded: expanded}
+	if expanded {
+		for _, raw := range lines {
+			data.Logs = append(data.Logs, parseIngestLogLine(raw))
+		}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := feedTmpl.ExecuteTemplate(w, "ingestHistRow", data); err != nil {
+		log.Error().Err(err).Msg("render ingest history row")
+	}
 }
 
 // renderIngestBody writes the modal-body fragment plus the out-of-band chrome
 // updates, so every poll/mutation response also keeps the topbar chip, the
 // side menu's ingest item and the edge tab in sync on whatever page is open.
-func (s *Web) renderIngestBody(w http.ResponseWriter, ctx context.Context) {
-	body, err := s.ingestBody(ctx)
+func (s *Web) renderIngestBody(w http.ResponseWriter, ctx context.Context, page int) {
+	body, err := s.ingestBody(ctx, page)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -208,44 +261,80 @@ func (s *Web) writeIngestChrome(w http.ResponseWriter, ctx context.Context) {
 }
 
 // ingestBody assembles the modal body's view model from the manager snapshot
-// and the history table.
-func (s *Web) ingestBody(ctx context.Context) (ingestBodyData, error) {
+// and the requested history page. The top summary (last run, counts, banner,
+// chip) always reflects the newest runs, independent of which history page is
+// shown; only the History table pages.
+func (s *Web) ingestBody(ctx context.Context, page int) (ingestBodyData, error) {
 	st := s.ing.Status()
-	runs, err := s.db.ListIngestRuns(ctx, ingestHistoryLimit)
+	if page < 0 {
+		page = 0
+	}
+	history, hasMore, err := s.db.ListIngestRuns(ctx, ingestHistoryLimit, page*ingestHistoryLimit)
 	if err != nil {
 		return ingestBodyData{}, err
 	}
+	// On page 0 the history already starts at the newest run, so reuse it for
+	// the summary; deeper pages need a separate newest-page read.
+	newest := history
+	if page > 0 {
+		if newest, _, err = s.db.ListIngestRuns(ctx, ingestHistoryLimit, 0); err != nil {
+			return ingestBodyData{}, err
+		}
+	}
 
 	now := time.Now()
-	data := ingestBodyData{Running: st.Running}
+	data := ingestBodyData{
+		Running:      st.Running,
+		HistPage:     page,
+		HistPrevPage: page - 1,
+		HistNextPage: page + 1,
+		HistHasPrev:  page > 0,
+		HistHasNext:  hasMore,
+	}
 	if st.Running {
 		data.StartedAgo = agoPhrase(st.StartedAt, now)
 	}
 	for _, raw := range st.Lines {
 		data.Lines = append(data.Lines, parseIngestLogLine(raw))
 	}
-
-	for _, r := range runs {
-		v := toIngestRunView(r, now)
-		data.History = append(data.History, v)
-		if data.Last == nil && r.Status != store.IngestStatusRunning {
-			last := v
-			data.Last = &last
-			if r.Status == store.IngestStatusOK && r.FinishedAt != nil &&
-				now.Sub(*r.FinishedAt) < ingestBannerWindow {
-				data.ShowBanner = true
-			}
+	for _, r := range history {
+		data.History = append(data.History, ingestHistRowData{Run: toIngestRunView(r, now)})
+	}
+	// The summary panel tracks the newest finished run (skip a live one).
+	for _, r := range newest {
+		if r.Status == store.IngestStatusRunning {
+			continue
 		}
+		last := toIngestRunView(r, now)
+		data.Last = &last
+		if r.Status == store.IngestStatusOK && r.FinishedAt != nil &&
+			now.Sub(*r.FinishedAt) < ingestBannerWindow {
+			data.ShowBanner = true
+		}
+		break
 	}
 
 	data.Chip = ingestChip(st.Running, data.Last)
 	return data, nil
 }
 
-// ingestChip derives the topbar chip state: "failed" after an error, "warn"
-// after a cancel, hidden otherwise — including while running and after a successful run.
+// histPageFromQuery reads the zero-based history page from ?histPage=N,
+// clamping anything missing or invalid to 0.
+func histPageFromQuery(r *http.Request) int {
+	n, err := strconv.Atoi(r.URL.Query().Get("histPage"))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// ingestChip derives the topbar chip state: "running" while a run is live,
+// "failed" after an error, "warn" after a cancel, hidden otherwise (idle/ok).
 func ingestChip(running bool, last *ingestRunView) ingestChipData {
-	if running || last == nil {
+	if running {
+		return ingestChipData{State: "running"}
+	}
+	if last == nil {
 		return ingestChipData{}
 	}
 	switch last.Status {
@@ -261,6 +350,7 @@ func ingestChip(running bool, last *ingestRunView) ingestChipData {
 // toIngestRunView shapes one history row for display.
 func toIngestRunView(r store.IngestRun, now time.Time) ingestRunView {
 	v := ingestRunView{
+		ID:      r.ID,
 		Running: r.Status == store.IngestStatusRunning,
 		Status:  r.Status,
 		When:    agoPhrase(r.StartedAt, now),

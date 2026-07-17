@@ -190,6 +190,12 @@ func (m *Manager) execute(ctx context.Context, run *activeRun, buf *logBuffer, p
 	if ferr := m.db.FinishIngestRun(finishCtx, run.id, status, counts, msg); ferr != nil {
 		zlog.Error().Err(ferr).Int64("run", run.id).Msg("finalizing ingest history row failed")
 	}
+	// Persist the captured log so past runs stay inspectable, not just the
+	// latest (m.buf only holds the most recent run). Best-effort — a save
+	// failure must never fail the run.
+	if ferr := m.db.SaveIngestRunLog(finishCtx, run.id, buf.snapshot()); ferr != nil {
+		zlog.Error().Err(ferr).Int64("run", run.id).Msg("saving ingest run log failed")
+	}
 
 	m.mu.Lock()
 	m.active = nil

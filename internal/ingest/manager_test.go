@@ -86,7 +86,7 @@ func TestManagerRunLifecycle(t *testing.T) {
 	if err := m.Start(ctx, store.IngestTriggerManual); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
-	runs, err := m.db.ListIngestRuns(ctx, 10)
+	runs, _, err := m.db.ListIngestRuns(ctx, 10, 0)
 	if err != nil {
 		t.Fatalf("ListIngestRuns: %v", err)
 	}
