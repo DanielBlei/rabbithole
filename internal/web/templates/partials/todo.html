@@ -2,7 +2,7 @@
 <section class="pane todo-pane" id="todoWidget" hx-target="#todoWidget" hx-swap="outerHTML"
   data-all-tags="{{range $i, $t := .AllTags}}{{if $i}},{{end}}{{$t}}{{end}}">
   <div class="pane__bar">
-    <span class="pane__prompt">maze</span>:<span class="pane__path">~/todo</span>$&nbsp;<span class="pane__cmd">tasks --open {{.OpenCount}} --done {{.DoneCount}}</span><span class="blink">_</span>
+    <span class="pane__prompt">{{.PromptUser}}@rabbithole</span>:<span class="pane__path">~/tasks</span>$&nbsp;<span class="pane__cmd">tasks --open {{.OpenCount}} --done {{.DoneCount}}</span><span class="blink">_</span>
   </div>
 
   <!-- Open / Due / Completed tabs: hidden radios + label pills, CSS shows one

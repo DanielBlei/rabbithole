@@ -21,9 +21,9 @@ var itemsCmd = &cobra.Command{
 }
 
 var (
-	listStatus string
-	listSource string
-	listLimit  int
+	listStatus     string
+	listSource     string
+	listLimit      int
 	listSince      string
 	listBefore     string
 	listSort       string
@@ -44,7 +44,8 @@ func init() {
 		StringVar(&listSince, "since", "", "only items recorded within this long ago, e.g. 3d, 12h (default: 3d)")
 	listCmd.Flags().
 		StringVar(&listBefore, "before", "", "only items recorded earlier than this long ago, e.g. 3d (default: unbounded)")
-	listCmd.Flags().StringVar(&listSort, "sort", "", "sort order: score (default, best first), latest (newest first), or oldest (oldest first)")
+	listCmd.Flags().
+		StringVar(&listSort, "sort", "", "sort order: score (default, best first), latest (newest first), or oldest (oldest first)")
 	listCmd.Flags().BoolVar(&listBookmarked, "bookmarked", false, "show only bookmarked items")
 
 	sourcesCmd := &cobra.Command{
@@ -209,7 +210,13 @@ const defaultListSince = 3 * 24 * time.Hour
 // for a bare `items list`; an explicit --since overrides it, and --before pages
 // older without re-imposing the default.
 func resolveListFilter(defaultSince time.Duration) (store.ListFilter, error) {
-	filter := store.ListFilter{Status: listStatus, Source: listSource, Limit: listLimit, SortBy: listSort, Bookmarked: listBookmarked}
+	filter := store.ListFilter{
+		Status:     listStatus,
+		Source:     listSource,
+		Limit:      listLimit,
+		SortBy:     listSort,
+		Bookmarked: listBookmarked,
+	}
 	now := time.Now()
 
 	if listSince != "" {
@@ -253,7 +260,8 @@ func runList(cmd *cobra.Command, _ []string) error {
 		}
 		for _, r := range rows {
 			if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				scoreCell(r), r.Status, bookmarkCell(r), r.Source, truncate(r.Title, listTitleWidth), r.ID, r.Link); err != nil {
+				scoreCell(r), r.Status, bookmarkCell(r), r.Source,
+				truncate(r.Title, listTitleWidth), r.ID, r.Link); err != nil {
 				return err
 			}
 		}

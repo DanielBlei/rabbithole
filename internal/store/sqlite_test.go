@@ -63,7 +63,8 @@ func TestRecordReScoresUnscoredLink(t *testing.T) {
 
 	score := func() *int {
 		var s *int
-		if err := db.db.QueryRowContext(ctx, "SELECT llm_score FROM items WHERE link = ?", item.Link).Scan(&s); err != nil {
+		if err := db.db.QueryRowContext(ctx, "SELECT llm_score FROM items WHERE link = ?", item.Link).
+			Scan(&s); err != nil {
 			t.Fatalf("query score: %v", err)
 		}
 		return s
@@ -93,7 +94,8 @@ func TestRecordReScoresUnscoredLink(t *testing.T) {
 
 	// Still exactly one row for the link.
 	var count int
-	if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM items WHERE link = ?", item.Link).Scan(&count); err != nil {
+	if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM items WHERE link = ?", item.Link).
+		Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if count != 1 {
