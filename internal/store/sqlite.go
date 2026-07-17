@@ -146,6 +146,11 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("migrate ideas schema: %w", err)
 		}
 	}
+	if _, err := db.Exec(ingestSchema); err != nil {
+		// Ingest run history, kept in ingest.go; idempotent (IF NOT EXISTS).
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate ingest schema: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 
