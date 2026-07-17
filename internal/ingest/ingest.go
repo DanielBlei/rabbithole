@@ -29,6 +29,9 @@ type Outcome struct {
 	Fetched int           // items fetched across all feeds
 	Unseen  []feeds.Item  // fresh, not-yet-seen items considered for scoring
 	Results []rank.Result // every scored item, sorted best-first
+	Scored  int           // items the model scored, across all feeds
+	Skipped int           // items skipped as already scored
+	Failed  int           // items the model failed to score
 }
 
 // Run fetches every feed in cfg, then processes the feeds one at a time: each
@@ -148,6 +151,7 @@ func Run(
 	// Each feed selected its own results; re-sort the merged set so the digest
 	// is ordered best-first across every feed.
 	rank.SortResults(outcome.Results)
+	outcome.Scored, outcome.Skipped, outcome.Failed = totalScored, totalSkipped, totalFailed
 	log.Info().Int("feeds", len(cfg.Feeds)).Int("fetched", outcome.Fetched).
 		Int("scored", totalScored).Int("skipped", totalSkipped).Int("failed", totalFailed).
 		Int("selected", len(outcome.Results)).
@@ -194,7 +198,14 @@ func filterUnscored(ctx context.Context, db *store.Store, items []feeds.Item) ([
 
 // record persists every scored item's verdict. Each scored item is stamped with
 // the run day (digested_on), so the store retains when a score was produced.
-func record(ctx context.Context, db *store.Store, all []feeds.Item, scores map[string]rank.ItemScore, model string, day time.Time) error {
+func record(
+	ctx context.Context,
+	db *store.Store,
+	all []feeds.Item,
+	scores map[string]rank.ItemScore,
+	model string,
+	day time.Time,
+) error {
 	var entries []store.DigestEntry
 	for _, it := range all {
 		sc, ok := scores[it.ID]

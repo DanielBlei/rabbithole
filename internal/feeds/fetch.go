@@ -33,8 +33,6 @@ func FetchAll(ctx context.Context, sources []Source) []Item {
 		all []Item
 		wg  sync.WaitGroup
 	)
-	parser := gofeed.NewParser()
-
 	for _, src := range sources {
 		wg.Add(1)
 		go func(src Source) {
@@ -44,7 +42,9 @@ func FetchAll(ctx context.Context, sources []Source) []Item {
 
 			log.Debug().Str("feed", src.Name).Msg("fetching feed")
 			start := time.Now()
-			items, err := fetchOne(ctx, parser, src)
+			// gofeed.Parser lazily initializes internal state on first use and
+			// is not goroutine-safe, so each fetch gets its own (cheap) parser.
+			items, err := fetchOne(ctx, gofeed.NewParser(), src)
 			if err != nil {
 				log.Warn().Str("feed", src.Name).Err(err).Msg("skipping feed")
 				return
