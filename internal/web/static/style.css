@@ -12,6 +12,7 @@
   --warn:#FF5370;
   --gold:#FFCB6B;          /* bookmark accent — warm "keep for later", set apart from teal/green/red */
   --gold-dim:#7C6A41;
+  --blue:#82AAFF;          /* Oceanic blue — the shell prompt's path segment */
   --score-high:#C3E88D;
   --score-mid:#FFCB6B;
   --score-low:#FF5370;
@@ -79,14 +80,19 @@ header.topbar{
   font-size:1.6rem;letter-spacing:.04em;text-transform:uppercase;
 }
 .topbar__left .breaker{color:var(--line);font-size:1.4rem;}
-.topbar__nav{display:flex;align-items:center;gap:14px;font-size:1.2rem;letter-spacing:.05em;text-transform:uppercase;color:var(--text-dim);}
-/* Each page is a tab; the active one is marked with an underscore-style rule
-   beneath it (transparent on the others so the labels don't shift). */
-.topbar__nav a{padding-bottom:3px;border-bottom:2px solid transparent;transition:color .15s ease,border-color .15s ease;}
+/* Pages as a segmented pill control — a filled track with the active page
+   tinted teal, so the links unmistakably read as buttons (the bare-text nav
+   didn't). No sliding thumb: page switches are full navigations. */
+.topbar__nav{
+  display:flex;background:var(--fill);border-radius:999px;padding:3px;
+  font-size:1.1rem;letter-spacing:.05em;text-transform:uppercase;color:var(--text-dim);
+}
+.topbar__nav a{padding:4px 14px;border-radius:999px;transition:color .15s ease,background .15s ease;}
 .topbar__nav a:hover{color:var(--amber);}
-.topbar__nav a.active{color:var(--amber);border-bottom-color:var(--amber);}
-/* thin divider between pages so Feed and Maze read as distinct destinations */
-.topbar__nav-div{width:1px;height:13px;background:var(--line);}
+.topbar__nav a.active{
+  color:var(--amber);background:var(--tint);
+  box-shadow:inset 0 0 0 1px rgba(128,203,196,.22);
+}
 
 .topbar__right{position:relative;display:flex;align-items:center;gap:14px;}
 .clock{
@@ -240,11 +246,12 @@ header.topbar{
   padding:9px 14px;border-bottom:1px solid var(--line);
   font-size:1.25rem;color:var(--text-dim);
 }
-/* Faux shell prompt: user@host in accent, the run command brighter, so the bar
-   reads as this project's own terminal rather than generic chrome. */
-.pane__prompt{color:var(--amber);}
-.pane__path{color:var(--text-dim);}
-.pane__cmd{color:var(--text);}
+/* Faux shell prompt, classic zsh colouring: green user@host, blue path, dim
+   punctuation (inherited from the bar), bright command. Shared by the feed
+   pane, both maze widgets, and the ingest modal's title bar. */
+.pane__prompt{color:var(--score-high);}
+.pane__path{color:var(--blue);}
+.pane__cmd{color:var(--title);}
 
 .pane__filters{
   display:flex;flex-wrap:wrap;align-items:center;gap:18px;
@@ -589,6 +596,12 @@ header.topbar{
 
 /* Config viewer — a terminal-style frame that drops in over a dimmed page. */
 .modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:24px;}
+/* The page scrolls on the root element, so the modal lock must land there:
+   freeze <html> whenever #modal has content (class set by the observer in
+   layout.html; the :has() variant covers the pre-JS instant). */
+html:has(#modal:not(:empty)),
+html.modal-open,
+html.modal-open body{overflow:hidden;}
 .modal__backdrop{
   position:absolute;inset:0;background:rgba(0,0,0,.5);
   -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
@@ -614,13 +627,215 @@ header.topbar{
 .modal__close:hover{color:var(--amber);}
 .modal__error{padding:18px;color:var(--warn);font-size:1.3rem;}
 .modal__foot{padding:8px 14px;border-top:1px solid var(--line);color:var(--text-dim);font-size:1.1rem;}
-pre.yml{margin:0;overflow:auto;padding:16px 18px;font-size:1.25rem;line-height:1.65;color:var(--text);}
+/* min-height:0 lets the flex child shrink to the frame; without it the
+   content overflows the clipped frame and cannot scroll. */
+pre.yml{margin:0;min-height:0;overflow:auto;overscroll-behavior:contain;padding:16px 18px;font-size:1.25rem;line-height:1.65;color:var(--text);}
 pre.yml code{font-family:inherit;}
 .yml-comment{color:var(--text-dim);font-style:italic;}
 .yml-key{color:var(--amber);}
 .yml-string{color:var(--score-high);}
 .yml-num{color:var(--score-mid);}
 .yml-bool{color:var(--warn);}
+
+/* --- Hidden side menu ---------------------------------------------------- */
+/* Nothing lives on screen but a slim 3-line tab hugging the left edge below
+   the topbar; hovering the edge hot zone (or clicking the tab) slides out a
+   docked column that runs from the topbar's bottom edge to the viewport
+   floor — a proper side menu, not a floating window. It retracts on
+   mouse-leave / click-away / Escape / picking an item. The topbar keeps a
+   pinned height (--topbar-h) so the menu's top offset can't drift from it.
+   z-index: menu 45 (over the bar's 40, under the modal's 50), tab + hot zone
+   just beneath it. */
+:root{ --topbar-h:58px; }
+header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
+.nav-hot{position:fixed;left:0;top:var(--topbar-h);bottom:0;width:12px;z-index:44;}
+.navrail{
+  position:fixed;left:0;top:var(--topbar-h);bottom:0;z-index:45;width:250px;
+  overflow-y:auto;
+  display:flex;flex-direction:column;gap:3px;padding:12px 10px;
+  background:var(--overlay);
+  border-right:1px solid var(--hairline-strong);
+  -webkit-backdrop-filter:blur(22px) saturate(1.6);
+  backdrop-filter:blur(22px) saturate(1.6);
+  box-shadow:12px 0 28px rgba(0,0,0,.35), 28px 0 64px rgba(0,0,0,.22);
+  transform:translateX(-100%);
+  transition:transform .22s cubic-bezier(.2,.9,.3,1.05);
+}
+.navrail.open{transform:none;}
+.navrail__item{
+  position:relative;display:flex;align-items:center;gap:13px;
+  padding:9px 12px;border-radius:10px;white-space:nowrap;cursor:pointer;
+  background:none;border:0;font-family:inherit;color:var(--text);text-align:left;
+  overflow:hidden;text-overflow:ellipsis;
+  transition:background .13s ease;
+}
+.navrail__item:hover{background:var(--fill-hover);}
+.navrail__item--on{background:var(--tint);}
+.navrail__item--on::before{
+  content:"";position:absolute;left:0;top:8px;bottom:8px;width:2.5px;
+  border-radius:2px;background:var(--amber);
+}
+.navrail__gl{
+  position:relative;font-size:1.9rem;width:24px;flex:none;text-align:center;
+  color:var(--text-dim);line-height:1;
+}
+.navrail__item--on .navrail__gl{color:var(--amber);}
+.navrail__txt{min-width:0;}
+.navrail__nm{display:block;font-size:1.4rem;color:var(--title);}
+.navrail__item--on .navrail__nm{color:var(--amber);}
+.navrail__ds{display:block;font-size:1.1rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;}
+.navrail__div{height:1px;background:var(--hairline);margin:6px 14px;flex:none;}
+/* The ingest action's status dot rides the ⟳ glyph's corner. It only exists
+   for the states that need attention — pulsing while a run is live, red after
+   a failure. A healthy history renders no dot at all (no green anywhere). */
+.navrail__dot{position:absolute;right:-4px;top:-3px;width:7px;height:7px;border-radius:50%;}
+.navrail__dot--err{background:var(--warn);box-shadow:0 0 6px rgba(255,83,112,.4);}
+.navrail__dot--warn{background:var(--gold);box-shadow:0 0 6px rgba(255,203,107,.4);}
+.navrail__dot--run{background:var(--amber);animation:ing-pulse 1.1s ease-in-out infinite;}
+/* An incomplete run colours the whole item, not just the dot: red = error
+   (broken), gold = cancelled (didn't finish, nothing broke). */
+.navrail__item--err .navrail__gl,
+.navrail__item--err .navrail__nm,
+.navrail__item--err .navrail__ds{color:var(--warn);}
+.navrail__item--warn .navrail__gl,
+.navrail__item--warn .navrail__nm,
+.navrail__item--warn .navrail__ds{color:var(--gold);}
+
+/* The 3-line tab that summons the menu — mid-height at the very edge. It
+   mirrors the ingest state so trouble shows with the menu closed: red lines
+   on failure, pulsing while a run is live. Hidden while the menu is open. */
+.navtab{
+  position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:44;
+  display:flex;flex-direction:column;gap:4px;padding:14px 8px 14px 7px;
+  background:var(--fill);border:1px solid var(--hairline);border-left:0;
+  border-radius:0 8px 8px 0;cursor:pointer;
+  transition:background .15s ease,opacity .18s ease;
+}
+.navtab span{width:14px;height:1.5px;background:var(--text-dim);border-radius:2px;transition:background .15s ease;}
+.navtab:hover{background:var(--fill-hover);}
+.navtab:hover span{background:var(--amber);}
+.navtab--err span{background:var(--warn);}
+.navtab--err{box-shadow:0 0 10px rgba(255,83,112,.25);}
+.navtab--warn span{background:var(--gold);}
+.navtab--warn{box-shadow:0 0 10px rgba(255,203,107,.22);}
+.navtab--run span{background:var(--amber);}
+.navtab--run{animation:ing-pulse 1.1s ease-in-out infinite;}
+body.nav-open .navtab{opacity:0;pointer-events:none;}
+
+/* --- Ingest: ambient topbar chip ---------------------------------------- */
+/* A failure alarm, nothing more: only rendered visible after a failed run
+   (red), hidden otherwise — including while running (the drawer's pulsing dot
+   and the modal cover that). Updated out-of-band by ingest poll responses. */
+.ing-chip{
+  display:inline-flex;align-items:center;gap:6px;font-size:1.1rem;
+  padding:4px 10px;border-radius:6px;background:var(--fill);
+  cursor:pointer;white-space:nowrap;user-select:none;
+}
+.ing-chip i{width:7px;height:7px;border-radius:50%;flex:none;}
+.ing-chip--failed{color:var(--warn);}
+.ing-chip--failed i{background:var(--warn);box-shadow:0 0 6px rgba(255,83,112,.4);}
+.ing-chip--warn{color:var(--gold);}
+.ing-chip--warn i{background:var(--gold);box-shadow:0 0 6px rgba(255,203,107,.4);}
+@keyframes ing-pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+
+/* --- Ingest: runner modal ------------------------------------------------ */
+.modal__frame--ingest{width:min(640px,94vw);}
+/* Peek at the running config before triggering — swaps the modal to the
+   read-only config viewer (close it and reopen ingest from the bar). Styled
+   as a proper pill button so it doesn't hide in the footer text. */
+.modal__foot--ingest{display:flex;align-items:center;gap:10px;}
+.ing__cfg{
+  margin-left:auto;flex:none;
+  padding:4px 12px;border-radius:999px;
+  background:var(--fill);color:var(--text);
+  box-shadow:inset 0 0 0 1px var(--hairline-strong);
+  cursor:pointer;
+  transition:color .15s ease,background .15s ease,box-shadow .15s ease;
+}
+.ing__cfg:hover{
+  color:var(--amber);background:var(--tint);
+  box-shadow:inset 0 0 0 1px rgba(128,203,196,.35);
+}
+.ing{padding:14px 18px 16px;min-height:0;overflow-y:auto;overscroll-behavior:contain;}
+.ing__runline{display:flex;align-items:center;gap:9px;font-size:1.25rem;flex-wrap:wrap;}
+.ing__st{font-weight:500;}
+.ing__st--ok{color:var(--score-high);}
+.ing__st--err{color:var(--warn);}
+.ing__st--run{color:var(--amber);animation:ing-pulse 1.1s ease-in-out infinite;}
+.ing__sep{color:var(--line);}
+.ing__dim{color:var(--text-dim);}
+.ing__trigger{font-size:1rem;padding:1px 8px;border-radius:999px;background:var(--fill);color:var(--text-dim);}
+.ing__errline{margin-top:8px;font-size:1.15rem;color:var(--warn);}
+.ing__counts{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+.ing__cnt{background:var(--fill);border-radius:8px;padding:7px 12px;font-size:1.1rem;color:var(--text-dim);}
+.ing__cnt b{display:block;font-size:1.6rem;color:var(--title);font-weight:500;}
+.ing__cnt--new b{color:var(--amber);}
+.ing__cnt--warn b{color:var(--warn);}
+.ing__actions{display:flex;align-items:center;gap:10px;margin-top:14px;}
+.ing__btn{
+  font-family:inherit;font-size:1.2rem;border:0;border-radius:8px;
+  padding:8px 16px;cursor:pointer;transition:background .15s ease;
+}
+.ing__btn--run{
+  background:var(--tint);color:var(--amber);font-weight:500;
+  box-shadow:inset 0 0 0 1px rgba(128,203,196,.25);
+}
+.ing__btn--run:hover{background:rgba(128,203,196,.22);}
+.ing__btn--cancel{background:var(--fill);color:var(--warn);}
+.ing__btn--cancel:hover{background:var(--fill-hover);}
+.ing__log{margin-top:12px;border:1px solid var(--hairline);border-radius:8px;background:rgba(0,0,0,.28);}
+.ing__logbar{
+  display:flex;align-items:center;gap:8px;padding:5px 10px;font-size:1rem;
+  color:var(--text-dim);border-bottom:1px solid var(--hairline);
+  letter-spacing:.08em;text-transform:uppercase;
+}
+.ing__live{color:var(--amber);animation:ing-pulse 1.1s ease-in-out infinite;}
+.ing__lvl-pills{margin-left:auto;display:flex;gap:4px;text-transform:uppercase;}
+.ing__lvl-pills button{
+  font-family:inherit;font-size:inherit;text-transform:inherit;letter-spacing:inherit;
+  background:none;border:0;color:var(--text-dim);
+  padding:2px 10px;border-radius:999px;cursor:pointer;
+  transition:background .13s ease,color .13s ease;
+}
+.ing__lvl-pills button:hover{color:var(--text);}
+/* The picked level is a data-inglvl attribute on the modal frame (set by the
+   delegated pill JS) — the frame outlives the 2s body swaps, so the filter
+   holds across refreshes. No attribute means the default: info. */
+.modal__frame--ingest:not([data-inglvl="dbg"]) [data-ing-lvl="info"],
+.modal__frame--ingest[data-inglvl="dbg"] [data-ing-lvl="dbg"]{background:var(--tint);color:var(--amber);}
+/* The buffer always captures debug; the default INFO pill just hides it. */
+.modal__frame--ingest:not([data-inglvl="dbg"]) .ing-ln--dbg{display:none;}
+.ing__lines{height:210px;overflow-y:auto;overscroll-behavior:contain;padding:8px 10px;font-size:1.12rem;line-height:1.65;}
+.ing-ln{white-space:pre-wrap;word-break:break-word;}
+.ing-ln__ts{color:var(--text-dim);opacity:.7;}
+.ing-ln__lv{font-weight:600;}
+.ing-ln__lv--inf{color:var(--amber);}
+.ing-ln__lv--dbg{color:var(--text-dim);}
+.ing-ln__lv--wrn{color:var(--gold);}
+.ing-ln__lv--err{color:var(--warn);}
+.ing-ln__kv{color:var(--text-dim);}
+.ing-ln__kv b{color:var(--text);font-weight:400;}
+.ing__done{
+  display:flex;align-items:center;gap:10px;margin-top:12px;padding:9px 14px;
+  border-radius:8px;background:rgba(195,232,141,.08);
+  border:1px solid rgba(195,232,141,.2);color:var(--score-high);font-size:1.2rem;
+}
+.ing__done b{font-weight:600;}
+.ing__done a{margin-left:auto;color:var(--amber);border-bottom:1px dashed var(--amber-dim);}
+.ing__hist{margin-top:14px;}
+.ing__hist-lbl{
+  display:flex;align-items:center;gap:8px;font-size:1rem;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--text-dim);margin-bottom:6px;
+}
+.ing__hist-lbl::after{content:"";flex:1;height:1px;background:var(--hairline);}
+.ing__hist table{width:100%;border-collapse:collapse;font-size:1.12rem;}
+.ing__hist td{padding:5px 8px;color:var(--text-dim);border-top:1px solid var(--hairline);}
+.ing__hist tr:first-child td{border-top:0;}
+.ing__hist-when{color:var(--text);white-space:nowrap;}
+.ing__hist-st--ok{color:var(--score-high);}
+.ing__hist-st--err{color:var(--warn);}
+.ing__hist-st--run{color:var(--amber);}
+.ing__hist-took{white-space:nowrap;}
 
 /* ── Maze: the day-to-day tools home. First widget is the todo board. ────────
    Reuses the .pane terminal frame from the feed; the pieces below are the
@@ -1134,9 +1349,13 @@ pre.yml code{font-family:inherit;}
    every minor text inside them (times, source lines, tab labels, chips,
    buttons, inputs), so nothing gets missed. Titles re-pin --font-title above;
    code re-pins mono below. Mono chrome is what sits AROUND the cards: topbar,
-   prompt/filter/nav bars, board tabs, tiles, widgets, settings, YAML. .md and
-   textarea are kept as a safety net for note surfaces outside a card. */
-.row,.todo,.todo-add,.todo-empty,.note,.md,textarea{font-family:var(--font-body);}
+   prompt/filter/nav bars, board tabs, tiles, settings, YAML. Two chrome
+   exceptions read like content and follow the Text face — the side menu and
+   the weather/pollen widget (all four placements) — face only: their sizes
+   stay pinned, page zoom is the size knob for chrome. .md and textarea are
+   kept as a safety net for note surfaces outside a card. */
+.row,.todo,.todo-add,.todo-empty,.note,.md,textarea,
+.navrail,.wx-subbar,.wx-chip,.maze-rail{font-family:var(--font-body);}
 /* text layer, sizes — the calc offsets preserve the hierarchy (reading text
    1.35, sticky bodies / placeholders / title input 1.4, edit inputs 1.2–1.3)
    at every size step */

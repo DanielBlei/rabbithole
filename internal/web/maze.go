@@ -23,6 +23,8 @@ import (
 type mazeData struct {
 	Title      string
 	Active     string
+	Chrome     chromeData // shared topbar/rail state (ingest chip + rail action)
+	PromptUser string     // shell-prompt user in the widgets' pane title bars
 	Open       []todoView
 	Due        []todoView // the subset of Open due today or overdue — its own tab
 	DoneGroups []todoGroup
@@ -119,6 +121,8 @@ func (s *Web) mazeData(ctx context.Context) (mazeData, error) {
 	return mazeData{
 		Title:      "The Rabbit Hole",
 		Active:     "maze",
+		Chrome:     s.chrome(ctx),
+		PromptUser: s.user,
 		Open:       openViews,
 		Due:        due,
 		DoneGroups: groupByDay(done, today),

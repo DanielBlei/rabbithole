@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/server"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -57,9 +58,17 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}()
 	log.Debug().Str("db", cfg.Store.DBPath).Msg("store opened")
 
+	// The ingest manager owns web-triggered (and later scheduled) ingest runs:
+	// single-flight, background context, run history. It also flips any history
+	// row a crashed process left as 'running' to an error before serving.
+	mgr, err := ingest.NewManager(db, cfg)
+	if err != nil {
+		return err
+	}
+
 	httpSrv := &http.Server{
 		Addr:              serveAddr,
-		Handler:           server.New(db, cfg, serveAddr, configPath).Routes(),
+		Handler:           server.New(db, cfg, serveAddr, configPath, mgr).Routes(),
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 

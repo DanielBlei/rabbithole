@@ -35,11 +35,11 @@
       <span class="breaker">/</span>
       <nav class="topbar__nav">
         <a class="{{if eq .Active "feed"}}active{{end}}" href="/feed">Feed</a>
-        <span class="topbar__nav-div" aria-hidden="true"></span>
         <a class="{{if eq .Active "maze"}}active{{end}}" href="/maze">Maze</a>
       </nav>
     </div>
     <div class="topbar__right">
+      {{template "ingestChip" .Chrome.Chip}}
       <div class="clock" id="clock" aria-label="Current date and time">
         <span class="clock__time"></span>
         <span class="clock__date"></span>
@@ -123,7 +123,7 @@
               <button type="button" class="font-step__arrow" data-font-next aria-label="Next titles font">&#8250;</button>
             </div>
             <div class="clk-slider">
-              <div class="clk-slider__preview font-preview--title">Follow the white rabbit</div>
+              <div class="clk-slider__preview font-preview--title">Follow the rabbit</div>
               <input type="range" min="0" max="4" step="1" value="1" data-font-range="titleSize" aria-label="Title size">
             </div>
             <div class="settings-panel__label">Text</div>
@@ -136,7 +136,7 @@
               <button type="button" class="font-step__arrow" data-font-next aria-label="Next text font">&#8250;</button>
             </div>
             <div class="clk-slider">
-              <div class="clk-slider__preview font-preview--body">Curiouser and curiouser&hellip;</div>
+              <div class="clk-slider__preview font-preview--body">Down the rabbit hole&hellip;</div>
               <input type="range" min="0" max="4" step="1" value="1" data-font-range="bodySize" aria-label="Text size">
             </div>
           </div>
@@ -146,6 +146,27 @@
       </div>
     </div>
   </header>
+  <!-- Hidden side menu: nothing on screen but a slim 3-line tab hugging the
+       left edge; hovering the edge (or clicking the tab) slides out a docked
+       full-height column sitting below the topbar. Pages up top, then a
+       divider and the ingest action (glyph + status dot). The tab, the menu's ingest item and
+       the ingWatch poller are standalone templates so ingest responses can
+       re-render them out-of-band and keep them current. -->
+  {{template "navTab" .Chrome}}
+  <div class="nav-hot" id="navHot" aria-hidden="true"></div>
+  <nav class="navrail" id="navRail" aria-label="Pages">
+    <a class="navrail__item{{if eq .Active "feed"}} navrail__item--on{{end}}" href="/feed">
+      <span class="navrail__gl" aria-hidden="true">▤</span>
+      <span class="navrail__txt"><span class="navrail__nm">Feed</span><span class="navrail__ds">the rabbit hole</span></span>
+    </a>
+    <a class="navrail__item{{if eq .Active "maze"}} navrail__item--on{{end}}" href="/maze">
+      <span class="navrail__gl" aria-hidden="true">▦</span>
+      <span class="navrail__txt"><span class="navrail__nm">Maze</span><span class="navrail__ds">day-to-day</span></span>
+    </a>
+    <div class="navrail__div" aria-hidden="true"></div>
+    {{template "navIngest" .Chrome}}
+  </nav>
+  {{template "ingWatch" .Chrome}}
   <div class="content">
     {{block "content" .}}{{end}}
   </div>
@@ -181,7 +202,19 @@
   // closes the settings dropdown so the modal isn't left under it.
   (function(){
     var modal = document.getElementById('modal');
-    function dismiss(){ modal.innerHTML = ''; }
+    // Mirror the modal's open state onto <html> so the page scroll can lock
+    // (html.modal-open in CSS) — covers every open/close path, htmx included.
+    new MutationObserver(function(){
+      document.documentElement.classList.toggle('modal-open', !!modal.firstElementChild);
+    }).observe(modal, {childList: true});
+    function dismiss(){
+      var hadIngest = !!document.getElementById('ingestBody');
+      modal.innerHTML = '';
+      // Closing the runner also closes its update channel (the body poll), so
+      // ask for a fresh set of OOB chrome fragments — the chip/tab/drawer
+      // reflect the run's latest state without a page reload.
+      if (hadIngest && window.htmx) htmx.ajax('GET', '/ingest/chrome', {swap: 'none'});
+    }
     modal.addEventListener('click', function(e){
       if (e.target.closest('[data-modal-close]')) dismiss();
     });
@@ -189,6 +222,61 @@
       if (e.key === 'Escape' && modal.firstElementChild) dismiss();
     });
   })();
+
+  // Side menu: hovering the left-edge hot zone (or clicking the 3-line tab)
+  // slides the docked column out; it retracts on mouse-leave, on a click
+  // elsewhere, or after picking an item. The tab is OOB-replaced by ingest
+  // responses, so its click is delegated on document rather than bound.
+  (function(){
+    var rail = document.getElementById('navRail');
+    var hot = document.getElementById('navHot');
+    if (!rail || !hot) return;
+    var closeT = null;
+    function open(){
+      clearTimeout(closeT);
+      rail.classList.add('open');
+      document.body.classList.add('nav-open');
+    }
+    function closeNow(){
+      clearTimeout(closeT);
+      rail.classList.remove('open');
+      document.body.classList.remove('nav-open');
+    }
+    function closeSoon(){
+      clearTimeout(closeT);
+      closeT = setTimeout(closeNow, 240);
+    }
+    hot.addEventListener('mouseenter', open);
+    rail.addEventListener('mouseenter', open);
+    rail.addEventListener('mouseleave', closeSoon);
+    rail.addEventListener('click', function(e){
+      if (e.target.closest('.navrail__item')) closeNow();
+    });
+    document.addEventListener('click', function(e){
+      if (e.target.closest('#navTab')) { open(); return; }
+      if (rail.classList.contains('open') && !rail.contains(e.target)) closeNow();
+    });
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape') closeNow();
+    });
+  })();
+
+  // Ingest runner log: keep the tail in view. Every poll swap replaces the
+  // whole modal body, so re-pin the log container to its bottom after swaps.
+  document.body.addEventListener('htmx:afterSwap', function(){
+    var lines = document.querySelector('[data-ing-lines]');
+    if (lines) lines.scrollTop = lines.scrollHeight;
+  });
+
+  // Ingest log level filter (info/debug pills). The picked level lives as a
+  // data attribute on the modal *frame* — outside the 2s poll's swap target —
+  // so it survives every body refresh; the CSS does the actual hiding.
+  document.addEventListener('click', function(e){
+    var pill = e.target.closest('[data-ing-lvl]');
+    if (!pill) return;
+    var frame = pill.closest('.modal__frame--ingest');
+    if (frame) frame.setAttribute('data-inglvl', pill.getAttribute('data-ing-lvl'));
+  });
 
   // Topbar clock: a live local-time + date readout, formatted entirely client-
   // side and ticked every second. Format prefs (24h, seconds, date style) live
@@ -704,4 +792,41 @@
   {{block "scripts" .}}{{end}}
 </body>
 </html>
+{{end}}
+
+{{/* Standalone chrome fragments. Rendered inline by the layout above and
+     re-rendered with hx-swap-oob by every ingest response (status polls, the
+     modal-dismiss chrome refresh, the ingWatch poller), so the ambient ingest
+     state can never go stale on an open page. */}}
+
+{{/* The side menu's ingest action: ⟳ glyph + status dot (pulsing while
+     running, red on failure — no dot when healthy) + subline. Whole item
+     turns red on failure so it reads the moment the menu opens. */}}
+{{define "navIngest"}}
+<button id="navIngest" class="navrail__item navrail__item--act{{if eq .IngDot "err"}} navrail__item--err{{else if eq .IngDot "warn"}} navrail__item--warn{{end}}" type="button"
+        {{if .OOB}}hx-swap-oob="true"{{end}}
+        hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML" aria-label="Ingest runner">
+  <span class="navrail__gl" aria-hidden="true">⟳{{if .IngDot}}<i class="navrail__dot navrail__dot--{{.IngDot}}"></i>{{end}}</span>
+  <span class="navrail__txt"><span class="navrail__nm">Ingest</span><span class="navrail__ds">{{.IngSub}}</span></span>
+</button>
+{{end}}
+
+{{/* The 3-line edge tab that summons the side menu. Mirrors the ingest state
+     so a failure is visible even with the menu closed: red lines on failure,
+     pulsing while a run is live. */}}
+{{define "navTab"}}
+<button id="navTab" class="navtab{{if eq .IngDot "err"}} navtab--err{{else if eq .IngDot "warn"}} navtab--warn{{else if eq .IngDot "run"}} navtab--run{{end}}"
+        {{if .OOB}}hx-swap-oob="true"{{end}} type="button" aria-label="Menu">
+  <span></span><span></span><span></span>
+</button>
+{{end}}
+
+{{/* Invisible watcher: while a run is live it polls the chrome endpoint every
+     3s (swap:none — the response is pure OOB fragments, one of which is this
+     span itself), so the tab/chip/drawer stay live even with the runner modal
+     closed. The re-rendered span drops the poll attributes once the run ends,
+     stopping itself. */}}
+{{define "ingWatch"}}
+<span id="ingWatch" hidden {{if .OOB}}hx-swap-oob="true"{{end}}
+      {{if .Running}}hx-get="/ingest/chrome" hx-trigger="every 3s" hx-swap="none"{{end}}></span>
 {{end}}
