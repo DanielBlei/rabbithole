@@ -34,15 +34,13 @@ ingest:
 store:
   db_path: ./data/rabbithole.db
 
-# Feeds (any RSS/Atom URL). Medium tag/author/publication feeds:
+# Feeds (any RSS/Atom URL). E.g. Medium tag/author/publication feeds:
 #   https://medium.com/feed/tag/<tag>
 #   https://medium.com/feed/@<username>
 #   https://medium.com/feed/<publication>
 feeds:
+  - { name: "Red Hat Emerging Tech", url: "https://next.redhat.com/feed/" }
+  - { name: "Hugging Face blog",    url: "https://huggingface.co/blog/feed.xml" }
   - { name: "Medium — AI",          url: "https://medium.com/feed/tag/artificial-intelligence" }
   - { name: "Medium — LLMs",        url: "https://medium.com/feed/tag/large-language-models" }
   - { name: "Medium — ML",          url: "https://medium.com/feed/tag/machine-learning" }
-#  - { name: "arXiv cs.AI",          url: "http://export.arxiv.org/rss/cs.AI" }
-#  - { name: "arXiv cs.LG",          url: "http://export.arxiv.org/rss/cs.LG" }
-  - { name: "Hugging Face blog",    url: "https://huggingface.co/blog/feed.xml" }
-  - { name: "Red Hat Emerging Tech", url: "https://next.redhat.com/feed/" }

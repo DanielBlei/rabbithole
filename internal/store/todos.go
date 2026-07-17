@@ -111,7 +111,17 @@ func scanTodo(sc rowScanner) (Todo, error) {
 		completedAt sql.NullTime
 		tags        string
 	)
-	if err := sc.Scan(&t.ID, &t.Title, &t.Note, &t.Done, &due, &completedAt, &tags, &t.CreatedAt, &t.UpdatedAt); err != nil {
+	if err := sc.Scan(
+		&t.ID,
+		&t.Title,
+		&t.Note,
+		&t.Done,
+		&due,
+		&completedAt,
+		&tags,
+		&t.CreatedAt,
+		&t.UpdatedAt,
+	); err != nil {
 		return Todo{}, err
 	}
 	if due.Valid && due.String != "" {

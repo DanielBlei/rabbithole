@@ -1,7 +1,7 @@
 {{define "ideaWidget"}}
 <section class="pane idea-pane" id="ideaWidget" hx-target="#ideaWidget" hx-swap="outerHTML">
   <div class="pane__bar">
-    <span class="pane__prompt">maze</span>:<span class="pane__path">~/ideas</span>$&nbsp;<span class="pane__cmd">ideas --notes {{len .Ideas}}</span><span class="blink">_</span>
+    <span class="pane__prompt">{{.PromptUser}}@rabbithole</span>:<span class="pane__path">~/ideas</span>$&nbsp;<span class="pane__cmd">ideas --notes {{len .Ideas}}</span><span class="blink">_</span>
   </div>
 
   <!-- Sticky-note grid: a compose card first, then notes newest-first. Each note
