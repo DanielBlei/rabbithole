@@ -33,6 +33,7 @@ var rootCmd = &cobra.Command{
 	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		log = logger.New(debug, trace)
+		zerolog.DefaultContextLogger = &log
 		return nil
 	},
 }

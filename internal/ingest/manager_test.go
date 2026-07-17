@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
+	zlog "github.com/rs/zerolog/log"
+
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -32,7 +35,7 @@ func newManagerForTest(t *testing.T, outcome Outcome, runErr error) (*Manager, c
 	cfg := &config.Config{Profile: profile}
 	cfg.Inference.Think = &think
 
-	m, err := NewManager(db, cfg)
+	m, err := NewManager(db, cfg, zerolog.InfoLevel)
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -179,7 +182,7 @@ func TestManagerInterruptsStaleRuns(t *testing.T) {
 	think := true
 	cfg := &config.Config{}
 	cfg.Inference.Think = &think
-	if _, err := NewManager(db, cfg); err != nil {
+	if _, err := NewManager(db, cfg, zerolog.InfoLevel); err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
 
@@ -189,5 +192,114 @@ func TestManagerInterruptsStaleRuns(t *testing.T) {
 	}
 	if last.Status != store.IngestStatusError || last.Error != "interrupted" {
 		t.Errorf("stale row not interrupted: %+v", last)
+	}
+}
+
+// A Debug-level line lands in the run's buffer even when the manager's
+// configured logLevel is Info (the serve default without --debug) — the
+// buffer always captures everything; only the stderr mirror is filtered.
+func TestManagerBufferCapturesDebugRegardlessOfLogLevel(t *testing.T) {
+	m, release := newManagerForTest(t, Outcome{}, nil) // newManagerForTest uses zerolog.InfoLevel
+	orig := m.run
+	m.run = func(ctx context.Context, cfg *config.Config, profile string, db *store.Store, day time.Time, opts Options) (Outcome, error) {
+		zerolog.Ctx(ctx).Debug().Msg("debug-level line")
+		return orig(ctx, cfg, profile, db, day, opts)
+	}
+
+	if err := m.Start(context.Background(), store.IngestTriggerManual); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	close(release)
+	waitIdle(t, m)
+
+	if !logContains(m, "debug-level line") {
+		t.Errorf("buffer missing debug-level line despite Info logLevel: %q", m.Status().Lines)
+	}
+}
+
+// A log line emitted through the per-run context logger lands in the run's
+// buffer; a line emitted through the process-global logger during the same
+// window does not — the run's log capture is isolated from concurrent,
+// unrelated logging (e.g. an HTTP handler logging via the global logger while
+// a run is in flight).
+func TestManagerLogsRunContextOnly(t *testing.T) {
+	m, release := newManagerForTest(t, Outcome{}, nil)
+	orig := m.run
+	m.run = func(ctx context.Context, cfg *config.Config, profile string, db *store.Store, day time.Time, opts Options) (Outcome, error) {
+		zerolog.Ctx(ctx).Info().Msg("run-scoped line")
+		zlog.Info().Msg("global-scoped line")
+		return orig(ctx, cfg, profile, db, day, opts)
+	}
+
+	ctx := context.Background()
+	if err := m.Start(ctx, store.IngestTriggerManual); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	close(release)
+	waitIdle(t, m)
+
+	if !logContains(m, "run-scoped line") {
+		t.Errorf("log buffer missing run-scoped line: %q", m.Status().Lines)
+	}
+	if logContains(m, "global-scoped line") {
+		t.Errorf("log buffer picked up a global-logger line, isolation broken: %q", m.Status().Lines)
+	}
+}
+
+// Shutdown cancels and waits for an in-flight run before returning.
+func TestManagerShutdownWaitsForActiveRun(t *testing.T) {
+	m, _ := newManagerForTest(t, Outcome{}, nil)
+	ctx := context.Background()
+	if err := m.Start(ctx, store.IngestTriggerManual); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	m.Shutdown(context.Background())
+
+	if st := m.Status(); st.Running {
+		t.Error("still running after Shutdown")
+	}
+	last, err := m.db.LastIngestRun(ctx)
+	if err != nil {
+		t.Fatalf("LastIngestRun: %v", err)
+	}
+	if last.Status != store.IngestStatusCancelled {
+		t.Errorf("status = %q, want cancelled", last.Status)
+	}
+}
+
+// Shutdown is a no-op when no run is active.
+func TestManagerShutdownIdleNoop(t *testing.T) {
+	m, _ := newManagerForTest(t, Outcome{}, nil)
+	m.Shutdown(context.Background())
+	if st := m.Status(); st.Running {
+		t.Error("Shutdown on an idle manager reported running")
+	}
+}
+
+// Shutdown returns at ctx's deadline rather than hanging if the run ignores
+// cancellation.
+func TestManagerShutdownTimesOut(t *testing.T) {
+	m, _ := newManagerForTest(t, Outcome{}, nil)
+	m.run = func(ctx context.Context, _ *config.Config, _ string, _ *store.Store, _ time.Time, _ Options) (Outcome, error) {
+		<-make(chan struct{}) // never returns; ignores ctx cancellation
+		return Outcome{}, nil
+	}
+	if err := m.Start(context.Background(), store.IngestTriggerManual); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		m.Shutdown(shutdownCtx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Shutdown did not return at ctx deadline")
 	}
 }

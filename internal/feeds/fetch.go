@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -27,6 +27,7 @@ type Source struct {
 // FetchAll fetches every source concurrently and returns the union of items.
 // Individual feed failures are logged and skipped rather than failing the run.
 func FetchAll(ctx context.Context, sources []Source) []Item {
+	logger := zerolog.Ctx(ctx)
 	sem := make(chan struct{}, maxParallel)
 	var (
 		mu  sync.Mutex
@@ -40,16 +41,16 @@ func FetchAll(ctx context.Context, sources []Source) []Item {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			log.Debug().Str("feed", src.Name).Msg("fetching feed")
+			logger.Debug().Str("feed", src.Name).Msg("fetching feed")
 			start := time.Now()
 			// gofeed.Parser lazily initializes internal state on first use and
 			// is not goroutine-safe, so each fetch gets its own (cheap) parser.
 			items, err := fetchOne(ctx, gofeed.NewParser(), src)
 			if err != nil {
-				log.Warn().Str("feed", src.Name).Err(err).Msg("skipping feed")
+				logger.Warn().Str("feed", src.Name).Err(err).Msg("skipping feed")
 				return
 			}
-			log.Debug().Str("feed", src.Name).Int("items", len(items)).
+			logger.Debug().Str("feed", src.Name).Int("items", len(items)).
 				Str("elapsed", time.Since(start).Round(100*time.Millisecond).String()).Msg("feed fetched")
 			mu.Lock()
 			all = append(all, items...)

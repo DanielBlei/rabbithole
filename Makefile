@@ -4,6 +4,8 @@ PKG      := ./...
 NO_THINK ?=
 THINK_FLAG := $(if $(NO_THINK),--no-think,)
 ADDR     ?= :8080
+DEBUG    ?=
+DEBUG_FLAG := $(if $(DEBUG),--debug,)
 
 .DEFAULT_GOAL := help
 
@@ -54,8 +56,8 @@ heuristic: ## Offline ingest with the model-free keyword scorer (no Ollama neede
 ##@ Serve
 
 .PHONY: serve
-serve: ## Serve the items API over HTTP (uses CONFIG, ADDR; JSON only, web UI is being wired up)
-	go run . serve --config $(CONFIG) --addr $(ADDR)
+serve: ## Serve the items API over HTTP (uses CONFIG, ADDR; DEBUG=1 for verbose ingest logging)
+	go run . serve --config $(CONFIG) --addr $(ADDR) $(DEBUG_FLAG)
 
 ##@ Test
 

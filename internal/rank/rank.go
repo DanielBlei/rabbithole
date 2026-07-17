@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/retry"
@@ -49,6 +49,7 @@ func ScoreAll(
 		maxParallel = 1
 	}
 	batches := chunk(items, batchSize)
+	logger := zerolog.Ctx(ctx)
 
 	sem := make(chan struct{}, maxParallel)
 	var (
@@ -63,7 +64,7 @@ func ScoreAll(
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			log.Debug().Int("batch", idx+1).Int("of", len(batches)).
+			logger.Debug().Int("batch", idx+1).Int("of", len(batches)).
 				Int("size", len(batch)).Msg("scoring batch")
 
 			scores := scoreBatch(ctx, s, profile, batch)
@@ -75,12 +76,12 @@ func ScoreAll(
 			mu.Lock()
 			for _, sc := range scores {
 				out[sc.ID] = sc
-				log.Debug().Int("score", sc.Score).Str("reason", sc.Reason).
+				logger.Debug().Int("score", sc.Score).Str("reason", sc.Reason).
 					Str("title", truncate(titles[sc.ID], 80)).Msg("scored item")
 			}
 			mu.Unlock()
 
-			log.Debug().Int("batch", idx+1).Int("scored", len(scores)).
+			logger.Debug().Int("batch", idx+1).Int("scored", len(scores)).
 				Int("size", len(batch)).Msg("batch complete")
 		}(i, batch)
 	}
@@ -104,17 +105,18 @@ func scoreBatch(ctx context.Context, s Scorer, profile string, batch []feeds.Ite
 	if len(batch) == 1 {
 		return scoreOne(ctx, s, profile, batch[0])
 	}
+	logger := zerolog.Ctx(ctx)
 	scores, err := s.Score(ctx, profile, batch)
 	if err == nil {
 		missing := missingItems(batch, scores)
 		if len(missing) == 0 {
 			return scores
 		}
-		log.Warn().Int("items", len(batch)).Int("missing", len(missing)).
+		logger.Warn().Int("items", len(batch)).Int("missing", len(missing)).
 			Msg("batch response missing scores for some items, retrying individually")
 		return append(scores, retryEach(ctx, s, profile, missing)...)
 	}
-	log.Warn().Int("items", len(batch)).Err(err).Msg("batch " + failureVerb(err) + ", retrying individually")
+	logger.Warn().Int("items", len(batch)).Err(err).Msg("batch " + failureVerb(err) + ", retrying individually")
 	return retryEach(ctx, s, profile, batch)
 }
 
@@ -124,6 +126,7 @@ func scoreBatch(ctx context.Context, s Scorer, profile string, batch []feeds.Ite
 // blip, or a one-shot unparseable response) usually clears on a re-ask.
 // Without this, a single hiccup drops the article from the digest entirely.
 func scoreOne(ctx context.Context, s Scorer, profile string, item feeds.Item) []ItemScore {
+	logger := zerolog.Ctx(ctx)
 	var scores []ItemScore
 	err := retry.Do(ctx, retryAttempts, retryBackoff, func() error {
 		got, err := s.Score(ctx, profile, []feeds.Item{item})
@@ -136,11 +139,11 @@ func scoreOne(ctx context.Context, s Scorer, profile string, item feeds.Item) []
 		scores = got
 		return nil
 	}, func(attempt int, err error, delay time.Duration) {
-		log.Warn().Str("item", truncate(item.Title, 80)).Int("attempt", attempt).
+		logger.Warn().Str("item", truncate(item.Title, 80)).Int("attempt", attempt).
 			Str("retry_in", delay.String()).Err(err).Msg(failureVerb(err) + ", retrying item")
 	})
 	if err != nil {
-		log.Warn().Str("item", truncate(item.Title, 80)).Int("attempts", retryAttempts).
+		logger.Warn().Str("item", truncate(item.Title, 80)).Int("attempts", retryAttempts).
 			Err(err).Msg(failureVerb(err) + ", skipping after retries")
 		return nil
 	}

@@ -8,7 +8,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
@@ -26,7 +26,7 @@ type Options struct {
 // Outcome is the result of one cycle. Rendering it (markdown file, stdout,
 // JSON response, ...) is the caller's concern.
 type Outcome struct {
-	Fetched int           // items fetched across all feeds
+	Fetched int           // items within the configured recency window (age-filtered, pre-dedup), across all feeds
 	Unseen  []feeds.Item  // fresh, not-yet-seen items considered for scoring
 	Results []rank.Result // every scored item, sorted best-first
 	Scored  int           // items the model scored, across all feeds
@@ -51,16 +51,17 @@ func Run(
 	day time.Time,
 	opts Options,
 ) (Outcome, error) {
+	logger := zerolog.Ctx(ctx)
 	sources := make([]feeds.Source, len(cfg.Feeds))
 	for i, f := range cfg.Feeds {
 		sources[i] = feeds.Source{Name: f.Name, URL: f.URL}
-		log.Debug().Str("feed", f.Name).Str("url", f.URL).Msg("configured feed")
+		logger.Debug().Str("feed", f.Name).Str("url", f.URL).Msg("configured feed")
 	}
-	log.Info().Int("feeds", len(sources)).Msg("ingesting feeds")
+	logger.Info().Int("feeds", len(sources)).Msg("ingesting feeds")
 
 	fetchStart := time.Now()
 	items := feeds.FetchAll(ctx, sources)
-	log.Info().Int("items", len(items)).
+	logger.Info().Int("items", len(items)).
 		Str("elapsed", time.Since(fetchStart).Round(100*time.Millisecond).String()).Msg("fetched items")
 
 	// Group the fetched union back by feed so each feed is processed as a unit.
@@ -89,8 +90,12 @@ func Run(
 	}
 
 	runStart := time.Now()
-	outcome := Outcome{Fetched: len(items)}
-	var totalScored, totalSkipped, totalFailed int
+	// Counts are written straight into outcome as each feed is processed
+	// (rather than into locals assigned at the end), so a feed that aborts the
+	// run early (a DB error, a backend that fails to resolve) still returns
+	// accurate counts for the feeds already completed, instead of resetting
+	// everything to zero.
+	outcome := Outcome{}
 	for _, f := range cfg.Feeds {
 		feedItems := byFeed[f.Name]
 		if len(feedItems) == 0 {
@@ -99,7 +104,8 @@ func Run(
 		feedStart := time.Now()
 
 		fresh := filterByAge(feedItems, cfg.Ingest.Since.Std())
-		log.Debug().Str("feed", f.Name).Int("before", len(feedItems)).Int("after", len(fresh)).
+		outcome.Fetched += len(fresh)
+		logger.Debug().Str("feed", f.Name).Int("before", len(feedItems)).Int("after", len(fresh)).
 			Int("dropped_old", len(feedItems)-len(fresh)).Msg("age filter applied")
 
 		// dedup against the store before scoring: items already scored never
@@ -110,12 +116,12 @@ func Run(
 			return outcome, err
 		}
 		skipped := len(fresh) - len(unseen)
-		totalSkipped += skipped
+		outcome.Skipped += skipped
 
 		// One line per feed says what there is to do: how many new items to
 		// score and how many were skipped as already scored. new=0 means there
 		// was nothing to process for this feed.
-		log.Info().Str("feed", f.Name).Int("new", len(unseen)).Int("skipped", skipped).
+		logger.Info().Str("feed", f.Name).Int("new", len(unseen)).Int("skipped", skipped).
 			Msg("processing feed")
 		if len(unseen) == 0 {
 			continue
@@ -128,32 +134,31 @@ func Run(
 
 		scores := rank.ScoreAll(ctx, s, profile, unseen, cfg.Scoring.BatchSize, cfg.Scoring.MaxParallel)
 		failed := len(unseen) - len(scores)
-		totalFailed += failed
-		log.Info().Str("feed", f.Name).Int("processed", len(scores)).Int("failed", failed).
+		outcome.Failed += failed
+		logger.Info().Str("feed", f.Name).Int("processed", len(scores)).Int("failed", failed).
 			Msg("items processed")
 		results := rank.Select(unseen, scores)
 
 		if opts.Record {
 			if err := record(ctx, db, unseen, scores, cfg.Inference.Model, day); err != nil {
-				log.Warn().Str("feed", f.Name).Err(err).Msg("recording feed failed, skipping")
+				logger.Warn().Str("feed", f.Name).Err(err).Msg("recording feed failed, skipping")
 				continue
 			}
-			log.Info().Str("feed", f.Name).Int("recorded", len(unseen)).Int("scored", len(scores)).
+			logger.Info().Str("feed", f.Name).Int("recorded", len(unseen)).Int("scored", len(scores)).
 				Int("selected", len(results)).Int("failed", failed).
 				Str("elapsed", time.Since(feedStart).Round(100*time.Millisecond).String()).Msg("ingested to db")
 		}
 
 		outcome.Unseen = append(outcome.Unseen, unseen...)
 		outcome.Results = append(outcome.Results, results...)
-		totalScored += len(scores)
+		outcome.Scored += len(scores)
 	}
 
 	// Each feed selected its own results; re-sort the merged set so the digest
 	// is ordered best-first across every feed.
 	rank.SortResults(outcome.Results)
-	outcome.Scored, outcome.Skipped, outcome.Failed = totalScored, totalSkipped, totalFailed
-	log.Info().Int("feeds", len(cfg.Feeds)).Int("fetched", outcome.Fetched).
-		Int("scored", totalScored).Int("skipped", totalSkipped).Int("failed", totalFailed).
+	logger.Info().Int("feeds", len(cfg.Feeds)).Int("fetched", outcome.Fetched).
+		Int("scored", outcome.Scored).Int("skipped", outcome.Skipped).Int("failed", outcome.Failed).
 		Int("selected", len(outcome.Results)).
 		Str("elapsed", time.Since(runStart).Round(100*time.Millisecond).String()).Msg("ingest complete")
 

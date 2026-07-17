@@ -113,6 +113,37 @@ func TestRunProcessesFeedsPerSourceAndDedups(t *testing.T) {
 	}
 }
 
+// Fetched counts only items within the configured recency window, not every
+// item the feed parser returned — a feed can carry an old backlog that was
+// never in scope for this (or any) run.
+func TestRunFetchedCountsOnlyItemsWithinAgeWindow(t *testing.T) {
+	ctx := context.Background()
+	recent := time.Now().Add(-1 * time.Hour).Format(time.RFC1123Z)
+	old := time.Now().Add(-30 * 24 * time.Hour).Format(time.RFC1123Z)
+	body := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Feed</title>
+  <item><title>Recent item</title><link>https://x.test/recent</link><guid>https://x.test/recent</guid>
+    <pubDate>%s</pubDate><description>summary</description></item>
+  <item><title>Old item</title><link>https://x.test/old</link><guid>https://x.test/old</guid>
+    <pubDate>%s</pubDate><description>summary</description></item>
+</channel></rss>`, recent, old)
+	feed := config.Feed{Name: "Mixed", URL: serveRSS(t, body)}
+	cfg := testConfig(t, feed)
+	cfg.Ingest.Since = config.Duration(24 * time.Hour) // narrow window: only the recent item survives
+	db := openStore(t, cfg)
+
+	out, err := Run(ctx, cfg, "test", db, time.Now(), Options{Record: true})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Fetched != 1 {
+		t.Errorf("Fetched = %d, want 1 (only the item within the configured window)", out.Fetched)
+	}
+	if len(out.Unseen) != 1 || out.Unseen[0].Title != "Recent item" {
+		t.Errorf("Unseen = %+v, want just the recent item", out.Unseen)
+	}
+}
+
 func TestRunSkipsFailedFeed(t *testing.T) {
 	ctx := context.Background()
 	good := config.Feed{Name: "Good", URL: serveRSS(t, feedRSS("vLLM inference notes", "https://x.test/g"))}

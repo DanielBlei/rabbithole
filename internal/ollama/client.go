@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/ollama/ollama/api"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/httpclient"
@@ -98,6 +98,7 @@ func (c *Client) Validate(ctx context.Context) error {
 // before any concurrent Score call (inference.Resolve validates, then scoring
 // fans out).
 func (c *Client) checkThinkSupport(ctx context.Context) {
+	logger := zerolog.Ctx(ctx)
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
@@ -120,10 +121,10 @@ func (c *Client) checkThinkSupport(ctx context.Context) {
 		// Model accepts think — leave it on.
 	case strings.Contains(err.Error(), thinkUnsupported):
 		c.think = false
-		log.Warn().Str("model", c.model).
+		logger.Warn().Str("model", c.model).
 			Msg("ollama: model does not support thinking, disabling think mode for scoring")
 	default:
-		log.Debug().Err(err).Str("model", c.model).
+		logger.Debug().Err(err).Str("model", c.model).
 			Msg("ollama: think-support probe inconclusive, leaving think enabled")
 	}
 }
@@ -144,6 +145,7 @@ func (c *Client) listModelNames(ctx context.Context) ([]string, error) {
 
 // Score sends one JSON-mode chat request for the batch and parses the verdicts.
 func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) ([]rank.ItemScore, error) {
+	logger := zerolog.Ctx(ctx)
 	ctx, cancel := context.WithTimeout(ctx, chatTimeout)
 	defer cancel()
 
@@ -170,12 +172,12 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 		req.Think = think
 	}
 
-	log.Debug().
+	logger.Debug().
 		Str("model", c.model).
 		Int("items", len(items)).
 		Bool("think", c.think).
 		Msg("ollama: sending scoring request")
-	log.Trace().Str("prompt", userPrompt).Msg("ollama: prompt sent")
+	logger.Trace().Str("prompt", userPrompt).Msg("ollama: prompt sent")
 
 	start := time.Now()
 	var sb strings.Builder
@@ -202,13 +204,13 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 	}
 
 	// Logged as completion_tokens, not Ollama's own eval_count, to match vllm.Client's log key.
-	log.Debug().
+	logger.Debug().
 		Str("elapsed", time.Since(start).Round(time.Millisecond).String()).
 		Int("response_bytes", sb.Len()).
 		Str("done_reason", doneReason).
 		Int("completion_tokens", evalCount).
 		Msg("ollama: scoring response received")
-	log.Trace().Str("response", sb.String()).Msg("ollama: raw response")
+	logger.Trace().Str("response", sb.String()).Msg("ollama: raw response")
 
 	scores, err := rank.ParseScores(sb.String(), items)
 	if err != nil {

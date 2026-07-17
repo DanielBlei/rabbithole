@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 // Validator confirms a backend is reachable and serving a given model. It
@@ -47,6 +47,7 @@ func (v *Validator) Validate(
 		return nil
 	}
 
+	logger := zerolog.Ctx(ctx)
 	var models []string
 	err := Do(ctx, v.attempts, v.backoff, func() error {
 		m, err := list(ctx)
@@ -56,7 +57,7 @@ func (v *Validator) Validate(
 		models = m
 		return nil
 	}, func(attempt int, err error, delay time.Duration) {
-		log.Debug().Str("backend", v.name).Int("attempt", attempt).Err(err).
+		logger.Debug().Str("backend", v.name).Int("attempt", attempt).Err(err).
 			Str("retry_in", delay.String()).Msg(v.name + ": not reachable yet, retrying")
 	})
 	if err != nil {
