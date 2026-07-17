@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/httpclient"
@@ -119,6 +119,7 @@ type responseFormat struct {
 
 // Score sends one JSON-mode completion for the batch and parses the verdicts.
 func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) ([]rank.ItemScore, error) {
+	logger := zerolog.Ctx(ctx)
 	ctx, cancel := context.WithTimeout(ctx, chatTimeout)
 	defer cancel()
 
@@ -143,12 +144,12 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 		return nil, fmt.Errorf("marshal chat request: %w", err)
 	}
 
-	log.Debug().
+	logger.Debug().
 		Str("model", c.model).
 		Int("items", len(items)).
 		Bool("think", c.think).
 		Msg("vllm: sending scoring request")
-	log.Trace().Str("prompt", userPrompt).Msg("vllm: prompt sent")
+	logger.Trace().Str("prompt", userPrompt).Msg("vllm: prompt sent")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.host+"/v1/chat/completions", bytes.NewReader(body))
@@ -188,13 +189,13 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 
 	content := completion.Choices[0].Message.Content
 	finishReason := completion.Choices[0].FinishReason
-	log.Debug().
+	logger.Debug().
 		Str("elapsed", time.Since(start).Round(time.Millisecond).String()).
 		Int("response_bytes", len(content)).
 		Str("finish_reason", finishReason).
 		Int("completion_tokens", completion.Usage.CompletionTokens).
 		Msg("vllm: scoring response received")
-	log.Trace().Str("response", content).Msg("vllm: raw response")
+	logger.Trace().Str("response", content).Msg("vllm: raw response")
 
 	scores, err := rank.ParseScores(content, items)
 	if err != nil {

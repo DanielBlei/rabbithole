@@ -52,7 +52,7 @@ var ErrIngestRunNotFound = errors.New("ingest run not found")
 
 // IngestCounts are one run's item totals, recorded when the run finishes.
 type IngestCounts struct {
-	Fetched  int // items fetched across all feeds
+	Fetched  int // items within the configured recency window, across all feeds
 	NewItems int // fresh, not-yet-seen items considered for scoring
 	Scored   int // items the model scored
 	Skipped  int // items skipped as already scored

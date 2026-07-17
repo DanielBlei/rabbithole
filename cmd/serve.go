@@ -61,7 +61,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// The ingest manager owns web-triggered (and later scheduled) ingest runs:
 	// single-flight, background context, run history. It also flips any history
 	// row a crashed process left as 'running' to an error before serving.
-	mgr, err := ingest.NewManager(db, cfg)
+	mgr, err := ingest.NewManager(db, cfg, log.GetLevel())
 	if err != nil {
 		return err
 	}
@@ -92,6 +92,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("shutdown: %w", err)
 		}
+
+		// Drain any in-flight ingest run before the deferred db.Close() runs,
+		// so it never writes through a closed *sql.DB. Its own timeout budget,
+		// separate from the HTTP drain above, so a slow HTTP shutdown doesn't
+		// shortchange the run's chance to wind down cleanly.
+		mgrShutdownCtx, mgrCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer mgrCancel()
+		mgr.Shutdown(mgrShutdownCtx)
+
 		err := <-errCh
 		log.Info().Msg("server stopped")
 		return err

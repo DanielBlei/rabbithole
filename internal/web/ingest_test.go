@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/store"
@@ -32,7 +34,7 @@ func newIngestWeb(t *testing.T) *Web {
 	think := false
 	cfg := &config.Config{Profile: profile}
 	cfg.Inference.Think = &think
-	m, err := ingest.NewManager(db, cfg)
+	m, err := ingest.NewManager(db, cfg, zerolog.InfoLevel)
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}

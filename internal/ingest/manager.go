@@ -33,9 +33,10 @@ type runFunc func(context.Context, *config.Config, string, *store.Store, time.Ti
 // triggered it, records every run in the store's ingest_history, and captures
 // the run's log output for the web UI.
 type Manager struct {
-	db  *store.Store
-	cfg *config.Config
-	run runFunc
+	db       *store.Store
+	cfg      *config.Config
+	run      runFunc
+	logLevel zerolog.Level // console verbosity for the run logger's stderr mirror
 
 	mu     sync.Mutex
 	active *activeRun // nil when idle
@@ -60,14 +61,15 @@ type Status struct {
 	Lines     []string  // raw zerolog JSON, one event per line
 }
 
-// NewManager returns a Manager for db/cfg. History rows left as 'running' by
-// a process that died mid-run are flipped to errors first, so the UI never
-// reports a run that is no longer alive.
-func NewManager(db *store.Store, cfg *config.Config) (*Manager, error) {
+// NewManager returns a Manager for db/cfg, logging its per-run console
+// mirror at logLevel. History rows left as 'running' by a process that died
+// mid-run are flipped to errors first, so the UI never reports a run that is
+// no longer alive.
+func NewManager(db *store.Store, cfg *config.Config, logLevel zerolog.Level) (*Manager, error) {
 	if err := db.InterruptStaleIngestRuns(context.Background()); err != nil {
 		return nil, err
 	}
-	return &Manager{db: db, cfg: cfg, run: Run}, nil
+	return &Manager{db: db, cfg: cfg, run: Run, logLevel: logLevel}, nil
 }
 
 // Start launches a run in the background and returns immediately. If a run is
@@ -110,6 +112,22 @@ func (m *Manager) Cancel() {
 	}
 }
 
+// Shutdown cancels any in-flight run and blocks until it has finished, or ctx
+// is done, whichever comes first. A no-op when idle.
+func (m *Manager) Shutdown(ctx context.Context) {
+	m.mu.Lock()
+	run := m.active
+	m.mu.Unlock()
+	if run == nil {
+		return
+	}
+	run.cancel()
+	select {
+	case <-run.done:
+	case <-ctx.Done():
+	}
+}
+
 // Status returns the current snapshot: whether a run is live, when it started,
 // and the most recent run's captured log lines.
 func (m *Manager) Status() Status {
@@ -131,12 +149,12 @@ func (m *Manager) Status() Status {
 func (m *Manager) execute(ctx context.Context, run *activeRun, buf *logBuffer, profile string) {
 	defer close(run.done)
 
-	restore := captureLogs(buf)
+	runLogger := newRunLogger(buf, m.logLevel)
+	ctx = runLogger.WithContext(ctx)
 	outcome, err := m.run(ctx, m.cfg, profile, m.db, time.Now(), Options{
 		Think:  *m.cfg.Inference.Think,
 		Record: true,
 	})
-	restore()
 
 	// A cancelled run doesn't always surface context.Canceled: FetchAll treats
 	// per-feed failures — including cancelled fetches — as skippable, so Run can
@@ -151,12 +169,11 @@ func (m *Manager) execute(ctx context.Context, run *activeRun, buf *logBuffer, p
 	// The cycle's own logging stops at the failure point ("ingest complete" is
 	// only emitted on success), so append the outcome for the incomplete paths —
 	// otherwise the UI's log tail ends mid-stream and reads as still running.
-	tail := zerolog.New(buf).With().Timestamp().Logger()
 	switch status {
 	case store.IngestStatusCancelled:
-		tail.Warn().Msg("ingest cancelled")
+		runLogger.Warn().Msg("ingest cancelled")
 	case store.IngestStatusError:
-		tail.Error().Str("error", msg).Msg("ingest failed")
+		runLogger.Error().Str("error", msg).Msg("ingest failed")
 	}
 	counts := store.IngestCounts{
 		Fetched:  outcome.Fetched,
@@ -179,30 +196,21 @@ func (m *Manager) execute(ctx context.Context, run *activeRun, buf *logBuffer, p
 	m.mu.Unlock()
 }
 
-// captureLogs redirects the global zerolog logger for the duration of a run:
-// every event — the ingest cycle logs via the global, and so do feeds, rank and
-// inference — is written as JSON into buf at debug level, while stderr keeps
-// receiving the console format filtered to the level the process was started
-// with (so a serve without --debug doesn't suddenly get chatty). Returns the
-// restore func. Only ever active during a run; single-flight makes the global
-// swap safe from overlapping captures.
-func captureLogs(buf *logBuffer) (restore func()) {
-	prevLogger := zlog.Logger
-	prevLevel := zerolog.GlobalLevel()
-
+// newRunLogger builds the per-run logger threaded through the run's context
+// (see execute): every event is written as JSON into buf at debug level,
+// while stderr keeps receiving the console format filtered to logLevel (so a
+// serve without --debug doesn't suddenly get chatty). Unlike the global
+// logger, this is scoped to the run alone — a concurrent HTTP request
+// logging through the (untouched) global logger can never leak into another
+// run's buffer.
+func newRunLogger(buf *logBuffer, logLevel zerolog.Level) zerolog.Logger {
 	console := minLevelWriter{
 		w:   zerolog.LevelWriterAdapter{Writer: zerolog.ConsoleWriter{Out: os.Stderr}},
-		min: prevLevel,
+		min: logLevel,
 	}
-	zlog.Logger = zerolog.New(zerolog.MultiLevelWriter(console, buf)).
+	return zerolog.New(zerolog.MultiLevelWriter(console, buf)).
 		Level(zerolog.DebugLevel).
 		With().Timestamp().Logger()
-	zerolog.SetGlobalLevel(zerolog.DebugLevel)
-
-	return func() {
-		zlog.Logger = prevLogger
-		zerolog.SetGlobalLevel(prevLevel)
-	}
 }
 
 // minLevelWriter drops events below min — it keeps stderr at the operator's
