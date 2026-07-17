@@ -219,21 +219,23 @@
 
   // ---- swap boards by scrolling the empty frame ------------------------
   // Wheeling anywhere on the Maze page that ISN'T a board pane or the topbar —
-  // the tab row, the page margins, the area below the panes — flips between Tasks
-  // and Ideas by scroll direction (down → Ideas, up → Tasks), with a short cooldown
-  // so one gesture is one swap. Scrolling over a board pane is left untouched.
+  // the tab row, the page margins, the area below the panes — toggles between
+  // the Tasks and Ideas boards; with two boards, either scroll direction flips
+  // to the other one. A short cooldown keeps one gesture to one swap.
+  // Scrolling over a board pane is left untouched.
   var lastSwap = 0;
   document.addEventListener('wheel', function (e) {
-    if (!document.querySelector('.maze') || (e.target.closest && (e.target.closest('.pane') || e.target.closest('.topbar')))) return;
+    // Don't flip boards while a modal is open.
+    if (document.documentElement.classList.contains('modal-open')) return;
+    if (!document.querySelector('.maze') || (e.target.closest && (e.target.closest('.pane') || e.target.closest('.topbar') || e.target.closest('#modal')))) return;
     var now = Date.now();
     if (now - lastSwap < 450) { e.preventDefault(); return; }
     var todos = document.getElementById('mazeTabTodos');
     var ideas = document.getElementById('mazeTabIdeas');
-    if (!todos || !ideas) return;
-    var changed = false;
-    if (e.deltaY > 0 && !ideas.checked) { ideas.checked = true; changed = true; }
-    else if (e.deltaY < 0 && !todos.checked) { todos.checked = true; changed = true; }
-    if (changed) { lastSwap = now; e.preventDefault(); }
+    if (!todos || !ideas || !e.deltaY) return;
+    if (ideas.checked) { todos.checked = true; } else { ideas.checked = true; }
+    lastSwap = now;
+    e.preventDefault();
   }, { passive: false });
 
   // ---- tag filter (client-side OR, across all tab panels) -------------

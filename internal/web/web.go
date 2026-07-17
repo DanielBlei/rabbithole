@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -48,13 +49,15 @@ type Web struct {
 	addr    string // the serve listen address, shown in the faux shell prompt
 	user    string // shell-prompt name: cfg.User, or the OS user when blank
 	cfgPath string // config file path, read on demand by the config viewer
+	ing     *ingest.Manager
 }
 
 // New returns a Web backed by db, using cfg for request defaults. addr is the
 // listen address the serve command bound, surfaced in the page's shell prompt.
-// cfgPath is the config file the viewer reads and displays read-only.
-func New(db *store.Store, cfg *config.Config, addr, cfgPath string) *Web {
-	return &Web{db: db, cfg: cfg, addr: addr, user: promptUser(cfg.User), cfgPath: cfgPath}
+// cfgPath is the config file the viewer reads and displays read-only. ing owns
+// the in-process ingest runs the UI triggers and watches.
+func New(db *store.Store, cfg *config.Config, addr, cfgPath string, ing *ingest.Manager) *Web {
+	return &Web{db: db, cfg: cfg, addr: addr, user: promptUser(cfg.User), cfgPath: cfgPath, ing: ing}
 }
 
 // promptUser picks the shell-prompt name: the configured user, or the OS login
@@ -79,6 +82,11 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /feed", s.handleFeed)
 	mux.HandleFunc("GET /maze", s.handleMaze)
 	mux.HandleFunc("GET /config", s.handleConfig)
+	mux.HandleFunc("GET /ingest", s.handleIngest)
+	mux.HandleFunc("GET /ingest/status", s.handleIngestStatus)
+	mux.HandleFunc("GET /ingest/chrome", s.handleIngestChrome)
+	mux.HandleFunc("POST /ingest/run", s.handleIngestRun)
+	mux.HandleFunc("POST /ingest/cancel", s.handleIngestCancel)
 	mux.HandleFunc("POST /items/{id}/note", s.handleNote)
 	mux.HandleFunc("POST /items/{id}/seen", s.handleSeen)
 	mux.HandleFunc("POST /items/{id}/hide", s.handleHide)
@@ -105,8 +113,9 @@ func (s *Web) Routes() http.Handler {
 type pageData struct {
 	Title              string
 	Active             string
-	PromptUser         string // shell-prompt user in the pane title bar
-	ServeCmd           string // the command the prompt shows running, incl. the real --addr
+	Chrome             chromeData // shared topbar/rail state (ingest chip + rail action)
+	PromptUser         string     // shell-prompt user in the pane title bar
+	ServeCmd           string     // the command the prompt shows running, incl. the real --addr
 	Stats              statsData
 	Sources            []string
 	FilterSource       string
@@ -234,11 +243,17 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := pageData{
-		Title:              "The Rabbit Hole",
-		Active:             "feed",
-		PromptUser:         s.user,
-		ServeCmd:           "go run . serve --addr " + s.addr,
-		Stats:              s.stats(r, rows, len(counts), store.ListFilter{Source: source, After: after, Before: before, Bookmarked: onlyBookmark}),
+		Title:      "The Rabbit Hole",
+		Active:     "feed",
+		Chrome:     s.chrome(r.Context()),
+		PromptUser: s.user,
+		ServeCmd:   "go run . serve --addr " + s.addr,
+		Stats: s.stats(
+			r,
+			rows,
+			len(counts),
+			store.ListFilter{Source: source, After: after, Before: before, Bookmarked: onlyBookmark},
+		),
 		Sources:            sources,
 		FilterSource:       source,
 		FilterPublished:    published,

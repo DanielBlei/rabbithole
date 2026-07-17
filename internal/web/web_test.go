@@ -11,8 +11,23 @@ import (
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
+
+// testIngestManager builds the ingest manager New requires; the manager is
+// idle in these tests unless a test drives it.
+func testIngestManager(t *testing.T, db *store.Store) *ingest.Manager {
+	t.Helper()
+	think := false
+	cfg := &config.Config{}
+	cfg.Inference.Think = &think
+	m, err := ingest.NewManager(db, cfg)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	return m
+}
 
 func newTestWeb(t *testing.T) *Web {
 	t.Helper()
@@ -26,7 +41,7 @@ func newTestWeb(t *testing.T) *Web {
 		nil, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	return New(db, &config.Config{}, ":8080", "")
+	return New(db, &config.Config{}, ":8080", "", testIngestManager(t, db))
 }
 
 func post(t *testing.T, w *Web, path string) *httptest.ResponseRecorder {

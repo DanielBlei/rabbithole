@@ -1,0 +1,120 @@
+{{define "ingestModal"}}
+<div class="modal" id="ingestModal">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__frame modal__frame--ingest" role="dialog" aria-modal="true" aria-label="Ingest runner">
+    <div class="modal__bar">
+      <span class="modal__title"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span>:<span class="pane__path">~</span>$&nbsp;<span class="pane__cmd">go run . ingest</span><span class="blink">_</span></span>
+      <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+    </div>
+    {{template "ingestBody" .Body}}
+    <div class="modal__foot modal__foot--ingest">
+      <a class="ing__cfg" href="#" hx-get="/config" hx-target="#modal" hx-swap="innerHTML">⚙ view config</a>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{/* The swappable modal body. While a run is live it re-fetches itself every
+     2s; the attribute disappears with the running state, so polling stops by
+     itself. Every response also carries an OOB topbar-chip update (see
+     renderIngestBody). The INFO/DEBUG pills set a data-inglvl attribute on the
+     modal frame (delegated JS in layout.html) — the frame sits outside this
+     swap target, so the picked level survives every poll refresh. */}}
+{{define "ingestBody"}}
+<div class="ing" id="ingestBody" {{if .Running}}hx-get="/ingest/status" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML"{{end}}>
+  <div class="ing__runline">
+    {{if .Running}}
+      <span class="ing__st ing__st--run">◌ running</span>
+      <span class="ing__sep">·</span><span class="ing__dim">started {{.StartedAgo}}</span>
+    {{else if .Last}}
+      {{if eq .Last.Status "ok"}}<span class="ing__st ing__st--ok">✓ ok</span>
+      {{else if eq .Last.Status "cancelled"}}<span class="ing__st ing__st--err">✕ cancelled</span>
+      {{else}}<span class="ing__st ing__st--err">✕ error</span>{{end}}
+      <span class="ing__sep">·</span><span class="ing__dim">{{.Last.When}}</span>
+      {{if .Last.Took}}<span class="ing__dim">took {{.Last.Took}}</span>{{end}}
+      <span class="ing__trigger">{{.Last.Trigger}}</span>
+    {{else}}
+      <span class="ing__dim">never ran</span>
+    {{end}}
+  </div>
+  {{if and .Last .Last.Error}}{{if not .Running}}
+    <div class="ing__errline">{{.Last.Error}}</div>
+  {{end}}{{end}}
+
+  {{if .Last}}
+  <div class="ing__counts">
+    <span class="ing__cnt">fetched<b>{{.Last.Counts.Fetched}}</b></span>
+    <span class="ing__cnt ing__cnt--new">new<b>{{.Last.Counts.NewItems}}</b></span>
+    <span class="ing__cnt">scored<b>{{.Last.Counts.Scored}}</b></span>
+    <span class="ing__cnt">skipped<b>{{.Last.Counts.Skipped}}</b></span>
+    <span class="ing__cnt {{if gt .Last.Counts.Failed 0}}ing__cnt--warn{{end}}">failed<b>{{.Last.Counts.Failed}}</b></span>
+  </div>
+  {{end}}
+
+  <div class="ing__actions">
+    {{if .Running}}
+      <button class="ing__btn ing__btn--cancel" type="button"
+              hx-post="/ingest/cancel" hx-target="#ingestBody" hx-swap="outerHTML">✕ cancel</button>
+    {{else}}
+      <button class="ing__btn ing__btn--run" type="button"
+              hx-post="/ingest/run" hx-target="#ingestBody" hx-swap="outerHTML">▶ run now</button>
+    {{end}}
+  </div>
+
+  {{if .Lines}}
+  <div class="ing__log">
+    <div class="ing__logbar">
+      <span>run log</span>
+      {{if .Running}}<span class="ing__live">● live</span>{{end}}
+      <span class="ing__lvl-pills">
+        <button type="button" data-ing-lvl="info">info</button><button type="button" data-ing-lvl="dbg">debug</button>
+      </span>
+    </div>
+    <div class="ing__lines" data-ing-lines>
+      {{range .Lines}}
+      <div class="ing-ln{{if .Debug}} ing-ln--dbg{{end}}"><span class="ing-ln__ts">{{.Time}}</span> <span class="ing-ln__lv ing-ln__lv--{{.Class}}">{{.Level}}</span> {{.Msg}}{{range .Kvs}} <span class="ing-ln__kv">{{.K}}=<b>{{.V}}</b></span>{{end}}</div>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+
+  {{if .ShowBanner}}
+  <div class="ing__done">
+    <span>✓ run complete — <b>{{.Last.Counts.NewItems}}</b> new item{{if ne .Last.Counts.NewItems 1}}s{{end}} scored</span>
+    <a href="/feed">refresh feed →</a>
+  </div>
+  {{end}}
+
+  {{if .History}}
+  <div class="ing__hist">
+    <div class="ing__hist-lbl">history</div>
+    <table>
+      {{range .History}}
+      <tr>
+        <td class="ing__hist-when">{{.When}}</td>
+        {{if .Running}}<td class="ing__hist-st ing__hist-st--run">running</td>
+        {{else if eq .Status "ok"}}<td class="ing__hist-st ing__hist-st--ok">ok</td>
+        {{else}}<td class="ing__hist-st ing__hist-st--err">{{.Status}}</td>{{end}}
+        {{if .Error}}<td class="ing__hist-info">{{.Error}}</td>
+        {{else}}<td class="ing__hist-info">{{.Counts.NewItems}} new</td>{{end}}
+        <td class="ing__hist-took">{{.Took}}</td>
+        <td><span class="ing__trigger">{{.Trigger}}</span></td>
+      </tr>
+      {{end}}
+    </table>
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+{{/* Topbar status chip: visible after a failed (red) or cancelled (amber)
+     run, hidden otherwise, including while running. Rendered into the topbar
+     by layout.html and updated out-of-band by every ingest poll/mutation
+     response. Clicking it opens the runner modal. */}}
+{{define "ingestChip"}}
+<span id="ingChip" class="ing-chip{{if .State}} ing-chip--{{.State}}{{end}}"
+      {{if .OOB}}hx-swap-oob="true"{{end}} {{if not .State}}hidden{{end}}
+      hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML" role="button" tabindex="0">
+  {{- if eq .State "failed"}}<i></i>ingest failed · {{.Ago}}{{else if eq .State "warn"}}<i></i>ingest cancelled · {{.Ago}}{{end -}}
+</span>
+{{end}}
