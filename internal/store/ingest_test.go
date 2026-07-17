@@ -89,9 +89,12 @@ func TestIngestRunListAndErrors(t *testing.T) {
 		t.Fatalf("FinishIngestRun: %v", err)
 	}
 
-	runs, err := db.ListIngestRuns(ctx, 10)
+	runs, hasMore, err := db.ListIngestRuns(ctx, 10, 0)
 	if err != nil {
 		t.Fatalf("ListIngestRuns: %v", err)
+	}
+	if hasMore {
+		t.Errorf("hasMore true with 2 runs under a limit of 10")
 	}
 	if len(runs) != 2 || runs[0].ID != second || runs[1].ID != first {
 		t.Fatalf("runs not newest-first: %+v", runs)
@@ -100,12 +103,26 @@ func TestIngestRunListAndErrors(t *testing.T) {
 		t.Errorf("error row wrong: %+v", runs[1])
 	}
 
-	limited, err := db.ListIngestRuns(ctx, 1)
+	limited, hasMore, err := db.ListIngestRuns(ctx, 1, 0)
 	if err != nil {
 		t.Fatalf("ListIngestRuns limit: %v", err)
 	}
+	if !hasMore {
+		t.Errorf("hasMore false with 2 runs under a limit of 1")
+	}
 	if len(limited) != 1 || limited[0].ID != second {
 		t.Errorf("limit not applied: %+v", limited)
+	}
+
+	page2, hasMore, err := db.ListIngestRuns(ctx, 1, 1)
+	if err != nil {
+		t.Fatalf("ListIngestRuns offset: %v", err)
+	}
+	if hasMore {
+		t.Errorf("hasMore true on the last page")
+	}
+	if len(page2) != 1 || page2[0].ID != first {
+		t.Errorf("offset not applied: %+v", page2)
 	}
 }
 
@@ -130,7 +147,7 @@ func TestInterruptStaleIngestRuns(t *testing.T) {
 		t.Fatalf("InterruptStaleIngestRuns: %v", err)
 	}
 
-	runs, err := db.ListIngestRuns(ctx, 10)
+	runs, _, err := db.ListIngestRuns(ctx, 10, 0)
 	if err != nil {
 		t.Fatalf("ListIngestRuns: %v", err)
 	}

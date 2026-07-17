@@ -85,6 +85,7 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /ingest", s.handleIngest)
 	mux.HandleFunc("GET /ingest/status", s.handleIngestStatus)
 	mux.HandleFunc("GET /ingest/chrome", s.handleIngestChrome)
+	mux.HandleFunc("GET /ingest/runs/{id}/log", s.handleIngestRunLog)
 	mux.HandleFunc("POST /ingest/run", s.handleIngestRun)
 	mux.HandleFunc("POST /ingest/cancel", s.handleIngestCancel)
 	mux.HandleFunc("POST /items/{id}/note", s.handleNote)

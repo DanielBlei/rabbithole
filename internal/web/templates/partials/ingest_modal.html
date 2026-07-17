@@ -21,7 +21,7 @@
      modal frame (delegated JS in layout.html) — the frame sits outside this
      swap target, so the picked level survives every poll refresh. */}}
 {{define "ingestBody"}}
-<div class="ing" id="ingestBody" {{if .Running}}hx-get="/ingest/status" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML"{{end}}>
+<div class="ing" id="ingestBody" {{if .Running}}hx-get="/ingest/status?histPage={{.HistPage}}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML"{{end}}>
   <div class="ing__runline">
     {{if .Running}}
       <span class="ing__st ing__st--run">◌ running</span>
@@ -71,9 +71,7 @@
       </span>
     </div>
     <div class="ing__lines" data-ing-lines>
-      {{range .Lines}}
-      <div class="ing-ln{{if .Debug}} ing-ln--dbg{{end}}"><span class="ing-ln__ts">{{.Time}}</span> <span class="ing-ln__lv ing-ln__lv--{{.Class}}">{{.Level}}</span> {{.Msg}}{{range .Kvs}} <span class="ing-ln__kv">{{.K}}=<b>{{.V}}</b></span>{{end}}</div>
-      {{end}}
+      {{template "ingestLogLines" .Lines}}
     </div>
   </div>
   {{end}}
@@ -90,31 +88,72 @@
     <div class="ing__hist-lbl">history</div>
     <table>
       {{range .History}}
-      <tr>
-        <td class="ing__hist-when">{{.When}}</td>
-        {{if .Running}}<td class="ing__hist-st ing__hist-st--run">running</td>
-        {{else if eq .Status "ok"}}<td class="ing__hist-st ing__hist-st--ok">ok</td>
-        {{else}}<td class="ing__hist-st ing__hist-st--err">{{.Status}}</td>{{end}}
-        {{if .Error}}<td class="ing__hist-info">{{.Error}}</td>
-        {{else}}<td class="ing__hist-info">{{.Counts.NewItems}} new</td>{{end}}
-        <td class="ing__hist-took">{{.Took}}</td>
-        <td><span class="ing__trigger">{{.Trigger}}</span></td>
-      </tr>
+      {{template "ingestHistRow" .}}
       {{end}}
     </table>
+    {{if or .HistHasPrev .HistHasNext}}
+    <div class="ing__hist-pager">
+      {{if .HistHasPrev}}<button type="button" class="ing__pg" hx-get="/ingest/status?histPage={{.HistPrevPage}}" hx-target="#ingestBody" hx-swap="outerHTML">&laquo; newer</button>
+      {{else}}<span class="ing__pg ing__pg--off">&laquo; newer</span>{{end}}
+      <span class="ing__pg-n">page {{.HistNextPage}}</span>
+      {{if .HistHasNext}}<button type="button" class="ing__pg" hx-get="/ingest/status?histPage={{.HistNextPage}}" hx-target="#ingestBody" hx-swap="outerHTML">older &raquo;</button>
+      {{else}}<span class="ing__pg ing__pg--off">older &raquo;</span>{{end}}
+    </div>
+    {{end}}
   </div>
   {{end}}
 </div>
 {{end}}
 
-{{/* Topbar status chip: visible after a failed (red) or cancelled (amber)
-     run, hidden otherwise, including while running. Rendered into the topbar
-     by layout.html and updated out-of-band by every ingest poll/mutation
-     response. Clicking it opens the runner modal. */}}
+{{/* One history row group: a <tbody> owning the summary <tr> and, when
+     expanded, a log <tr>. A <table> may hold many <tbody> elements, so this is
+     a self-contained htmx swap target keyed by run id. */}}
+{{define "ingestHistRow"}}
+<tbody id="hist-{{.Run.ID}}">
+  <tr class="ing__hist-r{{if .Expanded}} ing__hist-r--open{{end}}">
+    <td class="ing__hist-tog">
+      {{if .Run.Running}}<span class="ing__hist-tog-x">·</span>
+      {{else}}<button type="button" class="ing__hist-tog-b"
+              hx-get="/ingest/runs/{{.Run.ID}}/log{{if .Expanded}}?collapse=1{{end}}"
+              hx-target="#hist-{{.Run.ID}}" hx-swap="outerHTML"
+              aria-label="{{if .Expanded}}Collapse{{else}}Expand{{end}} run log">{{if .Expanded}}&#9650;{{else}}&#9660;{{end}}</button>{{end}}
+    </td>
+    <td class="ing__hist-when">{{.Run.When}}</td>
+    {{if .Run.Running}}<td class="ing__hist-st ing__hist-st--run">running</td>
+    {{else if eq .Run.Status "ok"}}<td class="ing__hist-st ing__hist-st--ok">ok</td>
+    {{else}}<td class="ing__hist-st ing__hist-st--err">{{.Run.Status}}</td>{{end}}
+    {{if .Run.Error}}<td class="ing__hist-info">{{.Run.Error}}</td>
+    {{else}}<td class="ing__hist-info">{{.Run.Counts.NewItems}} new</td>{{end}}
+    <td class="ing__hist-took">{{.Run.Took}}</td>
+    <td><span class="ing__trigger">{{.Run.Trigger}}</span></td>
+  </tr>
+  {{if .Expanded}}
+  <tr class="ing__hist-log">
+    <td colspan="6">
+      {{if .Logs}}<div class="ing__lines">{{template "ingestLogLines" .Logs}}</div>
+      {{else}}<div class="ing__hist-nolog">no log captured for this run</div>{{end}}
+    </td>
+  </tr>
+  {{end}}
+</tbody>
+{{end}}
+
+{{/* Shared log-line rendering: the live/last-run tail and each expanded
+     history row render through this so the two never drift. */}}
+{{define "ingestLogLines"}}
+{{range .}}
+<div class="ing-ln{{if .Debug}} ing-ln--dbg{{end}}"><span class="ing-ln__ts">{{.Time}}</span> <span class="ing-ln__lv ing-ln__lv--{{.Class}}">{{.Level}}</span> {{.Msg}}{{range .Kvs}} <span class="ing-ln__kv">{{.K}}=<b>{{.V}}</b></span>{{end}}</div>
+{{end}}
+{{end}}
+
+{{/* Topbar status chip: a pulsing amber "running" while a run is live, then a
+     red "failed" or amber "cancelled" alarm after, hidden only when idle/ok.
+     Rendered into the topbar by layout.html and updated out-of-band by every
+     ingest poll/mutation response. Clicking it opens the runner modal. */}}
 {{define "ingestChip"}}
 <span id="ingChip" class="ing-chip{{if .State}} ing-chip--{{.State}}{{end}}"
       {{if .OOB}}hx-swap-oob="true"{{end}} {{if not .State}}hidden{{end}}
       hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML" role="button" tabindex="0">
-  {{- if eq .State "failed"}}<i></i>ingest failed · {{.Ago}}{{else if eq .State "warn"}}<i></i>ingest cancelled · {{.Ago}}{{end -}}
+  {{- if eq .State "running"}}<i></i>ingest running…{{else if eq .State "failed"}}<i></i>ingest failed · {{.Ago}}{{else if eq .State "warn"}}<i></i>ingest cancelled · {{.Ago}}{{end -}}
 </span>
 {{end}}

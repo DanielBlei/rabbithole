@@ -28,3 +28,4 @@ CLAUDE.md
 
 # Project data (sqlite db + generated digests)
 /data
+/config

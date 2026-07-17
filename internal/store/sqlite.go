@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,10 +78,24 @@ var ErrItemNotFound = errors.New("item not found")
 // HTTP 400) apart from an execution failure (HTTP 500).
 var ErrInvalidFilter = errors.New("invalid list filter")
 
-const (
-	pragmaWAL         = "PRAGMA journal_mode=WAL"
-	pragmaBusyTimeout = "PRAGMA busy_timeout=5000"
-)
+// dsnPragmas run on every pooled connection (modernc.org/sqlite applies each
+// _pragma at connection open), so per-connection settings hold across the pool.
+var dsnPragmas = []string{
+	"journal_mode(WAL)",
+	"busy_timeout(5000)",
+	"foreign_keys(1)",          // enforce REFERENCES / ON DELETE CASCADE
+	"auto_vacuum(incremental)", // reclaim space; only takes on a fresh DB
+}
+
+// dsn builds the sqlite connection string, carrying the pragmas as _pragma
+// query params.
+func dsn(path string) string {
+	q := url.Values{}
+	for _, p := range dsnPragmas {
+		q.Add("_pragma", p)
+	}
+	return "file:" + path + "?" + q.Encode()
+}
 
 // Store is a SQLite-backed item store.
 type Store struct {
@@ -94,17 +109,9 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("create db dir: %w", err)
 		}
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
-	}
-	if _, err := db.Exec(pragmaWAL); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("set WAL mode: %w", err)
-	}
-	if _, err := db.Exec(pragmaBusyTimeout); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("set busy timeout: %w", err)
 	}
 	if _, err := db.Exec(schema); err != nil {
 		_ = db.Close()
@@ -150,6 +157,11 @@ func Open(path string) (*Store, error) {
 		// Ingest run history, kept in ingest.go; idempotent (IF NOT EXISTS).
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate ingest schema: %w", err)
+	}
+	if _, err := db.Exec(ingestLogSchema); err != nil {
+		// Per-run captured logs, kept in ingest.go; idempotent (IF NOT EXISTS).
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate ingest log schema: %w", err)
 	}
 	return &Store{db: db}, nil
 }
