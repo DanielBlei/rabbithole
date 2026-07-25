@@ -1,8 +1,6 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -41,16 +39,18 @@ func TestParseDuration(t *testing.T) {
 	}
 }
 
+// writeConfig writes a config file plus the minimal feeds.yaml beside it that
+// Load now requires, and returns the config path.
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return p
+	return writeConfigWithFeeds(t, body, minimalFeeds)
 }
 
-const baseFeeds = "profile: ./p.md\nstore:\n  db_path: ./test.db\nfeeds:\n  - { name: x, url: http://x }\n"
+// baseFeeds is the required-fields-only config the duration/think tests build on.
+const baseFeeds = "profile: ./p.md\nstore:\n  db_path: ./test.db\n"
+
+// minimalFeeds is the smallest valid feeds file.
+const minimalFeeds = "feeds:\n  - name: x\n    url: http://x\n"
 
 func TestLoadSinceDaysAndHours(t *testing.T) {
 	for _, tc := range []struct {

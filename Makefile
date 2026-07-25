@@ -16,8 +16,9 @@ help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(MAKEFILE_LIST)
 
 .PHONY: setup
-setup: ## Create config.yaml and profile.md from the examples (if missing)
+setup: ## Create config.yaml, feeds.yaml and profile.md from the examples (if missing)
 	@test -f configs/config.yaml  || (cp configs/config.example.yaml  configs/config.yaml  && echo "created configs/config.yaml")
+	@test -f configs/feeds.yaml   || (cp configs/feeds.example.yaml   configs/feeds.yaml   && echo "created configs/feeds.yaml")
 	@test -f configs/profile.md   || (cp configs/profile.example.md   configs/profile.md   && echo "created configs/profile.md")
 
 ##@ Build

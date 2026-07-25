@@ -1,0 +1,61 @@
+# The Rabbit Hole feed list. Copy to configs/feeds.yaml and edit.
+#
+# Read at startup — stop the server, edit, start again.
+# View the resolved result in the web UI: gear → View feeds.
+
+# Applied to any feed that doesn't set the knob itself.
+defaults:
+  # Ignore items older than this. Accepts d/h/m (7d, 168h, 90m).
+  since: 7d
+  # Newest items one feed may contribute per run. 0 or omitted = uncapped.
+  max_items: 25
+
+feeds:
+  # Minimum: a unique name and a URL. The rest falls through to defaults.
+  - name: Red Hat Emerging Tech
+    url: https://next.redhat.com/feed/
+    tags:
+      - Red Hat
+      - Infra
+
+  - name: Hugging Face blog
+    url: https://huggingface.co/blog/feed.xml
+    tags:
+      - AI
+      - Research
+
+  # High volume: tighter window and a harder cap than the defaults.
+  - name: Medium — AI
+    url: https://medium.com/feed/tag/artificial-intelligence
+    since: 2d
+    max_items: 10
+    tags:
+      - AI
+      - Medium
+
+  - name: Medium — LLMs
+    url: https://medium.com/feed/tag/large-language-models
+    since: 2d
+    max_items: 10
+    tags:
+      - AI
+      - Medium
+
+  # Disable example, never fetched. Flip enable to true to switch it back on.
+  - name: Medium — ML
+    url: https://medium.com/feed/tag/machine-learning
+    enabled: false
+    tags:
+      - AI
+      - Medium
+
+# Notes:
+#   * A feed is identified by its URL, so renaming keeps its fetch history.
+#     Changing the URL makes it a new feed.
+#   * Names must be unique — items are stored under the name.
+#   * Cap archive-sized feeds: Hugging Face returns ~800 items in one fetch,
+#     and every unseen one is sent to the model.
+#
+# Medium URL shapes:
+#   https://medium.com/feed/tag/<tag>
+#   https://medium.com/feed/@<username>

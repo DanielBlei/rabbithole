@@ -57,13 +57,8 @@ func ParseDuration(s string) (time.Duration, error) {
 	return dur, nil
 }
 
-// Feed is a single RSS/Atom source.
-type Feed struct {
-	Name string `yaml:"name"`
-	URL  string `yaml:"url"`
-}
-
-// Config is the full run configuration loaded from YAML.
+// Config is the full run configuration loaded from YAML. Feeds live in their
+// own file (see feeds.go) — the fields at the bottom are how the two connect.
 type Config struct {
 	User      string          `yaml:"user"`    // shell-prompt name on the web UI; blank falls back to the OS user
 	Profile   string          `yaml:"profile"` // path to the interest-profile markdown
@@ -71,7 +66,16 @@ type Config struct {
 	Scoring   ScoringConfig   `yaml:"scoring"`
 	Ingest    IngestConfig    `yaml:"ingest"`
 	Store     StoreConfig     `yaml:"store"`
-	Feeds     []Feed          `yaml:"feeds"`
+
+	// FeedsFile points at the feeds file. When empty, Load looks for
+	// feeds.yaml beside the config file.
+	FeedsFile string `yaml:"feeds_file"`
+
+	// Feeds is the resolved feed set: the feeds themselves plus the defaults
+	// and path they came from. Derived at load, never written in this file —
+	// hence a single field rather than declared and computed state mixed
+	// together at the top level.
+	Feeds FeedSet `yaml:"-"`
 }
 
 // InferenceConfig configures the scoring backend (the model and how to reach it).
@@ -125,6 +129,11 @@ func Load(path string) (*Config, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	// Feeds resolve last: the cascade's outermost fallback is ingest.since,
+	// so the defaults above must already be applied.
+	if err := cfg.loadFeeds(path); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
 }
 
@@ -164,14 +173,6 @@ func (c *Config) validate() error {
 	}
 	if c.Store.DBPath == "" {
 		return fmt.Errorf("store.db_path is required")
-	}
-	if len(c.Feeds) == 0 {
-		return fmt.Errorf("at least one feed is required")
-	}
-	for i, f := range c.Feeds {
-		if f.URL == "" {
-			return fmt.Errorf("feed %d (%q) has no url", i, f.Name)
-		}
 	}
 	if c.Ingest.Since < 0 {
 		return fmt.Errorf("since must be positive, got %s", c.Ingest.Since)

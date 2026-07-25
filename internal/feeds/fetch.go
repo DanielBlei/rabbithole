@@ -24,19 +24,30 @@ type Source struct {
 	URL  string
 }
 
-// FetchAll fetches every source concurrently and returns the union of items.
-// Individual feed failures are logged and skipped rather than failing the run.
-func FetchAll(ctx context.Context, sources []Source) []Item {
+// Result is one source's fetch outcome. A failed fetch is a Result with Err
+// set and no Items — failures are reported, not swallowed, so the caller can
+// record feed health and still carry on with the sources that did work.
+type Result struct {
+	Source  Source
+	Items   []Item
+	Err     error
+	Elapsed time.Duration
+	At      time.Time // when the fetch finished
+}
+
+// FetchAll fetches every source concurrently and returns one Result per
+// source, in the order the sources were given. Individual feed failures are
+// logged and carried on the Result rather than failing the run.
+func FetchAll(ctx context.Context, sources []Source) []Result {
 	logger := zerolog.Ctx(ctx)
 	sem := make(chan struct{}, maxParallel)
-	var (
-		mu  sync.Mutex
-		all []Item
-		wg  sync.WaitGroup
-	)
-	for _, src := range sources {
+	// Indexed writes rather than an append under a mutex, so results come back
+	// in source order and a run's logs/health rows read predictably.
+	results := make([]Result, len(sources))
+	var wg sync.WaitGroup
+	for i, src := range sources {
 		wg.Add(1)
-		go func(src Source) {
+		go func(i int, src Source) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
@@ -46,19 +57,18 @@ func FetchAll(ctx context.Context, sources []Source) []Item {
 			// gofeed.Parser lazily initializes internal state on first use and
 			// is not goroutine-safe, so each fetch gets its own (cheap) parser.
 			items, err := fetchOne(ctx, gofeed.NewParser(), src)
+			res := Result{Source: src, Items: items, Err: err, Elapsed: time.Since(start), At: time.Now()}
 			if err != nil {
 				logger.Warn().Str("feed", src.Name).Err(err).Msg("skipping feed")
-				return
+			} else {
+				logger.Debug().Str("feed", src.Name).Int("items", len(items)).
+					Str("elapsed", res.Elapsed.Round(100*time.Millisecond).String()).Msg("feed fetched")
 			}
-			logger.Debug().Str("feed", src.Name).Int("items", len(items)).
-				Str("elapsed", time.Since(start).Round(100*time.Millisecond).String()).Msg("feed fetched")
-			mu.Lock()
-			all = append(all, items...)
-			mu.Unlock()
-		}(src)
+			results[i] = res
+		}(i, src)
 	}
 	wg.Wait()
-	return all
+	return results
 }
 
 func fetchOne(ctx context.Context, parser *gofeed.Parser, src Source) ([]Item, error) {

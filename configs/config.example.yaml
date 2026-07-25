@@ -27,20 +27,15 @@ scoring:
 
 # Fetch/score run settings.
 ingest:
-  since: 7d  # ignore items older than this; accepts 'd' (days) or 'h' (e.g. 14d, 168h)
+  # Global lookback window — the outermost fallback for a feed's `since`.
+  # Accepts 'd' (days) or 'h' (e.g. 14d, 168h).
+  since: 7d
   # digest_dir: ./data/digests  # set only to export a markdown digest via `ingest --markdown`
 
 # Item persistence.
 store:
   db_path: ./data/rabbithole.db
 
-# Feeds (any RSS/Atom URL). E.g. Medium tag/author/publication feeds:
-#   https://medium.com/feed/tag/<tag>
-#   https://medium.com/feed/@<username>
-#   https://medium.com/feed/<publication>
-feeds:
-  - { name: "Red Hat Emerging Tech", url: "https://next.redhat.com/feed/" }
-  - { name: "Hugging Face blog",    url: "https://huggingface.co/blog/feed.xml" }
-  - { name: "Medium — AI",          url: "https://medium.com/feed/tag/artificial-intelligence" }
-  - { name: "Medium — LLMs",        url: "https://medium.com/feed/tag/large-language-models" }
-  - { name: "Medium — ML",          url: "https://medium.com/feed/tag/machine-learning" }
+# Feeds live in their own file (see configs/feeds.example.yaml), where each one
+# can override the lookback window, cap its items, carry tags, or be parked.
+feeds_file: ./configs/feeds.yaml
