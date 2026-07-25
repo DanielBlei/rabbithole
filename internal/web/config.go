@@ -25,7 +25,9 @@ func (s *Web) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if raw, err := os.ReadFile(s.cfgPath); err != nil {
 		data.Error = err.Error()
 	} else {
-		data.YAML = highlightYAML(string(raw))
+		// Never paint a credential into the page: the modal is opened over
+		// screen-shares and lands in screenshots.
+		data.YAML = highlightYAML(redactSecrets(string(raw)))
 	}
 
 	// The config modal is shared chrome (opened from the topbar gear on any
@@ -34,6 +36,57 @@ func (s *Web) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if err := feedTmpl.ExecuteTemplate(w, "configModal", data); err != nil {
 		// Status is likely already written; log rather than double-write.
 		log.Error().Err(err).Msg("render config modal")
+	}
+}
+
+// secretKeyRE matches a YAML line whose key looks like a credential. It's
+// deliberately loose on the key (any key *containing* one of the words, so
+// `openai_api_key` and `auth_token` are caught too) and requires a non-empty
+// value, which is captured whole for the redactor to inspect.
+var secretKeyRE = regexp.MustCompile(
+	`(?i)^(\s*(?:- )?)([a-z0-9_.-]*(?:api_key|apikey|token|secret|password|passwd)[a-z0-9_.-]*)(\s*:[ \t]*)(.+)$`)
+
+// redactedMask stands in for a secret's value in the viewer.
+const redactedMask = "••••••••"
+
+// redactSecrets masks the value of any credential-looking key in raw YAML,
+// keeping the key, indentation and trailing comment so the viewer still shows
+// that the field exists and what it's for. An empty value is left alone —
+// there's nothing to leak, and blanking it would hide the "unset" state that
+// makes the config readable.
+//
+// This is a line-level pass over the source text rather than a parse-and-
+// re-emit, because the viewer's whole point is showing the file verbatim
+// (comments, ordering, formatting). It is a display guard, not an access
+// control: anyone who can reach this server can already read the file.
+func redactSecrets(src string) string {
+	lines := strings.Split(src, "\n")
+	for i, line := range lines {
+		m := secretKeyRE.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		value, comment := splitComment(m[4])
+		if isBlankScalar(value) {
+			continue
+		}
+		redacted := m[1] + m[2] + m[3] + redactedMask
+		if comment != "" {
+			redacted += " " + comment
+		}
+		lines[i] = redacted
+	}
+	return strings.Join(lines, "\n")
+}
+
+// isBlankScalar reports whether a YAML value carries nothing worth hiding:
+// absent, or an empty quoted string.
+func isBlankScalar(v string) bool {
+	switch strings.TrimSpace(v) {
+	case "", `""`, "''", "~", "null":
+		return true
+	default:
+		return false
 	}
 }
 
