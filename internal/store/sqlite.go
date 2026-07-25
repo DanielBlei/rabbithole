@@ -163,6 +163,11 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate ingest log schema: %w", err)
 	}
+	if _, err := db.Exec(feedFetchSchema); err != nil {
+		// Per-feed fetch history, kept in feeds.go; idempotent (IF NOT EXISTS).
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate feed fetch schema: %w", err)
+	}
 	return &Store{db: db}, nil
 }
 
