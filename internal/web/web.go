@@ -82,6 +82,7 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /feed", s.handleFeed)
 	mux.HandleFunc("GET /maze", s.handleMaze)
 	mux.HandleFunc("GET /config", s.handleConfig)
+	mux.HandleFunc("GET /feeds", s.handleFeeds)
 	mux.HandleFunc("GET /ingest", s.handleIngest)
 	mux.HandleFunc("GET /ingest/status", s.handleIngestStatus)
 	mux.HandleFunc("GET /ingest/chrome", s.handleIngestChrome)
