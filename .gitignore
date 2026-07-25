@@ -23,9 +23,13 @@ go.work.sum
 # Editor/IDE
 .idea/
 .vscode/
-.claude
+.claude/
 CLAUDE.md
 
 # Project data (sqlite db + generated digests)
 /data
-/config
+
+# Personal config: the real files, never the tracked *.example.* templates.
+/configs/config.yaml
+/configs/feeds.yaml
+/configs/profile.md
