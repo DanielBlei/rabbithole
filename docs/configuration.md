@@ -1,34 +1,126 @@
 # Configuration
 
-Copy `configs/config.example.yaml` to `configs/config.yaml` and edit (`make setup` does this,
-plus the profile copy, if both files are missing).
+Two files, both under `configs/`:
+
+| File | What it holds |
+|---|---|
+| `config.yaml` | how to run — model, scoring, storage, paths |
+| `feeds.yaml` | the feed list and per-feed tuning |
+
+Copy the `*.example.yaml` templates and edit (`make setup` does this, plus the profile copy,
+for any file that's missing). Both are read once at startup: **editing them while the server
+is running has no effect** — stop it, edit, start again. The web UI has read-only viewers for
+both under the gear menu (View config / View feeds).
+
+## config.yaml
+
+The schema is nested. Every field below is optional unless marked required.
 
 | Field | Meaning | Default |
 |---|---|---|
-| `profile` | Path to your interest-profile markdown, injected into the scoring prompt | required |
-| `provider` | `ollama` \| `vllm` \| `heuristic` | `ollama` |
-| `chat_host` | Inference endpoint URL | `http://localhost:11434` |
-| `chat_model` | Model name | `qwen3:4b` |
-| `api_key` | Optional bearer token (vLLM prod / Ollama Cloud) | `""` |
-| `batch_size` | Items sent per scoring request | `5` |
-| `max_parallel` | Concurrent scoring requests in flight | `4` |
-| `min_score` | Inclusion threshold, 0–10 | `6` |
-| `since` | Ignore items older than this when fetching | `14d` |
-| `list_since` | Default display window for `items list` / `serve`, independent of `since` | `3d` |
-| `output_dir` | Digest output directory | `./data/digests` |
-| `db_path` | SQLite database path | required |
-| `feeds` | List of `{ name, url }` RSS/Atom sources | at least one required |
+| `user` | Name shown in the web UI's shell prompt | your OS login name |
+| `profile` | Path to your interest-profile markdown, injected into the scoring prompt | **required** |
+| `inference.provider` | `ollama` \| `vllm` \| `heuristic` | `ollama` |
+| `inference.host` | Inference endpoint URL | `http://localhost:11434` |
+| `inference.model` | Model name | `qwen3:4b` |
+| `inference.api_key` | Optional bearer token (vLLM prod / Ollama Cloud) | `""` |
+| `inference.think` | Model reasoning during scoring | `true` |
+| `scoring.batch_size` | Items sent per scoring request | `5` |
+| `scoring.max_parallel` | Concurrent scoring requests in flight | `4` |
+| `ingest.since` | Global lookback window — the outermost fallback for a feed's `since` | `14d` |
+| `ingest.digest_dir` | Where `ingest --markdown` writes the digest | none (required by that flag) |
+| `store.db_path` | SQLite database path | **required** |
+| `feeds_file` | Path to the feed list | `feeds.yaml` beside `config.yaml` |
 
-Durations (`since`, `list_since`) accept a `d` (days) suffix on top of Go's standard units
-(`h`, `m`, `s`), e.g. `14d`, `168h`, `36h`.
+Durations accept a `d` (days) suffix on top of Go's standard units (`h`, `m`, `s`) —
+e.g. `14d`, `168h`, `36h`, `1h30m`.
 
-## Feeds
+`api_key` is stored in plaintext. The config viewer masks it, but the file itself isn't
+protected — keep `configs/config.yaml` out of version control (it's gitignored).
 
-Any RSS/Atom URL works. Medium feeds:
+## feeds.yaml
+
+A `defaults:` block plus the feed list. Any RSS/Atom URL works.
+
+```yaml
+defaults:
+  since: 7d       # lookback window for feeds that don't set their own
+  max_items: 25   # cap per feed per run; 0 or omitted = uncapped
+
+feeds:
+  - name: Hugging Face blog
+    url: https://huggingface.co/blog/feed.xml
+    tags: [ai, research]
+
+  - name: Medium — AI          # high volume: tighter window, harder cap
+    url: https://medium.com/feed/tag/artificial-intelligence
+    since: 2d
+    max_items: 10
+
+  - name: Old Newsletter       # parked, not deleted
+    url: https://example.com/feed.xml
+    enabled: false
+```
+
+| Field | Meaning | Default |
+|---|---|---|
+| `name` | Display name; also the `source` items are stored under | **required, unique** |
+| `url` | RSS/Atom feed URL — also the feed's identity | **required** |
+| `enabled` | `false` parks the feed — kept in the file, never fetched | `true` |
+| `since` | This feed's lookback window | `defaults.since`, then `ingest.since` |
+| `max_items` | Cap on the newest in-window items this feed contributes per run | `defaults.max_items`, then uncapped |
+| `tags` | Free-form labels, shown in the feeds viewer | `defaults.tags` |
+
+`max_items` matters more than it looks: some feeds return their whole archive.
+Hugging Face's blog feed returns ~800 items in a single fetch, and without a cap every
+unseen one goes to the model for scoring on the first run.
+
+### How a value is resolved
+
+Each knob falls through until something sets it:
+
+```
+feed entry  →  feeds.yaml defaults  →  config.yaml (since only)  →  built-in
+```
+
+The feeds viewer marks inherited values with `*` and names their origin on hover, so you can
+always see whether a feed set a value itself or picked it up from further out. `tags` are the
+exception — a feed's tags are *added to* the defaults' rather than replacing them.
+
+### Identity: what makes a feed "the same feed"
+
+A feed's identity is derived from its **URL**, not its name. Fetch history is keyed on that
+identity, so:
+
+- **Renaming a feed keeps its history.** The name is a label; change it freely.
+- **Changing a feed's URL starts a new feed.** That's deliberate — a different URL is a
+  different source.
+- **Two entries with the same URL share one history entry.** Allowed (it's harmless and
+  self-inflicted), but a warning is logged at startup so it isn't silent.
+
+Names must still be unique, and that's a *separate* constraint: items are stored under the
+feed name, so two feeds sharing one would merge into a single source in the feed list.
+Renaming does still start a new source for already-stored items — history follows the URL,
+stored items follow the name.
+
+### Feed health
+
+Every ingest run appends one row per feed to a fetch history: outcome, item count, error,
+and how long it took. The feeds viewer aggregates it into a status dot, the current failure
+streak, when the feed last worked, and a strip of recent attempts so a pattern is visible at
+a glance rather than only the latest verdict.
+
+A failing feed never fails the run — it's logged, recorded, and skipped. History is recorded
+on `--dry-run` too, so a dead feed surfaces even on a run that persists nothing.
+
+The history is append-only and pruned to the newest 200 attempts per feed. Rows for feeds
+you've removed are left alone, so re-adding a feed restores its history rather than starting
+blank.
+
+Medium feed URL shapes:
 
 - `https://medium.com/feed/tag/<tag>`
 - `https://medium.com/feed/@<username>`
-- `https://medium.com/feed/<publication>`
 
 ## Interest profile
 
