@@ -1,0 +1,88 @@
+{{/* Read-only feeds viewer. Shows what the server *resolved* — effective
+     since/cap per feed with an asterisk on inherited values — joined with each
+     feed's last fetch outcome, rather than the raw file text. Editing feeds is
+     deliberately not here: stop the server, edit the file, start again. */}}
+{{define "feedsModal"}}
+<div class="modal" id="feedsModal">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__frame modal__frame--feeds" role="dialog" aria-modal="true" aria-label="Configured feeds">
+    <div class="modal__bar">
+      <span class="modal__title">feeds — <span class="modal__path">{{.Path}}</span></span>
+      <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+    </div>
+
+    <div class="fds">
+      <div class="fds__sum">
+        <span class="fds__cnt">{{.Total}} feed{{if ne .Total 1}}s{{end}}</span>
+        <span class="fds__sep">·</span>
+        <span class="fds__cnt">{{.Enabled}} enabled</span>
+        {{if .Failing}}<span class="fds__sep">·</span><span class="fds__cnt fds__cnt--err">{{.Failing}} failing</span>{{end}}
+      </div>
+
+      {{if .Error}}<div class="fds__note">{{.Error}}</div>{{end}}
+
+      {{if .Rows}}
+      <div class="fds__scroll">
+        <table class="fds__t">
+          <thead>
+            <tr>
+              <th class="fds__th-st" aria-label="Status"></th>
+              <th>feed</th>
+              <th class="fds__th-n">since</th>
+              <th class="fds__th-n">cap</th>
+              <th>tags</th>
+              <th>last fetch</th>
+              <th class="fds__th-hist">history</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Rows}}
+            <tr class="fds__r{{if not .Enabled}} fds__r--off{{end}}">
+              <td class="fds__st"><span class="fds__dot fds__dot--{{.State}}" title="{{.Detail}}" aria-label="{{.Detail}}"></span></td>
+              <td class="fds__name">
+                <span class="fds__nm">{{.Name}}</span>
+                <a class="fds__url" href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.Host}}</a>
+              </td>
+              <td class="fds__n">{{.Since}}{{if .SinceOn}}<span class="fds__inh" title="inherited from {{.SinceOn}}">*</span>{{end}}</td>
+              <td class="fds__n">{{.Cap}}{{if .CapOn}}<span class="fds__inh" title="inherited from {{.CapOn}}">*</span>{{end}}</td>
+              <td class="fds__tags">{{range .Tags}}<span class="fds__tag">{{.}}</span>{{end}}</td>
+              <td class="fds__health">
+                {{if eq .State "error"}}
+                  <span class="fds__err" title="{{.Detail}}">{{.Detail}}</span>
+                  {{if gt .FailStreak 1}}<span class="fds__streak" title="consecutive failures">&times;{{.FailStreak}}</span>{{end}}
+                {{else if eq .State "off"}}
+                  <span class="fds__dim">disabled</span>
+                {{else if eq .State "never"}}
+                  <span class="fds__dim">not fetched yet</span>
+                {{else}}
+                  <span class="fds__ok">{{.Detail}}</span>
+                {{end}}
+                {{if .Since1st}}<span class="fds__when">failing since {{.Since1st}}</span>
+                {{else if .LastFetch}}<span class="fds__when">{{.LastFetch}}</span>{{end}}
+              </td>
+              {{/* Oldest-to-newest run of past attempts: the shape of a feed's
+                   recent behaviour at a glance, which a single current-status
+                   dot can't show. */}}
+              <td class="fds__strip">
+                {{range .Strip}}<i class="fds__tick{{if not .OK}} fds__tick--bad{{end}}" title="{{.Title}}"></i>{{end}}
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+        <div class="fds__note">no feeds configured</div>
+      {{end}}
+
+      <div class="fds__legend">
+        <span><b>*</b> inherited value</span>
+        <span class="fds__sep">·</span>
+        <span>defaults: {{.Defaults}}</span>
+      </div>
+    </div>
+
+    <div class="modal__foot">read-only view — edit the feeds file and restart the server to change it</div>
+  </div>
+</div>
+{{end}}

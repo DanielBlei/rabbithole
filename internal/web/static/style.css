@@ -865,6 +865,83 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 .ing__pg--off{color:var(--text-dim);opacity:.4;cursor:default;}
 .ing__pg-n{color:var(--text-dim);letter-spacing:.06em;}
 
+/* --- Feeds: read-only viewer modal --------------------------------------- */
+/* A dense table, not a YAML dump: at two dozen feeds the question is "what did
+   the server resolve and is it still fetching", so effective values (with a *
+   on inherited ones) and last-fetch health are the content. */
+.modal__frame--feeds{width:min(940px,95vw);max-height:88vh;}
+.fds{padding:14px 20px 18px;min-height:0;display:flex;flex-direction:column;overflow:hidden;}
+.fds__sum{display:flex;align-items:center;gap:9px;font-size:1.3rem;color:var(--text-dim);}
+.fds__cnt{color:var(--text);}
+.fds__cnt--err{color:var(--warn);}
+.fds__sep{color:var(--line);}
+.fds__note{
+  margin-top:10px;padding:9px 13px;border-radius:8px;font-size:1.25rem;
+  background:var(--fill);color:var(--text-dim);
+}
+/* The table scrolls inside the modal, so the summary and legend stay put. */
+.fds__scroll{margin-top:12px;min-height:0;overflow-y:auto;overscroll-behavior:contain;}
+.fds__t{width:100%;border-collapse:collapse;font-size:1.3rem;}
+.fds__t thead th{
+  position:sticky;top:0;z-index:1;background:var(--pane);
+  padding:6px 10px;text-align:left;font-weight:400;font-size:1.1rem;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);
+  border-bottom:1px solid var(--hairline);
+}
+.fds__t td{padding:8px 10px;color:var(--text-dim);border-top:1px solid var(--hairline);vertical-align:top;}
+.fds__t tbody tr:first-child td{border-top:0;}
+.fds__r--off{opacity:.5;}
+.fds__th-st{width:2.2rem;}
+.fds__th-n{width:5.5rem;}
+.fds__st{padding-right:0;}
+/* Status dot: green ok, red error, gold never-fetched, hollow when parked. */
+.fds__dot{display:inline-block;width:.8rem;height:.8rem;border-radius:50%;margin-top:.45rem;}
+.fds__dot--ok{background:var(--score-high);box-shadow:0 0 5px rgba(195,232,141,.35);}
+.fds__dot--error{background:var(--warn);box-shadow:0 0 5px rgba(255,83,112,.4);}
+.fds__dot--never{background:var(--gold);opacity:.7;}
+.fds__dot--off{background:none;box-shadow:inset 0 0 0 1px var(--text-dim);}
+.fds__name{min-width:16rem;}
+.fds__nm{display:block;color:var(--title);}
+.fds__url{
+  display:block;margin-top:2px;font-size:1.1rem;color:var(--text-dim);
+  opacity:.75;text-decoration:none;
+}
+.fds__url:hover{color:var(--amber);opacity:1;}
+.fds__n{white-space:nowrap;color:var(--text);}
+/* Inherited marker — deliberately faint; the value is the signal, the
+   asterisk only answers "did I set this or did it fall through". */
+.fds__inh{color:var(--amber-dim);cursor:help;margin-left:1px;}
+.fds__tags{max-width:14rem;}
+.fds__tag{
+  display:inline-block;margin:0 4px 3px 0;padding:1px 8px;border-radius:999px;
+  background:var(--fill);color:var(--text-dim);font-size:1.05rem;
+}
+.fds__health{max-width:22rem;}
+.fds__ok{color:var(--text);}
+.fds__err{
+  color:var(--warn);display:inline-block;max-width:20rem;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;
+}
+.fds__streak{margin-left:5px;color:var(--warn);opacity:.8;font-size:1.1rem;}
+.fds__dim{color:var(--text-dim);opacity:.7;font-style:italic;}
+.fds__when{display:block;margin-top:2px;font-size:1.1rem;color:var(--text-dim);opacity:.7;}
+/* Fetch-history strip: one tick per past attempt, oldest left. Reads as a
+   shape (solid run vs gaps) rather than as data you parse tick by tick. */
+.fds__th-hist{width:9rem;}
+.fds__strip{white-space:nowrap;line-height:1;}
+.fds__tick{
+  display:inline-block;width:.4rem;height:1.4rem;margin-right:2px;
+  border-radius:1px;background:var(--score-high);opacity:.55;cursor:help;
+}
+.fds__tick--bad{background:var(--warn);opacity:.85;}
+.fds__strip .fds__tick:last-child{opacity:1;}
+.fds__legend{
+  display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+  margin-top:12px;padding-top:10px;border-top:1px solid var(--hairline);
+  font-size:1.15rem;color:var(--text-dim);
+}
+.fds__legend b{color:var(--amber-dim);font-weight:400;}
+
 /* ── Maze: the day-to-day tools home. First widget is the todo board. ────────
    Reuses the .pane terminal frame from the feed; the pieces below are the
    board-specific chrome (tabs, add row, task rows). The whole widget re-renders
