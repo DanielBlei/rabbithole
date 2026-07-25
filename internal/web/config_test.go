@@ -74,3 +74,84 @@ func TestHighlightYAML(t *testing.T) {
 		}
 	}
 }
+
+// A set credential must never reach the rendered page — the modal is opened
+// over screen-shares and lands in screenshots (review finding 1.1).
+func TestHandleConfigRedactsSecrets(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	const secret = "sk-live-SUPERSECRET-0123456789"
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := "inference:\n  provider: ollama\n  api_key: \"" + secret + "\" # ollama cloud\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	w := New(db, &config.Config{}, ":8080", path, testIngestManager(t, db))
+	rec := httptest.NewRecorder()
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/config", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /config: status = %d, want 200", rec.Code)
+	}
+	out := rec.Body.String()
+	if strings.Contains(out, secret) {
+		t.Fatalf("api_key leaked into the config modal; body=%s", out)
+	}
+	// The field and its comment still show, so the viewer stays informative.
+	if !strings.Contains(out, "api_key") || !strings.Contains(out, redactedMask) {
+		t.Errorf("expected a masked api_key field; body=%s", out)
+	}
+	if !strings.Contains(out, "ollama cloud") {
+		t.Errorf("trailing comment should survive redaction; body=%s", out)
+	}
+}
+
+func TestRedactSecrets(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"quoted key", `  api_key: "abc123"`, "  api_key: " + redactedMask},
+		{"bare key", `api_key: abc123`, "api_key: " + redactedMask},
+		{"prefixed key", `  openai_api_key: abc`, "  openai_api_key: " + redactedMask},
+		{"token", `token: xyz`, "token: " + redactedMask},
+		{"auth_token", `  auth_token: xyz`, "  auth_token: " + redactedMask},
+		{"password", `password: hunter2`, "password: " + redactedMask},
+		{"client_secret", `client_secret: shh`, "client_secret: " + redactedMask},
+		{"list item", `  - token: xyz`, "  - token: " + redactedMask},
+		{"comment kept", `api_key: abc # note`, "api_key: " + redactedMask + " # note"},
+		// Nothing to hide: an unset value stays legible.
+		{"empty quoted", `api_key: ""`, `api_key: ""`},
+		{"empty", `api_key:`, `api_key:`},
+		{"null", `api_key: null`, `api_key: null`},
+		// Non-secret keys are untouched, including ones merely mentioning it.
+		{"other key", `model: qwen3:4b`, `model: qwen3:4b`},
+		{"comment only", `# set api_key here`, `# set api_key here`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := redactSecrets(c.in); got != c.want {
+				t.Errorf("redactSecrets(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// Redaction must survive a multi-line file without disturbing its neighbours.
+func TestRedactSecretsMultiline(t *testing.T) {
+	in := "inference:\n  provider: ollama\n  api_key: secret-value\n  model: qwen3:4b\n"
+	got := redactSecrets(in)
+	if strings.Contains(got, "secret-value") {
+		t.Errorf("secret survived redaction: %q", got)
+	}
+	for _, want := range []string{"provider: ollama", "model: qwen3:4b", "api_key: " + redactedMask} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q; got %q", want, got)
+		}
+	}
+}
