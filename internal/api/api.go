@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -222,5 +224,8 @@ func parseTime(field, v string) (time.Time, error) {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	// The status is already written, so a failed encode can only be logged.
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Warn().Err(err).Int("status", status).Msg("encoding JSON response")
+	}
 }

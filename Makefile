@@ -114,6 +114,6 @@ trace: ## Run the ingest with trace logging (raw model prompts/responses)
 .PHONY: db-dump
 db-dump: ## Dump the items table via the sqlite3 CLI (requires DB=path)
 	@test -n "$(DB)" || { echo "usage: make db-dump DB=./data/rabbithole.db" >&2; exit 1; }
-	sqlite3 -header -column $(DB) "SELECT id, source, title, status, llm_score, user_score, ingested_on, created_at FROM items ORDER BY created_at;"
+	sqlite3 -header -column $(DB) "SELECT id, source, title, status, llm_score, user_score, digested_on, created_at FROM items ORDER BY created_at;"
 
 
