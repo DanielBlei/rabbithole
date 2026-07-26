@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+var errStillDown = errors.New("still down")
+
 func TestDoSucceedsAfterFailures(t *testing.T) {
 	var calls int
 	var retries []int
@@ -37,6 +39,7 @@ func TestDoFailureModes(t *testing.T) {
 		delay     time.Duration
 		fn        func(calls *int, cancel context.CancelFunc) error
 		wantCalls int
+		wantErr   error
 	}{
 		{
 			name:     "exhausts attempts",
@@ -44,9 +47,10 @@ func TestDoFailureModes(t *testing.T) {
 			delay:    time.Millisecond,
 			fn: func(calls *int, _ context.CancelFunc) error {
 				*calls++
-				return errors.New("still down")
+				return errStillDown
 			},
 			wantCalls: 3,
+			wantErr:   errStillDown,
 		},
 		{
 			name:     "stops on context cancel",
@@ -57,9 +61,12 @@ func TestDoFailureModes(t *testing.T) {
 				if *calls == 1 {
 					cancel()
 				}
-				return errors.New("not ready")
+				return errStillDown
 			},
 			wantCalls: 1,
+			// The context error, not fn's, so a cancelled run is
+			// distinguishable from one that used up its attempts.
+			wantErr: context.Canceled,
 		},
 	}
 	for _, tt := range tests {
@@ -67,8 +74,8 @@ func TestDoFailureModes(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			var calls int
 			err := Do(ctx, tt.attempts, tt.delay, func() error { return tt.fn(&calls, cancel) }, nil)
-			if err == nil {
-				t.Fatal("Do() error = nil, want non-nil")
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Do() error = %v, want one wrapping %v", err, tt.wantErr)
 			}
 			if calls != tt.wantCalls {
 				t.Fatalf("calls = %d, want %d", calls, tt.wantCalls)

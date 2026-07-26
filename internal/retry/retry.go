@@ -4,6 +4,7 @@ package retry
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -11,6 +12,9 @@ import (
 // waits delay, then doubles delay for the next wait. onRetry, if non-nil, is
 // invoked after a failed attempt (other than the last) with the attempt
 // number that just failed, its error, and the upcoming delay.
+//
+// Running out of attempts returns fn's last error; a cancelled ctx returns the
+// context error instead, so callers can tell the two apart.
 func Do(
 	ctx context.Context,
 	attempts int,
@@ -32,7 +36,7 @@ func Do(
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():
-			return err
+			return fmt.Errorf("%w after %d attempt(s), last error: %v", ctx.Err(), attempt, err)
 		}
 		delay *= 2
 	}

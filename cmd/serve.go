@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -28,15 +29,24 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 }
 
-// shutdownTimeout bounds how long runServe waits for in-flight requests to
-// finish once the signal-aware context (see root.go's withSignalCancel) is
-// cancelled.
-const shutdownTimeout = 5 * time.Second
+// Time limits for one connection, plus how long shutdown waits.
+// Without these, a slow or stuck client can hold a connection open forever.
+const (
+	readHeaderTimeout = 5 * time.Second   // time to send the request headers
+	readTimeout       = 15 * time.Second  // time to send the headers plus the body
+	writeTimeout      = 30 * time.Second  // nothing streams, so this covers the slowest full page
+	idleTimeout       = 120 * time.Second // how long an open but unused connection is kept
+	shutdownTimeout   = 5 * time.Second   // how long we wait for in-flight requests on Ctrl+C
+)
 
-// readHeaderTimeout bounds how long a client may take to send its request
-// headers, guarding against Slowloris-style connection holding that the
-// zero-value http.Server otherwise leaves unbounded.
-const readHeaderTimeout = 5 * time.Second
+// browsableAddr turns a listen address into one you can paste in a browser,
+// naming the host when the address only gives a port (":8080").
+func browsableAddr(addr string) string {
+	if strings.HasPrefix(addr, ":") {
+		return "localhost" + addr
+	}
+	return addr
+}
 
 func runServe(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
@@ -70,11 +80,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Addr:              serveAddr,
 		Handler:           server.New(db, cfg, serveAddr, configPath, mgr).Routes(),
 		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info().Msg(fmt.Sprintf("serving at http://localhost%s", serveAddr))
+		log.Info().Msg("serving at http://" + browsableAddr(serveAddr))
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 			return
