@@ -58,7 +58,7 @@ func Run(
 	active := cfg.Feeds.Enabled()
 	sources := make([]feeds.Source, len(active))
 	for i, f := range active {
-		sources[i] = feeds.Source{Name: f.Name, URL: f.URL}
+		sources[i] = feeds.Source{Name: f.Name, URL: f.URL, Tags: f.Tags}
 		logger.Debug().Str("feed", f.Name).Str("url", f.URL).
 			Str("since", f.Since.String()).Int("max_items", f.MaxItems).Msg("configured feed")
 	}
@@ -87,6 +87,14 @@ func Run(
 	// history is observability and must never fail the run.
 	if err := recordFeedFetches(ctx, db, active, results); err != nil {
 		logger.Warn().Err(err).Msg("recording feed fetch history failed")
+	}
+
+	// Items carry their feed's tags, written when they're inserted. An already
+	// scored item is never re-inserted, so retagging a feed in the feeds file
+	// reaches its existing items only through this sync. Best-effort, like the
+	// history above.
+	if err := db.SyncSourceTags(ctx, ConfiguredTags(cfg)); err != nil {
+		logger.Warn().Err(err).Msg("syncing feed tags failed")
 	}
 
 	// resolveScorer builds the backend lazily on the first feed with items to
@@ -193,6 +201,17 @@ func Run(
 		Str("elapsed", time.Since(runStart).Round(100*time.Millisecond).String()).Msg("ingest complete")
 
 	return outcome, nil
+}
+
+// ConfiguredTags maps every configured feed's name — the value items record as
+// their source — to its resolved tags. Disabled feeds are included: their
+// items are still in the store and still belong to their tags.
+func ConfiguredTags(cfg *config.Config) map[string][]string {
+	tags := make(map[string][]string, cfg.Feeds.Len())
+	for _, f := range cfg.Feeds.All {
+		tags[f.Name] = f.Tags
+	}
+	return tags
 }
 
 // tallyFetches counts the items fetched across every source and how many

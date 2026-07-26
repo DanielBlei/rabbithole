@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
 
 // openTestStore opens a throwaway store, closed on cleanup.
@@ -386,3 +388,45 @@ func TestRecordFeedFetchesBatch(t *testing.T) {
 
 // feedRecentAll asks for more history than any test writes.
 const feedRecentAll = 100
+
+// Tags follow the feeds file, both ways: a feed that gains tags has its already
+// recorded items tagged, and one that loses them goes back to untagged. Sources
+// the map doesn't mention are left as they are.
+func TestSyncSourceTags(t *testing.T) {
+	ctx := context.Background()
+	db := openTestStore(t)
+
+	items := []feeds.Item{
+		{ID: "1", Source: "Alpha", Title: "a", Link: "https://x/a"},
+		{ID: "2", Source: "Beta", Title: "b", Link: "https://x/b", Tags: []string{"ml"}},
+		{ID: "3", Source: "Gamma", Title: "c", Link: "https://x/c", Tags: []string{"go"}},
+	}
+	if err := db.Record(ctx, items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	err := db.SyncSourceTags(ctx, map[string][]string{
+		"Alpha": {"AI", "rust"}, // newly tagged
+		"Beta":  nil,            // tags removed from the file
+	})
+	if err != nil {
+		t.Fatalf("SyncSourceTags: %v", err)
+	}
+
+	tagsOf := func(link string) []string {
+		row, err := db.Get(ctx, link)
+		if err != nil {
+			t.Fatalf("Get %s: %v", link, err)
+		}
+		return row.Tags
+	}
+	if got := tagsOf("https://x/a"); len(got) != 2 || got[0] != "AI" || got[1] != "rust" {
+		t.Errorf("Alpha tags = %v, want [AI rust] — recorded case preserved", got)
+	}
+	if got := tagsOf("https://x/b"); got != nil {
+		t.Errorf("Beta tags = %v, want nil once the file drops them", got)
+	}
+	if got := tagsOf("https://x/c"); len(got) != 1 || got[0] != "go" {
+		t.Errorf("Gamma tags = %v, want [go] — a source the sync doesn't mention is untouched", got)
+	}
+}

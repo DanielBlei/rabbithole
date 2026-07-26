@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS items (
 	status           TEXT NOT NULL DEFAULT 'unread',
 	user_score       INTEGER,
 	user_note        TEXT,
-	bookmarked       BOOLEAN NOT NULL DEFAULT 0
+	bookmarked       BOOLEAN NOT NULL DEFAULT 0,
+	tags             TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_items_digested ON items(digested_on);
 CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
@@ -177,6 +178,8 @@ func Open(path string) (*Store, error) {
 var addColumns = []string{
 	"ALTER TABLE items ADD COLUMN llm_score_model TEXT",
 	"ALTER TABLE items ADD COLUMN bookmarked BOOLEAN NOT NULL DEFAULT 0",
+	// The tags of the feed the item came from, comma-joined, NULL when the feed carries none.
+	"ALTER TABLE items ADD COLUMN tags TEXT",
 	// Index the bookmark column for the `--bookmarked` filter. This lives here
 	// rather than in the base schema because that block runs before the ALTER
 	// above, so on an existing DB the column wouldn't exist yet. CREATE INDEX
@@ -270,14 +273,15 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEnt
 	defer func() { _ = tx.Rollback() }()
 
 	const q = `INSERT INTO items
-		(id, source, title, link, summary, published_at, created_at, updated_at, llm_score, llm_score_reason, llm_score_model, digested_on)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(id, source, title, link, summary, published_at, created_at, updated_at, llm_score, llm_score_reason, llm_score_model, digested_on, tags)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(link) DO UPDATE SET
 			llm_score        = excluded.llm_score,
 			llm_score_reason = excluded.llm_score_reason,
 			llm_score_model  = excluded.llm_score_model,
 			digested_on      = COALESCE(excluded.digested_on, digested_on),
-			updated_at       = excluded.updated_at
+			updated_at       = excluded.updated_at,
+			tags             = excluded.tags
 		WHERE excluded.llm_score IS NOT NULL`
 	stmt, err := tx.PrepareContext(ctx, q)
 	if err != nil {
@@ -308,8 +312,13 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEnt
 		if !it.Published.IsZero() {
 			publishedAt = it.Published
 		}
+		// A feed with no tags stores NULL rather than an empty string, so "untagged" is one value everywhere.
+		var tags any
+		if joined := strings.Join(it.Tags, ","); joined != "" {
+			tags = joined
+		}
 		if _, err := stmt.ExecContext(ctx, it.ID, it.Source, it.Title, it.Link,
-			it.Summary, publishedAt, now, now, llmScore, llmScoreReason, llmScoreModel, digestDay); err != nil {
+			it.Summary, publishedAt, now, now, llmScore, llmScoreReason, llmScoreModel, digestDay, tags); err != nil {
 			return fmt.Errorf("insert item %s: %w", it.ID, err)
 		}
 	}
@@ -401,11 +410,12 @@ type ItemRow struct {
 	UserNote       *string
 	PublishedAt    *time.Time
 	Bookmarked     bool
+	Tags           []string
 }
 
 // itemRowColumns is the SELECT list backing both List and Get, kept in one place
 // so the column order stays in lockstep with scanItemRow's destinations.
-const itemRowColumns = "id, source, title, link, status, llm_score, llm_score_reason, llm_score_model, user_score, user_note, published_at, bookmarked"
+const itemRowColumns = "id, source, title, link, status, llm_score, llm_score_reason, llm_score_model, user_score, user_note, published_at, bookmarked, tags"
 
 // rowScanner is satisfied by both *sql.Row (Get) and *sql.Rows (List), letting
 // scanItemRow serve the single-row and multi-row reads from one mapping.
@@ -425,10 +435,14 @@ func scanItemRow(sc rowScanner) (ItemRow, error) {
 		userScore   sql.NullInt64
 		userNote    sql.NullString
 		publishedAt sql.NullTime
+		tags        sql.NullString
 	)
 	if err := sc.Scan(&r.ID, &r.Source, &r.Title, &r.Link, &r.Status,
-		&llmScore, &llmReason, &llmModel, &userScore, &userNote, &publishedAt, &r.Bookmarked); err != nil {
+		&llmScore, &llmReason, &llmModel, &userScore, &userNote, &publishedAt, &r.Bookmarked, &tags); err != nil {
 		return ItemRow{}, err
+	}
+	if tags.Valid && tags.String != "" {
+		r.Tags = strings.Split(tags.String, ",")
 	}
 	if llmScore.Valid {
 		v := int(llmScore.Int64)

@@ -260,15 +260,6 @@ header.topbar{
 }
 .filter{display:flex;align-items:center;gap:6px;color:var(--text-dim);}
 .filter__key{letter-spacing:.05em;text-transform:uppercase;font-size:1.05rem;}
-.filter__select{
-  appearance:none;-webkit-appearance:none;
-  background:var(--fill) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23607D8B' d='M0 0l5 6 5-6z'/></svg>") no-repeat right 11px center;
-  border:1px solid transparent;color:var(--text);
-  font-family:inherit;font-size:1.2rem;padding:5px 28px 5px 13px;border-radius:999px;cursor:pointer;
-}
-.filter__select:hover{background-color:var(--tint);color:var(--accent);}
-.filter__select:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
-
 .filter--published{position:relative;gap:8px;}
 .pills{display:flex;gap:6px;}
 .pill{position:relative;display:inline-flex;cursor:pointer;}
@@ -328,13 +319,38 @@ header.topbar{
 /* popmenu: a compact trigger that sits inline with the other filter controls
    (so the bar stays one level) and opens a small popover of chips. Used by both
    "View" (seen/hidden checkbox chips) and "Sort" (latest/oldest/score radios).
-   The button mirrors filter__select; an optional dot flags an active selection
-   while it's closed. */
+   The button is pill-shaped like the rest of the bar; an optional dot flags an
+   active selection while it's closed. */
 .popmenu{position:relative;}
 .popmenu__btn{
   display:inline-flex;align-items:center;gap:7px;list-style:none;cursor:pointer;
   background:var(--fill);border:1px solid transparent;color:var(--text);
   font-family:inherit;font-size:1.2rem;padding:5px 13px;border-radius:999px;
+}
+/* Source is the bar's primary filter, so unlike the other popmenus its closed
+   button carries the selected value rather than a fixed label — the key + value
+   shape the published filter beside it already uses. It keeps the footprint of
+   the select it replaced, value centred, caret pinned to the edge; a long feed
+   name ellipsises rather than stretching the bar. Its width is fixed rather
+   than a minimum: the label changes as you select (All → a feed name → a name
+   plus "+2"), and a button that resized with it would shove the rest of the bar
+   around on every pick. The caret and the "+N"/dot cluster sit outside the flow,
+   so the label centres in the field and stays put as they come and go; only
+   their side is padded, so a long name fills the whole field before it
+   ellipsises instead of truncating against reserved empty space. */
+.popmenu--src .popmenu__btn{position:relative;width:22rem;padding:5px 48px 5px 16px;}
+.popmenu--src .popmenu__val{flex:1;text-align:center;}
+.popmenu--src .popmenu__meta{
+  position:absolute;right:26px;top:50%;transform:translateY(-50%);
+  display:flex;align-items:center;gap:5px;
+}
+/* The value ellipsises inside that fixed width rather than pushing the button
+   wider; the "+N" sits outside it, so truncating a long first name can never
+   swallow the count. */
+.popmenu__val{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.popmenu__more{flex:none;color:var(--caution);font-size:1.05rem;letter-spacing:.02em;}
+.popmenu--src .popmenu__btn::after{
+  position:absolute;right:13px;top:50%;transform:translateY(-50%);
 }
 .popmenu__btn::-webkit-details-marker{display:none;}
 .popmenu__btn::after{content:"\25be";color:var(--text-dim);font-size:1rem;}
@@ -346,15 +362,20 @@ header.topbar{
    when both are on, mirroring the chip accents inside the popover. */
 .popmenu__dot--seen{background:var(--score-high);box-shadow:0 0 6px rgba(195,232,141,.6);}
 .popmenu__dot--hide{background:var(--warn);box-shadow:0 0 6px rgba(255,83,112,.6);}
-.popmenu__dot--bookmark{background:var(--caution);box-shadow:0 0 6px rgba(255,203,107,.6);}
+/* Amber is the "narrowed" signal, shared by the bookmark chip and by the
+   Source/Tags buttons — a dot means this control is no longer showing all. */
+.popmenu__dot--bookmark,.popmenu__dot--amber{background:var(--caution);box-shadow:0 0 6px rgba(255,203,107,.6);}
 .popmenu__panel{
-  position:absolute;right:0;top:calc(100% + 8px);z-index:10;min-width:130px;
-  display:flex;flex-direction:column;gap:7px;align-items:stretch;
+  /* Never narrower than the trigger it hangs off, so a wide button doesn't
+     open a cramped list — but a menu of short labels (Sort, View) stays close
+     to its content rather than opening a half-empty surface. */
+  position:absolute;right:0;top:calc(100% + 8px);z-index:10;min-width:max(100%,13rem);
+  display:flex;flex-direction:column;gap:8px;align-items:stretch;
   background:var(--overlay);border:1px solid var(--hairline-strong);border-radius:16px;
   -webkit-backdrop-filter:blur(22px) saturate(1.6);
   backdrop-filter:blur(22px) saturate(1.6);
   box-shadow:0 1px 2px rgba(0,0,0,.30), 0 12px 28px rgba(0,0,0,.38), 0 28px 64px rgba(0,0,0,.30);
-  padding:9px;
+  padding:11px;
   transform-origin:top right;animation:pop-in .16s cubic-bezier(.2,1.1,.4,1);
 }
 /* divider between the orthogonal Bookmarked filter and the status units */
@@ -364,6 +385,23 @@ header.topbar{
 /* Sort chips are single-select; the checked one fills with the primary accent
    to match the filled look of the View chips. */
 .pill--sort input:checked ~ span{background:rgba(128,203,196,.12);}
+
+/* Option chips (Source, Tags): plain labels, no leading glyph or colour dot —
+   the values are the content, and a list of them shouldn't read as decorated.
+   Amber when picked, matching the dot the closed button then shows. The "All"
+   / "any" chip above the divider keeps the default teal instead, so the
+   unnarrowed state never looks like a filter. */
+.pill--opt input:checked ~ span{color:var(--caution);background:rgba(255,203,107,.12);}
+.pill--opt input:focus-visible ~ span{outline-color:var(--caution);}
+.pill--opt span::before{content:none;}
+/* Source/Tags hold names, not one-word settings, so their panel is roomier and
+   its chips never wrap — the panel grows to the longest name instead. Either
+   list can also run long, so cap the height and scroll rather than let the
+   popover run off the viewport. */
+.popmenu__panel--list{min-width:max(100%,22rem);max-height:min(56vh,420px);overflow-y:auto;}
+.popmenu__panel--list .pill span{white-space:nowrap;}
+/* Tags are labels, not feed titles — they don't need the source panel's width. */
+.popmenu__panel--tags{min-width:max(100%,15rem);}
 
 .pane__nav{
   display:flex;align-items:center;justify-content:space-between;
@@ -378,6 +416,23 @@ header.topbar{
 .nav-btn:hover:not(:disabled){color:var(--accent);background:var(--tint);}
 .nav-btn:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
 .nav-btn:disabled{opacity:.3;cursor:not-allowed;}
+
+/* Bottom pager: the same controls as the bar's, but outside the pane frame —
+   no surface, no border, dim until hovered. It's there for the hand that's
+   already at the end of the list, so it shouldn't read as a second toolbar. */
+.pagenav{
+  display:flex;align-items:center;justify-content:center;gap:14px;
+  padding:14px 4px 2px;font-size:1.25rem;color:var(--text-dim);
+}
+.pagenav__btn{
+  background:none;border:1px solid transparent;color:var(--text-dim);
+  font-family:inherit;font-size:1.25rem;padding:5px 12px;border-radius:999px;cursor:pointer;
+  opacity:.65;transition:opacity .15s ease,color .15s ease,background-color .15s ease;
+}
+.pagenav__btn:hover:not(:disabled){opacity:1;color:var(--accent);background:var(--tint);}
+.pagenav__btn:focus-visible{outline:1px solid var(--accent);outline-offset:2px;opacity:1;}
+.pagenav__btn:disabled{opacity:.2;cursor:not-allowed;}
+.pagenav__info{opacity:.55;font-size:1.15rem;}
 
 .pane__body{padding:18px 18px 6px;font-size:1.4rem;line-height:1.55;}
 
