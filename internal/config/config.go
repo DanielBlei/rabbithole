@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/DanielBlei/rabbithole/internal/rank"
 )
 
 // Duration is a time.Duration that unmarshals from YAML strings, additionally
@@ -63,13 +65,8 @@ type Config struct {
 	User      string          `yaml:"user"`    // shell-prompt name on the web UI; blank falls back to the OS user
 	Profile   string          `yaml:"profile"` // path to the interest-profile markdown
 	Inference InferenceConfig `yaml:"inference"`
-	Scoring   ScoringConfig   `yaml:"scoring"`
 	Ingest    IngestConfig    `yaml:"ingest"`
 	Store     StoreConfig     `yaml:"store"`
-
-	// FeedsFile points at the feeds file. When empty, Load looks for
-	// feeds.yaml beside the config file.
-	FeedsFile string `yaml:"feeds_file"`
 
 	// Feeds is the resolved feed set: the feeds themselves plus the defaults
 	// and path they came from. Derived at load, never written in this file —
@@ -85,18 +82,22 @@ type InferenceConfig struct {
 	Model    string `yaml:"model"`    // chat model name
 	APIKey   string `yaml:"api_key"`  // optional bearer token
 	Think    *bool  `yaml:"think"`    // model reasoning during scoring; defaults true when not set in the config
-}
 
-// ScoringConfig tunes how items are batched through the scorer.
-type ScoringConfig struct {
+	// How items are batched through the model. BatchSize also sizes the token
+	// budget: ModelTuning.Budget multiplies TokensPerItem by it.
 	BatchSize   int `yaml:"batch_size"`   // items per scoring request
 	MaxParallel int `yaml:"max_parallel"` // concurrent scoring requests in flight
+
+	// ModelTuning carries the decoding limits.
+	// Omit the block, or any field in it, to take rank's defaults.
+	ModelTuning rank.ModelTuning `yaml:"model_tuning"`
 }
 
 // IngestConfig governs the fetch/score run.
 type IngestConfig struct {
 	Since     Duration `yaml:"since"`      // lookback window (e.g. 14d, 168h)
 	DigestDir string   `yaml:"digest_dir"` // optional: where `ingest --markdown` writes the digest; no default
+	Feeds     string   `yaml:"feeds"`      // path to the feeds file; empty looks for feeds.yaml beside the config
 }
 
 // StoreConfig configures item persistence. Local sqlite for now; host/credentials
@@ -111,7 +112,7 @@ const (
 	defaultHost        = "http://localhost:11434"
 	defaultModel       = "qwen3:4b"
 	defaultBatchSize   = 5
-	defaultMaxParallel = 4
+	defaultMaxParallel = 2
 	defaultSince       = 14 * 24 * time.Hour
 )
 
@@ -151,11 +152,11 @@ func (c *Config) applyDefaults() {
 		t := true
 		c.Inference.Think = &t
 	}
-	if c.Scoring.BatchSize <= 0 {
-		c.Scoring.BatchSize = defaultBatchSize
+	if c.Inference.BatchSize <= 0 {
+		c.Inference.BatchSize = defaultBatchSize
 	}
-	if c.Scoring.MaxParallel <= 0 {
-		c.Scoring.MaxParallel = defaultMaxParallel
+	if c.Inference.MaxParallel <= 0 {
+		c.Inference.MaxParallel = defaultMaxParallel
 	}
 	if c.Ingest.Since == 0 {
 		c.Ingest.Since = Duration(defaultSince)

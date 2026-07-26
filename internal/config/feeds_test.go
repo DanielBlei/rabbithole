@@ -225,7 +225,7 @@ func TestFeedID(t *testing.T) {
 	}
 }
 
-// An explicit feeds_file is honoured and its path is reported for the viewer.
+// An explicit ingest.feeds is honoured and its path is reported for the viewer.
 func TestLoadFeedsExplicitPath(t *testing.T) {
 	dir := t.TempDir()
 	feedsPath := filepath.Join(dir, "sources.yaml")
@@ -234,7 +234,7 @@ func TestLoadFeedsExplicitPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfgPath := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte(baseConfig+"feeds_file: "+feedsPath+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(baseConfig+"  feeds: "+feedsPath+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -276,8 +276,8 @@ func TestLoadFeedsErrors(t *testing.T) {
 			wantErr: "no feeds configured",
 		},
 		{
-			name:    "explicit feeds_file missing",
-			config:  baseConfig + "feeds_file: /nope/feeds.yaml\n",
+			name:    "explicit ingest.feeds missing",
+			config:  baseConfig + "  feeds: /nope/feeds.yaml\n",
 			wantErr: "does not exist",
 		},
 		{
@@ -406,7 +406,7 @@ func TestFeedsExampleFileLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfgPath := writeConfigWithFeeds(t, baseConfig+"feeds_file: "+examplePath+"\n", "")
+	cfgPath := writeConfigWithFeeds(t, baseConfig+"  feeds: "+examplePath+"\n", "")
 
 	cfg, err := Load(cfgPath)
 	if err != nil {

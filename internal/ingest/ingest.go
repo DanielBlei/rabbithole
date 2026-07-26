@@ -161,7 +161,7 @@ func Run(
 			return outcome, err
 		}
 
-		scores := rank.ScoreAll(ctx, s, profile, unseen, cfg.Scoring.BatchSize, cfg.Scoring.MaxParallel)
+		scores := rank.ScoreAll(ctx, s, profile, unseen, cfg.Inference.BatchSize, cfg.Inference.MaxParallel)
 		failed := len(unseen) - len(scores)
 		outcome.Failed += failed
 		logger.Info().Str("feed", f.Name).Int("processed", len(scores)).Int("failed", failed).

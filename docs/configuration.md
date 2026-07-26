@@ -25,18 +25,38 @@ The schema is nested. Every field below is optional unless marked required.
 | `inference.model` | Model name | `qwen3:4b` |
 | `inference.api_key` | Optional bearer token (vLLM prod / Ollama Cloud) | `""` |
 | `inference.think` | Model reasoning during scoring | `true` |
-| `scoring.batch_size` | Items sent per scoring request | `5` |
-| `scoring.max_parallel` | Concurrent scoring requests in flight | `4` |
+| `inference.batch_size` | Items sent per scoring request; also multiplies `tokens_per_item` | `5` |
+| `inference.max_parallel` | Concurrent scoring requests in flight. Ollama queues rather than parallelizes — use `1` for it | `2` |
+| `inference.model_tuning.*` | Decoding limits — see below | see below |
 | `ingest.since` | Global lookback window — the outermost fallback for a feed's `since` | `14d` |
 | `ingest.digest_dir` | Where `ingest --markdown` writes the digest | none (required by that flag) |
+| `ingest.feeds` | Path to the feed list | `feeds.yaml` beside `config.yaml` |
 | `store.db_path` | SQLite database path | **required** |
-| `feeds_file` | Path to the feed list | `feeds.yaml` beside `config.yaml` |
 
 Durations accept a `d` (days) suffix on top of Go's standard units (`h`, `m`, `s`) —
 e.g. `14d`, `168h`, `36h`, `1h30m`.
 
 `api_key` is stored in plaintext. The config viewer masks it, but the file itself isn't
 protected — keep `configs/config.yaml` out of version control (it's gitignored).
+
+### inference.model_tuning
+
+Decoding limits sent with every scoring request. Omit the block, or any field in it, to
+take the defaults. Tune when swapping in a model that is terser or more verbose.
+
+| Field | Meaning | Default |
+|---|---|---|
+| `num_ctx` | Input window. Left unset, Ollama silently drops the front of an over-long prompt and the model scores articles it never fully saw. Ollama only — vLLM fixes this at startup | server default |
+| `max_tokens` | Hard output cap; `0` auto-sizes from the three below | `0` |
+| `tokens_per_item` | Allowance per article in a batch | `256` |
+| `tokens_overhead` | Allowance for the JSON scaffolding | `256` |
+| `tokens_thinking` | Added when `think` is on; reasoning spends the same budget | `2048` |
+| `reason_max_chars` | Max characters for the reason in the model's JSON response; schema-enforced | `200` |
+
+The model is held to the response shape by **structured outputs**: the schema is compiled
+into a grammar and the sampler may only pick tokens that fit, so scores come back as
+integers and unknown fields can't appear. `reason_max_chars` is part of that schema and is
+what actually keeps rationales short — the prompt's word count is only a suggestion.
 
 ## feeds.yaml
 

@@ -21,9 +21,9 @@ func Resolve(ctx context.Context, cfg config.InferenceConfig, think bool) (rank.
 	)
 	switch cfg.Provider {
 	case "ollama":
-		s, err = ollama.New(cfg.Host, cfg.Model, cfg.APIKey, think)
+		s, err = ollama.New(cfg.Host, cfg.Model, cfg.APIKey, think, cfg.ModelTuning)
 	case "vllm":
-		s, err = vllm.New(cfg.Host, cfg.Model, cfg.APIKey, think)
+		s, err = vllm.New(cfg.Host, cfg.Model, cfg.APIKey, think, cfg.ModelTuning)
 	case "heuristic":
 		s = rank.NewHeuristic()
 	default:

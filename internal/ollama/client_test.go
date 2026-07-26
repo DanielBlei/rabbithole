@@ -1,6 +1,7 @@
 package ollama
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DanielBlei/rabbithole/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/rank"
 )
 
 func withFastValidateRetry(t *testing.T) {
@@ -41,7 +43,7 @@ func TestValidate(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3:latest", "", false)
+			c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{})
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -88,7 +90,7 @@ func TestValidateThinkProbe(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3:latest", "", true)
+			c, err := New(srv.URL, "llama3:latest", "", true, rank.ModelTuning{})
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -133,7 +135,7 @@ func TestListModelNames(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3:latest", "", false)
+			c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{})
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -161,8 +163,11 @@ func TestScoreSurfacesDoneReasonOnParseFailure(t *testing.T) {
 		wantErr    string
 	}{
 		{
-			name: "truncated response reports length",
-			ndjsonBody: `{"message":{"role":"assistant","content":"{\"scores\":[{\"index\":1,\"score\":9,\"reason\":\"ok\"}]"},"done":true,"done_reason":"length","eval_count":42}
+			// Cut before any entry completed, so there is nothing to salvage.
+			// A response truncated mid-rationale is repaired instead — see
+			// TestScoreSalvagesTruncatedResponse.
+			name: "truncation beyond repair reports length",
+			ndjsonBody: `{"message":{"role":"assistant","content":"{\"scores\":[{\"index"},"done":true,"done_reason":"length","eval_count":42}
 `,
 			wantErr: `done_reason="length", completion_tokens=42`,
 		},
@@ -187,7 +192,7 @@ func TestScoreSurfacesDoneReasonOnParseFailure(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3:latest", "", false)
+			c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{})
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -197,5 +202,66 @@ func TestScoreSurfacesDoneReasonOnParseFailure(t *testing.T) {
 				t.Fatalf("Score() error = %v, want containing %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestScoreSalvagesTruncatedResponse covers the dominant real-world failure:
+// the model runs long on the last rationale and generation stops mid-string.
+// The scores that did arrive are good and must survive — dropping the batch
+// cost whole articles their place in the digest.
+func TestScoreSalvagesTruncatedResponse(t *testing.T) {
+	body := `{"message":{"role":"assistant","content":"{\"scores\":[{\"index\":1,\"score\":9,\"reason\":\"Very relevant to LLM serving"},"done":true,"done_reason":"length","eval_count":42}
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	got, err := c.Score(t.Context(), "profile", []feeds.Item{{ID: "a", Title: "A"}})
+	if err != nil {
+		t.Fatalf("Score() error = %v, want the truncated response salvaged", err)
+	}
+	want := []rank.ItemScore{{ID: "a", Score: 9, Reason: "Very relevant to LLM serving"}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Score() = %+v, want %+v", got, want)
+	}
+}
+
+// TestScoreRequestConstrainsOutput pins the two settings that stop malformed
+// verdicts at the source: the schema Ollama compiles to a sampling grammar, and
+// the token cap that bounds a runaway rationale.
+func TestScoreRequestConstrainsOutput(t *testing.T) {
+	var got struct {
+		Format  json.RawMessage `json:"format"`
+		Options struct {
+			NumPredict int `json:"num_predict"`
+		} `json:"options"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"{\"scores\":[{\"index\":1,\"score\":9,\"reason\":\"x\"}]}"},"done":true,"done_reason":"stop","eval_count":9}
+`))
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	items := []feeds.Item{{ID: "a", Title: "A"}, {ID: "b", Title: "B"}}
+	if _, err := c.Score(t.Context(), "profile", items); err != nil {
+		t.Fatalf("Score() error = %v", err)
+	}
+	if !json.Valid(got.Format) || len(got.Format) == 0 || got.Format[0] != '{' {
+		t.Errorf("format = %s, want the JSON schema object", got.Format)
+	}
+	if want := (rank.ModelTuning{}).Budget(len(items), false); got.Options.NumPredict != want {
+		t.Errorf("num_predict = %d, want %d", got.Options.NumPredict, want)
 	}
 }

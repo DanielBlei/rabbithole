@@ -14,7 +14,7 @@ import (
 )
 
 // defaultFeedsFileName is the feeds file Load looks for next to the config
-// file when `feeds_file` isn't set.
+// file when `ingest.feeds` isn't set.
 const defaultFeedsFileName = "feeds.yaml"
 
 // feedIDLen is how many hex characters of the URL digest make up a feed ID.
@@ -146,7 +146,7 @@ func (c *Config) loadFeeds(configPath string) error {
 	}
 	if !found {
 		if explicit {
-			return fmt.Errorf("feeds_file %q does not exist", path)
+			return fmt.Errorf("ingest.feeds %q does not exist", path)
 		}
 		return fmt.Errorf("no feeds configured: create %s (copy configs/feeds.example.yaml)", path)
 	}
@@ -175,12 +175,12 @@ func (c *Config) SetFeeds(doc FeedsDoc) error {
 }
 
 // feedsFilePath returns the feeds file to read and whether the user named it
-// explicitly. An explicit feeds_file is taken as written (resolved against the
+// explicitly. An explicit ingest.feeds is taken as written (resolved against the
 // process working directory, like `profile`); when unset, the default sits
 // beside the config file so moving the config directory keeps them together.
 func (c *Config) feedsFilePath(configPath string) (path string, explicit bool) {
-	if c.FeedsFile != "" {
-		return c.FeedsFile, true
+	if c.Ingest.Feeds != "" {
+		return c.Ingest.Feeds, true
 	}
 	return filepath.Join(filepath.Dir(configPath), defaultFeedsFileName), false
 }

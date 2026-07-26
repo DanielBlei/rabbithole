@@ -50,8 +50,7 @@ func testConfig(t *testing.T, feeds ...config.Feed) *config.Config {
 func testConfigWith(t *testing.T, doc config.FeedsDoc) *config.Config {
 	t.Helper()
 	cfg := &config.Config{
-		Inference: config.InferenceConfig{Provider: "heuristic", Model: "test-model"},
-		Scoring:   config.ScoringConfig{BatchSize: 2, MaxParallel: 2},
+		Inference: config.InferenceConfig{BatchSize: 2, MaxParallel: 2, Provider: "heuristic", Model: "test-model"},
 		Ingest:    config.IngestConfig{Since: config.Duration(365 * 24 * time.Hour)},
 		Store:     config.StoreConfig{DBPath: filepath.Join(t.TempDir(), "test.db")},
 	}

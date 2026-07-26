@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
@@ -35,15 +37,100 @@ article is FOR THIS SPECIFIC READER.
 Scoring guide (0-10):
 - 9-10: directly on-target, deep, novel, high signal
 - 6-8:  relevant and substantive
-- 3-5:  tangential or shallow
-- 0-2:  off-topic, beginner, clickbait, or marketing
+- 3-5:  beginner, tangential or shallow
+- 0-2:  off-topic, clickbait, or marketing
 
-Reward depth, novelty and concrete technical substance. Penalize clickbait, beginner
-tutorials, vendor marketing and listicles.
+Reward depth, novelty and concrete technical substance. Penalize clickbait and vendor marketing.
 
 Respond with ONLY a valid JSON object, no prose, no code fences:
 {"scores":[{"index":<int>,"score":<int 0-10>,"reason":"<=15 word rationale"}]}
-Include exactly one entry per article, using the article's index.`
+Include exactly one entry per article, using the article's index.
+Keep every reason under 15 words. Write one blunt clause, not a paragraph.`
+
+// schemaTemplate is the output shape the model must fill. The backend send it
+// as a structured output schema: the server turns it into a grammar and lets the
+// model pick only tokens that fit, so the shape is enforced rather than asked for.
+const schemaTemplate = `{
+  "type": "object",
+  "properties": {
+    "scores": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "index":  {"type": "integer", "minimum": 1},
+          "score":  {"type": "integer", "minimum": 0, "maximum": 10},
+          "reason": {"type": "string", "maxLength": %d}
+        },
+        "required": ["index", "score", "reason"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["scores"],
+  "additionalProperties": false
+}`
+
+// Defaults for Model Tuning.
+const (
+	defaultTokensPerItem  = 256
+	defaultTokensOverhead = 256
+	defaultTokensThinking = 2048
+	defaultReasonMaxChars = 200
+)
+
+// ModelTuning holds the decoding adjustments and limits for a scoring request,
+// loaded from inference.model_tuning. Every field is optional; the zero value
+// normalizes to the defaults above.
+//
+// The Tokens* fields budget the whole reply and only stop a runaway — hitting
+// that limit truncates the JSON. ReasonMaxChars shapes one field and is meant to
+// be hit: the model closes the string and moves on, output stays valid.
+type ModelTuning struct {
+	NumCtx         int `yaml:"num_ctx"`          // input window; 0 = server default. Ollama only, vLLM fixes it at startup
+	MaxTokens      int `yaml:"max_tokens"`       // tokens for the whole reply; 0 = auto-size from the three below
+	TokensPerItem  int `yaml:"tokens_per_item"`  // per article in the batch
+	TokensOverhead int `yaml:"tokens_overhead"`  // JSON scaffolding
+	TokensThinking int `yaml:"tokens_thinking"`  // added when think is on
+	ReasonMaxChars int `yaml:"reason_max_chars"` // max characters for the reason in the model's JSON response; schema-enforced
+}
+
+// Normalize returns t with every unset field replaced by its default.
+func (t ModelTuning) Normalize() ModelTuning {
+	if t.TokensPerItem <= 0 {
+		t.TokensPerItem = defaultTokensPerItem
+	}
+	if t.TokensOverhead <= 0 {
+		t.TokensOverhead = defaultTokensOverhead
+	}
+	if t.TokensThinking <= 0 {
+		t.TokensThinking = defaultTokensThinking
+	}
+	if t.ReasonMaxChars <= 0 {
+		t.ReasonMaxChars = defaultReasonMaxChars
+	}
+	return t
+}
+
+// Budget returns the completion-token cap for a batch of n items. think must
+// match the request's reasoning mode: thinking tokens count against the same
+// limit, so a budget sized for the answer alone would truncate it.
+func (t ModelTuning) Budget(n int, think bool) int {
+	t = t.Normalize()
+	if t.MaxTokens > 0 {
+		return t.MaxTokens
+	}
+	budget := t.TokensOverhead + t.TokensPerItem*n
+	if think {
+		budget += t.TokensThinking
+	}
+	return budget
+}
+
+// Schema renders the response schema the backends send for structured output.
+func (t ModelTuning) Schema() string {
+	return fmt.Sprintf(schemaTemplate, t.Normalize().ReasonMaxChars)
+}
 
 // BuildUserPrompt renders the profile and a batch of items into the user message.
 // Items are numbered 1..N; the model refers to them by that index.
@@ -62,24 +149,100 @@ func BuildUserPrompt(profile string, items []feeds.Item) string {
 }
 
 type rawScores struct {
-	Scores []struct {
-		Index  int     `json:"index"`
-		Score  float64 `json:"score"` // some models emit fractional scores despite the int 0-10 prompt
-		Reason string  `json:"reason"`
-	} `json:"scores"`
+	Scores []scoreEntry `json:"scores"`
 }
 
-// ParseScores extracts the JSON verdict from a model response and maps the
-// 1-based indices back onto items. It tolerates code fences and leading/trailing
-// prose by slicing to the outermost JSON object. Errors include a snippet of
-// the raw response so a misbehaving model's actual output is visible in logs.
+// scoreEntry is one verdict as the model wrote it.
+type scoreEntry struct {
+	Index  int
+	Score  float64 // some models emit fractional scores despite the int 0-10 prompt
+	Reason string
+}
+
+// UnmarshalJSON reads an entry leniently, for models that ignore the schema.
+func (e *scoreEntry) UnmarshalJSON(b []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(b, &fields); err != nil {
+		return err
+	}
+	for k, v := range fields {
+		switch normalizeKey(k) {
+		case "index":
+			e.Index = int(math.Round(asNumber(v)))
+		case "score":
+			e.Score = asNumber(v)
+		case "reason":
+			e.Reason = asText(v)
+		}
+	}
+	return nil
+}
+
+// normalizeKey reduces "Reason", "reason:" and " reason " to "reason".
+func normalizeKey(k string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(k) {
+		if r >= 'a' && r <= 'z' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// asNumber reads a JSON number or a quoted one ("9"); anything else is 0.
+func asNumber(v json.RawMessage) float64 {
+	s := strings.Trim(strings.TrimSpace(string(v)), `"`)
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return f
+}
+
+// asText reads a JSON string, or joins a list of them; anything else is empty.
+func asText(v json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(v, &s); err == nil {
+		return s
+	}
+	var list []string
+	if err := json.Unmarshal(v, &list); err == nil {
+		return strings.Join(list, " ")
+	}
+	return ""
+}
+
+// cleanReason sanitizes the rationale, dropping the junk tail after a false close.
+func cleanReason(s string) string {
+	if i := falseCloseIndex(s); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+// falseCloseIndex finds the first `”` or `“` followed by a brace, or -1.
+func falseCloseIndex(s string) int {
+	for i, r := range s {
+		if r != '“' && r != '”' {
+			continue
+		}
+		rest := strings.TrimLeft(s[i+utf8.RuneLen(r):], " \t")
+		if strings.HasPrefix(rest, "}") || strings.HasPrefix(rest, "]") {
+			return i
+		}
+	}
+	return -1
+}
+
+// ParseScores reads the JSON verdict from a model response and maps the 1-based
+// indices back onto items. Errors carry a snippet of the raw response.
 func ParseScores(raw string, items []feeds.Item) ([]ItemScore, error) {
 	jsonStr, err := extractJSONObject(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%w: raw=%q", err, truncate(raw, 200))
 	}
-	var parsed rawScores
-	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+	parsed, err := unmarshalScores(jsonStr)
+	if err != nil {
 		return nil, fmt.Errorf("parse scores json: %w: raw=%q", err, truncate(jsonStr, 200))
 	}
 	if len(parsed.Scores) == 0 {
@@ -92,9 +255,7 @@ func ParseScores(raw string, items []feeds.Item) ([]ItemScore, error) {
 		idx := s.Index - 1
 		switch {
 		case len(items) == 1:
-			// A single-item batch has only one possible target regardless of
-			// the index the model reports — small models sometimes hardcode
-			// index 0 (or another constant) no matter the array size.
+			// Only one possible target, whatever index the model reported.
 			idx = 0
 		case idx < 0 || idx >= len(items):
 			continue
@@ -102,7 +263,7 @@ func ParseScores(raw string, items []feeds.Item) ([]ItemScore, error) {
 		out = append(out, ItemScore{
 			ID:     items[idx].ID,
 			Score:  clamp(int(math.Round(s.Score)), 0, 10),
-			Reason: strings.TrimSpace(s.Reason),
+			Reason: cleanReason(s.Reason),
 		})
 	}
 	if len(out) == 0 {
@@ -111,14 +272,102 @@ func ParseScores(raw string, items []feeds.Item) ([]ItemScore, error) {
 	return out, nil
 }
 
-// extractJSONObject returns the substring from the first '{' to the last '}'.
+// repairAttempts bounds how many trailing entries unmarshalScores discards.
+const repairAttempts = 3
+
+// unmarshalScores decodes the verdict, keeping the entries a truncated
+// response did complete.
+func unmarshalScores(s string) (rawScores, error) {
+	var firstErr error
+	for range repairAttempts {
+		var parsed rawScores
+		err := json.Unmarshal([]byte(repairJSON(s)), &parsed)
+		if err == nil {
+			return parsed, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+		// Cut landed mid-field: drop that entry and retry.
+		open := strings.LastIndexByte(s, '{')
+		if open <= 0 {
+			break
+		}
+		s = strings.TrimRight(s[:open], " \t\r\n,")
+	}
+	return rawScores{}, firstErr
+}
+
+// repairJSON closes a truncated fragment: it terminates an open string and
+// appends the brackets still on the stack. Balanced input is returned as-is.
+func repairJSON(s string) string {
+	stack, inString, escaped, _ := scanJSON(s)
+	if len(stack) == 0 && !inString {
+		return s
+	}
+	var b strings.Builder
+	if inString {
+		// A trailing backslash would escape the quote that closes the string.
+		if escaped {
+			s = s[:len(s)-1]
+		}
+		b.WriteString(s)
+		b.WriteByte('"')
+	} else {
+		// Drop a dangling separator so the close doesn't follow a comma or colon.
+		b.WriteString(strings.TrimRight(s, " \t\r\n,:"))
+	}
+	for i := len(stack) - 1; i >= 0; i-- {
+		if stack[i] == '{' {
+			b.WriteByte('}')
+		} else {
+			b.WriteByte(']')
+		}
+	}
+	return b.String()
+}
+
+// extractJSONObject returns the outermost JSON object in raw, dropping any
+// prose or code fences around it. A truncated one is returned for repairJSON.
 func extractJSONObject(raw string) (string, error) {
 	start := strings.IndexByte(raw, '{')
-	end := strings.LastIndexByte(raw, '}')
-	if start < 0 || end < 0 || end < start {
+	if start < 0 {
 		return "", fmt.Errorf("no JSON object found in response")
 	}
-	return raw[start : end+1], nil
+	if _, _, _, end := scanJSON(raw[start:]); end >= 0 {
+		return raw[start : start+end], nil
+	}
+	return raw[start:], nil
+}
+
+// scanJSON reports the parser state at the end of s: brackets still open,
+// whether it ended inside a string or on an escape, and the offset past the
+// outermost value (-1 if it never closed).
+func scanJSON(s string) (stack []byte, inString, escaped bool, end int) {
+	end = -1
+	for i := range len(s) {
+		c := s[i]
+		switch {
+		case escaped:
+			escaped = false
+		case inString && c == '\\':
+			escaped = true
+		case c == '"':
+			inString = !inString
+		case inString:
+			// Brackets inside a string are content, not structure.
+		case c == '{' || c == '[':
+			stack = append(stack, c)
+		case c == '}' || c == ']':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+				if len(stack) == 0 && end < 0 {
+					end = i + 1
+				}
+			}
+		}
+	}
+	return stack, inString, escaped, end
 }
 
 func clamp(v, lo, hi int) int {

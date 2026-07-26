@@ -43,6 +43,7 @@ type Client struct {
 	api       *api.Client
 	model     string
 	think     bool
+	tuning    rank.ModelTuning
 	validator *retry.Validator
 	thinkOnce sync.Once // gates the one-time think-support probe in Validate
 }
@@ -50,7 +51,8 @@ type Client struct {
 // New connects to host using the given chat model. apiKey is optional (Bearer).
 // The model must carry an explicit tag to avoid pulling the wrong image.
 // think enables the model's reasoning mode, which is on by default for scoring.
-func New(host, model, apiKey string, think bool) (*Client, error) {
+// tuning carries the decoding limits; its zero value uses rank's defaults.
+func New(host, model, apiKey string, think bool, tuning rank.ModelTuning) (*Client, error) {
 	u, err := url.Parse(host)
 	if err != nil {
 		return nil, fmt.Errorf("invalid host %q: %w", host, err)
@@ -66,6 +68,7 @@ func New(host, model, apiKey string, think bool) (*Client, error) {
 		api:       api.NewClient(u, hc),
 		model:     model,
 		think:     think,
+		tuning:    tuning.Normalize(),
 		validator: retry.NewValidator("ollama", validateAttempts, validateBackoff),
 	}, nil
 }
@@ -151,10 +154,18 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 
 	userPrompt := rank.BuildUserPrompt(profile, items)
 	stream := false
+	budget := c.tuning.Budget(len(items), c.think)
+	opts := map[string]any{"num_predict": budget}
+	// Left unset, Ollama silently drops the front of an over-long prompt.
+	if c.tuning.NumCtx > 0 {
+		opts["num_ctx"] = c.tuning.NumCtx
+	}
 	req := &api.ChatRequest{
 		Model:  c.model,
 		Stream: &stream,
-		Format: json.RawMessage(`"json"`),
+		// A schema rather than bare "json": Ollama compiles it to a grammar and samples only conforming tokens
+		Format:  json.RawMessage(c.tuning.Schema()),
+		Options: opts,
 		Messages: []api.Message{
 			{Role: "system", Content: rank.SystemPrompt},
 			{Role: "user", Content: userPrompt},
@@ -176,6 +187,7 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 		Str("model", c.model).
 		Int("items", len(items)).
 		Bool("think", c.think).
+		Int("num_predict", budget).
 		Msg("ollama: sending scoring request")
 	logger.Trace().Str("prompt", userPrompt).Msg("ollama: prompt sent")
 
@@ -200,7 +212,13 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 		// The stream closed without a done chunk at all (not a "length"/"stop"
 		// done_reason, which would mean Ollama did report a reason) - distinct
 		// from the zero value so logs don't read as a reported-but-empty reason.
+		// The response is incomplete but not worthless: ParseScores repairs the
+		// truncated tail, so the entries that did arrive still count. Warned
+		// either way, since a server cutting off mid-answer is worth knowing
+		// about even when the salvage works.
 		doneReason = "no done signal (stream closed early)"
+		logger.Warn().Str("model", c.model).Int("response_bytes", sb.Len()).
+			Msg("ollama: response ended without a done signal, consuming what arrived")
 	}
 
 	// Logged as completion_tokens, not Ollama's own eval_count, to match vllm.Client's log key.
