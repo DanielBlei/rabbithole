@@ -71,7 +71,9 @@ func TestIngestModalAndRun(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LastIngestRun: %v", err)
 		}
-		if last != nil && last.Status != store.IngestStatusRunning {
+		// Both must settle: the row is finalized just before the manager clears
+		// its in-memory flag, and the assertions below read the manager.
+		if last != nil && last.Status != store.IngestStatusRunning && !w.ing.Status().Running {
 			if last.Status != store.IngestStatusOK {
 				t.Fatalf("run finished %q, want ok: %+v", last.Status, last)
 			}
