@@ -487,12 +487,19 @@ func tierOf(score int) string {
 // over the pills; an unset window leaves both sides open (all items).
 func windowFor(published, from, to string) (after, before time.Time, custom bool) {
 	if from != "" || to != "" {
+		// A date we can't read is ignored, leaving that end of the range open.
 		if from != "" {
-			after, _ = time.Parse("2006-01-02", from)
+			if t, err := time.Parse("2006-01-02", from); err == nil {
+				after = t
+			} else {
+				log.Warn().Str("from", from).Msg("ignoring invalid from date")
+			}
 		}
 		if to != "" {
 			if t, err := time.Parse("2006-01-02", to); err == nil {
 				before = t.AddDate(0, 0, 1) // make the end date inclusive
+			} else {
+				log.Warn().Str("to", to).Msg("ignoring invalid to date")
 			}
 		}
 		return after, before, true
