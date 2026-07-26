@@ -6,13 +6,29 @@
 
   <form class="pane__filters" method="get" action="/feed">
     <input type="hidden" name="view" value="1">
-    <label class="filter">
+    {{/* Source: multi-select chips in a popmenu rather than a native select, so
+         it reads as the bar's own vocabulary and several feeds can be on at
+         once. It keeps the key + value shape (like "published" below) and shows
+         the selection on the closed button, since it's the bar's primary
+         filter — the label is written by feed.html as the selection changes.
+         "All" sits above a divider as the unnarrowed default. Like Tags, the
+         inputs are unnamed: this filters the rows already loaded, client-side,
+         so picking a feed doesn't cost a round trip. */}}
+    {{if .Sources}}
+    <div class="filter filter--source">
       <span class="filter__key">source</span>
-      <select class="filter__select" name="source" onchange="this.form.submit()">
-        <option value="" {{if eq .FilterSource ""}}selected{{end}}>All</option>
-        {{range .Sources}}<option value="{{.}}" {{if eq $.FilterSource .}}selected{{end}}>{{.}}</option>{{end}}
-      </select>
-    </label>
+      <details class="popmenu popmenu--src">
+        <summary class="popmenu__btn"><span class="popmenu__val" data-src-label>All</span><span class="popmenu__meta"><span class="popmenu__more" data-src-more></span><span class="popmenu__dot popmenu__dot--amber" data-src-active hidden></span></span></summary>
+        <div class="popmenu__panel popmenu__panel--list">
+          <label class="pill"><input type="checkbox" class="src-filter__all" checked><span>All</span></label>
+          <div class="popmenu__sep" role="separator"></div>
+          {{range .Sources}}
+          <label class="pill pill--opt"><input type="checkbox" class="src-filter__chk" value="{{.}}"><span>{{.}}</span></label>
+          {{end}}
+        </div>
+      </details>
+    </div>
+    {{end}}
     <div class="filter filter--published">
       <span class="filter__key">published</span>
       <div class="pills">
@@ -27,14 +43,22 @@
         <label class="date-popover__field">to<input class="date-input" id="filterTo" type="date" name="to" value="{{.FilterTo}}" onchange="this.form.submit()"></label>
       </div>
     </div>
+    {{/* Dynamic tag filter: one chip per tag carried by the rows on this page,
+         client-side OR filtering (see feed.html scripts). The inputs are
+         deliberately unnamed so they stay out of the GET filter form's submit —
+         tags narrow what's already loaded, they aren't a server query. */}}
+    {{if .Tags}}
     <details class="filter popmenu">
-      <summary class="popmenu__btn">Sort</summary>
-      <div class="popmenu__panel">
-        <label class="pill pill--sort"><input type="radio" name="sort" value="latest" {{if eq .FilterSort "latest"}}checked{{end}} onchange="this.form.submit()"><span>Latest</span></label>
-        <label class="pill pill--sort"><input type="radio" name="sort" value="oldest" {{if eq .FilterSort "oldest"}}checked{{end}} onchange="this.form.submit()"><span>Oldest</span></label>
-        <label class="pill pill--sort"><input type="radio" name="sort" value="score" {{if eq .FilterSort "score"}}checked{{end}} onchange="this.form.submit()"><span>Score</span></label>
+      <summary class="popmenu__btn">Tags<span class="popmenu__dot popmenu__dot--amber" data-tag-active hidden></span></summary>
+      <div class="popmenu__panel popmenu__panel--list popmenu__panel--tags">
+        <label class="pill"><input type="checkbox" class="tag-filter__any" checked><span>any</span></label>
+        <div class="popmenu__sep" role="separator"></div>
+        {{range .Tags}}
+        <label class="pill pill--opt"><input type="checkbox" class="tag-filter__chk" value="{{.}}"><span>{{.}}</span></label>
+        {{end}}
       </div>
     </details>
+    {{end}}
     <details class="filter popmenu">
       <summary class="popmenu__btn">View{{if .FilterShowBookmark}}<span class="popmenu__dot popmenu__dot--bookmark"></span>{{end}}{{if .FilterShowSeen}}<span class="popmenu__dot popmenu__dot--seen"></span>{{end}}{{if .FilterShowHidden}}<span class="popmenu__dot popmenu__dot--hide"></span>{{end}}</summary>
       <div class="popmenu__panel">
@@ -43,6 +67,14 @@
         <label class="pill pill--unread"><input type="checkbox" name="unread" value="1" {{if .FilterShowUnread}}checked{{end}} onchange="this.form.submit()"><span><i class="pill__ic">&#9675;</i>Unread</span></label>
         <label class="pill pill--seen"><input type="checkbox" name="seen" value="1" {{if .FilterShowSeen}}checked{{end}} onchange="this.form.submit()"><span><i class="pill__ic">&#10003;</i>Seen</span></label>
         <label class="pill pill--hide"><input type="checkbox" name="hidden" value="1" {{if .FilterShowHidden}}checked{{end}} onchange="this.form.submit()"><span><i class="pill__ic">&#8856;</i>Hidden</span></label>
+      </div>
+    </details>
+    <details class="filter popmenu">
+      <summary class="popmenu__btn">Sort</summary>
+      <div class="popmenu__panel">
+        <label class="pill pill--sort"><input type="radio" name="sort" value="latest" {{if eq .FilterSort "latest"}}checked{{end}} onchange="this.form.submit()"><span>Latest</span></label>
+        <label class="pill pill--sort"><input type="radio" name="sort" value="oldest" {{if eq .FilterSort "oldest"}}checked{{end}} onchange="this.form.submit()"><span>Oldest</span></label>
+        <label class="pill pill--sort"><input type="radio" name="sort" value="score" {{if eq .FilterSort "score"}}checked{{end}} onchange="this.form.submit()"><span>Score</span></label>
       </div>
     </details>
   </form>
@@ -60,4 +92,13 @@
     {{range .Rows}}{{template "row" .}}{{end}}
   </div>
 </section>
+
+{{/* Second pager, below the frame: the same client-side page state as the one
+     in the bar, reachable from where the reading actually ends. Deliberately
+     outside the pane and quiet — an affordance, not a second control bar. */}}
+<nav class="pagenav" aria-label="Pagination">
+  <button type="button" class="pagenav__btn" id="btnPrevBottom">&lsaquo; prev</button>
+  <span class="pagenav__info" id="pageInfoBottom"></span>
+  <button type="button" class="pagenav__btn" id="btnNextBottom">next &rsaquo;</button>
+</nav>
 {{end}}

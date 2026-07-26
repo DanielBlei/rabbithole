@@ -68,6 +68,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}()
 	log.Debug().Str("db", cfg.Store.DBPath).Msg("store opened")
 
+	// Items carry their feed's tags, which the feed page filters on. Syncing at
+	// startup means editing tags in the feeds file takes effect on restart,
+	// rather than waiting for the next ingest run to notice.
+	if err := db.SyncSourceTags(ctx, ingest.ConfiguredTags(cfg)); err != nil {
+		log.Warn().Err(err).Msg("syncing feed tags failed")
+	}
+
 	// The ingest manager owns web-triggered (and later scheduled) ingest runs:
 	// single-flight, background context, run history. It also flips any history
 	// row a crashed process left as 'running' to an error before serving.

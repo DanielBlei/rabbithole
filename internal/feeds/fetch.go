@@ -18,10 +18,11 @@ const (
 	summaryLimit = 1200 // characters of summary kept for scoring
 )
 
-// Source identifies a feed to fetch.
+// Source identifies a feed to fetch. Tags are the feed's configured labels,
 type Source struct {
 	Name string
 	URL  string
+	Tags []string
 }
 
 // Result is one source's fetch outcome. A failed fetch is a Result with Err
@@ -98,6 +99,7 @@ func fetchOne(ctx context.Context, parser *gofeed.Parser, src Source) ([]Item, e
 			Link:      it.Link,
 			Summary:   cleanSummary(summary),
 			Published: published,
+			Tags:      src.Tags,
 		})
 	}
 	return items, nil

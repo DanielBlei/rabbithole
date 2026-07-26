@@ -25,46 +25,146 @@ function viewBookmarkChange(cb){
   cb.form.submit();
 }
 
-(function(){
-  // Mockup-era client-side pagination, kept only so this page is interactive
-  // to evaluate. Replaced by real server-side after/before/limit paging +
-  // htmx once backend work starts — see .claude/frontend-goals.md.
+// Mockup-era client-side pagination, kept only so this page is interactive to
+// evaluate. Replaced by real server-side after/before/limit paging + htmx once
+// backend work starts — see .claude/frontend-goals.md. Global (not in an IIFE)
+// so the tag filter and the row-leave animation can re-render it.
+var feedPager = (function(){
   var PAGE_SIZE = 10;
-  var rows = Array.prototype.slice.call(document.querySelectorAll('.pane__body .row'));
-  var total = rows.length;
-  var totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   var page = 1;
 
-  var btnFirst = document.getElementById('btnFirst');
-  var btnPrev = document.getElementById('btnPrev');
-  var btnNext = document.getElementById('btnNext');
-  var pageInfo = document.getElementById('pageInfo');
   var pane = document.getElementById('pane');
+  var btnFirst = document.getElementById('btnFirst');
+  var tops = [document.getElementById('btnPrev'), document.getElementById('btnNext')];
+  var bottoms = [document.getElementById('btnPrevBottom'), document.getElementById('btnNextBottom')];
+  var infos = [document.getElementById('pageInfo'), document.getElementById('pageInfoBottom')];
+
+  // Read the DOM on every render rather than caching a row list: rows leave
+  // (a mutation moved one out of the active view) and come back replaced by
+  // htmx swaps, and a swapped-in row arrives without the display the pager
+  // had set on the element it replaced.
+  function allRows(){ return Array.prototype.slice.call(document.querySelectorAll('.pane__body .row')); }
 
   function render(){
+    var rows = allRows();
+    // The pager works over what the tag filter leaves in play, so paging and
+    // filtering compose: 30 rows filtered down to 12 is two pages, not three
+    // with gaps.
+    var shown = rows.filter(function(row){ return !row.classList.contains('row--filtered'); });
+    var total = shown.length;
+    var totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (page > totalPages) page = totalPages;
     var start = (page - 1) * PAGE_SIZE;
     var end = Math.min(start + PAGE_SIZE, total);
-    rows.forEach(function(row, i){
-      row.style.display = (i >= start && i < end) ? '' : 'none';
+
+    rows.forEach(function(row){ row.style.display = 'none'; });
+    shown.forEach(function(row, i){
+      if (i >= start && i < end) row.style.display = '';
     });
-    pageInfo.textContent = 'items ' + (start + 1) + '–' + end + ' of ' + total;
-    btnFirst.disabled = page === 1;
-    btnPrev.disabled = page === 1;
-    btnNext.disabled = page === totalPages;
+
+    var label = total ? 'items ' + (start + 1) + '–' + end + ' of ' + total : 'no items';
+    infos.forEach(function(el){ if (el) el.textContent = label; });
+    if (btnFirst) btnFirst.disabled = page === 1;
+    tops.concat(bottoms).forEach(function(btn, i){
+      if (btn) btn.disabled = (i % 2 === 0) ? page === 1 : page === totalPages;
+    });
   }
 
   function goTo(target){
-    page = Math.min(Math.max(1, target), totalPages);
+    page = Math.max(1, target);
     render();
     var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     pane.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
   }
 
-  btnFirst.addEventListener('click', function(){ goTo(1); });
-  btnPrev.addEventListener('click', function(){ goTo(page - 1); });
-  btnNext.addEventListener('click', function(){ goTo(page + 1); });
+  if (btnFirst) btnFirst.addEventListener('click', function(){ goTo(1); });
+  tops.concat(bottoms).forEach(function(btn, i){
+    if (btn) btn.addEventListener('click', function(){ goTo(page + (i % 2 === 0 ? -1 : 1)); });
+  });
 
   render();
+  return { render: render, goTo: goTo };
+})();
+
+(function(){
+  // Source and tag filters: client-side, over the rows already on the page
+  // (each row carries its feed in data-source and that feed's tags in
+  // data-tags). Both chip sets are server-rendered from what those rows
+  // actually hold, so there's nothing to reconcile here — selecting none in a
+  // set means that set doesn't filter.
+  var tags = new Set();
+  var srcs = new Set();
+
+  // A row survives both filters independently: it must be from a selected
+  // source (or none picked) AND carry a selected tag (or none picked). Within
+  // each, selections are OR — "Medium — AI or Red Hat, tagged AI".
+  function apply(){
+    document.querySelectorAll('.pane__body .row').forEach(function(row){
+      var okSrc = !srcs.size || srcs.has(row.dataset.source || '');
+      var rowTags = (row.dataset.tags || '').split(',').filter(Boolean);
+      var okTag = !tags.size || rowTags.some(function(t){ return tags.has(t); });
+      row.classList.toggle('row--filtered', !(okSrc && okTag));
+    });
+    mark('[data-tag-active]', tags);
+    mark('[data-src-active]', srcs);
+    srcLabel();
+  }
+
+  function mark(sel, set){
+    var dot = document.querySelector(sel);
+    if (dot) dot.hidden = set.size === 0;
+  }
+
+  // The closed Source button carries the selection, so it has to survive names
+  // far wider than the button: the first name is shown and ellipsised by CSS if
+  // it's extravagant, with the "+N" for the rest kept in its own element so
+  // that truncation can never eat the count. The full list is the hover title.
+  function srcLabel(){
+    var el = document.querySelector('[data-src-label]');
+    var more = document.querySelector('[data-src-more]');
+    if (!el) return;
+    var picked = Array.from(srcs);
+    el.textContent = picked.length ? picked[0] : 'All';
+    // Left in the layout even when empty — CSS reserves its slot, so the label
+    // doesn't shift as the count comes and goes.
+    if (more) more.textContent = picked.length > 1 ? '+' + (picked.length - 1) : '';
+    var btn = el.closest('.popmenu__btn');
+    if (btn) btn.title = picked.length ? picked.join(', ') : '';
+  }
+
+  // Wires one filter's chips: the "all" chip clears the set (it can't be turned
+  // off directly — unchecking it would mean what it already means), and it
+  // tracks the selection rather than being a chip of its own.
+  function bind(allSel, chkSel, set){
+    var all = document.querySelector(allSel);
+    var boxes = document.querySelectorAll(chkSel);
+    function sync(){
+      if (all) all.checked = set.size === 0;
+      apply();
+      // The visible set changed under the pager; page 1 is the only sane
+      // landing spot (page 4 of the old set may not exist in the new one).
+      feedPager.goTo(1);
+    }
+    if (all) all.addEventListener('change', function(){
+      set.clear();
+      boxes.forEach(function(box){ box.checked = false; });
+      sync();
+    });
+    boxes.forEach(function(box){
+      box.addEventListener('change', function(){
+        if (box.checked) set.add(box.value); else set.delete(box.value);
+        sync();
+      });
+    });
+  }
+
+  bind('.tag-filter__any', '.tag-filter__chk', tags);
+  bind('.src-filter__all', '.src-filter__chk', srcs);
+  apply();
+
+  // A row htmx swaps back in is a fresh element: it has neither the filter
+  // class nor the display the pager gave its predecessor, so reapply both.
+  document.addEventListener('htmx:afterSwap', function(){ apply(); feedPager.render(); });
 })();
 
 (function(){
@@ -165,7 +265,7 @@ function viewBookmarkChange(cb){
     });
     el.textContent = n;
   }
-  function remove(row){ row.remove(); tweenAvg(); setHigh(); }
+  function remove(row){ row.remove(); tweenAvg(); setHigh(); feedPager.render(); }
   function leave(row){
     if (row._leaving) return;
     row._leaving = true;

@@ -15,6 +15,7 @@ type Item struct {
 	Link      string    // canonical URL
 	Summary   string    // description/summary text (plain-ish)
 	Published time.Time // publish time, zero if unknown
+	Tags      []string  // the source feed's configured tags, nil when it has none
 }
 
 // makeID derives a stable ID from the most reliable available key.

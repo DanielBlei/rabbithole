@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"net/http"
 	"os/user"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -119,8 +121,7 @@ type pageData struct {
 	PromptUser         string     // shell-prompt user in the pane title bar
 	ServeCmd           string     // the command the prompt shows running, incl. the real --addr
 	Stats              statsData
-	Sources            []string
-	FilterSource       string
+	Sources            []string // every source present in the rows below — the source filter's chips
 	FilterPublished    string
 	FilterCustom       bool
 	FilterFrom         string
@@ -130,6 +131,7 @@ type pageData struct {
 	FilterShowSeen     bool
 	FilterShowHidden   bool
 	FilterShowBookmark bool
+	Tags               []string // every tag carried by the rows below, sorted — the tag filter's chips
 	Rows               []rowData
 }
 
@@ -169,6 +171,9 @@ type rowData struct {
 	// Bookmarked is the "keep for later" flag — orthogonal to triage status,
 	// toggled via the bookmark route, and the basis for the future library page.
 	Bookmarked bool
+	// TagsAttr is the source feed's tags as recorded, comma-joined — the row's
+	// data-tags, which the client-side tag filter matches against.
+	TagsAttr string
 }
 
 func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
@@ -179,8 +184,6 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 	if sort == "" {
 		sort = store.SortByLatest
 	}
-	source := q.Get("source")
-
 	after, before, custom := windowFor(published, from, to)
 	if custom {
 		published = ""
@@ -220,7 +223,6 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 	if len(statuses) > 0 {
 		got, err := s.db.List(r.Context(), store.ListFilter{
 			Statuses:   statuses,
-			Source:     source,
 			After:      after,
 			Before:     before,
 			Bookmarked: onlyBookmark,
@@ -239,11 +241,7 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	sources := make([]string, len(counts))
-	for i, c := range counts {
-		sources[i] = c.Source
-	}
-
+	items := toRows(rows)
 	data := pageData{
 		Title:      "The Rabbit Hole",
 		Active:     "feed",
@@ -254,10 +252,9 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 			r,
 			rows,
 			len(counts),
-			store.ListFilter{Source: source, After: after, Before: before, Bookmarked: onlyBookmark},
+			store.ListFilter{After: after, Before: before, Bookmarked: onlyBookmark},
 		),
-		Sources:            sources,
-		FilterSource:       source,
+		Sources:            rowSources(items),
 		FilterPublished:    published,
 		FilterCustom:       custom,
 		FilterFrom:         from,
@@ -267,7 +264,8 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		FilterShowSeen:     showSeen,
 		FilterShowHidden:   showHidden,
 		FilterShowBookmark: onlyBookmark,
-		Rows:               toRows(rows),
+		Tags:               rowTags(items),
+		Rows:               items,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -412,6 +410,45 @@ func (s *Web) stats(r *http.Request, rows []store.ItemRow, sourcesActive int, co
 	return st
 }
 
+// rowSources collects the distinct sources present on the rows the page is
+// about to render, sorted. Like rowTags, the filter's options come from the
+// rows themselves rather than from the whole feed set, so an option can never
+// filter the page down to nothing.
+func rowSources(rows []rowData) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, row := range rows {
+		if row.Source == "" || seen[row.Source] {
+			continue
+		}
+		seen[row.Source] = true
+		out = append(out, row.Source)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// rowTags collects the tags present on the rows the page is about to render,
+// sorted and deduped. Deriving the filter's chips from the rows themselves —
+// rather than from the whole feeds file — keeps it honest: a chip only exists
+// when something on the page carries it, so narrowing by source can't leave
+// tags behind that would filter everything away.
+func rowTags(rows []rowData) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, row := range rows {
+		for _, tag := range strings.Split(row.TagsAttr, ",") {
+			if tag == "" || seen[tag] {
+				continue
+			}
+			seen[tag] = true
+			out = append(out, tag)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func toRows(rows []store.ItemRow) []rowData {
 	out := make([]rowData, len(rows))
 	for i, row := range rows {
@@ -439,6 +476,7 @@ func toRow(row store.ItemRow) rowData {
 		Seen:       row.Status == store.StatusRead,
 		Hidden:     row.Status == store.StatusSkipped,
 		Bookmarked: row.Bookmarked,
+		TagsAttr:   strings.Join(row.Tags, ","),
 	}
 	rd.ReasonHTML = renderMarkdown(rd.Reason)
 	// The "why" footnote attributes the reason to the model's own score, not the

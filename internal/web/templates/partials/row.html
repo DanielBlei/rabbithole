@@ -1,5 +1,5 @@
 {{define "row"}}
-<div class="row{{if .Seen}} is-seen{{end}}{{if .Hidden}} is-hidden{{end}}"{{if .Scored}} data-score="{{.Score}}"{{end}}>
+<div class="row{{if .Seen}} is-seen{{end}}{{if .Hidden}} is-hidden{{end}}"{{if .Scored}} data-score="{{.Score}}"{{end}} data-source="{{.Source}}" data-tags="{{.TagsAttr}}">
   <div class="row__actions">
     <button type="button" class="act act-seen{{if .Seen}} is-active{{end}}"
       hx-post="/items/{{.ID}}/seen" hx-target="closest .row" hx-swap="outerHTML"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -98,6 +99,11 @@ type FeedAttempt struct {
 func (a FeedAttempt) OK() bool { return a.Status == FeedStatusOK }
 
 const (
+	// Only rows whose tags actually differ are written, so a restart with an
+	// unchanged feeds file is a no-op rather than a table-wide rewrite. IS NOT
+	// is the null-safe comparison, which matters because untagged stores NULL.
+	sqlSyncSourceTags = `UPDATE items SET tags = ? WHERE source = ? AND tags IS NOT ?`
+
 	sqlInsertFeedFetch = `INSERT INTO feed_fetches
 		(feed_id, feed_name, url, status, error, items, elapsed_ms, fetched_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
@@ -158,6 +164,43 @@ const (
 			) WHERE rn > ?
 		)`
 )
+
+// SyncSourceTags brings recorded items in step with the tags their feed
+// carries in the feeds file, keyed by source name. Items are tagged when
+// they're inserted, but an item already scored is never re-inserted — so
+// without this, retagging a feed (or tagging one for the first time) would
+// only ever reach items ingested afterwards.
+//
+// Sources absent from tags are left alone: a feed dropped from the file keeps
+// the tags its items were recorded with rather than silently losing them.
+func (s *Store) SyncSourceTags(ctx context.Context, tags map[string][]string) error {
+	if len(tags) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.PrepareContext(ctx, sqlSyncSourceTags)
+	if err != nil {
+		return fmt.Errorf("prepare tag sync: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for source, list := range tags {
+		// An untagged feed stores NULL, matching what the insert path writes.
+		var joined any
+		if j := strings.Join(list, ","); j != "" {
+			joined = j
+		}
+		if _, err := stmt.ExecContext(ctx, joined, source, joined); err != nil {
+			return fmt.Errorf("sync tags for %q: %w", source, err)
+		}
+	}
+	return tx.Commit()
+}
 
 // RecordFeedFetches appends one history row per fetch outcome, in a single
 // transaction. Callers treat a failure here as non-fatal — history is

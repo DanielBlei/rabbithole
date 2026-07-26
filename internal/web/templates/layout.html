@@ -198,6 +198,28 @@
     });
   })();
 
+  // Popmenus (<details class="popmenu">: the feed's Source/Tags/View/Sort, the
+  // Maze tag filter) close on a click outside or Escape. A <details> only
+  // toggles from its own summary, so without this an opened panel stays up
+  // until you click that summary again. Delegated on document, so menus htmx
+  // swaps in are covered too.
+  (function(){
+    function closeAll(except){
+      document.querySelectorAll('details.popmenu[open]').forEach(function(menu){
+        if (menu !== except) menu.open = false;
+      });
+    }
+    document.addEventListener('click', function(e){
+      // The clicked menu stays open — chips inside it are the point, and its
+      // own summary already toggles. Any other open menu closes, so two can't
+      // overlap.
+      closeAll(e.target.closest('details.popmenu'));
+    });
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape') closeAll(null);
+    });
+  })();
+
   // Config viewer modal: htmx swaps the fragment into #modal; this clears it on
   // backdrop click, the close button, or Escape. The "View config" link also
   // closes the settings dropdown so the modal isn't left under it.
