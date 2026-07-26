@@ -57,7 +57,7 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 		Str("provider", cfg.Inference.Provider).
 		Str("model", cfg.Inference.Model).
 		Str("host", cfg.Inference.Host).
-		Int("batch_size", cfg.Scoring.BatchSize).
+		Int("batch_size", cfg.Inference.BatchSize).
 		Str("since", cfg.Ingest.Since.String()).
 		Bool("think", think).
 		Msg("config loaded")
@@ -100,7 +100,7 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 
 	if writeMarkdown {
 		if cfg.Ingest.DigestDir == "" {
-			return fmt.Errorf("--markdown set but ingest.digest_dir is empty; set it in the config")
+			return fmt.Errorf("--markdown set but ingest.digest_dir is empty; set it in the config file")
 		}
 		path, err := digest.Write(cfg.Ingest.DigestDir, day, outcome.Results)
 		if err != nil {

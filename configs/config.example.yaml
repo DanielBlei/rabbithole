@@ -8,34 +8,36 @@ user: danielblei
 # scoring prompt and is the main personalization knob.
 profile: ./configs/profile.example.md
 
-# Inference backend: the model and how to reach it.
-#   provider: ollama | vllm | heuristic
-#     ollama    - local Ollama server (default)
-#     vllm      - any OpenAI-compatible endpoint (vLLM, etc.)
-#     heuristic - keyword overlap, no model (offline testing)
+# Inference backend: the model, how to reach it, and how items are fed to it.
 inference:
-  provider: ollama
+  provider: ollama # Ollama | vLLM | heuristic - keywords (offline testing)
   host: http://localhost:11434
-  model: gemma3:1b # qwen3:1.7b # qwen3:0.6b
-  api_key: "" # optional bearer token (vLLM prod / Ollama cloud)
+  model: gemma3:1b # phi3:3.8b | qwen3:4b | etc
   think: false # model reasoning during scoring; omit to default on. gemma3:1b has no thinking mode, so disabled here
+  # api_key: "" # optional bearer token for model connection
 
-# How items are batched through the scorer.
-scoring:
-  batch_size: 5   # items sent per scoring request
-  max_parallel: 1 # concurrent scoring requests in flight
+  batch_size: 5 # items per scoring request (default 5)
+  max_parallel: 1 # concurrent scoring requests (default 2). Ollama queues rather than parallelizes, so keep it at 1 here
+
+  # Decoding limits, per model. Omit the block or any field to take the defaults below.
+  # Worth tuning to sharpen scoring as model behavior varies.
+  model_tuning:
+    num_ctx: 8192          # input window. Unset, Ollama silently truncates a long prompt. Ollama only, vLLM uses --max-model-len at startup
+    max_tokens: 0          # tokens for the whole reply; 0 auto-sizes from the three below
+    tokens_per_item: 256   # allowance per article in a batch
+    tokens_overhead: 256   # allowance for the JSON scaffolding
+    tokens_thinking: 2048  # added when think is on; reasoning spends the same budget
+    reason_max_chars: 200  # max characters for the reason in the model's schema-enforced JSON response.
 
 # Fetch/score run settings.
 ingest:
   # Global lookback window — the outermost fallback for a feed's `since`.
   # Accepts 'd' (days) or 'h' (e.g. 14d, 168h).
   since: 7d
-  # digest_dir: ./data/digests  # set only to export a markdown digest via `ingest --markdown`
 
-# Item persistence.
+  # The feed list (see configs/feeds.example.yaml).
+  feeds: ./configs/feeds.example.yaml
+
+# Item persistence (SQLite).
 store:
   db_path: ./data/rabbithole.db
-
-# Feeds live in their own file (see configs/feeds.example.yaml), where each one
-# can override the lookback window, cap its items, carry tags, or be parked.
-feeds_file: ./configs/feeds.yaml

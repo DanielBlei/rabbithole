@@ -44,20 +44,23 @@ type Client struct {
 	host      string
 	model     string
 	think     bool
+	tuning    rank.ModelTuning
 	hc        *http.Client
 	validator *retry.Validator
 }
 
 // New connects to host using the given model. apiKey is optional (Bearer).
 // think enables the model's reasoning mode (on by default for scoring).
-func New(host, model, apiKey string, think bool) (*Client, error) {
+// tuning carries the decoding limits; its zero value uses rank's defaults.
+func New(host, model, apiKey string, think bool, tuning rank.ModelTuning) (*Client, error) {
 	if _, err := url.Parse(host); err != nil {
 		return nil, fmt.Errorf("invalid host %q: %w", host, err)
 	}
 	return &Client{
-		host:  strings.TrimRight(host, "/"),
-		model: model,
-		think: think,
+		host:   strings.TrimRight(host, "/"),
+		model:  model,
+		think:  think,
+		tuning: tuning.Normalize(),
 		hc: &http.Client{
 			Transport: &httpclient.BearerTransport{Token: apiKey, Base: http.DefaultTransport},
 		},
@@ -104,6 +107,7 @@ type chatRequest struct {
 	Model            string         `json:"model"`
 	Messages         []chatMessage  `json:"messages"`
 	Stream           bool           `json:"stream"`
+	MaxTokens        int            `json:"max_tokens"`
 	ResponseFormat   responseFormat `json:"response_format"`
 	IncludeReasoning *bool          `json:"include_reasoning,omitempty"`
 }
@@ -113,8 +117,18 @@ type chatMessage struct {
 	Content string `json:"content"`
 }
 
+// responseFormat carries an OpenAI-compatible json_schema request. Guided
+// decoding against the schema is what keeps the model from quoting a score or
+// inventing a field; plain json_object only guarantees the syntax parses.
 type responseFormat struct {
-	Type string `json:"type"`
+	Type       string      `json:"type"`
+	JSONSchema *jsonSchema `json:"json_schema,omitempty"`
+}
+
+type jsonSchema struct {
+	Name   string          `json:"name"`
+	Strict bool            `json:"strict"`
+	Schema json.RawMessage `json:"schema"`
 }
 
 // Score sends one JSON-mode completion for the batch and parses the verdicts.
@@ -124,14 +138,23 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 	defer cancel()
 
 	userPrompt := rank.BuildUserPrompt(profile, items)
+	budget := c.tuning.Budget(len(items), c.think)
 	reqBody := chatRequest{
-		Model:  c.model,
-		Stream: false,
+		Model:     c.model,
+		Stream:    false,
+		MaxTokens: budget,
 		Messages: []chatMessage{
 			{Role: "system", Content: rank.SystemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
-		ResponseFormat: responseFormat{Type: "json_object"},
+		ResponseFormat: responseFormat{
+			Type: "json_schema",
+			JSONSchema: &jsonSchema{
+				Name:   "scores",
+				Strict: true,
+				Schema: json.RawMessage(c.tuning.Schema()),
+			},
+		},
 	}
 	// Disable reasoning only if explicitly requested. Servers that don't
 	// recognize the field ignore it.
@@ -148,6 +171,7 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 		Str("model", c.model).
 		Int("items", len(items)).
 		Bool("think", c.think).
+		Int("max_tokens", budget).
 		Msg("vllm: sending scoring request")
 	logger.Trace().Str("prompt", userPrompt).Msg("vllm: prompt sent")
 
