@@ -31,59 +31,69 @@
     {{end}}
     {{/* Published: one window at a time, so it's a radio set in a popmenu that
          wears its value on the closed button — the same key + value shape as
-         Source beside it. "any" sits above a divider as the unnarrowed
-         default. Server-side, unlike Source: the window is a store query. */}}
+         Source beside it. "All" sits above a divider as the unnarrowed
+         default. Server-side, unlike Source: the window is a store query.
+         data-filter is what submits the form — see static/js/feed.js; "custom"
+         carries none because it only opens the date popover. */}}
     <div class="filter filter--published">
       <span class="filter__key">published</span>
       <details class="popmenu popmenu--pub">
         <summary class="popmenu__btn"><span class="popmenu__val">{{.FilterPublishedTxt}}</span><span class="popmenu__meta"><span class="popmenu__dot popmenu__dot--amber" {{if not (or .FilterCustom .FilterPublished)}}hidden{{end}}></span></span></summary>
         <div class="popmenu__panel popmenu__panel--list">
-          <label class="pill"><input type="radio" name="published" value="" {{if not (or .FilterCustom .FilterPublished)}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>any</span></label>
+          <label class="pill"><input type="radio" name="published" value="" {{if not (or .FilterCustom .FilterPublished)}}checked{{end}} data-filter="window"><span>All</span></label>
           <div class="popmenu__sep" role="separator"></div>
-          <label class="pill pill--opt"><input type="radio" name="published" value="today" {{if and (not .FilterCustom) (eq .FilterPublished "today")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>today</span></label>
-          <label class="pill pill--opt"><input type="radio" name="published" value="7d" {{if and (not .FilterCustom) (eq .FilterPublished "7d")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>7d</span></label>
-          <label class="pill pill--opt"><input type="radio" name="published" value="14d" {{if and (not .FilterCustom) (eq .FilterPublished "14d")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>14d</span></label>
-          <label class="pill pill--opt"><input type="radio" name="published" value="30d" {{if and (not .FilterCustom) (eq .FilterPublished "30d")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>30d</span></label>
+          <label class="pill pill--opt"><input type="radio" name="published" value="today" {{if and (not .FilterCustom) (eq .FilterPublished "today")}}checked{{end}} data-filter="window"><span>today</span></label>
+          <label class="pill pill--opt"><input type="radio" name="published" value="7d" {{if and (not .FilterCustom) (eq .FilterPublished "7d")}}checked{{end}} data-filter="window"><span>7d</span></label>
+          <label class="pill pill--opt"><input type="radio" name="published" value="14d" {{if and (not .FilterCustom) (eq .FilterPublished "14d")}}checked{{end}} data-filter="window"><span>14d</span></label>
+          <label class="pill pill--opt"><input type="radio" name="published" value="30d" {{if and (not .FilterCustom) (eq .FilterPublished "30d")}}checked{{end}} data-filter="window"><span>30d</span></label>
           <label class="pill pill--opt"><input type="radio" name="published" value="custom" id="pubCustom" {{if .FilterCustom}}checked{{end}}><span>custom</span></label>
         </div>
       </details>
       <div class="date-popover">
-        <label class="date-popover__field">from<input class="date-input" id="filterFrom" type="date" name="from" value="{{.FilterFrom}}" onchange="this.form.submit()"></label>
-        <label class="date-popover__field">to<input class="date-input" id="filterTo" type="date" name="to" value="{{.FilterTo}}" onchange="this.form.submit()"></label>
+        <label class="date-popover__field">from<input class="date-input" id="filterFrom" type="date" name="from" value="{{.FilterFrom}}" data-filter="submit"></label>
+        <label class="date-popover__field">to<input class="date-input" id="filterTo" type="date" name="to" value="{{.FilterTo}}" data-filter="submit"></label>
       </div>
     </div>
     {{/* Dynamic tag filter: one chip per tag carried by the rows on this page,
-         client-side OR filtering (see feed.html scripts). The inputs are
-         deliberately unnamed so they stay out of the GET filter form's submit —
-         tags narrow what's already loaded, they aren't a server query. */}}
+         client-side OR filtering (see static/js/feed.js). Wears its selection on
+         the closed button in the same key + value shape as Source, abbreviated
+         the same way — first tag, "+N" for the rest, full list in the hover
+         title. "All" sits above a divider as the unnarrowed default — the same
+         word Source and Published use for the same thing. The inputs
+         are deliberately unnamed so they stay out of the GET filter form's
+         submit — tags narrow what's already loaded, they aren't a server
+         query. */}}
     {{if .Tags}}
-    <details class="filter popmenu">
-      <summary class="popmenu__btn">Tags<span class="popmenu__dot popmenu__dot--amber" data-tag-active hidden></span></summary>
-      <div class="popmenu__panel popmenu__panel--list popmenu__panel--tags">
-        <label class="pill"><input type="checkbox" class="tag-filter__any" checked><span>any</span></label>
-        <div class="popmenu__sep" role="separator"></div>
-        {{range .Tags}}
-        <label class="pill pill--opt"><input type="checkbox" class="tag-filter__chk" value="{{.}}"><span>{{.}}</span></label>
-        {{end}}
-      </div>
-    </details>
+    <div class="filter filter--tags">
+      <span class="filter__key">tags</span>
+      <details class="popmenu popmenu--tags">
+        <summary class="popmenu__btn"><span class="popmenu__val" data-tag-label>All</span><span class="popmenu__meta"><span class="popmenu__more" data-tag-more></span><span class="popmenu__dot popmenu__dot--amber" data-tag-active hidden></span></span></summary>
+        <div class="popmenu__panel popmenu__panel--list popmenu__panel--tags">
+          <label class="pill"><input type="checkbox" class="tag-filter__all" checked><span>All</span></label>
+          <div class="popmenu__sep" role="separator"></div>
+          {{range .Tags}}
+          <label class="pill pill--opt"><input type="checkbox" class="tag-filter__chk" value="{{.}}"><span>{{.}}</span></label>
+          {{end}}
+        </div>
+      </details>
+    </div>
     {{end}}
     <details class="filter popmenu">
       <summary class="popmenu__btn">View{{if .FilterShowBookmark}}<span class="popmenu__dot popmenu__dot--bookmark"></span>{{end}}{{if .FilterShowSeen}}<span class="popmenu__dot popmenu__dot--seen"></span>{{end}}{{if .FilterShowHidden}}<span class="popmenu__dot popmenu__dot--hide"></span>{{end}}</summary>
       <div class="popmenu__panel">
-        <label class="pill pill--bookmark"><input type="checkbox" name="bookmarked" value="1" {{if .FilterShowBookmark}}checked{{end}} onchange="viewBookmarkChange(this)"><span><i class="pill__ic">&#9873;</i>Bookmarked</span></label>
+        <label class="pill pill--bookmark"><input type="checkbox" name="bookmarked" value="1" {{if .FilterShowBookmark}}checked{{end}} data-filter="bookmark"><span><i class="pill__ic">&#9873;</i>Bookmarked</span></label>
         <div class="popmenu__sep" role="separator"></div>
-        <label class="pill pill--unread"><input type="checkbox" name="unread" value="1" {{if .FilterShowUnread}}checked{{end}} onchange="this.form.submit()"><span><i class="pill__ic">&#9675;</i>Unread</span></label>
-        <label class="pill pill--seen"><input type="checkbox" name="seen" value="1" {{if .FilterShowSeen}}checked{{end}} onchange="this.form.submit()"><span><i class="pill__ic">&#10003;</i>Seen</span></label>
-        <label class="pill pill--hide"><input type="checkbox" name="hidden" value="1" {{if .FilterShowHidden}}checked{{end}} onchange="this.form.submit()"><span><i class="pill__ic">&#8856;</i>Hidden</span></label>
+        <label class="pill pill--unread"><input type="checkbox" name="unread" value="1" {{if .FilterShowUnread}}checked{{end}} data-filter="submit"><span><i class="pill__ic">&#9675;</i>Unread</span></label>
+        <label class="pill pill--seen"><input type="checkbox" name="seen" value="1" {{if .FilterShowSeen}}checked{{end}} data-filter="submit"><span><i class="pill__ic">&#10003;</i>Seen</span></label>
+        <label class="pill pill--hide"><input type="checkbox" name="hidden" value="1" {{if .FilterShowHidden}}checked{{end}} data-filter="submit"><span><i class="pill__ic">&#8856;</i>Hidden</span></label>
       </div>
     </details>
     <details class="filter popmenu">
       <summary class="popmenu__btn">Sort</summary>
       <div class="popmenu__panel">
-        <label class="pill pill--sort"><input type="radio" name="sort" value="latest" {{if eq .FilterSort "latest"}}checked{{end}} onchange="this.form.submit()"><span>Latest</span></label>
-        <label class="pill pill--sort"><input type="radio" name="sort" value="oldest" {{if eq .FilterSort "oldest"}}checked{{end}} onchange="this.form.submit()"><span>Oldest</span></label>
-        <label class="pill pill--sort"><input type="radio" name="sort" value="score" {{if eq .FilterSort "score"}}checked{{end}} onchange="this.form.submit()"><span>Score</span></label>
+        <label class="pill pill--sort"><input type="radio" name="sort" value="latest" {{if eq .FilterSort "latest"}}checked{{end}} data-filter="submit"><span>Latest</span></label>
+        <label class="pill pill--sort"><input type="radio" name="sort" value="oldest" {{if eq .FilterSort "oldest"}}checked{{end}} data-filter="submit"><span>Oldest</span></label>
+        <label class="pill pill--sort"><input type="radio" name="sort" value="score" {{if eq .FilterSort "score"}}checked{{end}} data-filter="submit"><span>Score</span></label>
       </div>
     </details>
   </form>

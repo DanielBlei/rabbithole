@@ -574,13 +574,13 @@ func windowFor(published, from, to string) (after, before time.Time, custom bool
 }
 
 // publishedLabel names the active window on the filter's closed button. No
-// window is "any" — the unnarrowed default.
+// window is "All" — the unnarrowed default, the same word Source and Tags use.
 func publishedLabel(published string, custom bool) string {
 	switch {
 	case custom:
 		return "custom"
 	case published == "":
-		return "any"
+		return "All"
 	default:
 		return published
 	}
