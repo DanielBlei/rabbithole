@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -650,5 +651,41 @@ func TestSources(t *testing.T) {
 	want := []SourceCount{{Source: "S1", Count: 2}, {Source: "S2", Count: 1}}
 	if !slices.Equal(counts, want) {
 		t.Errorf("Sources() = %+v, want %+v", counts, want)
+	}
+}
+
+// TestOpenStampsSchemaVersion covers the version guard: a new database is
+// stamped, reopening one at the current version works, and one at another
+// version is refused rather than used.
+func TestOpenStampsSchemaVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	var version int
+	if err := db.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if version != schemaVersion {
+		t.Errorf("user_version = %d, want %d", version, schemaVersion)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen at current version: %v", err)
+	}
+	if _, err := reopened.db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion+1)); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if _, err := Open(path); !errors.Is(err, ErrSchemaVersion) {
+		t.Errorf("Open at wrong version: %v, want ErrSchemaVersion", err)
 	}
 }
