@@ -33,12 +33,6 @@ CREATE TABLE IF NOT EXISTS ideas (
 CREATE INDEX IF NOT EXISTS idx_ideas_live ON ideas(deleted_at, position);
 `
 
-// ideaAddColumns backfills columns on idea databases created before they existed,
-// mirroring todoAddColumns. Runs after ideaSchema; a "duplicate column" error on
-// a fresh DB is expected and tolerated by Open. Empty for now (kept for the
-// pattern, so a later column can be added without touching Open).
-var ideaAddColumns []string
-
 // MaxIdeaBody caps a note's text. Sticky notes are meant to be loose and short;
 // the web composer mirrors this with a maxlength, but AddIdea/UpdateIdea enforce
 // it server-side too.

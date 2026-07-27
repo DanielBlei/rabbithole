@@ -35,15 +35,6 @@ CREATE INDEX IF NOT EXISTS idx_todos_done ON todos(done);
 CREATE INDEX IF NOT EXISTS idx_todos_due ON todos(due_on);
 `
 
-// todoAddColumns backfills columns on todos databases created before they
-// existed. It runs after todoSchema (which leaves an existing table untouched),
-// mirroring sqlite.go's addColumns; a "duplicate column" error on a fresh DB is
-// expected and tolerated by the caller. Kept separate from addColumns because
-// that slice runs before todoSchema, when the todos table may not yet exist.
-var todoAddColumns = []string{
-	"ALTER TABLE todos ADD COLUMN tags TEXT NOT NULL DEFAULT ''",
-}
-
 // MaxTodoTitle caps a task title: titles are meant to be short and scannable, so
 // anything longer belongs in the (optional) note. The web add form mirrors this
 // with a maxlength, but AddTodo enforces it server-side too.

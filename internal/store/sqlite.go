@@ -39,7 +39,14 @@ CREATE TABLE IF NOT EXISTS items (
 );
 CREATE INDEX IF NOT EXISTS idx_items_digested ON items(digested_on);
 CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
+CREATE INDEX IF NOT EXISTS idx_items_bookmarked ON items(bookmarked);
 `
+
+// schemaVersion stamps the database via PRAGMA user_version.
+const schemaVersion = 1
+
+// allSchemas is every table's DDL, applied in order to a new database.
+var allSchemas = []string{schema, todoSchema, ideaSchema, ingestSchema, ingestLogSchema, feedFetchSchema}
 
 // Status values for the items.status column. llm_score/llm_score_reason are
 // the model's verdict, written by the daily run; status/user_score/user_note
@@ -73,6 +80,9 @@ const minUserScore, maxUserScore = 0, 10
 // given identifier.
 var ErrItemNotFound = errors.New("item not found")
 
+// ErrSchemaVersion is returned by Open when there is a database schema version missmatch
+var ErrSchemaVersion = errors.New("incompatible database schema")
+
 // ErrInvalidFilter is returned by List when a ListFilter holds an invalid
 // value (an unrecognized status or sort mode). It wraps a more specific
 // message; callers can errors.Is against it to tell a caller error (e.g. an
@@ -103,7 +113,7 @@ type Store struct {
 	db *sql.DB
 }
 
-// Open opens (or creates) the database at path and runs migrations.
+// Open opens the database at path, creating it when it does not exist yet.
 func Open(path string) (*Store, error) {
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -114,81 +124,41 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if err := initSchema(db, path); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("migrate schema: %w", err)
-	}
-	for _, stmt := range addColumns {
-		// Additive migrations for databases created before a column existed.
-		// CREATE TABLE IF NOT EXISTS above leaves an existing table untouched,
-		// so these backfill new columns. Idempotent: a "duplicate column"
-		// error (column already present, e.g. on a fresh DB) is expected.
-		if _, err := db.Exec(stmt); err != nil && !isDuplicateColumn(err) {
-			_ = db.Close()
-			return nil, fmt.Errorf("migrate schema: %w", err)
-		}
-	}
-	if _, err := db.Exec(todoSchema); err != nil {
-		// Maze task board, kept in todos.go; idempotent (IF NOT EXISTS).
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate todos schema: %w", err)
-	}
-	for _, stmt := range todoAddColumns {
-		// Additive todo migrations — run after todoSchema (not in addColumns,
-		// which runs before the todos table exists). Duplicate-column is expected
-		// on a DB that already has the column; tolerate it like addColumns.
-		if _, err := db.Exec(stmt); err != nil && !isDuplicateColumn(err) {
-			_ = db.Close()
-			return nil, fmt.Errorf("migrate todos schema: %w", err)
-		}
-	}
-	if _, err := db.Exec(ideaSchema); err != nil {
-		// Maze idea board, kept in ideas.go; idempotent (IF NOT EXISTS).
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate ideas schema: %w", err)
-	}
-	for _, stmt := range ideaAddColumns {
-		// Additive idea migrations — run after ideaSchema, mirroring todoAddColumns.
-		if _, err := db.Exec(stmt); err != nil && !isDuplicateColumn(err) {
-			_ = db.Close()
-			return nil, fmt.Errorf("migrate ideas schema: %w", err)
-		}
-	}
-	if _, err := db.Exec(ingestSchema); err != nil {
-		// Ingest run history, kept in ingest.go; idempotent (IF NOT EXISTS).
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate ingest schema: %w", err)
-	}
-	if _, err := db.Exec(ingestLogSchema); err != nil {
-		// Per-run captured logs, kept in ingest.go; idempotent (IF NOT EXISTS).
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate ingest log schema: %w", err)
-	}
-	if _, err := db.Exec(feedFetchSchema); err != nil {
-		// Per-feed fetch history, kept in feeds.go; idempotent (IF NOT EXISTS).
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate feed fetch schema: %w", err)
+		return nil, err
 	}
 	return &Store{db: db}, nil
 }
 
-// addColumns holds additive column migrations applied after the base schema.
-// Each must be safe to re-run; see Open for how duplicate-column errors are
-// tolerated.
-var addColumns = []string{
-	"ALTER TABLE items ADD COLUMN llm_score_model TEXT",
-	"ALTER TABLE items ADD COLUMN bookmarked BOOLEAN NOT NULL DEFAULT 0",
-	// The tags of the feed the item came from, comma-joined, NULL when the feed carries none.
-	"ALTER TABLE items ADD COLUMN tags TEXT",
-	// Index the bookmark column for the `--bookmarked` filter. This lives here
-	// rather than in the base schema because that block runs before the ALTER
-	// above, so on an existing DB the column wouldn't exist yet. CREATE INDEX
-	// IF NOT EXISTS is idempotent, so a re-run is a harmless no-op.
-	"CREATE INDEX IF NOT EXISTS idx_items_bookmarked ON items(bookmarked)",
-}
-
-func isDuplicateColumn(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "duplicate column name")
+// initSchema creates every table on a new database and stamps it with schemaVersion.
+// An existing database is checked against that version and rejected on a mismatch.
+func initSchema(db *sql.DB, path string) error {
+	var tables int
+	if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").Scan(&tables); err != nil {
+		return fmt.Errorf("inspect database: %w", err)
+	}
+	if tables > 0 {
+		var version int
+		if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+			return fmt.Errorf("read schema version: %w", err)
+		}
+		if version != schemaVersion {
+			return fmt.Errorf("%w: %s is version %d, this build expects %d — delete it and run ingest again",
+				ErrSchemaVersion, path, version, schemaVersion)
+		}
+		return nil
+	}
+	for _, stmt := range allSchemas {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("create schema: %w", err)
+		}
+	}
+	// PRAGMA takes no bound parameters; schemaVersion is a compile-time constant.
+	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+		return fmt.Errorf("stamp schema version: %w", err)
+	}
+	return nil
 }
 
 // Close releases the database handle.
