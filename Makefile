@@ -111,7 +111,7 @@ debug: ## Run the ingest with verbose logging
 trace: ## Run the ingest with trace logging (raw model prompts/responses)
 	go run . ingest --config $(CONFIG) --trace $(THINK_FLAG)
 
-.PHONY: db-dump
+.PHONY: db-dump-items
 db-dump: ## Dump the items table via the sqlite3 CLI (requires DB=path)
 	@test -n "$(DB)" || { echo "usage: make db-dump DB=./data/rabbithole.db" >&2; exit 1; }
 	sqlite3 -header -column $(DB) "SELECT id, source, title, status, llm_score, user_score, digested_on, created_at FROM items ORDER BY created_at;"
