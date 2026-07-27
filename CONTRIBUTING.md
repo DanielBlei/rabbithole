@@ -19,10 +19,14 @@ There is currently only one maintainer, so feel free to nudge a stale thread.
 The test for a change is whether it makes someone's daily reading better. Some things are
 deliberately outside that:
 
-- **Multi-user.** One person, one machine, one profile. No accounts or sharing.
+- **Multi-user.** One person, one profile. No accounts or sharing.
 - **A hosted service.** Self-hosting is the deployment model.
-- **Auth and remote access as features in themselves.** It binds loopback by default and
-  assumes a trusted machine.
+
+It runs on your own machine today, with no authentication and a loopback binding. That is the
+current state rather than a fixed position: whether it should be reachable from another
+device is genuinely open, and auth would follow that decision rather than lead it.
+[SECURITY.md](SECURITY.md) has the details, and is also where to report a vulnerability
+rather than in a public issue.
 
 One thing is genuinely undecided: whether this grows into a full self-hosted reader or stays
 a focused triage engine. If your idea leans on that answer, say so in the issue. It is a live

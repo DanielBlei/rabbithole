@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -214,6 +215,62 @@ func TestManagerBufferCapturesDebugRegardlessOfLogLevel(t *testing.T) {
 
 	if !logContains(m, "debug-level line") {
 		t.Errorf("buffer missing debug-level line despite Info logLevel: %q", m.Status().Lines)
+	}
+}
+
+// captureStderr returns what fn wrote to stderr. The swap has to happen before
+// fn runs, since newRunLogger reads os.Stderr when it is called.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Pipe: %v", err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = orig }()
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing pipe: %v", err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading pipe: %v", err)
+	}
+	return string(out)
+}
+
+// A run is quiet in the terminal unless you asked for --debug. The modal shows
+// those lines either way.
+func TestRunLoggerMirrorsToConsoleOnlyWhenVerbose(t *testing.T) {
+	tests := []struct {
+		name       string
+		level      zerolog.Level
+		wantStderr bool
+	}{
+		{"info stays quiet", zerolog.InfoLevel, false},
+		{"warn stays quiet", zerolog.WarnLevel, false},
+		{"debug mirrors", zerolog.DebugLevel, true},
+		{"trace mirrors", zerolog.TraceLevel, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := newLogBuffer(maxLogLines)
+			out := captureStderr(t, func() {
+				logger := newRunLogger(buf, tt.level)
+				logger.Info().Msg("a run line")
+			})
+
+			if got := strings.Contains(out, "a run line"); got != tt.wantStderr {
+				t.Errorf("line on stderr = %v, want %v (stderr: %q)", got, tt.wantStderr, out)
+			}
+			// The buffer is the UI's source and always gets the line.
+			if lines := buf.snapshot(); len(lines) != 1 || !strings.Contains(lines[0], "a run line") {
+				t.Errorf("buffer = %q, want the line regardless of level", lines)
+			}
+		})
 	}
 }
 
