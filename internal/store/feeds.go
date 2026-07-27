@@ -223,7 +223,7 @@ func (s *Store) RecordFeedFetches(ctx context.Context, fetches []FeedFetch) erro
 
 	for _, f := range fetches {
 		if _, err := stmt.ExecContext(ctx, f.FeedID, f.Name, f.URL, f.status(),
-			f.Error, f.Items, f.Elapsed.Milliseconds(), f.At); err != nil {
+			f.Error, f.Items, f.Elapsed.Milliseconds(), sqlTime(f.At)); err != nil {
 			return fmt.Errorf("insert feed fetch %q: %w", f.Name, err)
 		}
 	}
