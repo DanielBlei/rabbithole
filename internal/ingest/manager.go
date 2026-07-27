@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -36,7 +37,7 @@ type Manager struct {
 	db       *store.Store
 	cfg      *config.Config
 	run      runFunc
-	logLevel zerolog.Level // console verbosity for the run logger's stderr mirror
+	logLevel zerolog.Level // --debug also prints the run's lines in the terminal
 
 	mu     sync.Mutex
 	active *activeRun // nil when idle
@@ -61,10 +62,10 @@ type Status struct {
 	Lines     []string  // raw zerolog JSON, one event per line
 }
 
-// NewManager returns a Manager for db/cfg, logging its per-run console
-// mirror at logLevel. History rows left as 'running' by a process that died
-// mid-run are flipped to errors first, so the UI never reports a run that is
-// no longer alive.
+// NewManager returns a Manager for db/cfg. logLevel decides whether a run's own
+// lines show in the terminal (see newRunLogger). Runs left mid-flight by a
+// crashed process are marked failed first, so the UI never shows a run that
+// isn't alive.
 func NewManager(db *store.Store, cfg *config.Config, logLevel zerolog.Level) (*Manager, error) {
 	if err := db.InterruptStaleIngestRuns(context.Background()); err != nil {
 		return nil, err
@@ -197,44 +198,42 @@ func (m *Manager) execute(ctx context.Context, run *activeRun, buf *logBuffer, p
 		zlog.Error().Err(ferr).Int64("run", run.id).Msg("saving ingest run log failed")
 	}
 
+	// The one line a plain serve prints for a run, and all an unattended run
+	// leaves in the journal. The blow-by-blow is in the modal.
+	outcomeLog := zlog.Info()
+	if status == store.IngestStatusError {
+		outcomeLog = zlog.Error().Str("error", msg)
+	}
+	outcomeLog.
+		Int64("run", run.id).
+		Str("status", string(status)).
+		Int("fetched", counts.Fetched).
+		Int("new", counts.NewItems).
+		Int("scored", counts.Scored).
+		Int("skipped", counts.Skipped).
+		Int("failed", counts.Failed).
+		Str("took", time.Since(run.started).Round(time.Second).String()).
+		Msg("ingest run finished")
+
 	m.mu.Lock()
 	m.active = nil
 	m.mu.Unlock()
 }
 
-// newRunLogger builds the per-run logger threaded through the run's context
-// (see execute): every event is written as JSON into buf at debug level,
-// while stderr keeps receiving the console format filtered to logLevel (so a
-// serve without --debug doesn't suddenly get chatty). Unlike the global
-// logger, this is scoped to the run alone — a concurrent HTTP request
-// logging through the (untouched) global logger can never leak into another
-// run's buffer.
+// newRunLogger builds the logger for one run. Everything lands in buf, which the
+// modal tails live and the store keeps. The terminal only gets a copy under
+// --debug; otherwise a run would bury the request log there, while showing you
+// nothing the modal isn't already showing. execute still prints the outcome.
+//
+// The logger is scoped to this run, so nothing logged elsewhere reaches buf.
 func newRunLogger(buf *logBuffer, logLevel zerolog.Level) zerolog.Logger {
-	console := minLevelWriter{
-		w:   zerolog.LevelWriterAdapter{Writer: zerolog.ConsoleWriter{Out: os.Stderr}},
-		min: logLevel,
+	var w io.Writer = buf
+	if logLevel <= zerolog.DebugLevel {
+		w = zerolog.MultiLevelWriter(zerolog.ConsoleWriter{Out: os.Stderr}, buf)
 	}
-	return zerolog.New(zerolog.MultiLevelWriter(console, buf)).
+	return zerolog.New(w).
 		Level(zerolog.DebugLevel).
 		With().Timestamp().Logger()
-}
-
-// minLevelWriter drops events below min — it keeps stderr at the operator's
-// chosen verbosity while the sibling buffer writer receives everything.
-type minLevelWriter struct {
-	w   zerolog.LevelWriter
-	min zerolog.Level
-}
-
-func (m minLevelWriter) Write(p []byte) (int, error) {
-	return m.w.Write(p)
-}
-
-func (m minLevelWriter) WriteLevel(l zerolog.Level, p []byte) (int, error) {
-	if l < m.min {
-		return len(p), nil
-	}
-	return m.w.WriteLevel(l, p)
 }
 
 // logBuffer is a concurrency-safe ring of the run's most recent log lines.

@@ -46,7 +46,9 @@ Every target accepts `CONFIG=<path>` and defaults to `configs/config.example.yam
 `CONFIG` at the top of the `Makefile` if you would rather not pass it each time. Targets that
 read it will tell you while you are still on the example.
 
-`make serve` binds to loopback only. Run `make help` for the full target list.
+`make serve` binds to loopback only, and there is no authentication: it assumes it is running
+on your own machine. Read [SECURITY.md](SECURITY.md) before exposing it to anything else. Run
+`make help` for the full target list.
 
 The web UI also keeps the day's notes and ideas alongside the ranked feed. The same data is
 available as a [JSON API](docs/api.md), and `rabbithole ingest --markdown` writes a dated
