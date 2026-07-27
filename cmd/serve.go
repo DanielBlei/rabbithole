@@ -20,7 +20,7 @@ var serveAddr string
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Serve the items API over HTTP (JSON; a frontend is a later phase)",
+	Short: "Serve the web UI and the items API over HTTP",
 	RunE:  runServe,
 }
 
