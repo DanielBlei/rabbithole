@@ -48,12 +48,18 @@ Go 1.26+ is required.
 ## Before a PR
 
 ```bash
-make check   # gofmt + go vet + go test
+make check   # golangci-lint + go test -race + build
 ```
 
-There is no CI yet, so this gate runs on trust. Please actually run it. Add tests for new
-behaviour, update the page under `docs/` your change makes wrong, and run `make test-race` if
-you touched anything concurrent.
+`make check` runs the same gate CI does, so a green run locally is a green run on the PR. It
+needs [golangci-lint](https://golangci-lint.run/welcome/install/) — CI pins v2.12.2, so
+matching that locally avoids a surprise. The linter also reports formatting, and
+`make lint-fix` autofixes most of what it finds, formatting included.
+
+Add tests for new behaviour, and update the page under `docs/` your change makes wrong.
+
+Fork PRs need a maintainer to approve the workflow run before checks start, so expect the
+checks to sit idle for a bit on your first contribution.
 
 [docs/architecture.md](docs/architecture.md) has the package map and data flow;
 [docs/store.md](docs/store.md) documents the database.

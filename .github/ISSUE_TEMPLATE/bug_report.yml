@@ -1,0 +1,41 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The command you ran. Please redact `inference.api_key`.
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scorer
+    attributes:
+      label: Scorer
+      description: If it also reproduces with `heuristic`, no model is involved.
+      options:
+        - heuristic (no model)
+        - ollama
+        - vllm
+        - not sure
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS, `go version`, and the commit you are on.
+    validations:
+      required: true
