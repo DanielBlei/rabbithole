@@ -25,7 +25,8 @@ const ingestBannerWindow = 5 * time.Minute
 
 // ingestChipData drives the topbar status chip. The chip is ambient signal
 // only for the states that need attention: State is "running" (pulsing),
-// "failed" (red, with Ago), or "" — idle, in which case the chip renders
+// "failed" (red, with Ago), "warn" (cancelled, amber with Ago), "never" (amber,
+// nothing ingested yet) or "" — idle and healthy, in which case the chip renders
 // hidden (the element must still exist so htmx OOB swaps can find it).
 type ingestChipData struct {
 	State string
@@ -99,11 +100,12 @@ type ingestModalData struct {
 // struct feeds the standalone chrome fragments (navIngest/navTab/ingWatch)
 // that ingest responses re-render out-of-band so the chrome never goes stale.
 type chromeData struct {
-	Chip    ingestChipData
-	IngDot  string // ingest status dot: err | run | "" (healthy/never — no dot)
-	IngSub  string // ingest subline shown inside the open side menu
-	Running bool   // a run is live — the ingWatch fragment polls while true
-	OOB     bool   // render the fragments with hx-swap-oob
+	Chip     ingestChipData
+	IngDot   string // ingest status dot: err | warn | run | "" (healthy — no dot)
+	IngSub   string // ingest subline shown inside the open side menu
+	IngNever bool   // no run has ever been recorded — gates the first-run hint
+	Running  bool   // a run is live — the ingWatch fragment polls while true
+	OOB      bool   // render the fragments with hx-swap-oob
 }
 
 // chrome assembles the layout's shared state for a full page render. A history
@@ -125,7 +127,12 @@ func (s *Web) chrome(ctx context.Context) chromeData {
 	now := time.Now()
 	switch {
 	case last == nil:
-		return chromeData{IngSub: "never ran"}
+		// Nothing ingested yet: amber everywhere, so an empty feed reads as "not
+		// set up" rather than "nothing to read". Clears on the first run.
+		return chromeData{
+			Chip:   ingestChipData{State: "never"},
+			IngDot: "warn", IngSub: "never ran", IngNever: true,
+		}
 	case last.Status == store.IngestStatusOK:
 		return chromeData{IngSub: "ok · " + agoPhrase(last.StartedAt, now)}
 	case last.Status == store.IngestStatusError:
@@ -333,13 +340,14 @@ func histPageFromQuery(r *http.Request) int {
 }
 
 // ingestChip derives the topbar chip state: "running" while a run is live,
-// "failed" after an error, "warn" after a cancel, hidden otherwise (idle/ok).
+// "failed" after an error, "warn" after a cancel, "never" until the first run,
+// hidden otherwise (idle and healthy).
 func ingestChip(running bool, last *ingestRunView) ingestChipData {
 	if running {
 		return ingestChipData{State: "running"}
 	}
 	if last == nil {
-		return ingestChipData{}
+		return ingestChipData{State: "never"}
 	}
 	switch last.Status {
 	case store.IngestStatusError:
