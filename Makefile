@@ -37,8 +37,8 @@ config-hint:
 .PHONY: setup
 setup: ## Create config.yaml, feeds.yaml and profile.md from the examples (if missing)
 	@test -f configs/config.yaml  || ( \
-	  cp configs/config.example.yaml configs/config.yaml && \
-	  sed -i -e 's|profile.example.md|profile.md|' -e 's|feeds.example.yaml|feeds.yaml|' configs/config.yaml && \
+	  sed -e 's|profile.example.md|profile.md|' -e 's|feeds.example.yaml|feeds.yaml|' \
+	      configs/config.example.yaml > configs/config.yaml && \
 	  echo "created configs/config.yaml (pointing at your profile.md and feeds.yaml)" )
 	@test -f configs/feeds.yaml   || (cp configs/feeds.example.yaml   configs/feeds.yaml   && echo "created configs/feeds.yaml")
 	@test -f configs/profile.md   || (cp configs/profile.example.md   configs/profile.md   && echo "created configs/profile.md")
