@@ -147,14 +147,15 @@
 {{end}}
 {{end}}
 
-{{/* Topbar status chip: a pulsing amber "running" while a run is live, then a
-     red "failed" or amber "cancelled" alarm after, hidden only when idle/ok.
-     Rendered into the topbar by layout.html and updated out-of-band by every
-     ingest poll/mutation response. Clicking it opens the runner modal. */}}
+{{/* Topbar status chip: an amber "never ran" until the first run, a pulsing
+     amber "running" while one is live, then a red "failed" or amber "cancelled"
+     alarm after, hidden only when idle and healthy. Rendered into the topbar by
+     layout.html and updated out-of-band by every ingest poll/mutation response.
+     Clicking it opens the runner modal. */}}
 {{define "ingestChip"}}
 <span id="ingChip" class="ing-chip{{if .State}} ing-chip--{{.State}}{{end}}"
       {{if .OOB}}hx-swap-oob="true"{{end}} {{if not .State}}hidden{{end}}
       hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML" role="button" tabindex="0">
-  {{- if eq .State "running"}}<i></i>ingest running…{{else if eq .State "failed"}}<i></i>ingest failed · {{.Ago}}{{else if eq .State "warn"}}<i></i>ingest cancelled · {{.Ago}}{{end -}}
+  {{- if eq .State "running"}}<i></i>ingest running…{{else if eq .State "failed"}}<i></i>ingest failed · {{.Ago}}{{else if eq .State "warn"}}<i></i>ingest cancelled · {{.Ago}}{{else if eq .State "never"}}<i></i>ingest never ran{{end -}}
 </span>
 {{end}}

@@ -295,3 +295,37 @@ var feedPager = (function(){
     });
   });
 })();
+
+(function(){
+  // First-run hint pointing at the side menu. The server only renders #navHint
+  // on the feed while no ingest has ever run, so this just decides whether the
+  // user has already seen it — one flag, no expiry, dismissed for good on the
+  // first interaction of any kind.
+  var hint = document.getElementById('navHint');
+  if (!hint) return;
+  var KEY = 'rh.tour.ingest';
+  var tab = document.getElementById('navTab');
+
+  function dismiss(){
+    try { localStorage.setItem(KEY, '1'); } catch (e) { /* private mode: show it again, no worse */ }
+    hint.remove();
+    if (tab) tab.classList.remove('navtab--hint');
+  }
+
+  var seen;
+  try { seen = localStorage.getItem(KEY); } catch (e) { seen = null; }
+  if (seen){ hint.remove(); return; }
+
+  hint.hidden = false;
+  if (tab) tab.classList.add('navtab--hint');
+  // Next frame, so the entrance transition has a starting state to move from.
+  requestAnimationFrame(function(){ hint.classList.add('navhint--on'); });
+
+  // Anything the user does retires it: the ✕, a click anywhere, Escape, or
+  // reaching for the menu it points at (hovering the edge zone opens the
+  // drawer, which is the hint's whole job).
+  document.addEventListener('click', dismiss);
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') dismiss(); });
+  var hot = document.getElementById('navHot');
+  if (hot) hot.addEventListener('mouseenter', dismiss);
+})();

@@ -145,6 +145,18 @@
        the ingWatch poller are standalone templates so ingest responses can
        re-render them out-of-band and keep them current. -->
   {{template "navTab" .Chrome}}
+  {{/* First-run hint: the drawer is the only route to the ingest runner and
+       nothing on screen advertises it, so before the first run ever the feed
+       points at the tab once. Not a fragment — once a run is recorded the
+       server stops rendering it; until then static/js/feed.js shows it a single
+       time and remembers the dismissal. */}}
+  {{if and (eq .Active "feed") .Chrome.IngNever}}
+  <div class="navhint" id="navHint" role="note" hidden>
+    <button class="navhint__x" type="button" aria-label="Dismiss">&times;</button>
+    <div class="navhint__hd">the menu lives here</div>
+    <div class="navhint__sub"><span aria-hidden="true">⟳</span> Ingest is inside</div>
+  </div>
+  {{end}}
   <div class="nav-hot" id="navHot" aria-hidden="true"></div>
   <nav class="navrail" id="navRail" aria-label="Pages">
     <a class="navrail__item{{if eq .Active "feed"}} navrail__item--on{{end}}" href="/feed">

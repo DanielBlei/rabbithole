@@ -13,22 +13,26 @@
          filter — the label is written by feed.html as the selection changes.
          "All" sits above a divider as the unnarrowed default. Like Tags, the
          inputs are unnamed: this filters the rows already loaded, client-side,
-         so picking a feed doesn't cost a round trip. */}}
-    {{if .Sources}}
+         so picking a feed doesn't cost a round trip. Unlike Tags it renders
+         even with nothing to offer — it's the bar's primary filter, and a bar
+         that changes shape on an empty feed reads as broken. */}}
     <div class="filter filter--source">
       <span class="filter__key">source</span>
       <details class="popmenu popmenu--src">
         <summary class="popmenu__btn"><span class="popmenu__val" data-src-label>All</span><span class="popmenu__meta"><span class="popmenu__more" data-src-more></span><span class="popmenu__dot popmenu__dot--amber" data-src-active hidden></span></span></summary>
         <div class="popmenu__panel popmenu__panel--list">
           <label class="pill"><input type="checkbox" class="src-filter__all" checked><span>All</span></label>
+          {{if .Sources}}
           <div class="popmenu__sep" role="separator"></div>
           {{range .Sources}}
           <label class="pill pill--opt"><input type="checkbox" class="src-filter__chk" value="{{.}}"><span>{{.}}</span></label>
           {{end}}
+          {{else}}
+          <div class="popmenu__none">no sources in view</div>
+          {{end}}
         </div>
       </details>
     </div>
-    {{end}}
     {{/* Published: one window at a time, so it's a radio set in a popmenu that
          wears its value on the closed button — the same key + value shape as
          Source beside it. "All" sits above a divider as the unnarrowed
@@ -98,6 +102,9 @@
     </details>
   </form>
 
+  {{/* Nothing to page through on an empty feed — the pager JS null-guards every
+       button, so leaving it out is a no-op there. */}}
+  {{if .Rows}}
   <div class="pane__nav">
     <button class="nav-btn" id="btnFirst" title="Jump to first page">&laquo; first</button>
     <span class="pageinfo" id="pageInfo"></span>
@@ -106,18 +113,56 @@
       <button class="nav-btn" id="btnNext">next &rsaquo;</button>
     </div>
   </div>
+  {{end}}
 
   <div class="pane__body">
     {{range .Rows}}{{template "row" .}}{{end}}
+    {{if not .Rows}}{{template "feedEmpty" .Empty}}{{end}}
   </div>
 </section>
 
 {{/* Second pager, below the frame: the same client-side page state as the one
      in the bar, reachable from where the reading actually ends. Deliberately
      outside the pane and quiet — an affordance, not a second control bar. */}}
+{{if .Rows}}
 <nav class="pagenav" aria-label="Pagination">
   <button type="button" class="pagenav__btn" id="btnPrevBottom">&lsaquo; prev</button>
   <span class="pagenav__info" id="pageInfoBottom"></span>
   <button type="button" class="pagenav__btn" id="btnNextBottom">next &rsaquo;</button>
 </nav>
+{{end}}
+{{end}}
+
+{{/* The zero-state, rendered in the pane body when a render returns no rows. It
+     stays in the terminal's voice — the bunny, the shell line that came back
+     with nothing, then the reason and the way out. Kind picks all three:
+     "never" (nothing ingested yet) and "dry" (a run that found nothing) lead to
+     the ingest runner, "filtered" leads back to an unnarrowed feed. */}}
+{{define "feedEmpty"}}
+<div class="feed-empty">
+  <pre class="feed-empty__bunny" aria-hidden="true">(\_/)
+(&bull;_&bull;)</pre>
+  <div class="feed-empty__sh">
+    <span class="pane__prompt">$</span>&nbsp;<span class="pane__cmd">{{.Cmd}}</span>
+    <div class="feed-empty__out">0 items{{if eq .Kind "never"}} &mdash; the hole hasn&rsquo;t been dug yet{{end}}<span class="blink">_</span></div>
+  </div>
+  {{if eq .Kind "never"}}
+  <p class="feed-empty__lead">Nothing has been ingested yet.<br>Run Ingest to dig your feeds.</p>
+  <div class="feed-empty__acts">
+    <button class="feed-empty__go" type="button" hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML">&#9654; run ingest</button>
+    <a class="feed-empty__alt" href="#" hx-get="/feeds" hx-target="#modal" hx-swap="innerHTML">&#9636; view feeds</a>
+  </div>
+  {{else if eq .Kind "dry"}}
+  <p class="feed-empty__lead">The last run came back empty. Check the feed list, then run again.</p>
+  <div class="feed-empty__acts">
+    <button class="feed-empty__go" type="button" hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML">&#9654; run ingest</button>
+    <a class="feed-empty__alt" href="#" hx-get="/feeds" hx-target="#modal" hx-swap="innerHTML">&#9636; view feeds</a>
+  </div>
+  {{else}}
+  <p class="feed-empty__lead">No items match these filters.</p>
+  <div class="feed-empty__acts">
+    <a class="feed-empty__go" href="/feed">&times; clear filters</a>
+  </div>
+  {{end}}
+</div>
 {{end}}

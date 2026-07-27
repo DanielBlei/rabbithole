@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"html/template"
 	"io/fs"
@@ -144,7 +145,23 @@ type pageData struct {
 	Tags               []string // every tag carried by the rows below, sorted — the tag filter's chips
 	ListLimit          int      // listLimit, so the pager can say when the set below is truncated
 	Rows               []rowData
+	Empty              emptyData // the zero-state, filled only when Rows is empty
 }
+
+// emptyData drives the zero-state the pane renders when no rows come back. Kind
+// separates the three reasons a feed can be empty, because they want different
+// words and a different next action: nothing ingested yet (never), a run that
+// brought nothing home (dry), or a view that filters everything out (filtered).
+type emptyData struct {
+	Kind string // never | dry | filtered
+	Cmd  string // the faux shell line that came back with nothing
+}
+
+const (
+	emptyNever    = "never"
+	emptyDry      = "dry"
+	emptyFiltered = "filtered"
+)
 
 type statsData struct {
 	Available     int
@@ -254,10 +271,11 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := toRows(rows)
+	chrome := s.chrome(r.Context())
 	data := pageData{
 		Title:      "The Rabbit Hole",
 		Active:     "feed",
-		Chrome:     s.chrome(r.Context()),
+		Chrome:     chrome,
 		PromptUser: s.user,
 		ServeCmd:   "go run . serve --addr " + s.addr,
 		Stats: s.stats(
@@ -281,12 +299,73 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		ListLimit:          listLimit,
 		Rows:               items,
 	}
+	if len(items) == 0 {
+		data.Empty = s.emptyState(r.Context(), chrome.IngNever, data.cmd())
+	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := feedTmpl.ExecuteTemplate(w, "layout", data); err != nil {
 		// Status is likely already written; log rather than double-write.
 		log.Error().Err(err).Msg("render feed")
 	}
+}
+
+// emptyState explains an empty feed. The store-wide count runs on this path
+// only, so a normal render is unchanged. Items in the store mean the active
+// filters are what's hiding them; an empty store is either a feed nothing has
+// ever been ingested into, or a run that came home with nothing. A failed count
+// degrades to the filtered wording, which advises nothing.
+func (s *Web) emptyState(ctx context.Context, neverIngested bool, cmd string) emptyData {
+	e := emptyData{Kind: emptyFiltered, Cmd: cmd}
+	n, err := s.db.Count(ctx, store.ListFilter{})
+	if err != nil {
+		log.Warn().Err(err).Msg("counting items for the feed zero-state")
+		return e
+	}
+	if n == 0 {
+		e.Kind = emptyDry
+		if neverIngested {
+			e.Kind = emptyNever
+		}
+	}
+	return e
+}
+
+// cmd renders the active filters as a shell line in the filter bar's own
+// vocabulary. The zero-state shows it as the command that came back with
+// nothing, so an empty page says which view is empty.
+func (d pageData) cmd() string {
+	cmd := "rabbithole feed"
+	for _, f := range []struct {
+		on   bool
+		flag string
+	}{
+		{d.FilterShowUnread, "--unread"},
+		{d.FilterShowSeen, "--seen"},
+		{d.FilterShowHidden, "--hidden"},
+		{d.FilterShowBookmark, "--bookmarked"},
+	} {
+		if f.on {
+			cmd += " " + f.flag
+		}
+	}
+	// Every status chip cleared is itself the reason the page is empty — say so
+	// rather than rendering a bare command that looks like it should have worked.
+	if !d.FilterShowUnread && !d.FilterShowSeen && !d.FilterShowHidden {
+		cmd += " --status none"
+	}
+	switch {
+	case d.FilterCustom:
+		if d.FilterFrom != "" {
+			cmd += " --from " + d.FilterFrom
+		}
+		if d.FilterTo != "" {
+			cmd += " --to " + d.FilterTo
+		}
+	case d.FilterPublished != "":
+		cmd += " --published " + d.FilterPublished
+	}
+	return cmd
 }
 
 // httpStoreError maps a store error to an HTTP response: a missing item is a
