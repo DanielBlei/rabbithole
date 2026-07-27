@@ -282,7 +282,9 @@ header.topbar{
   padding:11px 13px;z-index:10;
   transform-origin:top left;
 }
-.pills:has(#pubCustom:checked) ~ .date-popover{display:flex;animation:pop-in .16s cubic-bezier(.2,1.1,.4,1);}
+/* Picking "custom" reveals the range popover, which hangs off the filter — so
+   it stays up after the menu itself closes. */
+.popmenu--pub:has(#pubCustom:checked) ~ .date-popover{display:flex;animation:pop-in .16s cubic-bezier(.2,1.1,.4,1);}
 .date-popover__field{
   display:flex;align-items:center;gap:6px;
   color:var(--text-dim);font-size:1.1rem;letter-spacing:.05em;text-transform:uppercase;
@@ -343,6 +345,18 @@ header.topbar{
 .popmenu--src .popmenu__meta{
   position:absolute;right:26px;top:50%;transform:translateY(-50%);
   display:flex;align-items:center;gap:5px;
+}
+/* Published wears its value too, but from a closed set of short labels — so it
+   takes the same centred-value/pinned-caret treatment at a width that fits
+   them, fixed so picking a window doesn't shift the bar. */
+.popmenu--pub .popmenu__btn{position:relative;width:12.5rem;padding:5px 38px 5px 14px;}
+.popmenu--pub .popmenu__val{flex:1;text-align:center;}
+.popmenu--pub .popmenu__meta{
+  position:absolute;right:24px;top:50%;transform:translateY(-50%);
+  display:flex;align-items:center;
+}
+.popmenu--pub .popmenu__btn::after{
+  position:absolute;right:13px;top:50%;transform:translateY(-50%);
 }
 /* The value ellipsises inside that fixed width rather than pushing the button
    wider; the "+N" sits outside it, so truncating a long first name can never
@@ -669,6 +683,8 @@ html.modal-open body{overflow:hidden;}
   box-shadow:0 24px 64px rgba(0,0,0,.6);overflow:hidden;
   animation:pop-in .18s cubic-bezier(.2,1.1,.4,1);
 }
+/* Focused as a container on open — the controls inside carry their own ring. */
+.modal__frame:focus{outline:none;}
 .modal__bar{
   display:flex;align-items:center;gap:10px;
   padding:9px 14px;background:var(--bg);border-bottom:1px solid var(--line);

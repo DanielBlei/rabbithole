@@ -1,5 +1,5 @@
 {{define "pane"}}
-<section class="pane" id="pane">
+<section class="pane" id="pane" data-limit="{{.ListLimit}}" data-available="{{.Stats.Available}}">
   <div class="pane__bar">
     <span class="pane__prompt">{{.PromptUser}}@rabbithole</span>:<span class="pane__path">~/feed</span>$&nbsp;<span class="pane__cmd">{{.ServeCmd}}</span><span class="blink">_</span>
   </div>
@@ -29,15 +29,24 @@
       </details>
     </div>
     {{end}}
+    {{/* Published: one window at a time, so it's a radio set in a popmenu that
+         wears its value on the closed button — the same key + value shape as
+         Source beside it. "any" sits above a divider as the unnarrowed
+         default. Server-side, unlike Source: the window is a store query. */}}
     <div class="filter filter--published">
       <span class="filter__key">published</span>
-      <div class="pills">
-        <label class="pill"><input type="radio" name="published" value="today" {{if and (not .FilterCustom) (eq .FilterPublished "today")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>today</span></label>
-        <label class="pill"><input type="radio" name="published" value="7d" {{if and (not .FilterCustom) (eq .FilterPublished "7d")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>7d</span></label>
-        <label class="pill"><input type="radio" name="published" value="14d" {{if and (not .FilterCustom) (eq .FilterPublished "14d")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>14d</span></label>
-        <label class="pill"><input type="radio" name="published" value="30d" {{if and (not .FilterCustom) (eq .FilterPublished "30d")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>30d</span></label>
-        <label class="pill"><input type="radio" name="published" value="custom" id="pubCustom" {{if .FilterCustom}}checked{{end}}><span>custom</span></label>
-      </div>
+      <details class="popmenu popmenu--pub">
+        <summary class="popmenu__btn"><span class="popmenu__val">{{.FilterPublishedTxt}}</span><span class="popmenu__meta"><span class="popmenu__dot popmenu__dot--amber" {{if not (or .FilterCustom .FilterPublished)}}hidden{{end}}></span></span></summary>
+        <div class="popmenu__panel popmenu__panel--list">
+          <label class="pill"><input type="radio" name="published" value="" {{if not (or .FilterCustom .FilterPublished)}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>any</span></label>
+          <div class="popmenu__sep" role="separator"></div>
+          <label class="pill pill--opt"><input type="radio" name="published" value="today" {{if and (not .FilterCustom) (eq .FilterPublished "today")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>today</span></label>
+          <label class="pill pill--opt"><input type="radio" name="published" value="7d" {{if and (not .FilterCustom) (eq .FilterPublished "7d")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>7d</span></label>
+          <label class="pill pill--opt"><input type="radio" name="published" value="14d" {{if and (not .FilterCustom) (eq .FilterPublished "14d")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>14d</span></label>
+          <label class="pill pill--opt"><input type="radio" name="published" value="30d" {{if and (not .FilterCustom) (eq .FilterPublished "30d")}}checked{{end}} onchange="document.getElementById('filterFrom').value='';document.getElementById('filterTo').value='';this.form.submit()"><span>30d</span></label>
+          <label class="pill pill--opt"><input type="radio" name="published" value="custom" id="pubCustom" {{if .FilterCustom}}checked{{end}}><span>custom</span></label>
+        </div>
+      </details>
       <div class="date-popover">
         <label class="date-popover__field">from<input class="date-input" id="filterFrom" type="date" name="from" value="{{.FilterFrom}}" onchange="this.form.submit()"></label>
         <label class="date-popover__field">to<input class="date-input" id="filterTo" type="date" name="to" value="{{.FilterTo}}" onchange="this.form.submit()"></label>

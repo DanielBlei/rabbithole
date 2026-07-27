@@ -45,6 +45,12 @@ func pageTmpl(page string) *template.Template {
 // page paginates this set client-side; real server-side paging is a follow-up.
 const listLimit = 100
 
+// Score tiers: high signal at 7 and above, mid at 4, low below.
+const (
+	highSignalScore = 7
+	midSignalScore  = 4
+)
+
 // Web renders the HTML frontend over the same store the JSON API uses.
 type Web struct {
 	db      *store.Store
@@ -126,6 +132,7 @@ type pageData struct {
 	Stats              statsData
 	Sources            []string // every source present in the rows below — the source filter's chips
 	FilterPublished    string
+	FilterPublishedTxt string // the window named for the filter's closed button
 	FilterCustom       bool
 	FilterFrom         string
 	FilterTo           string
@@ -135,12 +142,14 @@ type pageData struct {
 	FilterShowHidden   bool
 	FilterShowBookmark bool
 	Tags               []string // every tag carried by the rows below, sorted — the tag filter's chips
+	ListLimit          int      // listLimit, so the pager can say when the set below is truncated
 	Rows               []rowData
 }
 
 type statsData struct {
 	Available     int
-	HighSignal    int // count of shown items scoring >=7 (the "read these" set)
+	HighSignal    int // count of shown items in the high tier (the "read these" set)
+	HighThreshold int // the tier bound, for the tile label and the JS recalc
 	AvgScore      float64
 	SourcesActive int
 }
@@ -259,6 +268,7 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		),
 		Sources:            rowSources(items),
 		FilterPublished:    published,
+		FilterPublishedTxt: publishedLabel(published, custom),
 		FilterCustom:       custom,
 		FilterFrom:         from,
 		FilterTo:           to,
@@ -268,6 +278,7 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		FilterShowHidden:   showHidden,
 		FilterShowBookmark: onlyBookmark,
 		Tags:               rowTags(items),
+		ListLimit:          listLimit,
 		Rows:               items,
 	}
 
@@ -391,7 +402,7 @@ func (s *Web) handleBookmark(w http.ResponseWriter, r *http.Request) {
 // passed in as countFilter), regardless of triage status. (Rough v1 — refine
 // later.)
 func (s *Web) stats(r *http.Request, rows []store.ItemRow, sourcesActive int, countFilter store.ListFilter) statsData {
-	st := statsData{SourcesActive: sourcesActive}
+	st := statsData{SourcesActive: sourcesActive, HighThreshold: highSignalScore}
 
 	if n, err := s.db.Count(r.Context(), countFilter); err == nil {
 		st.Available = n
@@ -402,7 +413,7 @@ func (s *Web) stats(r *http.Request, rows []store.ItemRow, sourcesActive int, co
 		if sc, ok := score(row); ok {
 			sum += sc
 			n++
-			if sc >= 7 { // high tier — see tierOf
+			if sc >= highSignalScore {
 				st.HighSignal++
 			}
 		}
@@ -514,9 +525,9 @@ func score(row store.ItemRow) (int, bool) {
 
 func tierOf(score int) string {
 	switch {
-	case score >= 7:
+	case score >= highSignalScore:
 		return "high"
-	case score >= 4:
+	case score >= midSignalScore:
 		return "mid"
 	default:
 		return "low"
@@ -524,20 +535,22 @@ func tierOf(score int) string {
 }
 
 // windowFor maps the published-window filter (today/7d/14d/30d or a custom
-// from/to range) onto a created_at [after, before) bound. A custom range wins
+// from/to range) onto a published [after, before) bound. A custom range wins
 // over the pills; an unset window leaves both sides open (all items).
+// Both paths resolve in local time — a picked date means the user's calendar
+// day, and the store converts to UTC on the way in.
 func windowFor(published, from, to string) (after, before time.Time, custom bool) {
 	if from != "" || to != "" {
 		// A date we can't read is ignored, leaving that end of the range open.
 		if from != "" {
-			if t, err := time.Parse("2006-01-02", from); err == nil {
+			if t, err := time.ParseInLocation("2006-01-02", from, time.Local); err == nil {
 				after = t
 			} else {
 				log.Warn().Str("from", from).Msg("ignoring invalid from date")
 			}
 		}
 		if to != "" {
-			if t, err := time.Parse("2006-01-02", to); err == nil {
+			if t, err := time.ParseInLocation("2006-01-02", to, time.Local); err == nil {
 				before = t.AddDate(0, 0, 1) // make the end date inclusive
 			} else {
 				log.Warn().Str("to", to).Msg("ignoring invalid to date")
@@ -558,6 +571,19 @@ func windowFor(published, from, to string) (after, before time.Time, custom bool
 		after = now.AddDate(0, 0, -30)
 	}
 	return after, before, false
+}
+
+// publishedLabel names the active window on the filter's closed button. No
+// window is "any" — the unnarrowed default.
+func publishedLabel(published string, custom bool) string {
+	switch {
+	case custom:
+		return "custom"
+	case published == "":
+		return "any"
+	default:
+		return published
+	}
 }
 
 func startOfDay(t time.Time) time.Time {
