@@ -83,9 +83,10 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	srv := server.New(db, cfg, serveAddr, configPath, mgr, log)
 	httpSrv := &http.Server{
 		Addr:              serveAddr,
-		Handler:           server.New(db, cfg, serveAddr, configPath, mgr).Routes(),
+		Handler:           srv.Routes(),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
@@ -107,6 +108,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		// ctx is the signal-aware context from root.go's withSignalCancel —
 		// this fires on SIGINT (Ctrl+C) or SIGTERM.
 		log.Info().Msg("shutdown signal received, shutting down gracefully...")
+		// Fail readiness first, so anything routing to us can route away while
+		// the drain below finishes the requests already in flight.
+		srv.Drain()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		if err := httpSrv.Shutdown(shutdownCtx); err != nil {

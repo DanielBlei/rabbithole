@@ -12,6 +12,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/DanielBlei/rabbithole/internal/httplog"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -181,6 +182,9 @@ func (s *Web) handleIngestCancel(w http.ResponseWriter, r *http.Request) {
 // every 2s while a run is live (the hx-get is only emitted in the running
 // state, so polling stops by itself when the run ends).
 func (s *Web) handleIngestStatus(w http.ResponseWriter, r *http.Request) {
+	// Polling at 2s would otherwise bury the run's own console output, which
+	// is exactly what the operator opened the modal to watch.
+	httplog.Quiet(r)
 	s.renderIngestBody(w, r.Context(), histPageFromQuery(r))
 }
 

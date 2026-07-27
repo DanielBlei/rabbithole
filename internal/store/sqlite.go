@@ -164,6 +164,9 @@ func initSchema(db *sql.DB, path string) error {
 // Close releases the database handle.
 func (s *Store) Close() error { return s.db.Close() }
 
+// Ping reports whether the database is still reachable, for the readiness check.
+func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
+
 // linkChunkSize caps how many links go into a single "IN (...)" query, well
 // under SQLite's default bound parameter limit.
 const linkChunkSize = 500
