@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/httplog"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -109,7 +110,9 @@ func (s *Web) Routes() http.Handler {
 		// staticFS is embedded with a known "static" dir — can't happen.
 		panic(err)
 	}
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
+	// Assets are quiet: one line per file on every cold load, none of it signal.
+	mux.Handle("GET /static/", httplog.QuietHandler(
+		http.StripPrefix("/static/", http.FileServer(http.FS(static)))))
 	return mux
 }
 

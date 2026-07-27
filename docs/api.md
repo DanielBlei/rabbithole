@@ -64,3 +64,20 @@ Sets the item's status. The action verbs match the web frontend (`seen`/`hide`),
 which map to the store's `read`/`skipped` statuses respectively. `{id}` is the
 item's id (not its link, unlike the CLI's `items read|skip|unread` which accepts
 either). Returns `204 No Content` on success, `404` if the id doesn't exist.
+
+## GET /healthz
+
+Liveness. Answers `200 {"status":"ok"}` for as long as the process is serving, and
+checks nothing else — a database it cannot reach is not a fault a restart repairs,
+so that condition belongs to `/readyz` instead.
+
+## GET /readyz
+
+Readiness: whether this instance should be sent traffic. Pings the store and answers
+`200 {"status":"ok"}`, or `503` with a reason when the store is unreachable or the
+process has begun shutting down. An ingest run in flight is normal operation and does
+not affect it.
+
+Use `/readyz` for a container healthcheck or a proxy's upstream check, and `/healthz`
+for a restart policy. Neither appears in the request log at the default level, since
+both are polled on a timer.
