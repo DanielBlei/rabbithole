@@ -128,7 +128,7 @@ func (s *Store) AddIdea(ctx context.Context, body, color string) (Idea, error) {
 	if !validColor(color) {
 		color = randomColor()
 	}
-	now := time.Now()
+	now := sqlTime(time.Now())
 	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO ideas (body, color, position, created_at, updated_at)
 		 VALUES (?, ?, (SELECT COALESCE(MIN(position), 0) - 1 FROM ideas WHERE deleted_at IS NULL), ?, ?)`,
@@ -196,7 +196,7 @@ func (s *Store) UpdateIdea(ctx context.Context, id int64, body, color string) (I
 	}
 	if _, err := s.db.ExecContext(ctx,
 		"UPDATE ideas SET body = ?, color = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
-		body, color, time.Now(), id); err != nil {
+		body, color, sqlTime(time.Now()), id); err != nil {
 		return Idea{}, fmt.Errorf("update idea %d: %w", id, err)
 	}
 	return s.GetIdea(ctx, id)
@@ -208,7 +208,7 @@ func (s *Store) UpdateIdea(ctx context.Context, id int64, body, color string) (I
 func (s *Store) DeleteIdea(ctx context.Context, id int64) error {
 	res, err := s.db.ExecContext(ctx,
 		"UPDATE ideas SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
-		time.Now(), id)
+		sqlTime(time.Now()), id)
 	if err != nil {
 		return fmt.Errorf("delete idea %d: %w", id, err)
 	}

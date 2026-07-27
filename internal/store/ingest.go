@@ -150,7 +150,7 @@ func scanIngestRunWithLog(sc rowScanner) (IngestRun, string, error) {
 // the caller hands to FinishIngestRun when the run ends.
 func (s *Store) StartIngestRun(ctx context.Context, triggeredBy string) (int64, error) {
 	res, err := s.db.ExecContext(ctx, sqlInsertIngestRun,
-		time.Now(), IngestStatusRunning, triggeredBy)
+		sqlTime(time.Now()), IngestStatusRunning, triggeredBy)
 	if err != nil {
 		return 0, fmt.Errorf("insert ingest run: %w", err)
 	}
@@ -173,7 +173,7 @@ func (s *Store) FinishIngestRun(
 	errMsg string,
 ) error {
 	res, err := s.db.ExecContext(ctx, sqlFinishIngestRun,
-		time.Now(), status, counts.Fetched, counts.NewItems, counts.Scored, counts.Skipped, counts.Failed,
+		sqlTime(time.Now()), status, counts.Fetched, counts.NewItems, counts.Scored, counts.Skipped, counts.Failed,
 		errMsg, id, IngestStatusRunning)
 	if err != nil {
 		return fmt.Errorf("finish ingest run %d: %w", id, err)
@@ -261,7 +261,7 @@ func (s *Store) SaveIngestRunLog(ctx context.Context, runID int64, lines []strin
 // never be mistaken for a live one.
 func (s *Store) InterruptStaleIngestRuns(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, sqlInterruptIngestRuns,
-		time.Now(), IngestStatusError, IngestStatusRunning); err != nil {
+		sqlTime(time.Now()), IngestStatusError, IngestStatusRunning); err != nil {
 		return fmt.Errorf("interrupt stale ingest runs: %w", err)
 	}
 	return nil

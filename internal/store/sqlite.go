@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS items (
 );
 CREATE INDEX IF NOT EXISTS idx_items_digested ON items(digested_on);
 CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
+-- matches the itemDate expression the date filter and date sorts use.
+CREATE INDEX IF NOT EXISTS idx_items_date ON items(COALESCE(published_at, created_at));
 CREATE INDEX IF NOT EXISTS idx_items_bookmarked ON items(bookmarked);
 `
 
@@ -59,7 +61,7 @@ const (
 
 // Sort values for ListFilter.SortBy: SortByScore (the default for an empty
 // SortBy) ranks best-first by user/llm score; SortByLatest ranks newest-first
-// by created_at; SortByOldest ranks oldest-first by created_at.
+// by itemDate; SortByOldest ranks oldest-first by itemDate.
 const (
 	SortByScore  = "score"
 	SortByLatest = "latest"
@@ -106,6 +108,28 @@ func dsn(path string) string {
 		q.Add("_pragma", p)
 	}
 	return "file:" + path + "?" + q.Encode()
+}
+
+// sqlTimeLayout is RFC3339 in UTC with fixed-width nanoseconds. Fixed width is
+// the point: SQLite compares these as text, and time.RFC3339Nano trims trailing
+// zeros, which would sort ".050" after ".1".
+const sqlTimeLayout = "2006-01-02T15:04:05.000000000Z"
+
+// Every time value binds through sqlTime — a raw time.Time renders in a layout
+// that compares wrong.
+func sqlTime(t time.Time) string { return t.UTC().Format(sqlTimeLayout) }
+
+// itemDate is an item's own publication date, falling back to when we first
+// saw it for feeds that publish no date. What the date filter and the
+// latest/oldest sorts run on, and what the UI shows on the row.
+const itemDate = "COALESCE(published_at, created_at)"
+
+// sqlTimeOrNull is sqlTime for a nullable column; a zero time stores NULL.
+func sqlTimeOrNull(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return sqlTime(t)
 }
 
 // Store is a SQLite-backed item store.
@@ -262,7 +286,7 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEnt
 	}
 	defer func() { _ = stmt.Close() }()
 
-	now := time.Now()
+	now := sqlTime(time.Now())
 	dayStr := day.Format("2006-01-02")
 	for _, it := range all {
 		var (
@@ -281,10 +305,7 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEnt
 				digestDay = dayStr
 			}
 		}
-		var publishedAt any
-		if !it.Published.IsZero() {
-			publishedAt = it.Published
-		}
+		publishedAt := sqlTimeOrNull(it.Published)
 		// A feed with no tags stores NULL rather than an empty string, so "untagged" is one value everywhere.
 		var tags any
 		if joined := strings.Join(it.Tags, ","); joined != "" {
@@ -334,7 +355,7 @@ func (s *Store) UpdateUserState(ctx context.Context, identifier string, patch Us
 	}
 
 	sets := []string{"updated_at = ?"}
-	args := []any{time.Now()}
+	args := []any{sqlTime(time.Now())}
 	if patch.Status != nil {
 		sets = append(sets, "status = ?")
 		args = append(args, *patch.Status)
@@ -457,7 +478,7 @@ func (s *Store) Get(ctx context.Context, identifier string) (ItemRow, error) {
 
 // ListFilter narrows List's results. Zero-value fields are unfiltered: an
 // empty Status/Statuses or Source matches anything, a zero After/Before leaves
-// that side of the created_at window open, a false Bookmarked matches anything,
+// that side of the itemDate window open, a false Bookmarked matches anything,
 // an empty SortBy falls back to SortByScore, and Limit<=0 falls back to
 // defaultListLimit.
 //
@@ -505,7 +526,7 @@ func isValidSortBy(sortBy string) bool {
 // List returns items matching filter. By default (SortByScore) results are
 // ranked best-first: highest of user_score/llm_score (whichever is set;
 // user_score wins when both are), with source as a tiebreak; unscored items
-// sort last. SortByLatest ranks newest-first by created_at, SortByOldest
+// sort last. SortByLatest ranks newest-first by itemDate, SortByOldest
 // oldest-first.
 // validate reports whether the filter's status/sort values are recognized,
 // returning an ErrInvalidFilter-wrapped error otherwise. Shared by List and
@@ -545,12 +566,12 @@ func (filter ListFilter) whereClause() (where []string, args []any) {
 		args = append(args, filter.Source)
 	}
 	if !filter.After.IsZero() {
-		where = append(where, "created_at >= ?")
-		args = append(args, filter.After)
+		where = append(where, itemDate+" >= ?")
+		args = append(args, sqlTime(filter.After))
 	}
 	if !filter.Before.IsZero() {
-		where = append(where, "created_at < ?")
-		args = append(args, filter.Before)
+		where = append(where, itemDate+" < ?")
+		args = append(args, sqlTime(filter.Before))
 	}
 	if filter.Bookmarked {
 		where = append(where, "bookmarked = 1")
@@ -594,10 +615,12 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]ItemRow, error) 
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
 	switch filter.SortBy {
+	// id breaks ties so a page holds still: items from one ingest run that
+	// carry no published date share a created_at down to the second.
 	case SortByLatest:
-		q += " ORDER BY created_at DESC"
+		q += " ORDER BY " + itemDate + " DESC, id DESC"
 	case SortByOldest:
-		q += " ORDER BY created_at ASC"
+		q += " ORDER BY " + itemDate + " ASC, id ASC"
 	default:
 		q += " ORDER BY COALESCE(user_score, llm_score, ?) DESC, source ASC"
 		args = append(args, unscoredSentinel)

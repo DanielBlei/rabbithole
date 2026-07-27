@@ -186,7 +186,7 @@ func (s *Store) AddTodo(ctx context.Context, title, note string, due *time.Time,
 	if due != nil {
 		dueVal = due.Format(dueDateLayout)
 	}
-	now := time.Now()
+	now := sqlTime(time.Now())
 	res, err := s.db.ExecContext(ctx,
 		"INSERT INTO todos (title, note, done, due_on, tags, created_at, updated_at) VALUES (?, ?, 0, ?, ?, ?, ?)",
 		title, strings.TrimSpace(note), dueVal, joinTags(tags), now, now)
@@ -262,7 +262,7 @@ func (s *Store) ToggleTodo(ctx context.Context, id int64) (Todo, error) {
 	}
 
 	done := !cur.Done
-	now := time.Now()
+	now := sqlTime(time.Now())
 	var completed any
 	if done {
 		completed = now
@@ -280,7 +280,7 @@ func (s *Store) ToggleTodo(ctx context.Context, id int64) (Todo, error) {
 func (s *Store) SetTodoTags(ctx context.Context, id int64, tags []string) (Todo, error) {
 	res, err := s.db.ExecContext(ctx,
 		"UPDATE todos SET tags = ?, updated_at = ? WHERE id = ?",
-		joinTags(tags), time.Now(), id)
+		joinTags(tags), sqlTime(time.Now()), id)
 	if err != nil {
 		return Todo{}, fmt.Errorf("set todo tags %d: %w", id, err)
 	}

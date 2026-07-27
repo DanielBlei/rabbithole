@@ -419,7 +419,8 @@ func TestList(t *testing.T) {
 	// Spread created_at across distinct days (oldest a -> newest d) so
 	// After/Before windows and SortByLatest have something to distinguish.
 	// Record always stamps created_at with time.Now(), so this is set
-	// directly — there's no public API for backdating it.
+	// directly — there's no public API for backdating it. Goes through
+	// sqlTime like every other write, or it won't compare against the bounds.
 	now := time.Now()
 	for id, age := range map[string]time.Duration{
 		"a": 4 * 24 * time.Hour,
@@ -430,7 +431,7 @@ func TestList(t *testing.T) {
 		if _, err := db.db.ExecContext(
 			ctx,
 			"UPDATE items SET created_at = ? WHERE id = ?",
-			now.Add(-age),
+			sqlTime(now.Add(-age)),
 			id,
 		); err != nil {
 			t.Fatalf("backdate %s: %v", id, err)
