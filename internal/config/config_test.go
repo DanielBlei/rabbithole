@@ -98,3 +98,21 @@ func TestLoadThinkDefaultsAndOverride(t *testing.T) {
 		}
 	}
 }
+
+func TestStripHTMLComments(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"no comment", "# Profile\n- AI", "# Profile\n- AI"},
+		{"leading block", "<!--\nnotes\n-->\n\n# Profile\n- AI", "# Profile\n- AI"},
+		{"inline", "- AI <!-- keep an eye on this --> and infra", "- AI  and infra"},
+		{"multiple", "<!-- a -->x<!-- b -->", "x"},
+		{"unterminated is left alone", "# Profile\n<!-- oops", "# Profile\n<!-- oops"},
+	} {
+		if got := stripHTMLComments(tc.in); got != tc.want {
+			t.Errorf("%s: stripHTMLComments(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+}
