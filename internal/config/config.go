@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -181,11 +182,18 @@ func (c *Config) validate() error {
 	return nil
 }
 
+var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
+
+// stripHTMLComments drops <!-- --> blocks, so comments never reach the model
+func stripHTMLComments(md string) string {
+	return strings.TrimSpace(htmlComment.ReplaceAllString(md, ""))
+}
+
 // LoadProfile reads the interest-profile markdown referenced by the config.
 func (c *Config) LoadProfile() (string, error) {
 	raw, err := os.ReadFile(c.Profile)
 	if err != nil {
 		return "", fmt.Errorf("read profile %q: %w", c.Profile, err)
 	}
-	return string(raw), nil
+	return stripHTMLComments(string(raw)), nil
 }

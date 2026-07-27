@@ -1,27 +1,29 @@
+<!--
+Describe what you want to read about. This file is passed to the model as-is and decides
+what scores well, so replace the example below with your own interests. The headings are a
+suggestion, and plain sentences work too. Saying what you *don't* want matters as much as
+saying what you do.
+-->
+
 # Reading interest profile
 
-I'm an AI engineer joining Red Hat's Emerging Technologies group. Score articles by how
-much they'd help me do that job well and stay ahead of where AI engineering is going.
+I'm an AI enthusiast. Score articles by how interesting they'd be to me, and for keeping up
+with where things are going.
 
-## Strongly interested (score high)
-- LLM inference and serving: vLLM, TGI, quantization, batching, KV cache, throughput/latency tuning
-- RAG systems: retrieval quality, chunking, embeddings, evaluation, hybrid search, re-ranking
-- Agentic systems: tool use, orchestration, multi-agent patterns, MCP, evaluation of agents
-- Kubernetes-native AI: model serving on k8s, KServe, operators, GPU scheduling, OpenShift AI
-- Open-weight models and the ecosystem around them (Llama, Qwen, Mistral, etc.)
-- Practical engineering write-ups: architecture, benchmarks, postmortems, "how we built X"
-- AI evaluation, observability, and reliability in production
+## Interested (score high)
+- Running open-source language models, ideally on my own machine
+- Practical write-ups: how something was built, what worked, what didn't
+- Kubernetes and cloud-native infrastructure
+- New models and tools worth trying out
 
-## Mildly interested (score medium)
-- Broader ML research with clear engineering relevance
-- Developer tooling and DX for AI applications
+## Somewhat interested (score medium)
+- Machine learning research with a clear practical angle
+- Developer tooling
 - Cost/performance trade-off analyses
 
 ## Not interested (score low)
-- Beginner tutorials ("intro to Python", "what is an LLM")
-- Crypto/web3, NFT, get-rich-quick, trading bots
-- Marketing fluff, vendor press releases, listicles, clickbait ("X will change everything")
-- No-code hype with no technical substance
-- Pure prompt-engineering "tips" threads with no depth
+- Beginner tutorials and "what is an LLM" explainers
+- Marketing/press releases with no technical details
+- Listicles and clickbait ("X will change everything")
 
-Prefer depth, novelty, and concrete technical substance over popularity.
+Prefer depth and substance over popularity.
