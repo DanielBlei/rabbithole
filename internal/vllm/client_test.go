@@ -184,7 +184,11 @@ func TestScoreRequestConstrainsOutput(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&got)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"scores\":[{\"index\":1,\"score\":9,\"reason\":\"x\"}]}"},"finish_reason":"stop"}],"usage":{"completion_tokens":9}}`))
+		_, _ = w.Write(
+			[]byte(
+				`{"choices":[{"message":{"content":"{\"scores\":[{\"index\":1,\"score\":9,\"reason\":\"x\"}]}"},"finish_reason":"stop"}],"usage":{"completion_tokens":9}}`,
+			),
+		)
 	}))
 	defer srv.Close()
 
