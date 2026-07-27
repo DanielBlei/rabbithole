@@ -1,0 +1,6 @@
+blank_issues_enabled: true
+
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/DanielBlei/rabbithole/security/advisories/new
+    about: Please report privately rather than in a public issue. See SECURITY.md.
