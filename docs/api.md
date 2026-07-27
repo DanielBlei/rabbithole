@@ -1,8 +1,7 @@
 # HTTP API
 
 `rabbithole serve` exposes the same data and operations as the `items` CLI (see
-[docs/cli.md](cli.md)) over JSON. There's no frontend yet — endpoints are meant to be
-consumed directly or scripted against.
+[docs/cli.md](cli.md)) over JSON.
 
 ## GET /api/items
 

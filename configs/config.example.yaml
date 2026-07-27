@@ -1,13 +1,13 @@
 # The Rabbit Hole configuration. Copy to configs/config.yaml and edit.
 # Every field and its default: docs/configuration.md
 
-user: danielblei                        # web UI shell prompt; blank uses your OS login name
-profile: ./configs/profile.example.md   # what you're interested in — drives the ranking
+# user:                                 # web UI shell prompt; unset uses your OS login name
+profile: ./configs/profile.example.md   # what you're interested in, driving the ranking
 
 inference:
   provider: ollama              # ollama | vllm | heuristic (keywords, no model)
   host: http://localhost:11434
-  model: gemma3:1b              # phi3:3.8b | qwen3:4b | etc
+  model: qwen3:4b               # gemma3:4b | phi3:3.8b | etc
   think: false                  # model reasoning before scoring; default true
   # api_key: ""                 # bearer token, if your endpoint needs one
 
@@ -24,8 +24,9 @@ inference:
     reason_max_chars: 200       # longest "why" the model may write per item
 
 ingest:
-  since: 7d                     # how far back to look; accepts d/h/m (7d, 168h, 90m)
-  feeds: ./configs/feeds.example.yaml
+  since: 7d                             # how far back to look; accepts d/h/m (7d, 168h, 90m)
+  feeds: ./configs/feeds.example.yaml   # RSS feeds to pull from
+  digest_dir: ./data/digests            # where `ingest --markdown` writes; required by that flag
 
 store:
   db_path: ./data/rabbithole.db
