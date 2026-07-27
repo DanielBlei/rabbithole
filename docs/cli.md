@@ -1,54 +1,33 @@
 # CLI reference
 
-```
-rabbithole [--config PATH] [--debug] [--trace]
-```
-
-`--config` defaults to `./configs/config.yaml`. `--debug` logs every stage — config, per-feed
-fetches, age/dedup filtering, each scoring batch and per-item score, selection, and write —
-with timings. `--trace` additionally logs raw model prompts/responses and implies `--debug`.
-
-## run
+The web UI is the primary interface (see the [README](../README.md)). The CLI covers
+scripted runs, direct access to the item store, and inspection of what the model received.
 
 ```
-rabbithole run [--provider P] [--dry-run] [--no-think]
+rabbithole [--config PATH] [--debug] [--trace] <command>
 ```
 
-Fetches feeds, scores new items against the interest profile, and writes today's digest to
-`data/digests/YYYY-MM-DD.md`.
+| Flag | Description | Default |
+|---|---|---|
+| `--config` | Path to the configuration file | `./configs/config.yaml` |
+| `--debug` | Log each stage with timings: configuration, per-feed fetches, filtering, scoring batches and per-item scores, selection, write | off |
+| `--trace` | Additionally log raw model prompts and responses; implies `--debug` | off |
 
-- `--provider` overrides the configured provider (`ollama`|`vllm`|`heuristic`) for this run.
-- `--dry-run` prints the digest to stdout instead of writing a file or recording items.
-- `--no-think` disables the model's reasoning/thinking mode during scoring. Thinking is on by
-  default; pass this for models without a capable think mode, or for faster scoring without
-  chain-of-thought before the JSON.
-
-## items
-
-Browse and record your own read/skip/rating/notes for digest items, by id or link (both
-shown by `items list`).
+## ingest
 
 ```
-rabbithole items list [--status S] [--source NAME] [--limit N] [--since D] [--before D] [--sort score|latest|oldest]
-rabbithole items sources
-rabbithole items read|skip|unread <id|link>...
-rabbithole items rate <id|link> <0-10>
-rabbithole items note <id|link> <text>...
+rabbithole ingest [--dry-run] [--provider P] [--no-think] [--markdown]
 ```
 
-- `list` shows items best-score-first by default (the highest of `user_score`/`llm_score`,
-  whichever is set), optionally filtered by `--status` or `--source`. `--since`/`--before`
-  are durations relative to now (e.g. `3d`, `12h`); with neither set, it defaults to the
-  config's `list_since` window — `--before` pages older without re-imposing that default.
-  `--sort latest` shows newest first instead; `--sort oldest` shows oldest first.
-- `sources` lists distinct source names with item counts, for use with `list --source`.
-- `read`/`skip`/`unread` accept multiple ids/links at once and set `status`, continuing past
-  per-item failures (like `kubectl delete`) and printing a summary of how many failed.
-- `rate` sets `user_score` (0–10); `note` sets `user_note` (no quoting needed — all trailing
-  words are joined). These two stay single-item since one value can't sensibly apply to many.
+Fetches the configured feeds, scores new items against the interest profile, and records
+them in the store.
 
-These commands call `internal/store.UpdateUserState` directly — the same method `serve`'s
-HTTP handlers call (see [docs/api.md](api.md)).
+| Flag | Description |
+|---|---|
+| `--dry-run` | Print the digest to stdout without writing files or recording items. Feed health is still recorded. |
+| `--provider` | Override the configured provider for this run (`ollama`, `vllm`, `heuristic`) |
+| `--no-think` | Disable model reasoning for this run, for models without a thinking mode or for a faster pass |
+| `--markdown` | Also write `YYYY-MM-DD.md` to `ingest.digest_dir`; fails if that setting is empty |
 
 ## serve
 
@@ -56,6 +35,35 @@ HTTP handlers call (see [docs/api.md](api.md)).
 rabbithole serve [--addr ADDR]
 ```
 
-Serves the items store over HTTP as JSON. `--addr` defaults to `:8080`. There's no frontend
-yet — see [docs/api.md](api.md) for the endpoints. Shuts down gracefully on SIGINT/SIGTERM,
-waiting up to 5s for in-flight requests to finish.
+Serves the web UI and the JSON API (see [docs/api.md](api.md)). `--addr` defaults to
+`127.0.0.1:8080`, which is loopback-only; set it explicitly to listen on other interfaces.
+SIGINT and SIGTERM trigger a graceful shutdown, allowing up to 5 seconds for in-flight
+requests and for any running ingest to finish.
+
+## items
+
+Reads and annotates the item store from the terminal. Items are addressed by id or link,
+both of which `items list` prints.
+
+```
+rabbithole items list [--status S] [--source NAME] [--limit N] [--since D] [--before D]
+                      [--sort score|latest|oldest] [--bookmarked]
+rabbithole items sources
+rabbithole items read|skip|unread <id|link>...
+rabbithole items bookmark|unbookmark <id|link>...
+rabbithole items rate <id|link> <0-10>
+rabbithole items note <id|link> <text>...
+```
+
+- `list` returns the last three days, highest score first, using the user rating where set
+  and the model score otherwise. `--since` and `--before` are durations relative to now
+  (`3d`, `12h`); `--before` on its own pages further back without reapplying the three-day
+  default. `--limit` defaults to 50.
+- `sources` lists source names with item counts, as accepted by `list --source`.
+- `read`, `skip`, `unread`, `bookmark` and `unbookmark` accept multiple identifiers. They
+  continue past individual failures and report the number that failed.
+- `rate` and `note` apply to a single item, as one value cannot meaningfully apply to
+  several. `note` requires no quoting; trailing arguments are joined.
+
+These commands use the same store method as the HTTP handlers, so changes made here appear
+in the web UI on refresh.

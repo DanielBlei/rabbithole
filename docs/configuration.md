@@ -1,149 +1,203 @@
 # Configuration
 
-Two files, both under `configs/`:
+Three files under `configs/`:
 
-| File | What it holds |
+| File | Contents |
 |---|---|
-| `config.yaml` | how to run — model, scoring, storage, paths |
-| `feeds.yaml` | the feed list and per-feed tuning |
+| `config.yaml` | How to run — model, scoring, storage, paths |
+| `feeds.yaml` | The feed list and per-feed tuning |
+| `profile.md` | The interest profile used for ranking |
 
-Copy the `*.example.yaml` templates and edit (`make setup` does this, plus the profile copy,
-for any file that's missing). Both are read once at startup: **editing them while the server
-is running has no effect** — stop it, edit, start again. The web UI has read-only viewers for
-both under the gear menu (View config / View feeds).
+## Getting started
+
+```sh
+make setup   # copies the *.example.* templates for any file that is missing
+```
+
+The templates ship pointing at the example profile and feed list so a fresh checkout runs
+without further edits. Once you have your own, update `configs/config.yaml` accordingly:
+
+```yaml
+profile: ./configs/profile.md
+ingest:
+  feeds: ./configs/feeds.yaml
+```
+
+> **Note:** until those paths are changed, edits to `configs/profile.md` and
+> `configs/feeds.yaml` have no effect — the application reads the example files.
+
+All three files are read once at startup. Changes made while the server is running are not
+picked up; restart it. The loaded configuration can be inspected from the web UI under the
+gear menu (View config / View feeds).
 
 ## config.yaml
 
-The schema is nested. Every field below is optional unless marked required.
+All fields are optional unless marked required.
 
-| Field | Meaning | Default |
+| Field | Description | Default |
 |---|---|---|
-| `user` | Name shown in the web UI's shell prompt | your OS login name |
-| `profile` | Path to your interest-profile markdown, injected into the scoring prompt | **required** |
+| `user` | Name shown in the web UI's shell prompt | OS login name |
+| `profile` | Path to the interest profile | **required** |
 | `inference.provider` | `ollama` \| `vllm` \| `heuristic` | `ollama` |
-| `inference.host` | Inference endpoint URL | `http://localhost:11434` |
+| `inference.host` | Inference server URL | `http://localhost:11434` |
 | `inference.model` | Model name | `qwen3:4b` |
-| `inference.api_key` | Optional bearer token (vLLM prod / Ollama Cloud) | `""` |
-| `inference.think` | Model reasoning during scoring | `true` |
-| `inference.batch_size` | Items sent per scoring request; also multiplies `tokens_per_item` | `5` |
-| `inference.max_parallel` | Concurrent scoring requests in flight. Ollama queues rather than parallelizes — use `1` for it | `2` |
+| `inference.api_key` | Bearer token, where the endpoint requires one | none |
+| `inference.think` | Allow model reasoning before scoring, with fallback | `true` |
+| `inference.batch_size` | Articles per scoring request | `5` |
+| `inference.max_parallel` | Scoring requests in flight | `2` |
 | `inference.model_tuning.*` | Decoding limits — see below | see below |
-| `ingest.since` | Global lookback window — the outermost fallback for a feed's `since` | `14d` |
-| `ingest.digest_dir` | Where `ingest --markdown` writes the digest | none (required by that flag) |
+| `ingest.since` | Lookback window for new items | `14d` |
 | `ingest.feeds` | Path to the feed list | `feeds.yaml` beside `config.yaml` |
-| `store.db_path` | SQLite database path | **required** |
+| `ingest.digest_dir` | Output directory for `ingest --markdown` | none — required by that flag |
+| `store.db_path` | SQLite database file | **required** |
 
-Durations accept a `d` (days) suffix on top of Go's standard units (`h`, `m`, `s`) —
-e.g. `14d`, `168h`, `36h`, `1h30m`.
+Durations accept a `d` (days) suffix in addition to the standard `h`, `m` and `s` — for
+example `14d`, `168h`, `1h30m`.
 
-`api_key` is stored in plaintext. The config viewer masks it, but the file itself isn't
-protected — keep `configs/config.yaml` out of version control (it's gitignored).
+**Providers**
+
+- `ollama` — a local Ollama server; the default.
+- `vllm` — an OpenAI-compatible vLLM endpoint.
+- `heuristic` — keyword matching with no model involved. Suitable for offline use and for
+  testing feed and filter changes without inference latency.
+
+**Thinking fallback**
+
+Not every model has a reasoning mode. On Ollama, `think: true` is probed once at startup: a
+model that rejects it falls back to `think: false` with a warning, rather than failing every
+scoring request. Any other error during the probe leaves thinking on, so a transient problem
+is not mistaken for a missing feature. vLLM has no such probe — `think` is passed through as
+set.
+
+> **Note:** `api_key` is stored in plaintext. The web UI's config viewer masks it, but the
+> file itself is unprotected — keep `configs/config.yaml` out of version control (it is
+> gitignored by default).
 
 ### inference.model_tuning
 
-Decoding limits sent with every scoring request. Omit the block, or any field in it, to
-take the defaults. Tune when swapping in a model that is terser or more verbose.
+Decoding limits sent with every scoring request. Omit the block, or any field within it, to
+take the defaults. Worth adjusting when substituting a model that is more or less verbose.
 
-| Field | Meaning | Default |
+| Field | Description | Default |
 |---|---|---|
-| `num_ctx` | Input window. Left unset, Ollama silently drops the front of an over-long prompt and the model scores articles it never fully saw. Ollama only — vLLM fixes this at startup | server default |
-| `max_tokens` | Hard output cap; `0` auto-sizes from the three below | `0` |
+| `num_ctx` | Input window | server default |
+| `max_tokens` | Cap on the whole reply; `0` derives it from the three fields below | `0` |
 | `tokens_per_item` | Allowance per article in a batch | `256` |
-| `tokens_overhead` | Allowance for the JSON scaffolding | `256` |
-| `tokens_thinking` | Added when `think` is on; reasoning spends the same budget | `2048` |
-| `reason_max_chars` | Max characters for the reason in the model's JSON response; schema-enforced | `200` |
+| `tokens_overhead` | Allowance for the JSON envelope | `256` |
+| `tokens_thinking` | Added when `think` is enabled | `2048` |
+| `reason_max_chars` | Maximum length of the per-item rationale | `200` |
 
-The model is held to the response shape by **structured outputs**: the schema is compiled
-into a grammar and the sampler may only pick tokens that fit, so scores come back as
-integers and unknown fields can't appear. `reason_max_chars` is part of that schema and is
-what actually keeps rationales short — the prompt's word count is only a suggestion.
+Responses are constrained to a fixed JSON shape, so scores are always returned as integers
+and `reason_max_chars` is enforced rather than merely requested.
+
+> **Recommendations**
+>
+> - **Set `num_ctx` explicitly.** Left unset, Ollama silently truncates an over-long prompt
+>   and the model scores articles it did not fully receive. `8192` is a reasonable starting
+>   point. Ollama only; vLLM fixes the equivalent at startup via `--max-model-len`.
+> - **Use `max_parallel: 1` with Ollama.** Requests are queued rather than served
+>   concurrently, so higher values yield no additional throughput.
+> - **Disable `think` for small models** (1B–4B). Reasoning quality is limited at that size
+>   and consumes `tokens_thinking` on every request.
+> - **Keep `batch_size` moderate.** Larger batches lengthen the prompt and increase the
+>   chance of the model losing track of individual items; `5` is a reasonable balance.
 
 ## feeds.yaml
 
-A `defaults:` block plus the feed list. Any RSS/Atom URL works.
+A `defaults:` block followed by the feed list. Any RSS or Atom URL is accepted.
 
 ```yaml
 defaults:
-  since: 7d       # lookback window for feeds that don't set their own
-  max_items: 25   # cap per feed per run; 0 or omitted = uncapped
+  since: 7d
+  max_items: 25
 
 feeds:
   - name: Hugging Face blog
     url: https://huggingface.co/blog/feed.xml
-    tags: [ai, research]
+    tags: [AI, Research]
 
   - name: Medium — AI          # high volume: tighter window, harder cap
     url: https://medium.com/feed/tag/artificial-intelligence
     since: 2d
     max_items: 10
 
-  - name: Old Newsletter       # parked, not deleted
+  - name: Old Newsletter       # disabled, not deleted
     url: https://example.com/feed.xml
     enabled: false
 ```
 
-| Field | Meaning | Default |
+| Field | Description | Default |
 |---|---|---|
-| `name` | Display name; also the `source` items are stored under | **required, unique** |
-| `url` | RSS/Atom feed URL — also the feed's identity | **required** |
-| `enabled` | `false` parks the feed — kept in the file, never fetched | `true` |
-| `since` | This feed's lookback window | `defaults.since`, then `ingest.since` |
-| `max_items` | Cap on the newest in-window items this feed contributes per run | `defaults.max_items`, then uncapped |
-| `tags` | Free-form labels, shown in the feeds viewer | `defaults.tags` |
+| `name` | Display name; also the source items are stored under | **required, unique** |
+| `url` | RSS or Atom URL | **required** |
+| `enabled` | `false` retains the entry but never fetches it | `true` |
+| `since` | Lookback window for this feed | `defaults.since`, then `ingest.since` |
+| `max_items` | Maximum items contributed per run; `0` is uncapped | `defaults.max_items`, then uncapped |
+| `tags` | Free-form labels, used for filtering in the UI | `defaults.tags` |
 
-`max_items` matters more than it looks: some feeds return their whole archive.
-Hugging Face's blog feed returns ~800 items in a single fetch, and without a cap every
-unseen one goes to the model for scoring on the first run.
-
-### How a value is resolved
-
-Each knob falls through until something sets it:
+The `defaults:` block accepts `since`, `max_items`, `enabled` and `tags`, applying each to
+any feed that does not set it. Values resolve through the following chain:
 
 ```
-feed entry  →  feeds.yaml defaults  →  config.yaml (since only)  →  built-in
+feed entry  →  feeds.yaml defaults  →  config.yaml ingest.since  →  built-in
 ```
 
-The feeds viewer marks inherited values with `*` and names their origin on hover, so you can
-always see whether a feed set a value itself or picked it up from further out. `tags` are the
-exception — a feed's tags are *added to* the defaults' rather than replacing them.
+Tags are the exception: a feed's tags are added to the defaults rather than replacing them.
+The feeds viewer marks inherited values with `*` and identifies their origin on hover.
 
-### Identity: what makes a feed "the same feed"
+> **Recommendations**
+>
+> - **Cap high-volume feeds.** Some return their entire archive: the Hugging Face blog feed
+>   returns roughly 800 items in a single fetch, and without `max_items` every one of them
+>   is sent for scoring on the first run.
+> - **Disable feeds rather than removing them.** `enabled: false` preserves the entry and
+>   its history, so re-enabling resumes where it stopped.
+> - **Renaming is safe; changing a URL is not.** See below.
 
-A feed's identity is derived from its **URL**, not its name. Fetch history is keyed on that
-identity, so:
+### Feed identity
 
-- **Renaming a feed keeps its history.** The name is a label; change it freely.
-- **Changing a feed's URL starts a new feed.** That's deliberate — a different URL is a
+A feed is identified by its URL rather than its name:
+
+- **Renaming preserves fetch history.** Items already stored keep the previous name,
+  however, and will appear as a separate source in the feed list.
+- **Changing the URL creates a new feed**, with no history. A different URL is treated as a
   different source.
-- **Two entries with the same URL share one history entry.** Allowed (it's harmless and
-  self-inflicted), but a warning is logged at startup so it isn't silent.
+- **Two entries sharing a URL** share a single history record. This is permitted and logged
+  at startup.
 
-Names must still be unique, and that's a *separate* constraint: items are stored under the
-feed name, so two feeds sharing one would merge into a single source in the feed list.
-Renaming does still start a new source for already-stored items — history follows the URL,
-stored items follow the name.
+Names must be unique, as items are stored under the name; duplicates would merge two feeds
+into a single source.
 
 ### Feed health
 
-Every ingest run appends one row per feed to a fetch history: outcome, item count, error,
-and how long it took. The feeds viewer aggregates it into a status dot, the current failure
-streak, when the feed last worked, and a strip of recent attempts so a pattern is visible at
-a glance rather than only the latest verdict.
+Each run records, per feed, whether the fetch succeeded, how many items it returned, and how
+long it took. The feeds viewer presents this as a status indicator, the current failure
+streak, the time of the last success, and a strip of recent attempts, so trends are visible
+rather than only the most recent result.
 
-A failing feed never fails the run — it's logged, recorded, and skipped. History is recorded
-on `--dry-run` too, so a dead feed surfaces even on a run that persists nothing.
+- A failing feed does not fail the run; it is logged, recorded and skipped.
+- History is recorded on `--dry-run` as well, so an unreachable feed is visible even on a
+  run that persists nothing.
+- The most recent 200 attempts per feed are retained. Removing a feed leaves its history
+  intact, so re-adding it restores the record.
 
-The history is append-only and pruned to the newest 200 attempts per feed. Rows for feeds
-you've removed are left alone, so re-adding a feed restores its history rather than starting
-blank.
+### Medium feed URLs
 
-Medium feed URL shapes:
-
-- `https://medium.com/feed/tag/<tag>`
-- `https://medium.com/feed/@<username>`
+```
+https://medium.com/feed/tag/<tag>
+https://medium.com/feed/@<username>
+```
 
 ## Interest profile
 
-`configs/profile.example.md` is a starting point — free-form markdown describing what you
-care about. It's injected verbatim into the scoring prompt, so the more specific, the better
-the ranking.
+Free-form markdown describing the subject matter of interest; `configs/profile.example.md`
+is a starting point. It is passed to the model verbatim with every batch of articles and is
+the primary influence on how items are scored.
+
+HTML comments (`<!-- ... -->`) are removed before the profile reaches the model, so notes to
+yourself can be kept in the file without being read as interests.
+
+> **Recommendation:** be specific, and state exclusions as well as interests. "Kubernetes
+> operators, KubeVirt, Go internals — not funding rounds or product launches" ranks
+> considerably better than "AI and infrastructure". When results are consistently
+> off-target, revise this file before changing the model.

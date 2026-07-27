@@ -1,14 +1,10 @@
 # The Rabbit Hole feed list. Copy to configs/feeds.yaml and edit.
-#
-# Read at startup — stop the server, edit, start again.
-# View the resolved result in the web UI: gear → View feeds.
+# Inheritance, feed identity, health: docs/configuration.md
 
 # Applied to any feed that doesn't set the knob itself.
 defaults:
-  # Ignore items older than this. Accepts d/h/m (7d, 168h, 90m).
-  since: 7d
-  # Newest items one feed may contribute per run. 0 or omitted = uncapped.
-  max_items: 25
+  since: 7d       # ignore items older than this; accepts d/h/m (7d, 168h, 90m)
+  max_items: 25   # newest items one feed may add per run; 0 or omitted = uncapped
 
 feeds:
   # Minimum: a unique name and a URL. The rest falls through to defaults.
@@ -18,6 +14,7 @@ feeds:
       - Red Hat
       - Infra
 
+  # Cap archive-sized feeds: this may return 100+ items in a single fetch.
   - name: Hugging Face blog
     url: https://huggingface.co/blog/feed.xml
     tags:
@@ -41,7 +38,7 @@ feeds:
       - AI
       - Medium
 
-  # Disable example, never fetched. Flip enable to true to switch it back on.
+  # Parked: kept here with its history, never fetched. Flip to true to resume.
   - name: Medium — ML
     url: https://medium.com/feed/tag/machine-learning
     enabled: false
@@ -49,12 +46,8 @@ feeds:
       - AI
       - Medium
 
-# Notes:
-#   * A feed is identified by its URL, so renaming keeps its fetch history.
-#     Changing the URL makes it a new feed.
-#   * Names must be unique — items are stored under the name.
-#   * Cap archive-sized feeds: Hugging Face returns ~800 items in one fetch,
-#     and every unseen one is sent to the model.
+# A feed is identified by its URL — renaming keeps its history, changing the URL
+# starts a new feed. Names must be unique; items are filed under the name.
 #
 # Medium URL shapes:
 #   https://medium.com/feed/tag/<tag>

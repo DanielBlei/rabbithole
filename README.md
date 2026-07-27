@@ -32,13 +32,14 @@ go run . run
 ```
 
 This writes a digest to `data/digests/YYYY-MM-DD.md`. For everything else — full config
-reference, the `run`/`items`/`serve` commands, the HTTP API, and how the pieces fit
+reference, the `ingest`/`items`/`serve` commands, the HTTP API, and how the pieces fit
 together — see [docs/](docs):
 
 - [docs/configuration.md](docs/configuration.md)
 - [docs/cli.md](docs/cli.md)
 - [docs/api.md](docs/api.md)
 - [docs/architecture.md](docs/architecture.md)
+- [docs/store.md](docs/store.md)
 
 ## Contributing
 

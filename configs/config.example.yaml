@@ -1,43 +1,31 @@
 # The Rabbit Hole configuration. Copy to configs/config.yaml and edit.
+# Every field and its default: docs/configuration.md
 
-# Name shown in the web UI's shell prompt (e.g. "daniel@rabbithole:~$").
-# Leave blank/omit to fall back to your OS login name.
-user: danielblei
+user: danielblei                        # web UI shell prompt; blank uses your OS login name
+profile: ./configs/profile.example.md   # what you're interested in — drives the ranking
 
-# Path to your interest profile (free-form markdown). This is injected into the
-# scoring prompt and is the main personalization knob.
-profile: ./configs/profile.example.md
-
-# Inference backend: the model, how to reach it, and how items are fed to it.
 inference:
-  provider: ollama # Ollama | vLLM | heuristic - keywords (offline testing)
+  provider: ollama              # ollama | vllm | heuristic (keywords, no model)
   host: http://localhost:11434
-  model: gemma3:1b # phi3:3.8b | qwen3:4b | etc
-  think: false # model reasoning during scoring; omit to default on. gemma3:1b has no thinking mode, so disabled here
-  # api_key: "" # optional bearer token for model connection
+  model: gemma3:1b              # phi3:3.8b | qwen3:4b | etc
+  think: false                  # model reasoning before scoring; default true
+  # api_key: ""                 # bearer token, if your endpoint needs one
 
-  batch_size: 5 # items per scoring request (default 5)
-  max_parallel: 1 # concurrent scoring requests (default 2). Ollama queues rather than parallelizes, so keep it at 1 here
+  batch_size: 5                 # articles per scoring request
+  max_parallel: 1               # requests in flight; keep at 1 for Ollama, it queues anyway
 
-  # Decoding limits, per model. Omit the block or any field to take the defaults below.
-  # Worth tuning to sharpen scoring as model behavior varies.
+  # Decoding limits. Omit the block, or any field, to take the defaults below.
   model_tuning:
-    num_ctx: 8192          # input window. Unset, Ollama silently truncates a long prompt. Ollama only, vLLM uses --max-model-len at startup
-    max_tokens: 0          # tokens for the whole reply; 0 auto-sizes from the three below
-    tokens_per_item: 256   # allowance per article in a batch
-    tokens_overhead: 256   # allowance for the JSON scaffolding
-    tokens_thinking: 2048  # added when think is on; reasoning spends the same budget
-    reason_max_chars: 200  # max characters for the reason in the model's schema-enforced JSON response.
+    num_ctx: 8192               # input window; unset lets Ollama silently truncate long prompts
+    max_tokens: 0               # whole reply; 0 sizes it from the three below
+    tokens_per_item: 256        # per article in a batch
+    tokens_overhead: 256        # for the JSON wrapper
+    tokens_thinking: 2048       # added when think is on
+    reason_max_chars: 200       # longest "why" the model may write per item
 
-# Fetch/score run settings.
 ingest:
-  # Global lookback window — the outermost fallback for a feed's `since`.
-  # Accepts 'd' (days) or 'h' (e.g. 14d, 168h).
-  since: 7d
-
-  # The feed list (see configs/feeds.example.yaml).
+  since: 7d                     # how far back to look; accepts d/h/m (7d, 168h, 90m)
   feeds: ./configs/feeds.example.yaml
 
-# Item persistence (SQLite).
 store:
   db_path: ./data/rabbithole.db
