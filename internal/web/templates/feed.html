@@ -1,7 +1,7 @@
 {{define "content"}}
 <div class="stats-row">
   <div class="tile"><div class="num">{{.Stats.Available}}</div><div class="label">total</div></div>
-  <div class="tile"><div class="num num--high" id="statHigh">{{.Stats.HighSignal}}</div><div class="label">high signal &ge;7</div></div>
+  <div class="tile"><div class="num num--high" id="statHigh" data-high="{{.Stats.HighThreshold}}">{{.Stats.HighSignal}}</div><div class="label">high signal &ge;{{.Stats.HighThreshold}}</div></div>
   <div class="tile"><div class="num" id="statAvg">{{printf "%.1f" .Stats.AvgScore}}</div><div class="label">avg score</div></div>
   <div class="tile placeholder"><div class="num">&gt;</div><div class="label">more widgets soon<span class="blink">_</span></div></div>
 </div>
@@ -63,6 +63,11 @@ var feedPager = (function(){
     });
 
     var label = total ? 'items ' + (start + 1) + '–' + end + ' of ' + total : 'no items';
+    // The server caps the render at listLimit, so say when there are matches
+    // below the fold that no amount of paging will reach.
+    var limit = parseInt(pane.dataset.limit, 10);
+    var avail = parseInt(pane.dataset.available, 10);
+    if (rows.length >= limit && avail > rows.length) label += ' · first ' + limit + ' of ' + avail;
     infos.forEach(function(el){ if (el) el.textContent = label; });
     if (btnFirst) btnFirst.disabled = page === 1;
     tops.concat(bottoms).forEach(function(btn, i){
@@ -252,16 +257,17 @@ var feedPager = (function(){
       if (t < 1) requestAnimationFrame(step);
     });
   }
-  // High Signal tile: count of visible scored rows in the high tier (>=7),
-  // matching the server's stats() gate. Recomputed from the live DOM whenever a
-  // row leaves so it tracks the shown set without a reload.
+  // High Signal tile: count of visible scored rows in the high tier, recomputed
+  // from the live DOM whenever a row leaves so it tracks the shown set without a
+  // reload. The tier bound comes off the tile, so Go stays its only definition.
   function setHigh(){
     var el = document.getElementById('statHigh');
     if (!el) return;
+    var min = parseFloat(el.dataset.high);
     var n = 0;
     document.querySelectorAll('.pane__body .row').forEach(function(row){
       var s = row.getAttribute('data-score');
-      if (s !== null && parseFloat(s) >= 7) n++;
+      if (s !== null && parseFloat(s) >= min) n++;
     });
     el.textContent = n;
   }
