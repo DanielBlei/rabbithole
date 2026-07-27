@@ -6,8 +6,9 @@ package web
 
 import "embed"
 
-// templatesFS holds the layout/page/partial templates; staticFS holds the CSS
-// (and, later, htmx.min.js). Both are embedded relative to this package dir.
+// templatesFS holds the layout/page/partial templates; staticFS holds the CSS,
+// htmx, and the page scripts under static/js. Both are embedded relative to
+// this package dir.
 //
 //go:embed templates
 var templatesFS embed.FS

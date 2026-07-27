@@ -19,7 +19,7 @@
      2s; the attribute disappears with the running state, so polling stops by
      itself. Every response also carries an OOB topbar-chip update (see
      renderIngestBody). The INFO/DEBUG pills set a data-inglvl attribute on the
-     modal frame (delegated JS in layout.html) — the frame sits outside this
+     modal frame (delegated JS in static/js/ingest.js) — the frame sits outside this
      swap target, so the picked level survives every poll refresh. */}}
 {{define "ingestBody"}}
 <div class="ing" id="ingestBody" {{if .Running}}hx-get="/ingest/status?histPage={{.HistPage}}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML"{{end}}>

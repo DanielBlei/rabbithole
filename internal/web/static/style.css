@@ -358,6 +358,23 @@ header.topbar{
 .popmenu--pub .popmenu__btn::after{
   position:absolute;right:13px;top:50%;transform:translateY(-50%);
 }
+/* Tags wear their selection the same way Source does, but hold the shortest
+   labels in the bar — so the same centred-value/pinned-caret treatment at the
+   smallest width of the three, under the published filter beside it. A tag
+   longer than the field ellipsises rather than widening it; the panel below is
+   free to be wider than the button. The right padding is deeper than the left
+   on purpose: the caret and the "+N"/dot cluster live there, so the value is
+   centred in what's left rather than in the button, which is what keeps it from
+   running under them. */
+.popmenu--tags .popmenu__btn{position:relative;width:11rem;padding:5px 42px 5px 13px;}
+.popmenu--tags .popmenu__val{flex:1;text-align:center;}
+.popmenu--tags .popmenu__meta{
+  position:absolute;right:24px;top:50%;transform:translateY(-50%);
+  display:flex;align-items:center;gap:4px;
+}
+.popmenu--tags .popmenu__btn::after{
+  position:absolute;right:13px;top:50%;transform:translateY(-50%);
+}
 /* The value ellipsises inside that fixed width rather than pushing the button
    wider; the "+N" sits outside it, so truncating a long first name can never
    swallow the count. */
@@ -403,7 +420,7 @@ header.topbar{
 /* Option chips (Source, Tags): plain labels, no leading glyph or colour dot —
    the values are the content, and a list of them shouldn't read as decorated.
    Amber when picked, matching the dot the closed button then shows. The "All"
-   / "any" chip above the divider keeps the default teal instead, so the
+   chip above the divider keeps the default teal instead, so the
    unnarrowed state never looks like a filter. */
 .pill--opt input:checked ~ span{color:var(--caution);background:rgba(255,203,107,.12);}
 .pill--opt input:focus-visible ~ span{outline-color:var(--caution);}
@@ -414,7 +431,8 @@ header.topbar{
    popover run off the viewport. */
 .popmenu__panel--list{min-width:max(100%,22rem);max-height:min(56vh,420px);overflow-y:auto;}
 .popmenu__panel--list .pill span{white-space:nowrap;}
-/* Tags are labels, not feed titles — they don't need the source panel's width. */
+/* Tags are labels, not feed titles — they don't need the source panel's width,
+   but they do need more than the narrow trigger they now hang off. */
 .popmenu__panel--tags{min-width:max(100%,15rem);}
 
 .pane__nav{
