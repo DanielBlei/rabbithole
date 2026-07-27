@@ -155,7 +155,13 @@ func TestFeedZeroStateAfterEmptyRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartIngestRun: %v", err)
 	}
-	if err := w.db.FinishIngestRun(context.Background(), id, store.IngestStatusOK, store.IngestCounts{}, ""); err != nil {
+	if err := w.db.FinishIngestRun(
+		context.Background(),
+		id,
+		store.IngestStatusOK,
+		store.IngestCounts{},
+		"",
+	); err != nil {
 		t.Fatalf("FinishIngestRun: %v", err)
 	}
 
@@ -209,7 +215,13 @@ func TestPageDataCmd(t *testing.T) {
 		{"no status picked", pageData{}, "rabbithole feed --status none"},
 		{
 			"custom range wins over the window",
-			pageData{FilterShowUnread: true, FilterCustom: true, FilterPublished: "7d", FilterFrom: "2026-01-02", FilterTo: "2026-01-09"},
+			pageData{
+				FilterShowUnread: true,
+				FilterCustom:     true,
+				FilterPublished:  "7d",
+				FilterFrom:       "2026-01-02",
+				FilterTo:         "2026-01-09",
+			},
 			"rabbithole feed --unread --from 2026-01-02 --to 2026-01-09",
 		},
 	}

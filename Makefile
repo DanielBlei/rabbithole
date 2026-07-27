@@ -54,9 +54,12 @@ tidy: ## Sync go.mod/go.sum
 	go mod tidy
 
 .PHONY: clean
-clean: ## Remove the binary, coverage, and generated data
+clean: ## Remove build artifacts (DATA=1 also deletes ./data — the database and digests)
 	rm -f $(BINARY) coverage.out
-	rm -rf data
+	@if [ -n "$(DATA)" ] && [ -d data ]; then \
+	  printf 'Delete ./data (database, digests)? This cannot be undone. [y/N] '; \
+	  read ans; case "$$ans" in [yY]*) rm -rf data; echo "removed ./data";; *) echo "kept";; esac; \
+	fi
 
 ##@ ingest
 
@@ -111,17 +114,27 @@ vet: ## Run go vet
 fmt: ## Format all Go source
 	gofmt -w -s .
 
+NEED_GOLANGCI = command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint is required (CI runs it)."; echo "install: https://golangci-lint.run/welcome/install/"; exit 1; }
+
 .PHONY: lint
-lint: ## Run golangci-lint if installed, else fall back to vet
-	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run; else echo "golangci-lint not found; running go vet"; go vet $(PKG); fi
+lint: ## Run golangci-lint (also covers gofmt/goimports/golines and vet)
+	@$(NEED_GOLANGCI)
+	golangci-lint run
 
 .PHONY: lint-fix
 lint-fix: ## Run golangci-lint with --fix (formats + autofixes lint issues)
-	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not found"; exit 1; }
+	@$(NEED_GOLANGCI)
 	golangci-lint run --fix
 
+# Unpinned: a stale scanner defeats the purpose.
+GOVULNCHECK ?= go run golang.org/x/vuln/cmd/govulncheck@latest
+
+.PHONY: vulncheck
+vulncheck: ## Scan dependencies for known vulnerabilities
+	$(GOVULNCHECK) $(PKG)
+
 .PHONY: check
-check: fmt vet test ## fmt + vet + test (run before committing)
+check: lint test-race build ## The gate CI runs (run before committing; needs golangci-lint)
 
 ##@ Debug
 

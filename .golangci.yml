@@ -23,3 +23,6 @@ formatters:
 
 issues:
   max-same-issues: 0
+  # Off by default this would hide a formatting issue behind another finding on the same line.
+  uniq-by-line: false
+
