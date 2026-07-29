@@ -731,8 +731,16 @@ header.topbar{
    freeze <html> whenever #modal has content (class set by the observer in
    layout.html; the :has() variant covers the pre-JS instant). */
 html:has(#modal:not(:empty)),
+html:has(#modalTop:not(:empty)),
 html.modal-open,
 html.modal-open body{overflow:hidden;}
+/* Stacked layer: sits above the base dialog, and skips the blur so the two
+   glass panes don't compound into mush. */
+#modalTop .modal{z-index:60;}
+#modalTop .modal__backdrop{
+  background:rgba(0,0,0,.42);
+  -webkit-backdrop-filter:none;backdrop-filter:none;
+}
 .modal__backdrop{
   position:absolute;inset:0;background:rgba(0,0,0,.5);
   -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
@@ -924,9 +932,9 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 /* Peek at the running config before triggering — swaps the modal to the
    read-only config viewer (close it and reopen ingest from the bar). Styled
    as a proper pill button so it doesn't hide in the footer text. */
-.modal__foot--ingest{display:flex;align-items:center;gap:10px;}
+.modal__foot--ingest{display:flex;align-items:center;justify-content:flex-end;gap:10px;}
 .ing__cfg{
-  margin-left:auto;flex:none;
+  flex:none;
   padding:4px 12px;border-radius:999px;
   background:var(--fill);color:var(--text);
   box-shadow:inset 0 0 0 1px var(--hairline-strong);
@@ -953,17 +961,23 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 .ing__cnt--new b{color:var(--accent);}
 .ing__cnt--warn b{color:var(--warn);}
 .ing__actions{display:flex;align-items:center;gap:10px;margin-top:14px;}
+.ing__actions--end{justify-content:flex-end;margin-top:10px;}
 .ing__btn{
   font-family:inherit;font-size:1.35rem;border:0;border-radius:8px;
-  padding:9px 18px;cursor:pointer;transition:background .15s ease;
+  padding:9px 18px;cursor:pointer;transition:background .15s ease,color .15s ease,box-shadow .15s ease;
 }
 .ing__btn--run{
   background:var(--tint);color:var(--accent);font-weight:500;
   box-shadow:inset 0 0 0 1px rgba(128,203,196,.25);
 }
-.ing__btn--run:hover{background:rgba(128,203,196,.22);}
+.ing__btn--run:enabled:hover{background:rgba(128,203,196,.22);}
 .ing__btn--cancel{background:var(--fill);color:var(--warn);}
-.ing__btn--cancel:hover{background:var(--fill-hover);}
+.ing__btn--cancel:enabled:hover{background:var(--fill-hover);}
+/* Inert button: keeps its slot, drops the colour and the affordance. */
+.ing__btn:disabled{
+  background:var(--fill);color:var(--text-dim);opacity:.45;
+  box-shadow:inset 0 0 0 1px var(--hairline);cursor:default;
+}
 .ing__log{margin-top:12px;border:1px solid var(--hairline);border-radius:8px;background:rgba(0,0,0,.28);}
 .ing__logbar{
   display:flex;align-items:center;gap:8px;padding:7px 12px;font-size:1.15rem;

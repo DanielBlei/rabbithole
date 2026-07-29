@@ -8,8 +8,9 @@
     </div>
     {{template "ingestBody" .Body}}
     <div class="modal__foot modal__foot--ingest">
-      <a class="ing__cfg" href="#" hx-get="/config" hx-target="#modal" hx-swap="innerHTML">⚙ view config</a>
-      <a class="ing__cfg" href="#" hx-get="/feeds" hx-target="#modal" hx-swap="innerHTML">▤ view feeds</a>
+      {{/* Stack over the runner instead of replacing it; Esc drops back here. */}}
+      <a class="ing__cfg" href="#" hx-get="/config" hx-target="#modalTop" hx-swap="innerHTML">⚙ view config</a>
+      <a class="ing__cfg" href="#" hx-get="/feeds" hx-target="#modalTop" hx-swap="innerHTML">▤ view feeds</a>
     </div>
   </div>
 </div>
@@ -38,7 +39,8 @@
       <span class="ing__dim">never ran</span>
     {{end}}
   </div>
-  {{if and .Last .Last.Error}}{{if not .Running}}
+  {{/* Skipped for cancelled runs — the message is just "cancelled" again. */}}
+  {{if and .Last .Last.Error (ne .Last.Status "cancelled")}}{{if not .Running}}
     <div class="ing__errline">{{.Last.Error}}</div>
   {{end}}{{end}}
 
@@ -52,14 +54,10 @@
   </div>
   {{end}}
 
+  {{/* Always here; greys out while a run is live. */}}
   <div class="ing__actions">
-    {{if .Running}}
-      <button class="ing__btn ing__btn--cancel" type="button"
-              hx-post="/ingest/cancel" hx-target="#ingestBody" hx-swap="outerHTML">✕ cancel</button>
-    {{else}}
-      <button class="ing__btn ing__btn--run" type="button"
-              hx-post="/ingest/run" hx-target="#ingestBody" hx-swap="outerHTML">▶ run now</button>
-    {{end}}
+    <button class="ing__btn ing__btn--run" type="button" {{if .Running}}disabled{{end}}
+            hx-post="/ingest/run" hx-target="#ingestBody" hx-swap="outerHTML">▶ run now</button>
   </div>
 
   {{if .Lines}}
@@ -83,6 +81,12 @@
     <a href="/feed">refresh feed →</a>
   </div>
   {{end}}
+
+  {{/* Always here; greys out once there's nothing to cancel. */}}
+  <div class="ing__actions ing__actions--end">
+    <button class="ing__btn ing__btn--cancel" type="button" {{if not .Running}}disabled{{end}}
+            hx-post="/ingest/cancel" hx-target="#ingestBody" hx-swap="outerHTML">✕ cancel</button>
+  </div>
 
   {{if .History}}
   <div class="ing__hist">
@@ -123,7 +127,8 @@
     {{if .Run.Running}}<td class="ing__hist-st ing__hist-st--run">running</td>
     {{else if eq .Run.Status "ok"}}<td class="ing__hist-st ing__hist-st--ok">ok</td>
     {{else}}<td class="ing__hist-st ing__hist-st--err">{{.Run.Status}}</td>{{end}}
-    {{if .Run.Error}}<td class="ing__hist-info">{{.Run.Error}}</td>
+    {{/* Same here: a cancelled row shows its partial haul, not the word twice. */}}
+    {{if and .Run.Error (ne .Run.Status "cancelled")}}<td class="ing__hist-info">{{.Run.Error}}</td>
     {{else}}<td class="ing__hist-info">{{.Run.Counts.NewItems}} new</td>{{end}}
     <td class="ing__hist-took">{{.Run.Took}}</td>
     <td><span class="ing__trigger">{{.Run.Trigger}}</span></td>

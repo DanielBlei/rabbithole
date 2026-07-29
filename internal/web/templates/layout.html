@@ -175,6 +175,8 @@
     {{block "content" .}}{{end}}
   </div>
   <div id="modal"></div>
+  <!-- Second layer: dialogs opened from inside another one stack here. -->
+  <div id="modalTop"></div>
   <!-- Every script is external so the page can carry a strict Content-Security-
        Policy: none of this is inline, and none of it is needed before the DOM
        is parsed. Each file says at the top what it owns. -->
