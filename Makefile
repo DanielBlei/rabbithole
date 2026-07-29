@@ -3,7 +3,7 @@ CONFIG   ?= ./configs/config.example.yaml
 PKG      := ./...
 NO_THINK ?=
 THINK_FLAG := $(if $(NO_THINK),--no-think,)
-ADDR     ?= :8080
+ADDR     ?= 127.0.0.1:8080
 DEBUG    ?=
 DEBUG_FLAG := $(if $(DEBUG),--debug,)
 
