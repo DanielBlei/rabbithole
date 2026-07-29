@@ -80,7 +80,7 @@ The core table: one row per article ever seen, whether or not it was scored.
 | `link` | TEXT UNIQUE | **The real identity.** Dedup and upserts key on this |
 | `summary` | TEXT | Feed-provided summary, sent to the model |
 | `published_at` | TIMESTAMP | From the feed; NULL when it publishes no date |
-| `created_at` | TIMESTAMP | When this row was first written; what list windows filter on |
+| `created_at` | TIMESTAMP | When this row was first written; stands in for `published_at` when the feed gives none |
 | `updated_at` | TIMESTAMP | Touched by re-scoring and by user edits |
 | `llm_score` | INTEGER | 0–10; NULL means seen but not yet scored |
 | `llm_score_reason` | TEXT | The model's rationale |
@@ -110,6 +110,23 @@ NULL, and re-seeing an article never resets your own state on it.
 recorded without a score is reported as absent so the next run retries it — a scoring
 failure costs one run, not the article.
 
+**Date windows.** `List` and `Count` filter on `COALESCE(published_at, created_at)`, an
+item's own date falling back to when we first saw it, with a matching index. `After` is
+inclusive and `Before` exclusive.
+
+**Deletion.** `PruneItems` deletes items matching a `PruneFilter` (source, a date window, or
+both) and reports how many went; `PrunePreview` answers the same question without deleting,
+and both build one predicate so they cannot disagree. Nothing references `items`, so a prune
+reaches the feed and nothing else.
+
+Unlike `ListFilter`, whose zero value means "everything", a zero `PruneFilter` is invalid.
+Emptying the feed takes `All`, which cannot be combined with the other selectors — the point
+is that it can't be reached by an unset field, not that it can't be reached. Bookmarked,
+rated and noted items are kept
+unless `IncludeSaved`: that state is the only part of a row re-ingest cannot restore. A
+pruned link its feed still lists returns on the next run, rescored from scratch, because
+`ScoredLinks` only sees rows that still exist.
+
 ## feed_fetches
 
 Append-only log of every feed fetch attempt, one row per feed per run.
@@ -135,7 +152,7 @@ changing its URL starts fresh. Rows for feeds no longer in `feeds.yaml` are simp
 read, so re-adding a feed restores its history.
 
 `PruneFeedFetches` keeps the newest 200 rows per feed and runs at the end of every fetch
-phase. This is the only table with a retention policy.
+phase. This is the only automatic retention policy; items have a manual one in `PruneItems`.
 
 ## ingest_history and ingest_run_logs
 
@@ -261,7 +278,8 @@ stateDiagram-v2
 ```
 
 `status` is a single value; bookmarking and rating are orthogonal flags on the same row, not
-states. Items are never deleted.
+states. Nothing on the ingest or web paths deletes an item; the one way out is `PruneItems`,
+which you drive from `items prune`.
 
 ## Boundaries
 
@@ -294,9 +312,14 @@ script — is a question for when that stops being true.
 
 ## Known gaps
 
-- **Unbounded growth.** Only `feed_fetches` prunes. `items`, `ingest_history`,
-  `ingest_run_logs` and completed `todos` grow forever. Nothing is large enough to matter
-  yet, but `ingest_run_logs` is the first to watch — it stores whole run logs.
+- **Unbounded growth.** Only `feed_fetches` prunes on its own; `items` has `items prune` but
+  nothing calls it for you. `ingest_history`, `ingest_run_logs` and completed `todos` grow
+  forever. Nothing is large enough to matter yet, but `ingest_run_logs` is the first to
+  watch — it stores whole run logs.
+- **Deleting does not shrink the file.** `auto_vacuum(incremental)` only takes on a database
+  created with it, so on an existing one freed pages go to the freelist and get reused
+  rather than returned. Reclaiming disk means running `VACUUM` by hand with the server
+  stopped.
 - **No `Store` interface.** Callers take `*store.Store` directly, future expansion planned
   to support multiple stores. 
 - **Feeds are not in the database**, which is what makes the three soft links above soft.

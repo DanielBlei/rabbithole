@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -28,6 +29,15 @@ var (
 	listBefore     string
 	listSort       string
 	listBookmarked bool
+)
+
+var (
+	pruneAll          bool
+	pruneSource       string
+	pruneSince        string
+	pruneBefore       string
+	pruneIncludeSaved bool
+	pruneDryRun       bool
 )
 
 func init() {
@@ -97,7 +107,24 @@ func init() {
 		Args:  cobra.MinimumNArgs(1),
 		RunE:  bookmarkRunE(false, "unbookmarked"),
 	}
-	itemsCmd.AddCommand(listCmd, sourcesCmd, readCmd, skipCmd, unreadCmd, rateCmd, noteCmd, bookmarkCmd, unbookmarkCmd)
+	pruneCmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Delete items by source and/or age, leaving the rest of the store alone",
+		Args:  cobra.NoArgs,
+		RunE:  runPrune,
+	}
+	pruneCmd.Flags().BoolVar(&pruneAll, "all", false, "delete every item; cannot be combined with the filters below")
+	pruneCmd.Flags().
+		StringVar(&pruneSource, "source", "", "delete items from this source, named as `items sources` prints it")
+	pruneCmd.Flags().StringVar(&pruneBefore, "before", "", "delete items older than this, e.g. 30d, 720h")
+	pruneCmd.Flags().
+		StringVar(&pruneSince, "since", "", "delete items newer than this, e.g. 2d; pair with --before for a window")
+	pruneCmd.Flags().
+		BoolVar(&pruneIncludeSaved, "include-saved", false, "also delete bookmarked, rated or noted items (kept by default)")
+	pruneCmd.Flags().BoolVar(&pruneDryRun, "dry-run", false, "print what would be deleted, and delete nothing")
+
+	itemsCmd.AddCommand(listCmd, sourcesCmd, readCmd, skipCmd, unreadCmd, rateCmd, noteCmd,
+		bookmarkCmd, unbookmarkCmd, pruneCmd)
 	rootCmd.AddCommand(itemsCmd)
 }
 
@@ -254,19 +281,25 @@ func runList(cmd *cobra.Command, _ []string) error {
 			fmt.Println("No items.")
 			return nil
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-		if _, err := fmt.Fprintln(w, "SCORE\tSTATUS\tMARK\tSOURCE\tTITLE\tID\tLINK"); err != nil {
+		return writeItemTable(rows)
+	})
+}
+
+// writeItemTable renders rows in the `items list` layout, shared with the prune
+// preview so what you inspect before a delete looks like what you browsed.
+func writeItemTable(rows []store.ItemRow) error {
+	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	if _, err := fmt.Fprintln(w, "SCORE\tSTATUS\tMARK\tSOURCE\tTITLE\tID\tLINK"); err != nil {
+		return err
+	}
+	for _, r := range rows {
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			scoreCell(r), r.Status, bookmarkCell(r), r.Source,
+			truncate(r.Title, listTitleWidth), r.ID, r.Link); err != nil {
 			return err
 		}
-		for _, r := range rows {
-			if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				scoreCell(r), r.Status, bookmarkCell(r), r.Source,
-				truncate(r.Title, listTitleWidth), r.ID, r.Link); err != nil {
-				return err
-			}
-		}
-		return w.Flush()
-	})
+	}
+	return w.Flush()
 }
 
 func runSources(cmd *cobra.Command, _ []string) error {
@@ -290,6 +323,120 @@ func runSources(cmd *cobra.Command, _ []string) error {
 		}
 		return w.Flush()
 	})
+}
+
+// prunePreviewSample caps how many rows --dry-run prints: enough to recognize
+// what is about to go, not a second copy of `items list`.
+const prunePreviewSample = 10
+
+// resolvePruneFilter turns the `items prune` flags into a store.PruneFilter,
+// converting --since/--before (durations relative to now) into the absolute
+// bounds the filter holds. Unlike resolveListFilter there is no default window:
+// a prune with no flags is refused rather than given one, so emptying the feed
+// takes the explicit --all.
+func resolvePruneFilter(now time.Time) (store.PruneFilter, error) {
+	filter := store.PruneFilter{
+		All:          pruneAll,
+		Source:       pruneSource,
+		IncludeSaved: pruneIncludeSaved,
+	}
+	if pruneSince != "" {
+		d, err := config.ParseDuration(pruneSince)
+		if err != nil {
+			return store.PruneFilter{}, fmt.Errorf("--since: %w", err)
+		}
+		filter.After = now.Add(-d)
+	}
+	if pruneBefore != "" {
+		d, err := config.ParseDuration(pruneBefore)
+		if err != nil {
+			return store.PruneFilter{}, fmt.Errorf("--before: %w", err)
+		}
+		filter.Before = now.Add(-d)
+	}
+	narrowed := filter.Source != "" || !filter.After.IsZero() || !filter.Before.IsZero()
+	if filter.All && narrowed {
+		return store.PruneFilter{}, errors.New("--all cannot be combined with --source, --since or --before")
+	}
+	if !filter.All && !narrowed {
+		return store.PruneFilter{}, errors.New("prune needs --all, or at least one of --source, --since and --before")
+	}
+	return filter, nil
+}
+
+// reingestNote warns when a prune reaches into the window ingest still fetches,
+// where deleting an item its feed still lists means the next run re-fetches and
+// re-scores it. It reads the global window while feeds may override it, so the
+// note says "may" and is empty only when the prune stays clear of it entirely.
+func reingestNote(filter store.PruneFilter, now time.Time, window time.Duration) string {
+	if !filter.Before.IsZero() && !filter.Before.After(now.Add(-window)) {
+		return ""
+	}
+	return fmt.Sprintf(
+		"Note: this reaches inside the %s ingest window; the next ingest may re-fetch and re-score those items.",
+		humanDuration(window),
+	)
+}
+
+// humanDuration renders a whole number of days the way the config spells it
+// ("7d"), since time.Duration would print that as "168h0m0s".
+func humanDuration(d time.Duration) string {
+	if d >= 24*time.Hour && d%(24*time.Hour) == 0 {
+		return fmt.Sprintf("%dd", int(d/(24*time.Hour)))
+	}
+	return d.String()
+}
+
+func runPrune(cmd *cobra.Command, _ []string) error {
+	return withStore(cmd, func(ctx context.Context, db *store.Store, cfg *config.Config) error {
+		now := time.Now()
+		filter, err := resolvePruneFilter(now)
+		if err != nil {
+			return err
+		}
+
+		if pruneDryRun {
+			preview, err := db.PrunePreview(ctx, filter, prunePreviewSample)
+			if err != nil {
+				return err
+			}
+			if preview.Deleted == 0 {
+				fmt.Println("No items match; nothing to prune." + keptClause(preview))
+				return nil
+			}
+			fmt.Printf("Would prune %d item(s), showing %d:%s\n",
+				preview.Deleted, len(preview.Sample), keptClause(preview))
+			if err := writeItemTable(preview.Sample); err != nil {
+				return err
+			}
+			fmt.Println("Dry run: nothing was deleted.")
+			return nil
+		}
+
+		result, err := db.PruneItems(ctx, filter)
+		if err != nil {
+			return err
+		}
+		if result.Deleted == 0 {
+			fmt.Println("No items match; nothing pruned." + keptClause(result))
+			return nil
+		}
+		fmt.Printf("Pruned %d item(s).%s\n", result.Deleted, keptClause(result))
+		if note := reingestNote(filter, now, cfg.Ingest.Since.Std()); note != "" {
+			fmt.Println(note)
+		}
+		return nil
+	})
+}
+
+// keptClause reports the items the filter selected but the saved-item guard
+// spared. Without it a prune that leaves a source in `items sources` reads as a
+// command that silently did nothing.
+func keptClause(result store.PruneResult) string {
+	if result.Kept == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" Kept %d bookmarked/rated/noted (--include-saved to remove those too).", result.Kept)
 }
 
 // scoreCell renders an item's best-available score (user_score if set, else

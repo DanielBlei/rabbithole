@@ -53,6 +53,7 @@ rabbithole items read|skip|unread <id|link>...
 rabbithole items bookmark|unbookmark <id|link>...
 rabbithole items rate <id|link> <0-10>
 rabbithole items note <id|link> <text>...
+rabbithole items prune [--all | --source NAME [--since D] [--before D]] [--include-saved] [--dry-run]
 ```
 
 - `list` returns the last three days, highest score first, using the user rating where set
@@ -64,6 +65,36 @@ rabbithole items note <id|link> <text>...
   continue past individual failures and report the number that failed.
 - `rate` and `note` apply to a single item, as one value cannot meaningfully apply to
   several. `note` requires no quoting; trailing arguments are joined.
+- `prune` deletes items, and only items — one source, everything past a certain age, or a
+  window combining both. Todos, ideas, feed health and run history are untouched, so it is
+  the way to clean up a feed without starting the database over.
+
+At least one of `--source`, `--since` or `--before` is required, so a prune can't select the
+whole store by leaving a flag off. Emptying the feed is `--all`, which says so explicitly and
+refuses to be combined with the three. `--since` and `--before` mean what they do in `list`
+(durations before now, compared against the item's own published date and falling back to
+when it was first seen), so `items list` with the same flags previews exactly what `prune`
+would delete. `--dry-run` prints the count and the ten newest matches without deleting.
+
+Items you bookmarked, rated or annotated are kept and reported; `--include-saved` removes
+those too. Everything else on a row comes back on re-ingest, so that state is the only part
+worth protecting.
+
+```
+rabbithole items prune --source "Red Hat Emerging Tech" --dry-run
+rabbithole items prune --before 90d
+rabbithole items prune --all --include-saved       # or: make clean-feeds
+```
+
+`make clean-feeds` wraps that last one in a y/N prompt and is the quickest way to reset the
+feed while developing. It names the config it is about to act on, since that is what decides
+which database gets emptied.
+
+Two things to know. Pruning inside the ingest window costs a re-fetch and a re-score: the
+next run sees the link as new, because deduplication keys on links that are still stored.
+Items from feeds that publish no date are always re-fetched while they remain in the feed.
+And the database file does not shrink — SQLite reuses the freed pages, but reclaiming the
+space on disk means running `VACUUM` yourself with the server stopped.
 
 These commands use the same store method as the HTTP handlers, so changes made here appear
 in the web UI on refresh.

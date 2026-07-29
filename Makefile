@@ -61,6 +61,16 @@ clean: ## Remove build artifacts (DATA=1 also deletes ./data — the database an
 	  read ans; case "$$ans" in [yY]*) rm -rf data; echo "removed ./data";; *) echo "kept";; esac; \
 	fi
 
+.PHONY: clean-feeds
+clean-feeds: ## Delete every feed item from the store, keeping todos, ideas and run history (uses CONFIG)
+	@printf 'Delete every feed item from the store in \033[36m$(CONFIG)\033[0m?\n'
+	@printf 'Bookmarks, ratings and notes go too. Todos, ideas and run history are kept.\n'
+	@printf 'The next ingest re-fetches and re-scores anything still in your feeds. [y/N] '
+	@read ans; case "$$ans" in \
+	  [yY]*) go run . items prune --all --include-saved --config $(CONFIG);; \
+	  *) echo "kept";; \
+	esac
+
 ##@ ingest
 
 .PHONY: ingest
