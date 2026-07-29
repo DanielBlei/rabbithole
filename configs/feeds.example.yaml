@@ -4,7 +4,7 @@
 # Applied to any feed that doesn't set the knob itself.
 defaults:
   since: 7d       # ignore items older than this; accepts d/h/m (7d, 168h, 90m)
-  max_items: 25   # newest items one feed may add per run; 0 or omitted = uncapped
+  max_items: 25   # cap for the number of items per feed, some may return hundreds; omit to remove cap
 
 feeds:
   # Minimum: a unique name and a URL. The rest falls through to defaults.
@@ -14,34 +14,29 @@ feeds:
       - Red Hat
       - Infra
 
-  # Cap archive-sized feeds: this may return 100+ items in a single fetch.
   - name: Hugging Face blog
     url: https://huggingface.co/blog/feed.xml
     tags:
       - AI
       - Research
 
-  # High volume: tighter window and a harder cap than the defaults.
+  - name: arXiv — cs.AI
+    url: https://rss.arxiv.org/rss/cs.AI
+    tags:
+      - AI
+      - Research
+      - Papers
+
   - name: Medium — AI
     url: https://medium.com/feed/tag/artificial-intelligence
-    since: 2d
-    max_items: 10
+    max_items: 10 # High volume: retrieve only small number of items
     tags:
       - AI
       - Medium
 
   - name: Medium — LLMs
     url: https://medium.com/feed/tag/large-language-models
-    since: 2d
-    max_items: 10
-    tags:
-      - AI
-      - Medium
-
-  # Parked: kept here with its history, never fetched. Flip to true to resume.
-  - name: Medium — ML
-    url: https://medium.com/feed/tag/machine-learning
-    enabled: false
+    max_items: 10 # High volume: retrieve only small number of items
     tags:
       - AI
       - Medium

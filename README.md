@@ -1,70 +1,63 @@
-# The Rabbit Hole
+<p align="center">
+  <img src="docs/img/logo.png" alt="The Rabbit Hole" width="480">
+</p>
 
-A personal RSS reading assistant. It fetches your RSS/Atom feeds (Medium, arXiv, blogs, etc),
-scores each new item against an interest profile you write yourself, and ranks what
-is worth reading today, the best first, each with a one-line reason.
+<p align="center">
+  <a href="https://github.com/DanielBlei/rabbithole/actions/workflows/ci.yml"><img src="https://github.com/DanielBlei/rabbithole/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="go.mod"><img src="https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white" alt="Go 1.26+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
+  <img src="https://img.shields.io/badge/backends-Ollama%20%7C%20vLLM%20%7C%20heuristic-informational" alt="Backends: Ollama, vLLM, heuristic">
+</p>
 
-`rabbithole serve` is the main way to use it. Start it, open the web UI, and run an ingest to
-fetch and rank your feeds.
+**The Rabbit Hole** is a personal RSS reading assistant. It fetches your RSS/Atom feeds
+(Medium, arXiv, blogs, etc), scores each item against an interest profile you write yourself,
+creating a unique, personalised ranked feed.
+
+Open it in your browser. The **Feed** page is the day's reading ranked. The **Maze** page is
+where you put down tasks or todos, and throw ideas at the board before they get away.
+
+Everything runs on your own machine, and state is written to a local SQLite file.
+
+<p align="center">
+  <img src="docs/img/feed-page.png" alt="The Feed page: items ranked by score, each with a one-line reason" width="900">
+</p>
+
+<!-- Remove once 0.1.0 is tagged. -->
+> **Status:** pre-release. No tagged release yet; `main` is the only supported version.
 
 ## Requirements
 
 - Go 1.26+
-- One of:
-  - [Ollama](https://ollama.com) running locally (the default provider), or
-  - an OpenAI-compatible chat endpoint such as vLLM, or
-  - nothing. The `heuristic` provider needs no model and is handy for a first run or for
-    working offline.
+- [Ollama](https://ollama.com) running locally (the default)
+- or any OpenAI-compatible endpoint, such as [vLLM](https://docs.vllm.ai)
+- or nothing, with the built-in `heuristic` scorer
 
-State lives in a local SQLite file through a pure-Go driver, so there is no database server
-to run and no cgo toolchain to install.
-
-## Getting started
+## Quickstart
 
 ```bash
-make setup
-
-# then edit:
-#   configs/feeds.yaml   the RSS/Atom feeds to pull from
-#   configs/profile.md   what you care about, which is what drives the ranking
-
-# pull default configured model
-ollama pull qwen3:4b
-
-# targets default to the example config, so point them at yours
+make setup                              # creates configs/{config,feeds,profile} from the examples
+ollama pull qwen3:4b                    # the default model
 CONFIG=./configs/config.yaml make serve
 ```
 
 Open <http://localhost:8080> and hit ingest. The first run fetches your feeds and scores
 them, which takes a while on a local model; after that the page fills in.
 
-`make setup` will not overwrite a file you already have, so it is safe to re-run. Of the
-three files it copies, `configs/profile.md` is the one that matters most. The model is handed
-it verbatim on every scoring call, so it decides what surfaces and what does not.
+Then edit `configs/profile.md`, what you care about in your own words, and `configs/feeds.yaml`.
+The profile is the one that matters most: the model is handed it verbatim on every scoring
+call, so it decides what surfaces and what does not.
 
-Every target accepts `CONFIG=<path>` and defaults to `configs/config.example.yaml`. Set
-`CONFIG` at the top of the `Makefile` if you would rather not pass it each time. Targets that
-read it will tell you while you are still on the example.
+`make serve` binds to loopback only and has no authentication: it assumes it is running on
+your own machine. Read [SECURITY.md](SECURITY.md) before exposing it to anything else.
 
-`make serve` binds to loopback only, and there is no authentication: it assumes it is running
-on your own machine. Read [SECURITY.md](SECURITY.md) before exposing it to anything else. Run
-`make help` for the full target list.
+## Documentation
 
-The web UI also keeps the day's notes and ideas alongside the ranked feed. The same data is
-available as a [JSON API](docs/api.md), and `rabbithole ingest --markdown` writes a dated
-Markdown file if you would rather read it that way.
-
-The model backend is pluggable: Ollama by default, any OpenAI-compatible endpoint such as
-vLLM as a drop-in, or a model-free `heuristic` scorer that needs no model at all.
-
-The rest is in [docs/](docs): the config reference, the `ingest`, `items` and `serve`
-commands, the HTTP API, and how the pieces fit together.
-
-- [docs/configuration.md](docs/configuration.md)
-- [docs/cli.md](docs/cli.md)
-- [docs/api.md](docs/api.md)
-- [docs/architecture.md](docs/architecture.md)
-- [docs/store.md](docs/store.md)
+- [docs/quickstart.md](docs/quickstart.md): the same steps with the details filled in
+- [docs/configuration.md](docs/configuration.md): every field in the three config files
+- [docs/cli.md](docs/cli.md): the `ingest`, `items` and `serve` commands
+- [docs/api.md](docs/api.md): the HTTP API
+- [docs/architecture.md](docs/architecture.md): how the pieces fit together
+- [docs/store.md](docs/store.md): the SQLite schema and item lifecycle
 
 ## Contributing
 
