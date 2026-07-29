@@ -43,6 +43,8 @@ it each time.
 
 ## 4. Run an ingest
 
+> Already ingested on the example config? Run `make clean-feeds` first to remove them.
+
 Open <http://localhost:8080> and hit ingest. Nothing is fetched until you do. This is the step
 that pulls your feeds and scores them.
 

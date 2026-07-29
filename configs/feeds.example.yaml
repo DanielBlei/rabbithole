@@ -29,6 +29,7 @@ feeds:
 
   - name: Medium — AI
     url: https://medium.com/feed/tag/artificial-intelligence
+    since: 2d     # override the default window for one feed
     max_items: 10 # High volume: retrieve only small number of items
     tags:
       - AI
@@ -37,6 +38,14 @@ feeds:
   - name: Medium — LLMs
     url: https://medium.com/feed/tag/large-language-models
     max_items: 10 # High volume: retrieve only small number of items
+    tags:
+      - AI
+      - Medium
+
+  # Parked: kept here with its history, never fetched. Flip to true to resume.
+  - name: Medium — ML
+    url: https://medium.com/feed/tag/machine-learning
+    enabled: false
     tags:
       - AI
       - Medium

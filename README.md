@@ -16,7 +16,8 @@ creating a unique, personalised ranked feed.
 Open it in your browser. The **Feed** page is the day's reading ranked. The **Maze** page is
 where you put down tasks or todos, and throw ideas at the board before they get away.
 
-Everything runs on your own machine, and state is written to a local SQLite file.
+Everything runs on your own machine: a single binary, no dependency hell, and state in a
+local SQLite file.
 
 <p align="center">
   <img src="docs/img/feed-page.png" alt="The Feed page: items ranked by score, each with a one-line reason" width="900">
@@ -35,17 +36,15 @@ Everything runs on your own machine, and state is written to a local SQLite file
 ## Quickstart
 
 ```bash
-make setup                              # creates configs/{config,feeds,profile} from the examples
-ollama pull qwen3:4b                    # the default model
-CONFIG=./configs/config.yaml make serve
+ollama pull qwen3:4b   # the default model
+make serve             # runs on the shipped example config
 ```
 
-Open <http://localhost:8080> and hit ingest. The first run fetches your feeds and scores
-them, which takes a while on a local model; after that the page fills in.
+Open <http://localhost:8080> and hit ingest. The first run fetches the feeds and scores them,
+which takes a while on a local model; after that the page fills in.
 
-Then edit `configs/profile.md`, what you care about in your own words, and `configs/feeds.yaml`.
-The profile is the one that matters most: the model is handed it verbatim on every scoring
-call, so it decides what surfaces and what does not.
+That ranks against an example profile. For a feed ranked against your own interests, see the
+full guide: **[docs/quickstart.md](docs/quickstart.md)**.
 
 `make serve` binds to loopback only and has no authentication: it assumes it is running on
 your own machine. Read [SECURITY.md](SECURITY.md) before exposing it to anything else.
