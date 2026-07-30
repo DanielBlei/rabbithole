@@ -66,9 +66,18 @@
           </a>
           <div class="settings-sub__flyout">
             <div class="settings-panel__label">Display</div>
-            <div class="clk-row">
-              <button type="button" class="clk-btn" data-wx-toggle="show" aria-pressed="true">Weather</button>
-              <button type="button" class="clk-btn" data-wx-toggle="showPollen" aria-pressed="true">Pollen</button>
+            <!-- Named on the left, state on the right: the pill alone did not
+                 say whether it was the current state or the action. Pollen
+                 follows Weather, since it has nowhere to render without it. -->
+            <div class="wx-switches">
+              <div class="wx-switch">
+                <span>Weather</span>
+                <button type="button" class="clk-btn" data-wx-toggle="show" aria-label="Weather" aria-pressed="true">On</button>
+              </div>
+              <div class="wx-switch">
+                <span>Pollen</span>
+                <button type="button" class="clk-btn" data-wx-toggle="showPollen" aria-label="Pollen" aria-pressed="true">On</button>
+              </div>
             </div>
             <div class="settings-panel__label">Layout</div>
             <div class="wx-layout-step" data-wx-layout-step>
@@ -94,6 +103,13 @@
               <div class="wx-loc__results" id="wxLocResults" hidden></div>
               <button type="button" class="clk-btn" id="wxLocBtn">Use my location</button>
             </div>
+            <!-- Open-Meteo's free API is CC BY 4.0, which requires the credit to
+                 be visible where the data is used. Here rather than in the four
+                 placements: reachable from all of them, and it leaves the
+                 compact sub-bar and chip uncluttered. -->
+            <p class="wx-credit">Weather and pollen data by
+              <a href="https://open-meteo.com" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a>
+            </p>
           </div>
         </div>
         <div class="settings-panel__divider"></div>

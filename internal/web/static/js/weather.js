@@ -74,21 +74,33 @@
       .catch(function(){});
   }
 
+  // Records why we have no location ('off' = declined or unsupported) so the
+  // placements can say so instead of rendering an unexplained blank. Any
+  // location, granted or typed, clears it.
   function requestLocation(){
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation){ wxSet('geo','off'); renderWeather(); return; }
     navigator.geolocation.getCurrentPosition(function(p){
+      wxSet('geo','ok');
       wxSet('lat', p.coords.latitude);
       wxSet('lon', p.coords.longitude);
       wxSet('label', 'My location');
       wxSet('fetchedAt', '0');
       fetchWeather(p.coords.latitude, p.coords.longitude);
+    }, function(){
+      wxSet('geo','off');
+      renderWeather();
     });
   }
 
   function maybeRefresh(){
     var lat = parseFloat(wxGet('lat',''));
     var lon = parseFloat(wxGet('lon',''));
-    if (!lat || !lon){ requestLocation(); return; }
+    if (!lat || !lon){
+      // Ask once. A refusal is remembered by the browser, so asking again on
+      // every load only re-runs the error path; render the hint instead.
+      if (wxGet('geo','') === 'off') renderWeather(); else requestLocation();
+      return;
+    }
     var age = Date.now() - parseInt(wxGet('fetchedAt','0'), 10);
     if (age > CACHE_TTL){ fetchWeather(lat, lon); return; }
     renderWeather();
@@ -188,8 +200,16 @@
     var chip = document.getElementById('wxChip');
     var rail = document.getElementById('wxRail');
 
+    // Nothing to draw yet. If we know a location is never coming, keep the
+    // widget's space and say what to do about it; if the request is merely
+    // still in flight, stay quiet.
     if (!wxData || !wxData.current){
-      if (sub) sub.innerHTML = ''; if (chip) chip.innerHTML = ''; if (rail) rail.innerHTML = '';
+      var stuck = wxGet('geo','') === 'off' && !wxGet('lat','');
+      var hint  = stuck ? '<span class="wx-hint">Weather needs a location. '+
+                          'Add one in Settings, or hide the widget.</span>' : '';
+      if (sub)  sub.innerHTML  = hint;
+      if (chip) chip.innerHTML = stuck ? '<span class="wx-hint">Add a location</span>' : '';
+      if (rail) rail.innerHTML = hint;
       return;
     }
     var cur = wxData.current, wx = wxFor(cur.weather_code), u = unitSym();
@@ -218,17 +238,26 @@
     var maze = document.querySelector('.maze');
     if (!maze) return;
     var on = wxGet('show','1') !== '0';
-    maze.setAttribute('data-wx-mode', on ? wxGet('mode','inline') : 'off');
+    maze.setAttribute('data-wx-mode', on ? wxGet('mode','subbar') : 'off');
   }
 
   // --- settings controls ---
   function syncWxControls(){
+    var weatherOn = wxGet('show','1') !== '0';
     document.querySelectorAll('[data-wx-toggle]').forEach(function(btn){
       var k = btn.getAttribute('data-wx-toggle');
       var isOn = wxGet(k,'1') !== '0';
+      // Pollen rides on Weather: with the widget hidden it has nowhere to
+      // render, so it reads and behaves as off while keeping its own pref for
+      // when Weather comes back.
+      if (k === 'showPollen'){
+        btn.disabled = !weatherOn;
+        isOn = isOn && weatherOn;
+      }
       btn.classList.toggle('is-on', isOn);
       btn.setAttribute('aria-pressed', isOn ? 'true' : 'false');
       if (k === 'time24') btn.textContent = isOn ? '24-hour' : 'AM / PM';
+      else if (k === 'show' || k === 'showPollen') btn.textContent = isOn ? 'On' : 'Off';
     });
     var unit = wxGet('unit','C');
     document.querySelectorAll('[data-wx-unit]').forEach(function(btn){
@@ -236,8 +265,8 @@
       btn.classList.toggle('is-on', on);
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
-    var mode = wxGet('mode','inline');
-    var mi = MODES.indexOf(mode); if (mi < 0) mi = 1;
+    var mode = wxGet('mode','subbar');
+    var mi = MODES.indexOf(mode); if (mi < 0) mi = 0;
     var layoutName = document.querySelector('[data-wx-layout-name]');
     if (layoutName) layoutName.textContent = MODE_NAMES[MODES[mi]];
     var layoutDots = document.querySelectorAll('[data-wx-layout-dots] i');
@@ -260,7 +289,10 @@
     }
     var k = t.getAttribute('data-wx-toggle');
     wxSet(k, wxGet(k,'1') === '0' ? '1' : '0');
-    renderWeather();
+    // Switching Weather back on has to resume the load the gate skipped, not
+    // just redraw, or the first enable in a session renders nothing.
+    if (k === 'show' && wxGet('show','1') !== '0') maybeRefresh();
+    else renderWeather();
     syncWxControls();
   });
 
@@ -316,8 +348,8 @@
   var wxLayoutDots = document.querySelector('[data-wx-layout-dots]');
   if (wxLayoutDots) MODES.forEach(function(){ wxLayoutDots.appendChild(document.createElement('i')); });
   function stepLayout(dir){
-    var mode = wxGet('mode','inline');
-    var i = MODES.indexOf(mode); if (i < 0) i = 1;
+    var mode = wxGet('mode','subbar');
+    var i = MODES.indexOf(mode); if (i < 0) i = 0;
     var next = MODES[(i + dir + MODES.length) % MODES.length];
     wxSet('mode', next);
     applyMode(); syncWxControls();
@@ -329,7 +361,8 @@
 
   syncWxControls();
   applyMode();
-  if (document.querySelector('.maze')) maybeRefresh();
+  // Hidden means hidden: no location prompt and no Open-Meteo request.
+  if (document.querySelector('.maze') && wxGet('show','1') !== '0') maybeRefresh();
   document.addEventListener('htmx:afterSwap', function(){
     if (document.querySelector('.maze')) renderWeather();
   });
