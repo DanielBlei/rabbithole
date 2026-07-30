@@ -1,61 +1,58 @@
 # Security
 
-## Where things stand today
-
-Right now The Rabbit Hole runs on your own machine, for you alone, and everything below
-follows from that. It is the current state rather than a permanent position: if reaching it
-from another device becomes a goal, authentication and CSRF protection come with it. Until
-then it is better to say plainly what is missing than to imply hardening that is not there.
-
-- **There is no authentication and no CSRF protection.** Anyone who can reach the port can
-  read every item, trigger an ingest run, and delete todos and ideas.
-- **`serve` binds to `127.0.0.1:8080` by default.** Loopback is the only setup that is
-  currently tested or supported.
-- **The config file may hold an API key** (`inference.api_key`) in plain text. It is read
-  from disk with no special handling, so its permissions are yours to set.
-
-Passing `--addr` something routable is a deliberate act and does not become safe just because
-the flag allows it. If you need to reach this from another machine, put it behind a reverse
-proxy that terminates TLS and does the authentication, or reach it over a VPN or an SSH
-tunnel. Do not put it on the open internet.
-
-## Handling untrusted content
-
-Feed content and model output are both untrusted input, and both end up on a page:
-
-- Rendered Markdown is sanitised with [bluemonday](https://github.com/microcosm-cc/bluemonday)
-  before it reaches a template (`internal/web/markdown.go`). Everything else goes through
-  `html/template`, which escapes by default.
-- Feed URLs are fetched as configured. The tool will request whatever you put in
-  `feeds.yaml`, including addresses on your local network, so treat that file as something
-  only you write.
-
 ## Reporting a vulnerability
 
-Please report privately rather than opening a public issue: use GitHub's
-**Security → Report a vulnerability** on this repository, which opens a private advisory.
+Report privately rather than in a public issue: GitHub's **Security → Report a vulnerability**
+on this repository opens a private advisory. Say what you did, what happened, and what you
+expected; a proof of concept helps. One maintainer, so expect days rather than hours.
 
-Include what you did, what happened, and what you expected. A proof of concept helps. There
-is currently only one maintainer, so expect a first reply in days rather than hours.
+In scope: anything that lets a page in your browser, a malicious feed, or model output read or
+change data it should not; injection of any kind; path traversal; a dependency vulnerability
+reachable from this code.
 
-In scope:
+Out of scope, because they are known and deliberate rather than something anyone missed (see
+[Where things stand](#where-things-stand)): no authentication on a loopback binding, missing
+CSRF tokens, and anything that needs an attacker to already have a shell on the machine.
 
-- Anything that lets a page in your browser, a malicious feed, or model output read or change
-  data it should not, given a loopback-only deployment.
-- Injection of any kind, path traversal, or a dependency vulnerability that is actually
-  reachable from this code.
+## Where things stand
 
-Not worth a report, because they are the known state described above rather than something
-anyone has missed:
+There is no login. Anyone who can reach the port gets the whole app: your items, the ingest
+runs, the todos and ideas. That works today because `serve` listens on `127.0.0.1:8080`, so
+whoever can reach it is already on your machine.
 
-- No authentication on a loopback binding.
-- Missing CSRF tokens on the web UI's forms.
-- Anything that requires an attacker to already have a shell on the machine.
+Authentication and CSRF protection are future work, waiting on a question that is still open:
+whether this should be reachable from another device at all.
 
-The first two are gaps waiting on a decision about remote access, not positions being
-defended. If you have a view on how they should work, an issue is the right place for it.
+Two more things worth knowing:
+
+- **Loopback is the only setup tested.** To reach it from another machine, put it behind a
+  reverse proxy that handles TLS and the login, or use a VPN or an SSH tunnel. Not the open
+  internet.
+- **`inference.api_key` sits in the config in plain text**, so its file permissions are yours
+  to set.
+
+## Untrusted content
+
+Feed content and model output both end up on a page. Rendered Markdown is sanitised with
+[bluemonday](https://github.com/microcosm-cc/bluemonday) (`internal/web/markdown.go`);
+everything else goes through `html/template`, which escapes by default.
+
+Feeds are fetched as configured, local network addresses included, so treat `feeds.yaml` as
+something only you write.
+
+## What leaves your machine
+
+The server talks to your feeds and your inference host, nothing else. Fonts ship inside the
+binary, so no page load reaches a CDN.
+
+The exception is the Maze weather widget, on by default. The browser calls Open-Meteo with
+your coordinates for the forecast and pollen, and their geocoding endpoint when you search for
+a city. Coordinates come from the browser's location prompt or that search, stay in
+`localStorage`, and never reach the server. Decline the prompt and nothing is requested; it is
+asked once, not on every visit. Switching the widget off in Settings → Weather stops all of
+it. See `internal/web/static/js/weather.js`.
 
 ## Supported versions
 
-There are no releases yet. Fixes land on `main`, which is the only version that receives
-them.
+<!-- Update once 0.1.0 is tagged. -->
+No releases yet. Fixes land on `main`.

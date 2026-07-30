@@ -45,9 +45,9 @@ internal/logger       zerolog setup for --debug/--trace
 
 - **Adaptive ranking** — feed `status`/`user_score`/`user_note` history (recorded via
   `items` or the API) back into the scoring prompt as liked/disliked examples.
-- **Full-text crawl** — fetch article bodies for richer scoring beyond title+summary.
-- **Full-text search** — FTS5 over the item text; the SQLite driver already includes it.
-- **Embeddings pre-filter** — cheap shortlist → LLM rerank for large feed sets, and
-  near-duplicate detection for the same story arriving from several feeds.
+- **Full-text crawl** — consider fetch article bodies for richer scoring beyond title+summary.
+- **Feegs page text search** — FTS5 over the item text; the SQLite driver already includes it.
 - **Scheduling & delivery** — systemd timer or cron to run ingest unattended, plus email,
   push or an output feed so the digest reaches you instead of waiting to be opened.
+- **Postgres** — one store reachable from more than one of your machines, instead of each
+  process owning a local file. Still one profile and one reader (see [store.md](store.md)).

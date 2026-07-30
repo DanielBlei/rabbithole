@@ -10,14 +10,15 @@
 </p>
 
 **The Rabbit Hole** is a personal RSS reading assistant. It fetches your RSS/Atom feeds
-(Medium, arXiv, blogs, etc), scores each item against an interest profile you write yourself,
-creating a unique, personalised ranked feed.
+(Medium, arXiv, blogs, etc) and scores each item against an interest profile you write
+yourself. What comes back is a reading list ranked by what you actually care about.
 
 Open it in your browser. The **Feed** page is the day's reading ranked. The **Maze** page is
-where you put down tasks or todos, and throw ideas at the board before they get away.
+where you put down tasks or todos, throw ideas at the board before they get away, and keep an
+eye on the weather.
 
-Everything runs on your own machine: a single binary, no dependency hell, and state in a
-local SQLite file.
+It runs on your own machine: one binary with the UI inside it, no dependency hell, and state in a local SQLite
+file.
 
 <p align="center">
   <img src="docs/img/feed-page.png" alt="The Feed page: items ranked by score, each with a one-line reason" width="900">
@@ -55,15 +56,28 @@ your own machine. Read [SECURITY.md](SECURITY.md) before exposing it to anything
 - [docs/configuration.md](docs/configuration.md): every field in the three config files
 - [docs/cli.md](docs/cli.md): the `ingest`, `items` and `serve` commands
 - [docs/api.md](docs/api.md): the HTTP API
-- [docs/architecture.md](docs/architecture.md): how the pieces fit together
+- [docs/architecture.md](docs/architecture.md): how the pieces fit together, and what is
+  planned next
 - [docs/store.md](docs/store.md): the SQLite schema and item lifecycle
+
+## Getting help
+
+Questions, or something not behaving? Open an issue. Security reports go privately through
+[SECURITY.md](SECURITY.md) instead.
 
 ## Contributing
 
-Ideas and patches are welcome. For anything beyond a small fix, please open an issue first,
-so you do not end up building against a decision you had no way of seeing. Small fixes can
-come straight as a PR. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Ideas and patches are welcome. For anything beyond a small fix, open an issue first, so we
+can agree the approach before you spend an evening on it. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Acknowledgements
+
+Weather and pollen data by [Open-Meteo](https://open-meteo.com).
+
+The fonts are open source and come bundled with the app, so it looks the same offline. Their
+licences sit next to them in [internal/web/static/fonts](internal/web/static/fonts).
 
 ## License
 
-Licensed under the [Apache License, Version 2.0](LICENSE).
+Licensed under the [Apache License, Version 2.0](LICENSE). The bundled fonts keep their own
+licences, linked above.

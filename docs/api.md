@@ -16,11 +16,13 @@ Query params (all optional):
 | `before` | RFC3339 timestamp; only items before this |
 | `limit` | max items to return |
 
-If both `after` and `before` are omitted, the window defaults to `[now - list_since, now)`
-(`list_since` from config). If only `before` is given, `after` is derived as
-`before - list_since`, so paging "older" by echoing the previous response's `window.after`
-back as the next request's `before` keeps every page the same width without the client
-needing to know `list_since` itself. If only `after` is given, the window is open-ended.
+If both `after` and `before` are omitted, the window defaults to the last three days,
+`[now - 3d, now)`. If only `before` is given, `after` is derived as `before - 3d`, so paging
+"older" by echoing the previous response's `window.after` back as the next request's `before`
+keeps every page the same width without the client needing to know that width itself. If only
+`after` is given, the window is open-ended.
+
+The three days are fixed, not configurable: `defaultListWindow` in `internal/api/api.go`.
 
 Response:
 
@@ -35,6 +37,7 @@ Response:
       "status": "unread",
       "llm_score": 8,
       "llm_score_reason": "...",
+      "llm_score_model": "qwen3:4b",
       "user_score": null,
       "published_at": "2026-01-01T00:00:00Z"
     }
@@ -43,7 +46,8 @@ Response:
 }
 ```
 
-`llm_score`, `llm_score_reason`, `user_score`, and `published_at` are omitted when unset.
+`llm_score`, `llm_score_reason`, `llm_score_model`, `user_score` and `published_at` are
+omitted when unset.
 
 ## GET /api/sources
 

@@ -201,3 +201,21 @@ yourself can be kept in the file without being read as interests.
 > operators, KubeVirt, Go internals — not funding rounds or product launches" ranks
 > considerably better than "AI and infrastructure". When results are consistently
 > off-target, revise this file before changing the model.
+
+## The Maze weather widget
+
+The Maze page carries a weather and pollen read-out. None of it lives in the config files:
+every setting is in the browser, under Settings → Weather.
+
+| Setting | What it does |
+|---|---|
+| Weather, Pollen | Show or hide each. Weather off means no location prompt and no requests |
+| Layout | Sub-bar (the default), inline chip, or either rail; the rails show the full read-out |
+| Units | °C or °F |
+| Hours | 24-hour or AM/PM, matching the clock |
+| Location | Type a city, or press "Use my location" |
+
+Data comes from [Open-Meteo](https://open-meteo.com), fetched by the browser and cached for 30
+minutes. You are asked for a location once, on the first visit; decline and nothing is
+requested, and the city search does the same job. [SECURITY.md](../SECURITY.md) has what gets
+sent.

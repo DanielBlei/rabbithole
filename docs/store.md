@@ -1,10 +1,12 @@
 # Store
 
-Everything persists in a single SQLite file at `store.db_path` (default
-`./data/rabbithole.db`), accessed through `internal/store`.
+Everything persists in a single SQLite file at `store.db_path`, accessed through
+`internal/store`. The setting is required and has no default; the shipped example config uses
+`./data/rabbithole.db`.
 
-SQLite is the only supported backend. Postgres is on the roadmap, so that one store can back
-several instances rather than one process owning a local file.
+> SQLite is the only supported backend. Postgres is on the roadmap, so that one person can
+> reach the same store from more than one machine rather than each process owning its own local
+> file.
 
 Connection pragmas, applied per pooled connection via the DSN:
 
@@ -320,6 +322,6 @@ script — is a question for when that stops being true.
   created with it, so on an existing one freed pages go to the freelist and get reused
   rather than returned. Reclaiming disk means running `VACUUM` by hand with the server
   stopped.
-- **No `Store` interface.** Callers take `*store.Store` directly, future expansion planned
-  to support multiple stores. 
+- **No `Store` interface.** Callers take `*store.Store` directly. Supporting a second backend
+  means introducing one first.
 - **Feeds are not in the database**, which is what makes the three soft links above soft.
