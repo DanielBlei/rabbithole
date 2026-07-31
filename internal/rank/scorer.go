@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package rank defines the scoring interface and the prompt/parse helpers
 // shared by the inference backends.
 package rank

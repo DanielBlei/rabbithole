@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package server is the HTTP composition root for the serve command: it builds
 // the root mux, wraps it in the access log, and mounts the route sets that live
 // in their own packages — the JSON API (internal/api) under /api/, and the HTML

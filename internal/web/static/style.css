@@ -184,6 +184,10 @@ header.topbar{
   text-transform:uppercase;color:var(--accent-dim);
 }
 .settings-panel__divider{height:1px;background:var(--line);margin:5px 6px;}
+/* Outbound links carry an arrow so they read as leaving the app. */
+.settings-panel__item--ext{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.settings-panel__ext{color:var(--text-dim);font-size:1.2rem;line-height:1;}
+.settings-panel__item--ext:hover .settings-panel__ext{color:var(--accent);}
 
 /* "Date & time" sub-menu: hovering/focusing the trigger reveals a flyout that
    opens to the left of the panel (the panel hugs the right screen edge). */

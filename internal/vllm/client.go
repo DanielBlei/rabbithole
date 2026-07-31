@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package vllm implements rank.Scorer against an OpenAI-compatible endpoint
 // such as vLLM.
 package vllm

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package web serves The Rabbit Hole's HTML frontend: the digest "triage" page,
 // rendered server-side from the same internal/store the JSON API reads. Its
 // templates and static assets are embedded via go:embed (this file), so the

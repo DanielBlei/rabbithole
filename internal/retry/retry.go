@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package retry provides exponential backoff for operations against a
 // dependency that may still be starting up (e.g. a local Ollama/vLLM server).
 package retry
