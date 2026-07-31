@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package api exposes The Rabbit Hole's item store over HTTP as JSON — the stable
 // /api/* contract (see docs/api.md). Handlers call the same internal/store
 // functions the CLI calls. It is mounted by internal/server alongside the HTML

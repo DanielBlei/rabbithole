@@ -74,4 +74,20 @@ otherwise have the right to contribute it under the project's license. It is the
 
 ## License
 
-Contributions are accepted under the [Apache License, Version 2.0](LICENSE).
+The Rabbit Hole is [Apache-2.0](LICENSE), and contributions come in under the same
+terms: anything you deliberately submit for inclusion is licensed Apache-2.0, with no
+extra conditions. That is Apache-2.0 section 5, and signing off is how you say it.
+
+You keep the copyright in what you write. There is no CLA and no assignment.
+
+Every Go file opens with two SPDX lines, so keep them on new ones:
+
+```go
+// SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+// SPDX-License-Identifier: Apache-2.0
+```
+
+They go at the very top, followed by a blank line, so a package doc comment underneath
+still reads as the doc comment. "The Rabbit Hole Authors" is everyone who has
+contributed, with the git history as the roster. The year is the project's rather than
+the file's, so leave it at 2026 instead of bumping it.

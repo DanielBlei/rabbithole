@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package config loads the YAML run configuration and the interest profile.
 package config
 
@@ -107,7 +110,7 @@ type StoreConfig struct {
 	DBPath string `yaml:"db_path"` // sqlite database path
 }
 
-// Defaults mirror go-to-rag conventions (Ollama on localhost).
+// Defaults (Ollama on localhost).
 const (
 	defaultProvider    = "ollama"
 	defaultHost        = "http://localhost:11434"

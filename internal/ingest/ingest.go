@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package ingest implements the fetch -> score -> record cycle shared by the
 // ingest command today and a future serve command's API/scheduler. It returns
 // the cycle's Outcome as data; rendering it (markdown digest, stdout, JSON, ...)

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package httplog is the HTTP access log: one middleware that records every
 // request's outcome and threads a request-scoped logger through the context.
 package httplog
