@@ -687,7 +687,9 @@ func wornView(unread, seen, hidden, bookmarked bool) pickState {
 		}
 	}
 	st := worn(picked, "none")
-	st.On = !(unread && !seen && !hidden && !bookmarked)
+	// Anything other than unread-only is a narrowing; unread-only is where a
+	// bare load lands, so it wears its name with the dot off.
+	st.On = !unread || seen || hidden || bookmarked
 	return st
 }
 

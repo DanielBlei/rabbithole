@@ -550,8 +550,14 @@ func TestListSearch(t *testing.T) {
 	ctx := context.Background()
 
 	items := []feeds.Item{
-		{ID: "a", Source: "Red Hat Emerging Tech", Title: "Kubernetes at the edge", Link: "https://x/a", Tags: []string{"Infra"}},
-		{ID: "b", Source: "Hugging Face blog", Title: "Fine-tuning on one GPU", Link: "https://x/b", Tags: []string{"AI", "Research"}},
+		{
+			ID: "a", Source: "Red Hat Emerging Tech", Link: "https://x/a",
+			Title: "Kubernetes at the edge", Tags: []string{"Infra"},
+		},
+		{
+			ID: "b", Source: "Hugging Face blog", Link: "https://x/b",
+			Title: "Fine-tuning on one GPU", Tags: []string{"AI", "Research"},
+		},
 		{ID: "c", Source: "Medium — AI", Title: "100% uptime, honestly", Link: "https://x/c"},
 	}
 	if err := db.Record(ctx, items, nil, time.Now()); err != nil {
