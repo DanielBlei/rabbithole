@@ -596,12 +596,18 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
    view that filtered itself out, not a feed with nothing in it. */
 .pane__none{padding:14px 4px 10px;color:var(--text-dim);font-size:1.25rem;font-style:italic;}
 
+/* Three tracks with equal outer columns, not space-between: "« first" on the
+   left is far narrower than prev+next on the right, so spacing them apart put
+   the count wherever the wider group left it rather than on the pane's centre
+   line. The outer columns share what's left equally, so the count is centred
+   whatever the buttons do. */
 .pane__nav{
-  display:flex;align-items:center;justify-content:space-between;
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;
   padding:10px 14px;border-bottom:1px solid var(--line);
   font-size:1.3rem;color:var(--text-dim);
 }
-.pane__nav .nav-right{display:flex;gap:8px;}
+.pane__nav > .nav-btn{justify-self:start;}
+.pane__nav .nav-right{display:flex;gap:8px;justify-self:end;}
 .nav-btn{
   background:var(--fill);border:1px solid transparent;color:var(--text-dim);
   font-family:inherit;font-size:1.3rem;padding:5px 10px;border-radius:9px;cursor:pointer;
