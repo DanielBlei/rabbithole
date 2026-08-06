@@ -541,6 +541,214 @@ func TestList(t *testing.T) {
 	}
 }
 
+func TestListSearch(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	items := []feeds.Item{
+		{ID: "a", Source: "Red Hat Emerging Tech", Title: "Kubernetes at the edge", Link: "https://x/a", Tags: []string{"Infra"}},
+		{ID: "b", Source: "Hugging Face blog", Title: "Fine-tuning on one GPU", Link: "https://x/b", Tags: []string{"AI", "Research"}},
+		{ID: "c", Source: "Medium — AI", Title: "100% uptime, honestly", Link: "https://x/c"},
+	}
+	if err := db.Record(ctx, items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	readStatus := StatusRead
+	if err := db.UpdateUserState(ctx, "https://x/b", UserPatch{Status: &readStatus}); err != nil {
+		t.Fatalf("UpdateUserState: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		filter  ListFilter
+		wantIDs []string
+	}{
+		{
+			name:    "matches a title, partially",
+			filter:  ListFilter{Search: "kuber", SortBy: SortByOldest},
+			wantIDs: []string{"a"},
+		},
+		{
+			name:    "matches a source",
+			filter:  ListFilter{Search: "hugging", SortBy: SortByOldest},
+			wantIDs: []string{"b"},
+		},
+		{
+			name:    "matches a tag",
+			filter:  ListFilter{Search: "research", SortBy: SortByOldest},
+			wantIDs: []string{"b"},
+		},
+		{
+			name:    "case-insensitive both ways",
+			filter:  ListFilter{Search: "EDGE", SortBy: SortByOldest},
+			wantIDs: []string{"a"},
+		},
+		{
+			// A wildcard in LIKE, a literal here: "100%" must not match "100 ".
+			name:    "% is text, not a wildcard",
+			filter:  ListFilter{Search: "100% u", SortBy: SortByOldest},
+			wantIDs: []string{"c"},
+		},
+		{
+			name:    "ANDs with the other bounds",
+			filter:  ListFilter{Search: "a", Status: StatusRead, SortBy: SortByOldest},
+			wantIDs: []string{"b"},
+		},
+		{
+			name:    "no match",
+			filter:  ListFilter{Search: "kubevirt", SortBy: SortByOldest},
+			wantIDs: []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows, err := db.List(ctx, tt.filter)
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			gotIDs := make([]string, len(rows))
+			for i, r := range rows {
+				gotIDs[i] = r.ID
+			}
+			if !slices.Equal(gotIDs, tt.wantIDs) {
+				t.Fatalf("List(Search=%q) ids = %v, want %v", tt.filter.Search, gotIDs, tt.wantIDs)
+			}
+			// Count shares whereClause with List, so the two can't drift.
+			n, err := db.Count(ctx, tt.filter)
+			if err != nil {
+				t.Fatalf("Count: %v", err)
+			}
+			if n != len(tt.wantIDs) {
+				t.Errorf("Count(Search=%q) = %d, want %d", tt.filter.Search, n, len(tt.wantIDs))
+			}
+		})
+	}
+}
+
+// The feed page's source and tag chips are multi-select and OR within
+// themselves, but AND with each other and with everything else in the bar.
+func TestListSourcesAndTags(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	items := []feeds.Item{
+		{ID: "a", Source: "Red Hat", Title: "A", Link: "https://x/a", Tags: []string{"Infra", "AI"}},
+		{ID: "b", Source: "HF blog", Title: "B", Link: "https://x/b", Tags: []string{"AI", "Research"}},
+		{ID: "c", Source: "Medium", Title: "C", Link: "https://x/c", Tags: []string{"AIOps"}},
+		{ID: "d", Source: "Medium", Title: "D", Link: "https://x/d"}, // untagged: tags is NULL
+	}
+	if err := db.Record(ctx, items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		filter  ListFilter
+		wantIDs []string
+	}{
+		{
+			name:    "one source",
+			filter:  ListFilter{Sources: []string{"Medium"}, SortBy: SortByOldest},
+			wantIDs: []string{"c", "d"},
+		},
+		{
+			name:    "several sources, OR within the set",
+			filter:  ListFilter{Sources: []string{"Medium", "Red Hat"}, SortBy: SortByOldest},
+			wantIDs: []string{"a", "c", "d"},
+		},
+		{
+			name:    "Sources wins over the single Source",
+			filter:  ListFilter{Source: "Red Hat", Sources: []string{"HF blog"}, SortBy: SortByOldest},
+			wantIDs: []string{"b"},
+		},
+		{
+			// The joined column is "Infra,AI" / "AIOps": a bare substring match
+			// would pull AIOps in on a search for AI.
+			name:    "a tag matches whole entries only",
+			filter:  ListFilter{Tags: []string{"AI"}, SortBy: SortByOldest},
+			wantIDs: []string{"a", "b"},
+		},
+		{
+			name:    "tags are case-insensitive",
+			filter:  ListFilter{Tags: []string{"research"}, SortBy: SortByOldest},
+			wantIDs: []string{"b"},
+		},
+		{
+			name:    "several tags, OR within the set",
+			filter:  ListFilter{Tags: []string{"Infra", "Research"}, SortBy: SortByOldest},
+			wantIDs: []string{"a", "b"},
+		},
+		{
+			name:    "source AND tag",
+			filter:  ListFilter{Sources: []string{"Red Hat", "HF blog"}, Tags: []string{"Infra"}, SortBy: SortByOldest},
+			wantIDs: []string{"a"},
+		},
+		{
+			name:    "untagged items are out of any tag filter",
+			filter:  ListFilter{Sources: []string{"Medium"}, Tags: []string{"AIOps"}, SortBy: SortByOldest},
+			wantIDs: []string{"c"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows, err := db.List(ctx, tt.filter)
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			gotIDs := make([]string, len(rows))
+			for i, r := range rows {
+				gotIDs[i] = r.ID
+			}
+			if !slices.Equal(gotIDs, tt.wantIDs) {
+				t.Fatalf("List() ids = %v, want %v", gotIDs, tt.wantIDs)
+			}
+			n, err := db.Count(ctx, tt.filter)
+			if err != nil {
+				t.Fatalf("Count: %v", err)
+			}
+			if n != len(tt.wantIDs) {
+				t.Errorf("Count() = %d, want %d", n, len(tt.wantIDs))
+			}
+		})
+	}
+}
+
+// The tag chips come from the store, not from the rendered rows, so the filter
+// can offer a tag the current view has none of.
+func TestTags(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	items := []feeds.Item{
+		{ID: "a", Source: "S1", Title: "A", Link: "https://x/a", Tags: []string{"Infra", "AI"}},
+		{ID: "b", Source: "S2", Title: "B", Link: "https://x/b", Tags: []string{"ai", "Research"}},
+		{ID: "c", Source: "S3", Title: "C", Link: "https://x/c"},
+	}
+	if err := db.Record(ctx, items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	got, err := db.Tags(ctx)
+	if err != nil {
+		t.Fatalf("Tags: %v", err)
+	}
+	// "ai" and "AI" are one tag, kept as first recorded; untagged contributes none.
+	if want := []string{"AI", "Infra", "Research"}; !slices.Equal(got, want) {
+		t.Errorf("Tags() = %v, want %v", got, want)
+	}
+}
+
 func TestListLimitClamp(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

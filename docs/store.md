@@ -130,6 +130,15 @@ failure costs one run, not the article.
 item's own date falling back to when we first saw it, with a matching index. `After` is
 inclusive and `Before` exclusive.
 
+**Text and set filters.** `Search` keeps items whose title, source or tags contain the text,
+case-insensitively; it uses `instr` rather than `LIKE '%x%'` so a `%` or `_` in what someone
+typed is matched literally. `Sources` and `Tags` are multi-select: OR within each set, AND
+with everything else, and `Sources` wins over the single `Source` the way `Statuses` wins
+over `Status`. Because `tags` is one comma-joined column, a tag is matched with its
+delimiters (`,AI,` against `,Infra,AI,`), so `AI` doesn't pull in `AIOps`. All of it lives in
+one `whereClause` shared by `List` and `Count`, so the list and the totals beside it cannot
+disagree.
+
 **Deletion.** `PruneItems` deletes items matching a `PruneFilter` (source, a date window, or
 both) and reports how many went; `PrunePreview` answers the same question without deleting,
 and both build one predicate so they cannot disagree. Nothing references `items`, so a prune

@@ -83,6 +83,11 @@
   --font-body:var(--font-mono);
   --fs-title:1.4rem;       /* ONE size for article + todo titles — never split */
   --fs-body:1.35rem;
+
+  /* The centred column every page sits in. One variable because the Maze's
+     rail layout widens from it — two copies would drift. Sized so the feed's
+     filter bar holds all six controls plus the reset on one line. */
+  --content-w:1180px;
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
@@ -307,7 +312,7 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 }
 .clk-slider input[type=range]:focus-visible{outline:1px solid var(--accent);outline-offset:4px;}
 
-.content{max-width:1120px;margin:0 auto;padding:28px 30px 80px;}
+.content{max-width:var(--content-w);margin:0 auto;padding:28px 30px 80px;}
 
 /* Tiles split the full section width evenly, whatever the count: flex:1 1 0 on
    each gives equal shares that grow to fill the row, so 3 / 4 / 5+ tiles each
@@ -348,7 +353,7 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 .pane__cmd{color:var(--title);}
 
 .pane__filters{
-  display:flex;flex-wrap:wrap;align-items:center;gap:18px;
+  display:flex;flex-wrap:wrap;align-items:center;gap:12px;
   padding:10px 14px;border-bottom:1px solid var(--line);
   font-size:1.2rem;
 }
@@ -366,21 +371,19 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 .pill input:checked ~ span{color:var(--accent);background:var(--tint);}
 .pill input:focus-visible ~ span{outline:1px solid var(--accent);outline-offset:2px;}
 
-.date-popover{
-  display:none;position:absolute;left:0;top:calc(100% + 8px);
-  align-items:center;gap:10px;min-width:max-content;
-  background:var(--overlay);border:1px solid var(--hairline-strong);border-radius:16px;
-  -webkit-backdrop-filter:blur(22px) saturate(1.6);
-  backdrop-filter:blur(22px) saturate(1.6);
-  box-shadow:0 1px 2px rgba(0,0,0,.30), 0 12px 28px rgba(0,0,0,.38), 0 28px 64px rgba(0,0,0,.30);
-  padding:11px 13px;z-index:10;
-  transform-origin:top left;
+/* "custom" is a fold inside the published menu, not a second floating window:
+   the fields live in the panel, so whatever closes the menu closes them too and
+   there's never a stray popover left on screen. The chip wears a ▸ that turns ▾
+   while it's open, the disclosure it now is. */
+.pill--fold span::after{content:"\25b8";margin-left:7px;font-size:.9em;opacity:.8;}
+.pill--fold input:checked ~ span::after{content:"\25be";}
+.date-fold{
+  display:none;flex-direction:column;gap:7px;
+  margin:2px 2px 0;padding:9px 10px;border-radius:10px;background:var(--fill);
 }
-/* Picking "custom" reveals the range popover, which hangs off the filter — so
-   it stays up after the menu itself closes. */
-.popmenu--pub:has(#pubCustom:checked) ~ .date-popover{display:flex;animation:pop-in .16s cubic-bezier(.2,1.1,.4,1);}
-.date-popover__field{
-  display:flex;align-items:center;gap:6px;
+.popmenu__panel:has(#pubCustom:checked) .date-fold{display:flex;}
+.date-fold__field{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
   color:var(--text-dim);font-size:1.1rem;letter-spacing:.05em;text-transform:uppercase;
 }
 .date-input{
@@ -423,56 +426,36 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
   background:var(--fill);border:1px solid transparent;color:var(--text);
   font-family:inherit;font-size:1.2rem;padding:5px 13px;border-radius:999px;
 }
-/* Source is the bar's primary filter, so unlike the other popmenus its closed
-   button carries the selected value rather than a fixed label — the key + value
-   shape the published filter beside it already uses. It keeps the footprint of
-   the select it replaced, value centred, caret pinned to the edge; a long feed
-   name ellipsises rather than stretching the bar. Its width is fixed rather
-   than a minimum: the label changes as you select (All → a feed name → a name
-   plus "+2"), and a button that resized with it would shove the rest of the bar
-   around on every pick. The caret and the "+N"/dot cluster sit outside the flow,
-   so the label centres in the field and stays put as they come and go; only
-   their side is padded, so a long name fills the whole field before it
-   ellipsises instead of truncating against reserved empty space. */
-.popmenu--src .popmenu__btn{position:relative;width:22rem;padding:5px 48px 5px 16px;}
-.popmenu--src .popmenu__val{flex:1;text-align:center;}
-.popmenu--src .popmenu__meta{
-  position:absolute;right:26px;top:50%;transform:translateY(-50%);
-  display:flex;align-items:center;gap:5px;
-}
-/* Published wears its value too, but from a closed set of short labels — so it
-   takes the same centred-value/pinned-caret treatment at a width that fits
-   them, fixed so picking a window doesn't shift the bar. */
-.popmenu--pub .popmenu__btn{position:relative;width:12.5rem;padding:5px 38px 5px 14px;}
-.popmenu--pub .popmenu__val{flex:1;text-align:center;}
-.popmenu--pub .popmenu__meta{
-  position:absolute;right:24px;top:50%;transform:translateY(-50%);
-  display:flex;align-items:center;
-}
+/* Every filter's closed button wears its value, so they all take the same
+   treatment: a fixed width (a button that resized with its label would shove
+   the bar on every pick), the value centred and ellipsised inside it, and the
+   caret pinned to the edge. The left padding is the shallower of the two by
+   about the caret's width, so the value reads centred in the button rather than
+   centred in a box the caret is visibly crowding — with equal padding it leaves
+   a gap on the left. The "+N"/dot cluster rides in the flow after the value,
+   see .popmenu__meta below. Widths differ only by what each filter holds. */
+.popmenu--src .popmenu__btn{position:relative;width:18rem;padding:5px 26px 5px 14px;gap:0;justify-content:center;}
+.popmenu--pub .popmenu__btn{position:relative;width:10rem;padding:5px 26px 5px 14px;gap:0;justify-content:center;}
 .popmenu--pub .popmenu__btn::after{
   position:absolute;right:13px;top:50%;transform:translateY(-50%);
 }
-/* Tags wear their selection the same way Source does, but hold the shortest
-   labels in the bar — so the same centred-value/pinned-caret treatment at the
-   smallest width of the three, under the published filter beside it. A tag
-   longer than the field ellipsises rather than widening it; the panel below is
-   free to be wider than the button. The right padding is deeper than the left
-   on purpose: the caret and the "+N"/dot cluster live there, so the value is
-   centred in what's left rather than in the button, which is what keeps it from
-   running under them. */
-.popmenu--tags .popmenu__btn{position:relative;width:11rem;padding:5px 42px 5px 13px;}
-.popmenu--tags .popmenu__val{flex:1;text-align:center;}
-.popmenu--tags .popmenu__meta{
-  position:absolute;right:24px;top:50%;transform:translateY(-50%);
-  display:flex;align-items:center;gap:4px;
-}
-.popmenu--tags .popmenu__btn::after{
-  position:absolute;right:13px;top:50%;transform:translateY(-50%);
-}
+/* Tags and View name themselves instead of wearing a value, so they size to
+   their label and keep the default inline caret — no fixed width to truncate
+   against, and the bar gets the room back. */
+.popmenu--tags .popmenu__btn,.popmenu--view .popmenu__btn{padding:5px 14px;}
 /* The value ellipsises inside that fixed width rather than pushing the button
-   wider; the "+N" sits outside it, so truncating a long first name can never
-   swallow the count. */
-.popmenu__val{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+   wider; the "+N" is its own element, so truncating a long first name can never
+   swallow the count. It shrinks to its text rather than filling the button, so
+   value and dot centre as one group — the text sitting left of centre by the
+   dot's share, instead of the dot pushing it off a centre of its own. */
+.popmenu__val{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* The cluster rides in the flow after the value instead of being pinned over
+   the padding. Empty, it takes no width and no margin — display:none children
+   contribute neither — so the value centres in the whole button; full, it just
+   narrows the value's share rather than overlapping it. */
+.popmenu__meta{display:flex;align-items:center;}
+.popmenu__meta > *{margin-left:6px;}
+.popmenu__more:empty{display:none;}
 .popmenu__more{flex:none;color:var(--caution);font-size:1.05rem;letter-spacing:.02em;}
 .popmenu--src .popmenu__btn::after{
   position:absolute;right:13px;top:50%;transform:translateY(-50%);
@@ -531,6 +514,87 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 /* Tags are labels, not feed titles — they don't need the source panel's width,
    but they do need more than the narrow trigger they now hang off. */
 .popmenu__panel--tags{min-width:max(100%,15rem);}
+
+/* Sort wears its value like Source and Published do — it has exactly one, and
+   it's a word worth reading without opening anything. Same fixed-width,
+   centred-value, pinned-caret treatment as the two of them. */
+.popmenu--sort .popmenu__btn{position:relative;width:10rem;padding:5px 26px 5px 14px;gap:0;justify-content:center;}
+.popmenu--sort .popmenu__btn::after{
+  position:absolute;right:13px;top:50%;transform:translateY(-50%);
+}
+
+/* The bar's reset, alone at the far end. A text action rather than a pill: it
+   undoes filters, it isn't one, and it only exists while there's something to
+   undo. Amber, the colour every "narrowed" dot in the bar already uses. */
+.filter__clear{
+  margin-left:auto;gap:5px;flex:none;white-space:nowrap;
+  padding:4px 11px;border-radius:999px;
+  color:var(--caution);font-size:1.15rem;text-decoration:none;
+}
+.filter__clear-x{font-size:1.4rem;line-height:1;}
+.filter__clear:hover{background:rgba(255,203,107,.12);}
+.filter__clear:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
+
+/* Search: the bar's one free-text control, sitting with the filters rather
+   than apart from them. No label and no caret — a magnifier is the one control
+   that names itself, so idle it's just the glyph. It widens only once it holds
+   a query, which it then wears like the menus beside it, ellipsised past a
+   point so a long phrase can't run away with the bar. */
+.popmenu--search .popmenu__btn{gap:0;padding:5px 11px;max-width:22rem;}
+.popmenu--search .popmenu__btn::after{content:none;}
+/* Spacing hangs off the label rather than the button's gap, so the idle
+   magnifier sits centred in its pill instead of against a gap to nothing. */
+.popmenu--search .popmenu__val{margin-left:7px;}
+.popmenu--search .popmenu__val:empty{display:none;}
+.search__ic{flex:none;width:14px;height:14px;opacity:.85;}
+/* Both are laid out with display, which outranks the browser's own [hidden]
+   rule (same specificity, author sheet last), so their hidden state has to be
+   spelled out here — otherwise the ✕ sits in the field with nothing to clear
+   and the completion list holds its gap while empty. */
+.search__clear[hidden],.search__sugg[hidden]{display:none;}
+.popmenu__panel--search{min-width:max(100%,24rem);gap:9px;}
+/* The field, on the Sources search box's recipe at the bar's pill radius. The
+   clear button sits inside its right end, so the padding leaves room for it. */
+.search__field{position:relative;display:flex;align-items:center;}
+.search__input{
+  width:100%;padding:7px 36px 7px 13px;border:0;border-radius:999px;
+  background:var(--fill);color:var(--text);font:inherit;font-size:1.25rem;
+}
+.search__input:focus{outline:0;background:var(--fill-hover);box-shadow:0 0 0 1px var(--accent-dim);}
+/* The browser's own clear button is unstyleable and only some browsers draw it;
+   .search__clear is the one that shows, on every browser, in the theme. */
+.search__input::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;}
+.search__clear{
+  position:absolute;right:5px;top:50%;transform:translateY(-50%);
+  display:flex;align-items:center;justify-content:center;
+  width:22px;height:22px;padding:0;border:0;border-radius:50%;cursor:pointer;
+  background:transparent;color:var(--text-dim);font:inherit;font-size:1.4rem;line-height:1;
+}
+.search__clear:hover{background:var(--fill-hover);color:var(--warn);}
+.search__clear:focus-visible{outline:1px solid var(--accent);outline-offset:1px;}
+/* Completions: rows inside the panel, not a second floating surface over it. */
+.search__sugg{display:flex;flex-direction:column;gap:2px;max-height:min(40vh,280px);overflow-y:auto;}
+.search__opt{
+  display:flex;align-items:center;gap:9px;
+  padding:6px 11px;border-radius:8px;cursor:pointer;
+  color:var(--text);font-size:1.2rem;
+}
+.search__opt:hover,.search__opt.is-active{background:var(--tint);color:var(--accent);}
+/* A feed name can be longer than the panel; it ellipsises rather than widening
+   the popover or wrapping onto a second line. */
+.search__opt-val{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* Which vocabulary the completion came from, set well back — it labels the
+   value without competing with it. */
+.search__opt-kind{
+  flex:none;min-width:4.5rem;color:var(--text-dim);
+  font-size:1rem;letter-spacing:.08em;text-transform:uppercase;
+}
+.search__hint{margin:0;color:var(--text-dim);font-size:1.05rem;}
+.search__hint kbd{font:inherit;color:var(--caution);}
+/* Client-side filtering can empty the body, which the server-rendered
+   zero-state above it never sees. Quieter than that state on purpose: this is a
+   view that filtered itself out, not a feed with nothing in it. */
+.pane__none{padding:14px 4px 10px;color:var(--text-dim);font-size:1.25rem;font-style:italic;}
 
 .pane__nav{
   display:flex;align-items:center;justify-content:space-between;
@@ -1843,7 +1907,7 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    rail fills one slot and the opposite slot stays empty (reserved), ready for a
    second side widget later. The container widens by both slots' footprint so the
    board keeps its no-rail width. Stacks on narrow screens (media query below). --- */
-.content:has(.maze[data-wx-mode^="rail"]){max-width:calc(1120px + 2 * (var(--rail-w) + var(--rail-gap)));}
+.content:has(.maze[data-wx-mode^="rail"]){max-width:calc(var(--content-w) + 2 * (var(--rail-w) + var(--rail-gap)));}
 .maze{position:relative;}
 .maze[data-wx-mode^="rail"] .maze-grid{
   display:grid;gap:var(--rail-gap);align-items:start;
@@ -1889,8 +1953,8 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 /* Too narrow to hold the centred board between two reserved side slots: collapse
    to one column so the rail stacks above the board (it's first in the DOM) at
    full width, and drop the container back to its normal centred cap. */
-@media (max-width:1160px){
-  .content:has(.maze[data-wx-mode^="rail"]){max-width:1120px;}
+@media (max-width:1220px){
+  .content:has(.maze[data-wx-mode^="rail"]){max-width:var(--content-w);}
   .maze[data-wx-mode^="rail"] .maze-grid{grid-template-columns:1fr;}
   .maze[data-wx-mode^="rail"] .maze-rail,
   .maze[data-wx-mode^="rail"] .maze-main{grid-column:1;grid-row:auto;}
@@ -2046,7 +2110,6 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
   .settings-sub:hover .settings-sub__flyout,
   .settings-sub:focus-within .settings-sub__flyout,
   .popmenu__panel,
-  .pills:has(#pubCustom:checked) ~ .date-popover,
   .tagput__suggest,
   .modal__frame{animation:none;}
   .maze-tabs::before{transition:none;}
