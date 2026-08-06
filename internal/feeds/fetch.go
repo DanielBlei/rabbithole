@@ -18,7 +18,11 @@ import (
 const (
 	fetchTimeout = 30 * time.Second
 	maxParallel  = 8
-	summaryLimit = 1200 // characters of summary kept for scoring
+	// summaryLimit caps the summary text sent to the scoring model.
+	// Most RSS feeds only provide a short excerpt (300-600 chars) in
+	// <description>, not the full article; the limit guards against
+	// the rare feed that inlines entire posts via <content:encoded>.
+	summaryLimit = 1500
 )
 
 // Source identifies a feed to fetch. Tags are the feed's configured labels,

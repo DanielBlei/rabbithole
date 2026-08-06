@@ -37,7 +37,7 @@ Response:
       "status": "unread",
       "llm_score": 8,
       "llm_score_reason": "...",
-      "llm_score_model": "qwen3:4b",
+      "llm_score_model": "qwen3.5:4b",
       "user_score": null,
       "published_at": "2026-01-01T00:00:00Z"
     }

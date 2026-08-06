@@ -46,9 +46,9 @@ Scoring guide (0-10):
 Reward depth, novelty and concrete technical substance. Penalize clickbait and vendor marketing.
 
 Respond with ONLY a valid JSON object, no prose, no code fences:
-{"scores":[{"index":<int>,"score":<int 0-10>,"reason":"<=15 word rationale"}]}
+{"scores":[{"index":<int>,"score":<int 0-10>,"reason":"1-2 sentence rationale"}]}
 Include exactly one entry per article, using the article's index.
-Keep every reason under 15 words. Write one blunt clause, not a paragraph.`
+Each reason should be 1-2 sentences explaining how the article relates to the reader's interests to justify the score.`
 
 // schemaTemplate is the output shape the model must fill. The backend send it
 // as a structured output schema: the server turns it into a grammar and lets the
@@ -76,10 +76,10 @@ const schemaTemplate = `{
 
 // Defaults for Model Tuning.
 const (
-	defaultTokensPerItem  = 256
-	defaultTokensOverhead = 256
+	defaultTokensPerItem  = 1024
+	defaultTokensOverhead = 512
 	defaultTokensThinking = 2048
-	defaultReasonMaxChars = 200
+	defaultReasonMaxChars = 512
 )
 
 // ModelTuning holds the decoding adjustments and limits for a scoring request,

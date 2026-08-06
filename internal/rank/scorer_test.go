@@ -235,21 +235,21 @@ func TestModelTuning(t *testing.T) {
 	}{
 		{
 			name: "zero value uses defaults", items: 5,
-			wantBudget: 256 + 256*5, wantReason: 200,
+			wantBudget: 512 + 1024*5, wantReason: 512,
 		},
 		{
 			name: "think adds its allowance", items: 5, think: true,
-			wantBudget: 256 + 256*5 + 2048, wantReason: 200,
+			wantBudget: 512 + 1024*5 + 2048, wantReason: 512,
 		},
 		{
 			name: "max_tokens overrides the auto-size", items: 5, think: true,
 			tuning:     ModelTuning{MaxTokens: 900},
-			wantBudget: 900, wantReason: 200,
+			wantBudget: 900, wantReason: 512,
 		},
 		{
 			name: "partial config keeps defaults for the rest", items: 2,
 			tuning:     ModelTuning{TokensPerItem: 64, ReasonMaxChars: 80},
-			wantBudget: 256 + 64*2, wantReason: 80,
+			wantBudget: 512 + 64*2, wantReason: 80,
 		},
 	}
 	for _, tt := range tests {

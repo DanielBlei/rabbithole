@@ -35,22 +35,22 @@ configuration can be inspected from the web UI under the gear menu (View config)
 
 All fields are optional unless marked required.
 
-| Field | Description | Default |
-|---|---|---|
-| `user` | Name shown in the web UI's shell prompt | OS login name |
-| `profile` | Path to the interest profile | **required** |
-| `inference.provider` | `ollama` \| `vllm` \| `heuristic` | `ollama` |
-| `inference.host` | Inference server URL | `http://localhost:11434` |
-| `inference.model` | Model name | `qwen3:4b` |
-| `inference.api_key` | Bearer token, where the endpoint requires one | none |
-| `inference.think` | Allow model reasoning before scoring, with fallback | `true` |
-| `inference.batch_size` | Articles per scoring request | `5` |
-| `inference.max_parallel` | Scoring requests in flight | `2` |
-| `inference.model_tuning.*` | Decoding limits — see below | see below |
-| `ingest.since` | Lookback window for new items | `14d` |
+| Field | Description | Default                           |
+|---|---|-----------------------------------|
+| `user` | Name shown in the web UI's shell prompt | OS login name                     |
+| `profile` | Path to the interest profile | **required**                      |
+| `inference.provider` | `ollama` \| `vllm` \| `heuristic` | `ollama`                          |
+| `inference.host` | Inference server URL | `http://localhost:11434`          |
+| `inference.model` | Model name | `qwen3.5:4b`                      |
+| `inference.api_key` | Bearer token, where the endpoint requires one | none                              |
+| `inference.think` | Allow model reasoning before scoring, with fallback | `true`                            |
+| `inference.batch_size` | Articles per scoring request | `1`                               |
+| `inference.max_parallel` | Scoring requests in flight | `1`                               |
+| `inference.model_tuning.*` | Decoding limits — see below | see below                         |
+| `ingest.since` | Lookback window for new items | `7d`                              |
 | `ingest.feeds` | Path to the feed seed file | `feeds.yaml` beside `config.yaml` |
-| `ingest.digest_dir` | Output directory for `ingest --markdown` | none — required by that flag |
-| `store.db_path` | SQLite database file | **required** |
+| `ingest.digest_dir` | Output directory for `ingest --markdown` | none — required by that flag      |
+| `store.db_path` | SQLite database file | **required**                      |
 
 Durations accept a `d` (days) suffix in addition to the standard `h`, `m` and `s` — for
 example `14d`, `168h`, `1h30m`.
@@ -83,10 +83,10 @@ take the defaults. Worth adjusting when substituting a model that is more or les
 |---|---|---|
 | `num_ctx` | Input window | server default |
 | `max_tokens` | Cap on the whole reply; `0` derives it from the three fields below | `0` |
-| `tokens_per_item` | Allowance per article in a batch | `256` |
-| `tokens_overhead` | Allowance for the JSON envelope | `256` |
+| `tokens_per_item` | Allowance per article in a batch | `1024` |
+| `tokens_overhead` | Allowance for the JSON envelope | `512` |
 | `tokens_thinking` | Added when `think` is enabled | `2048` |
-| `reason_max_chars` | Maximum length of the per-item rationale | `200` |
+| `reason_max_chars` | Maximum length of the per-item rationale | `512` |
 
 Responses are constrained to a fixed JSON shape, so scores are always returned as integers
 and `reason_max_chars` is enforced rather than merely requested.
@@ -96,12 +96,14 @@ and `reason_max_chars` is enforced rather than merely requested.
 > - **Set `num_ctx` explicitly.** Left unset, Ollama silently truncates an over-long prompt
 >   and the model scores articles it did not fully receive. `8192` is a reasonable starting
 >   point. Ollama only; vLLM fixes the equivalent at startup via `--max-model-len`.
-> - **Use `max_parallel: 1` with Ollama.** Requests are queued rather than served
->   concurrently, so higher values yield no additional throughput.
+> - **Leave `max_parallel` at 1 with Ollama.** Requests are queued rather than served
+>   concurrently, so higher values yield no additional throughput. Raise it only against an
+>   endpoint that genuinely serves in parallel, such as vLLM.
 > - **Disable `think` for small models** (1B–4B). Reasoning quality is limited at that size
->   and consumes `tokens_thinking` on every request.
-> - **Keep `batch_size` moderate.** Larger batches lengthen the prompt and increase the
->   chance of the model losing track of individual items; `5` is a reasonable balance.
+>   and consumes `tokens_thinking` on every request. The shipped example config does this.
+> - **Raise `batch_size` only on a capable model.** One article per request is the default
+>   because a local 4B has the whole context to itself and scores it better; larger batches
+>   lengthen the prompt and increase the chance of the model losing track of individual items.
 
 ## Feeds
 

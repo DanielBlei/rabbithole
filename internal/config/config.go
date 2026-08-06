@@ -134,10 +134,10 @@ type StoreConfig struct {
 const (
 	defaultProvider    = "ollama"
 	defaultHost        = "http://localhost:11434"
-	defaultModel       = "qwen3:4b"
-	defaultBatchSize   = 5
-	defaultMaxParallel = 2
-	defaultSince       = 14 * 24 * time.Hour
+	defaultModel       = "qwen3.5:4b"
+	defaultBatchSize   = 1
+	defaultMaxParallel = 1
+	defaultSince       = 7 * 24 * time.Hour
 )
 
 // Load reads and validates the config at path, applying defaults for unset fields.

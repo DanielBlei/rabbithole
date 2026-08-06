@@ -14,7 +14,7 @@ make setup
 
 | File | What it does | What to change |
 |---|---|---|
-| `configs/config.yaml` | How to run: model, scoring, storage, paths | The model, if you don't want the default `qwen3:4b` |
+| `configs/config.yaml` | How to run: model, scoring, storage, paths | The model, if you don't want the default `qwen3.5:4b` |
 | `configs/feeds.yaml` | The feeds to pull from | Add your own. A name and a URL is the minimum |
 | `configs/profile.md` | Your interests, which is what drives the ranking | Write what you care about, in your own words |
 
@@ -28,7 +28,7 @@ Every field is documented in [configuration.md](configuration.md), including the
 ## 2. Pull the model
 
 ```sh
-ollama pull qwen3:4b
+ollama pull qwen3.5:4b
 ```
 
 ## 3. Start the server
