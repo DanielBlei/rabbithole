@@ -24,8 +24,8 @@ file.
   <img src="docs/img/feed-page.png" alt="The Feed page: items ranked by score, each with a one-line reason" width="900">
 </p>
 
-<!-- Remove once 0.1.0 is tagged. -->
-> **Status:** pre-release. No tagged release yet; `main` is the only supported version.
+> **Status:** 0.x. Usable day to day, but the config format and the HTTP API can still change
+> between releases. Anything breaking is called out in the release notes.
 
 ## Requirements
 
@@ -33,6 +33,17 @@ file.
 - [Ollama](https://ollama.com) running locally (the default)
 - or any OpenAI-compatible endpoint, such as [vLLM](https://docs.vllm.ai)
 - or nothing, with the built-in `heuristic` scorer
+
+## Install
+
+```bash
+git clone https://github.com/DanielBlei/rabbithole.git
+cd rabbithole
+make build
+```
+
+Or `go install github.com/DanielBlei/rabbithole@latest` for just the binary. Currently it still
+needs the config files: copy them out of `configs/` and work from there.
 
 ## Quickstart
 
