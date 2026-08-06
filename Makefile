@@ -7,6 +7,10 @@ ADDR     ?= 127.0.0.1:8080
 DEBUG    ?=
 DEBUG_FLAG := $(if $(DEBUG),--debug,)
 
+# Nearest git tag plus any commits past it.
+VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS  := -X github.com/DanielBlei/rabbithole/cmd.version=$(VERSION)
+
 .DEFAULT_GOAL := help
 
 ##@ General
@@ -47,7 +51,7 @@ setup: ## Create config.yaml, feeds.yaml and profile.md from the examples (if mi
 
 .PHONY: build
 build: ## Compile the binary to ./rabbithole
-	go build -o $(BINARY) .
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
 .PHONY: tidy
 tidy: ## Sync go.mod/go.sum

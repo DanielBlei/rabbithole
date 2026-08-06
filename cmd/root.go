@@ -11,6 +11,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	buildinfo "runtime/debug"
+
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
@@ -26,12 +28,28 @@ var (
 
 const defaultConfigPath = "./configs/config.yaml"
 
+// version is stamped in at build time.
+var version = "dev"
+
+// buildVersion falls back to the module version for `go install` builds.
+func buildVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if info, ok := buildinfo.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	return version
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "rabbithole",
 	Short: "Personal RSS reading assistant: ranks feeds against your interests",
 	Long: "The Rabbit Hole fetches your RSS/Atom feeds, scores each new item against an " +
 		"interest profile using an LLM, and writes a daily markdown digest of what to read.",
-	Version:       "0.1.0",
+	Version:       buildVersion(),
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {

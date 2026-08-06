@@ -60,5 +60,5 @@ it. See `internal/web/static/js/weather.js`.
 
 ## Supported versions
 
-<!-- Update once 0.1.0 is tagged. -->
-No releases yet. Fixes land on `main`.
+The latest release is the supported one. Fixes land on `main` and go out in the next release;
+older tags are not backported.
