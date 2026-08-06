@@ -10,7 +10,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os/user"
-	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +48,10 @@ func pageTmpl(page string) *template.Template {
 // listLimit bounds how many rows the digest page pulls per render. The current
 // page paginates this set client-side; real server-side paging is a follow-up.
 const listLimit = 100
+
+// maxSearchLen caps the search control's text. Long enough for a headline,
+// short enough that the query string stays a link someone can share.
+const maxSearchLen = 120
 
 // Score tiers: high signal at 7 and above, mid at 4, low below.
 const (
@@ -145,7 +149,8 @@ type pageData struct {
 	PromptUser         string     // shell-prompt user in the pane title bar
 	ServeCmd           string     // the command the prompt shows running, incl. the real --addr
 	Stats              statsData
-	Sources            []string // every source present in the rows below — the source filter's chips
+	Sources            []pickChip // every source in the store, with the picked ones flagged
+	SourcesPick        pickState  // what the source button reads while closed
 	FilterPublished    string
 	FilterPublishedTxt string // the window named for the filter's closed button
 	FilterCustom       bool
@@ -156,10 +161,37 @@ type pageData struct {
 	FilterShowSeen     bool
 	FilterShowHidden   bool
 	FilterShowBookmark bool
-	Tags               []string // every tag carried by the rows below, sorted — the tag filter's chips
-	ListLimit          int      // listLimit, so the pager can say when the set below is truncated
-	Rows               []rowData
-	Empty              emptyData // the zero-state, filled only when Rows is empty
+	FilterSearch       string     // the search control's text, echoed back into its field and button
+	Tags               []pickChip // every tag in the store, with the picked ones flagged
+	// Tags and View name themselves on the button rather than wearing their
+	// value, so their pickState is what the tooltip lists and what decides
+	// whether they count towards Narrowed — not a label.
+	TagsPick pickState
+	ViewPick pickState
+	SortPick pickState // what the sort button reads while closed
+	// Narrowed is whether anything in the bar is filtering, which is the whole
+	// question the "clear" button answers — so it decides whether one renders.
+	Narrowed  bool
+	ListLimit int // listLimit, so the pager can say when the set below is truncated
+	Rows      []rowData
+	Empty     emptyData // the zero-state, filled only when Rows is empty
+}
+
+// pickChip is one option in a multi-select filter menu.
+type pickChip struct {
+	Value string
+	On    bool
+}
+
+// pickState is what a filter's closed button wears: the selection's first
+// value, a "+N" for the rest, the full list as a tooltip, and whether the
+// filter is narrowing anything (which lights the amber dot). Every control in
+// the bar carries one, so they all read the same way shut.
+type pickState struct {
+	Label string
+	More  string
+	Title string
+	On    bool
 }
 
 // emptyData drives the zero-state the pane renders when no rows come back. Kind
@@ -232,6 +264,20 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		published = ""
 	}
 
+	// The search control's text, matched against title, source and tags.
+	// Trimmed (a trailing space would hide every row) and capped, so a stray
+	// paste doesn't end up as the URL.
+	search := strings.TrimSpace(q.Get("search"))
+	if runes := []rune(search); len(runes) > maxSearchLen {
+		search = string(runes[:maxSearchLen])
+	}
+
+	// Source and tag chips: multi-select, OR within each set, AND across them.
+	// Repeated params rather than one comma-joined value, so a feed name with a
+	// comma in it stays one name.
+	pickedSources := cleanPicks(q["source"])
+	pickedTags := cleanPicks(q["tag"])
+
 	// Status visibility is unit-based multiselect: the Unread/Seen/Hidden chips
 	// each toggle one status independently (rather than unread-always + "show
 	// also" extras). "view" is a hidden marker the filter form always submits,
@@ -266,9 +312,12 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 	if len(statuses) > 0 {
 		got, err := s.db.List(r.Context(), store.ListFilter{
 			Statuses:   statuses,
+			Sources:    pickedSources,
+			Tags:       pickedTags,
 			After:      after,
 			Before:     before,
 			Bookmarked: onlyBookmark,
+			Search:     search,
 			SortBy:     sort,
 			Limit:      listLimit,
 		})
@@ -279,7 +328,15 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		rows = got
 	}
 
+	// The chips offer what the store holds, not what this render returned:
+	// options drawn from the rows would vanish as soon as you picked one, and
+	// there'd be no way back to the feed you just filtered out.
 	counts, err := s.db.Sources(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	tagOptions, err := s.db.Tags(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -296,9 +353,20 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 			r,
 			rows,
 			len(counts),
-			store.ListFilter{After: after, Before: before, Bookmarked: onlyBookmark},
+			// Every narrowing filter belongs in the pool count: "available" is
+			// how many items the bar's selection matches, which is what the
+			// pager's "first 100 of N" is claiming.
+			store.ListFilter{
+				Sources:    pickedSources,
+				Tags:       pickedTags,
+				After:      after,
+				Before:     before,
+				Bookmarked: onlyBookmark,
+				Search:     search,
+			},
 		),
-		Sources:            rowSources(items),
+		Sources:            pickChips(sourceNames(counts), pickedSources),
+		SourcesPick:        worn(pickedSources, "All"),
 		FilterPublished:    published,
 		FilterPublishedTxt: publishedLabel(published, custom),
 		FilterCustom:       custom,
@@ -309,10 +377,18 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		FilterShowSeen:     showSeen,
 		FilterShowHidden:   showHidden,
 		FilterShowBookmark: onlyBookmark,
-		Tags:               rowTags(items),
+		FilterSearch:       search,
+		Tags:               pickChips(tagOptions, pickedTags),
+		TagsPick:           worn(pickedTags, "All"),
 		ListLimit:          listLimit,
 		Rows:               items,
 	}
+	data.ViewPick = wornView(showUnread, showSeen, showHidden, onlyBookmark)
+	// Sort always has exactly one value, so it wears it plainly, spelled the way
+	// its own chips spell it; latest is the default and so isn't a narrowing.
+	data.SortPick = pickState{Label: sortLabel(sort), On: sort != store.SortByLatest}
+	data.Narrowed = data.SourcesPick.On || data.TagsPick.On || data.ViewPick.On ||
+		published != "" || custom || search != "" || sort != store.SortByLatest
 	if len(items) == 0 {
 		data.Empty = s.emptyState(r.Context(), chrome.IngNever, data.cmd())
 	}
@@ -378,6 +454,21 @@ func (d pageData) cmd() string {
 		}
 	case d.FilterPublished != "":
 		cmd += " --published " + d.FilterPublished
+	}
+	// Repeated flags for the multi-selects, the way the query string repeats
+	// them. Quoted, since feed names and the search text carry spaces.
+	for _, chip := range d.Sources {
+		if chip.On {
+			cmd += " --source " + strconv.Quote(chip.Value)
+		}
+	}
+	for _, chip := range d.Tags {
+		if chip.On {
+			cmd += " --tag " + strconv.Quote(chip.Value)
+		}
+	}
+	if d.FilterSearch != "" {
+		cmd += " --search " + strconv.Quote(d.FilterSearch)
 	}
 	return cmd
 }
@@ -517,43 +608,87 @@ func (s *Web) stats(r *http.Request, rows []store.ItemRow, sourcesActive int, co
 	return st
 }
 
-// rowSources collects the distinct sources present on the rows the page is
-// about to render, sorted. Like rowTags, the filter's options come from the
-// rows themselves rather than from the whole feed set, so an option can never
-// filter the page down to nothing.
-func rowSources(rows []rowData) []string {
+// maxPicks bounds how many values one multi-select filter accepts, so a
+// hand-written URL can't turn a menu of chips into a thousand-term query.
+const maxPicks = 50
+
+// cleanPicks takes a repeated query param and returns the values worth
+// filtering on: trimmed, blanks and duplicates dropped, capped.
+func cleanPicks(values []string) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, row := range rows {
-		if row.Source == "" || seen[row.Source] {
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" || seen[v] {
 			continue
 		}
-		seen[row.Source] = true
-		out = append(out, row.Source)
+		seen[v] = true
+		if out = append(out, v); len(out) == maxPicks {
+			break
+		}
 	}
-	sort.Strings(out)
 	return out
 }
 
-// rowTags collects the tags present on the rows the page is about to render,
-// sorted and deduped. Deriving the filter's chips from the rows themselves —
-// rather than from the whole feeds file — keeps it honest: a chip only exists
-// when something on the page carries it, so narrowing by source can't leave
-// tags behind that would filter everything away.
-func rowTags(rows []rowData) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, row := range rows {
-		for _, tag := range strings.Split(row.TagsAttr, ",") {
-			if tag == "" || seen[tag] {
-				continue
-			}
-			seen[tag] = true
-			out = append(out, tag)
+func sourceNames(counts []store.SourceCount) []string {
+	out := make([]string, len(counts))
+	for i, c := range counts {
+		out[i] = c.Source
+	}
+	return out
+}
+
+// pickChips pairs a filter's options with the current selection, so the
+// template can render each chip checked or not without a lookup of its own.
+func pickChips(options, picked []string) []pickChip {
+	on := make(map[string]bool, len(picked))
+	for _, p := range picked {
+		on[p] = true
+	}
+	chips := make([]pickChip, len(options))
+	for i, opt := range options {
+		chips[i] = pickChip{Value: opt, On: on[opt]}
+	}
+	return chips
+}
+
+// worn builds a filter's closed-button state. The first pick is shown and the
+// rest become a "+N" in its own element, so ellipsising a long name can never
+// eat the count; the full list is the button's tooltip. empty is what the
+// button reads when nothing is picked — "All", the same word the menu's
+// unnarrowed chip uses.
+func worn(picked []string, empty string) pickState {
+	st := pickState{Label: empty, On: len(picked) > 0}
+	if len(picked) == 0 {
+		return st
+	}
+	st.Label = picked[0]
+	if len(picked) > 1 {
+		st.More = "+" + strconv.Itoa(len(picked)-1)
+	}
+	st.Title = strings.Join(picked, ", ")
+	return st
+}
+
+// wornView is the View menu's version of worn: the statuses on show, with
+// "saved" first when the bookmark filter is on. Unread-only is the landing
+// view, so it wears its name without counting as narrowed.
+func wornView(unread, seen, hidden, bookmarked bool) pickState {
+	var picked []string
+	if bookmarked {
+		picked = append(picked, "saved")
+	}
+	for _, unit := range []struct {
+		on   bool
+		name string
+	}{{unread, "unread"}, {seen, "seen"}, {hidden, "hidden"}} {
+		if unit.on {
+			picked = append(picked, unit.name)
 		}
 	}
-	sort.Strings(out)
-	return out
+	st := worn(picked, "none")
+	st.On = !(unread && !seen && !hidden && !bookmarked)
+	return st
 }
 
 func toRows(rows []store.ItemRow) []rowData {
@@ -676,6 +811,19 @@ func publishedLabel(published string, custom bool) string {
 		return "All"
 	default:
 		return published
+	}
+}
+
+// sortLabel names the active sort on the filter's closed button, spelled the
+// way the chips inside the menu spell it rather than the way the store does.
+func sortLabel(sort string) string {
+	switch sort {
+	case store.SortByOldest:
+		return "Oldest"
+	case store.SortByScore:
+		return "Score"
+	default:
+		return "Latest"
 	}
 }
 

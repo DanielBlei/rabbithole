@@ -217,6 +217,21 @@ func TestPageDataCmd(t *testing.T) {
 		},
 		{"no status picked", pageData{}, "rabbithole feed --status none"},
 		{
+			"search, quoted because it's free text",
+			pageData{FilterShowUnread: true, FilterSearch: "edge cases"},
+			`rabbithole feed --unread --search "edge cases"`,
+		},
+		{
+			// Only the picked chips make it into the line, repeated per pick.
+			"multi-select chips",
+			pageData{
+				FilterShowUnread: true,
+				Sources:          []pickChip{{Value: "Red Hat", On: true}, {Value: "HF blog"}},
+				Tags:             []pickChip{{Value: "AI", On: true}, {Value: "Infra", On: true}},
+			},
+			`rabbithole feed --unread --source "Red Hat" --tag "AI" --tag "Infra"`,
+		},
+		{
 			"custom range wins over the window",
 			pageData{
 				FilterShowUnread: true,
@@ -234,6 +249,83 @@ func TestPageDataCmd(t *testing.T) {
 				t.Errorf("cmd() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// The search control is a real query, not only a client-side filter: search=
+// narrows what the server renders (so an item below the page's row cap is
+// reachable), and the text comes back in the field it was typed into.
+func TestFeedSearch(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	items := []feeds.Item{
+		{ID: "a", Source: "S1", Title: "Kubernetes at the edge", Link: "https://x/a"},
+		{ID: "b", Source: "S1", Title: "Fine-tuning on one GPU", Link: "https://x/b"},
+	}
+	if err := db.Record(context.Background(), items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	w := New(db, &config.Config{}, ":8080", "", testIngestManager(t, db))
+
+	body := get(t, w, "/feed?view=1&unread=1&search=kuber")
+	if !strings.Contains(body, "Kubernetes at the edge") {
+		t.Errorf("search dropped the matching item; body=%s", body)
+	}
+	if strings.Contains(body, "Fine-tuning on one GPU") {
+		t.Error("search rendered an item it doesn't match")
+	}
+	if !strings.Contains(body, `value="kuber"`) {
+		t.Error("search text didn't come back in the search field")
+	}
+}
+
+// Source and tag chips are store queries, not a sieve over the rendered rows:
+// they narrow what comes back, their options survive being picked, and the
+// clear-all way out appears only once something is narrowing.
+func TestFeedSourceAndTagFilters(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	items := []feeds.Item{
+		{ID: "a", Source: "Red Hat", Title: "Edge computing", Link: "https://x/a", Tags: []string{"Infra"}},
+		{ID: "b", Source: "HF blog", Title: "Small models", Link: "https://x/b", Tags: []string{"AI"}},
+	}
+	if err := db.Record(context.Background(), items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	w := New(db, &config.Config{}, ":8080", "", testIngestManager(t, db))
+
+	body := get(t, w, "/feed?view=1&unread=1&source=Red+Hat")
+	if !strings.Contains(body, "Edge computing") || strings.Contains(body, "Small models") {
+		t.Errorf("source filter didn't narrow the render; body=%s", body)
+	}
+	// The whole point of sourcing the options from the store: the feed you
+	// filtered out is still on offer, so you can switch to it.
+	if !strings.Contains(body, `value="HF blog"`) {
+		t.Error("source chips lost the option that isn't in the current view")
+	}
+	if !strings.Contains(body, "filter__clear") {
+		t.Error("a narrowed bar should offer the reset")
+	}
+
+	body = get(t, w, "/feed?view=1&unread=1&tag=AI")
+	if !strings.Contains(body, "Small models") || strings.Contains(body, "Edge computing") {
+		t.Errorf("tag filter didn't narrow the render; body=%s", body)
+	}
+
+	// Both at once, on rows that satisfy neither together.
+	body = get(t, w, "/feed?view=1&unread=1&source=Red+Hat&tag=AI")
+	if strings.Contains(body, "Edge computing") || strings.Contains(body, "Small models") {
+		t.Error("source and tag should AND, not OR")
+	}
+
+	if body = get(t, w, "/feed"); strings.Contains(body, "filter__clear") {
+		t.Error("an unfiltered bar should not offer the reset")
 	}
 }
 

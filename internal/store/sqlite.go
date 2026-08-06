@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -509,6 +510,19 @@ type ListFilter struct {
 	Bookmarked bool
 	SortBy     string
 	Limit      int
+
+	// Search keeps items whose title, source or tags contain this text,
+	// case-insensitively. Free text, unlike Source's exact match.
+	Search string
+
+	// Sources keeps items from any one of these feeds, where Source above is a
+	// single exact match. Set both and Sources wins, the way Statuses does.
+	Sources []string
+
+	// Tags keeps items carrying any one of these tags. The column holds them
+	// comma-joined, so each is matched with its delimiters — "AI" doesn't hit
+	// "AIOps".
+	Tags []string
 }
 
 // List's result-count bounds: defaultListLimit applies when ListFilter.Limit
@@ -568,9 +582,27 @@ func (filter ListFilter) whereClause() (where []string, args []any) {
 		where = append(where, "status = ?")
 		args = append(args, filter.Status)
 	}
-	if filter.Source != "" {
+	if len(filter.Sources) > 0 {
+		placeholders := make([]string, len(filter.Sources))
+		for i, src := range filter.Sources {
+			placeholders[i] = "?"
+			args = append(args, src)
+		}
+		where = append(where, "source IN ("+strings.Join(placeholders, ", ")+")")
+	} else if filter.Source != "" {
 		where = append(where, "source = ?")
 		args = append(args, filter.Source)
+	}
+	// OR within the set: an item carrying any of the tags is in. Each side
+	// wraps both the column and the tag in commas, so a tag only matches a
+	// whole entry in the joined list.
+	if len(filter.Tags) > 0 {
+		ors := make([]string, len(filter.Tags))
+		for i, tag := range filter.Tags {
+			ors[i] = "instr(',' || lower(COALESCE(tags, '')) || ',', ',' || lower(?) || ',') > 0"
+			args = append(args, tag)
+		}
+		where = append(where, "("+strings.Join(ors, " OR ")+")")
 	}
 	if !filter.After.IsZero() {
 		where = append(where, itemDate+" >= ?")
@@ -582,6 +614,15 @@ func (filter ListFilter) whereClause() (where []string, args []any) {
 	}
 	if filter.Bookmarked {
 		where = append(where, "bookmarked = 1")
+	}
+	// One OR group, so it ANDs with the bounds above. instr rather than LIKE
+	// '%x%': the text is whatever was typed, and instr has no wildcards to
+	// escape. tags is NULL when the item carries none.
+	if filter.Search != "" {
+		where = append(where, "(instr(lower(title), lower(?)) > 0"+
+			" OR instr(lower(source), lower(?)) > 0"+
+			" OR instr(lower(COALESCE(tags, '')), lower(?)) > 0)")
+		args = append(args, filter.Search, filter.Search, filter.Search)
 	}
 	return where, args
 }
@@ -677,4 +718,42 @@ func (s *Store) Sources(ctx context.Context) ([]SourceCount, error) {
 		counts = append(counts, c)
 	}
 	return counts, rows.Err()
+}
+
+// Tags returns every distinct tag carried by stored items, sorted, case kept as
+// recorded. This is the domain of values ListFilter.Tags can match against. The
+// column holds them comma-joined, so the splitting happens here: the distinct
+// combinations are few (one per feed), which is a much smaller scan than it
+// looks.
+func (s *Store) Tags(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT DISTINCT tags FROM items WHERE tags IS NOT NULL AND tags != ''")
+	if err != nil {
+		return nil, fmt.Errorf("query tags: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	seen := map[string]string{} // lowercased -> as recorded, so casing can't split a tag in two
+	for rows.Next() {
+		var joined string
+		if err := rows.Scan(&joined); err != nil {
+			return nil, fmt.Errorf("scan tags: %w", err)
+		}
+		for _, tag := range strings.Split(joined, ",") {
+			if tag = strings.TrimSpace(tag); tag != "" {
+				if _, ok := seen[strings.ToLower(tag)]; !ok {
+					seen[strings.ToLower(tag)] = tag
+				}
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	tags := make([]string, 0, len(seen))
+	for _, tag := range seen {
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+	return tags, nil
 }
