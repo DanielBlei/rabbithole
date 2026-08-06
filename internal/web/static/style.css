@@ -1086,6 +1086,23 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 
 /* --- Ingest: runner modal ------------------------------------------------ */
 .modal__frame--ingest{width:min(880px,95vw);max-height:88vh;}
+/* A question, not a workspace: narrow enough that the two answers sit together
+   under one sentence. */
+.modal__frame--ask{width:min(440px,92vw);}
+.ask{padding:18px 20px 16px;display:flex;flex-direction:column;gap:10px;}
+.ask__lead{margin:0;font-size:1.45rem;color:var(--title);}
+.ask__name{color:var(--accent);}
+.ask__sub{margin:0;font-size:1.2rem;line-height:1.6;color:var(--text-dim);}
+.ask__sub em{color:var(--text);font-style:normal;}
+.ask__foot{display:flex;justify-content:flex-end;gap:9px;margin-top:4px;}
+
+/* Sources is wider than the runner: it carries two columns, not a log. Its
+   height comes from the chosen page size (see .src__cols), so it is the same
+   every time you open it and never grows as you add feeds — but it is the
+   setting that decides, not the screen. 88vh is only a backstop for 20-per-page
+   on a short window. */
+.modal__frame--sources{width:min(1100px,96vw);max-height:88vh;}
+.modal__foot--sources{text-align:right;}
 /* Peek at the running config before triggering — swaps the modal to the
    read-only config viewer (close it and reopen ingest from the bar). Styled
    as a proper pill button so it doesn't hide in the footer text. */
@@ -1218,17 +1235,11 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 /* --- Sources: the feed set as settings ----------------------------------- */
 /* Two columns: a dense list you scan and toggle, and a pane for the one feed
    you're editing. The list carries the enable switch because parking feeds is
-   the common errand and shouldn't cost a trip through the editor. */
-.src-pane{display:flex;flex-direction:column;min-height:0;}
+   the common errand and shouldn't cost a trip through the editor.
+   This lives in a dialog, so it takes its height from the frame rather than the
+   viewport: the section flexes, and the two columns scroll inside it. */
+.src-pane{display:flex;flex-direction:column;min-height:0;flex:1 1 auto;}
 .src__sep{color:var(--line);}
-
-/* Only rendered when the ingest runner sent you here. */
-.src__back{padding:10px 16px 0;}
-.src__backlink{
-  display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:999px;
-  background:var(--fill);color:var(--text-dim);font-size:1.2rem;text-decoration:none;
-}
-.src__backlink:hover{background:var(--fill-hover);color:var(--accent);}
 
 /* The toolbar sits outside the swapped body, so a filtered view survives an
    edit and the search box never loses focus mid-repaint. */
@@ -1277,18 +1288,64 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 .src__note{margin:10px 16px 0;padding:9px 13px;border-radius:8px;background:var(--fill);
   font-size:1.25rem;color:var(--text-dim);}
 
+/* The columns reserve exactly one page of rows. That one number sets the
+   dialog's height, so it is stable whatever the last page holds and whether or
+   not the editor is open — and it shrinks when 88vh says it must, at which
+   point both columns scroll. --src-per is stamped on <html> by
+   static/js/sources.js from the saved per-page choice. */
+:root{ --src-row-h:37px; --src-per:10; }
+/* The floor is the editor's doing, not the list's: a page of 10 rows is shorter
+   than the form beside it, and without it the form scrolled inside its own
+   column. Below that the list simply carries some slack under its last row. */
 .src__cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);
-  gap:0;min-height:0;flex:1 1 auto;}
+  gap:0;min-height:0;flex:1 1 auto;
+  height:max(calc(var(--src-per) * var(--src-row-h) + 16px), 460px);}
+/* The list column: a scroll box that takes the height going, with the pager
+   pinned under it. The rule is carried by the column so the pager sits inside
+   it rather than beside it. */
+.src__col{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--hairline);}
 .src__list{
-  min-height:0;max-height:62vh;overflow-y:auto;overscroll-behavior:contain;
-  padding:8px 0;border-right:1px solid var(--hairline);
+  flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+  padding:8px 0;
 }
+/* Same chips as the ingest history pager, one tier smaller — this one paginates
+   a column, not a dialog. Arrows on the left, the page-size picker pinned right;
+   the arrows go when one page holds everything, the picker never does. */
+.src__pager{
+  flex:none;display:flex;align-items:center;gap:12px;
+  padding:7px 12px;border-top:1px solid var(--hairline);font-size:1.15rem;
+}
+.src__pgnav{display:flex;align-items:center;gap:10px;}
+.src__pgnav[hidden]{display:none;}
+.src__pg{
+  font-family:inherit;font-size:1.4rem;line-height:1;background:none;border:0;cursor:pointer;
+  color:var(--accent);padding:2px 11px;border-radius:999px;
+  transition:background .13s ease,color .13s ease;
+}
+.src__pg:hover:not(:disabled){background:var(--tint);}
+.src__pg:disabled{color:var(--text-dim);opacity:.35;cursor:default;}
+.src__pg-n{color:var(--text-dim);letter-spacing:.04em;white-space:nowrap;}
+
+.src__per{display:flex;align-items:center;gap:4px;margin-left:auto;}
+.src__perlbl{
+  margin-right:3px;font-size:1rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--text-dim);
+}
+.src__perbtn{
+  font-family:inherit;font-size:1.1rem;line-height:1;background:none;border:0;cursor:pointer;
+  color:var(--text-dim);padding:3px 8px;border-radius:999px;
+  transition:background .13s ease,color .13s ease;
+}
+.src__perbtn:hover{background:var(--fill-hover);color:var(--text);}
+.src__perbtn.is-on{background:var(--tint);color:var(--accent);}
 .src__empty{padding:28px 20px;color:var(--text-dim);font-size:1.3rem;}
 .src__emptysub{margin-top:6px;font-size:1.2rem;opacity:.7;}
 .src__none{padding:18px 20px;color:var(--text-dim);font-size:1.25rem;font-style:italic;}
 
-/* One feed. The whole left side is the pick target; the switch is its own. */
-.srow{display:flex;align-items:center;gap:10px;padding:0 14px 0 16px;}
+/* One feed. The whole left side is the pick target; the switch is its own.
+   A set height, so a page of N rows is always the same N rows tall and the
+   dialog can reserve exactly that much without measuring anything. */
+.srow{display:flex;align-items:center;gap:10px;padding:0 14px 0 16px;height:var(--src-row-h);}
 .srow--filtered{display:none;}
 .srow--off .srow__nm{color:var(--text-dim);}
 .srow--gone{opacity:.55;}
@@ -1326,7 +1383,62 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 .srow__tg--restore{padding:3px 11px;}
 
 /* --- Sources: the detail pane -------------------------------------------- */
-.src__detail{min-height:0;overflow-y:auto;overscroll-behavior:contain;max-height:62vh;}
+.src__detail{position:relative;min-height:0;overflow-y:auto;overscroll-behavior:contain;}
+/* The add confirmation: the command you just ran, printed on a card over a
+   blurred wash of the form you're about to reuse. Holds long enough to read,
+   then clears itself off. Translucent rather than opaque — the form showing
+   through is the point, it says where you're being put back. */
+.sdet__flash{
+  position:absolute;inset:0;z-index:2;pointer-events:none;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(26,35,39,.58);
+  -webkit-backdrop-filter:blur(6px) saturate(1.3);
+  backdrop-filter:blur(6px) saturate(1.3);
+  animation:sdet-flash 3s ease forwards;
+}
+.sdet__flashcard{
+  max-width:calc(100% - 44px);
+  padding:13px 20px;border-radius:12px;
+  background:var(--overlay);border:1px solid var(--hairline-strong);
+  -webkit-backdrop-filter:blur(22px) saturate(1.6);
+  backdrop-filter:blur(22px) saturate(1.6);
+  box-shadow:0 12px 32px rgba(0,0,0,.45);
+  font-size:1.3rem;line-height:1.75;white-space:nowrap;
+  animation:pop-in .2s cubic-bezier(.2,1.1,.4,1);
+}
+/* The prompt, the verb and the cursor hold their size; only the feed's name
+   gives way, so a long one truncates rather than widening the card past the
+   pane. */
+.sdet__flashline{display:flex;align-items:baseline;gap:.6ch;min-width:0;}
+.sdet__flashsig,
+.sdet__flashverb{flex:none;}
+.sdet__flashname{
+  flex:0 1 auto;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.sdet__flashsig{color:var(--accent-dim);}
+.sdet__flashok{
+  margin-bottom:5px;text-align:center;
+  color:var(--score-high);font-size:1.5rem;letter-spacing:.02em;
+}
+/* A removal reads red, and the wash carries a trace of it — the one change here
+   you can't undo by typing the value back. Off the screen half a second sooner
+   than the rest: "deleted" is a shorter read, and the row leaving the list has
+   already said it. */
+.sdet__flash--bad{background:rgba(38,26,30,.60);animation-duration:2.5s;}
+.sdet__flash--bad .sdet__flashok{color:var(--warn);}
+.sdet__flash--bad .sdet__flashname{color:var(--warn);}
+/* Holds for a bit over two seconds, then takes the last third to go — long
+   enough to read without sitting in the way of the next feed. */
+@keyframes sdet-flash{
+  0%,72%{opacity:1;}
+  100%{opacity:0;visibility:hidden;}
+}
+/* Still auto-clears, it just snaps instead of fading in and out. */
+@media (prefers-reduced-motion: reduce){
+  .sdet__flash{animation-timing-function:steps(1,end);}
+  .sdet__flashcard{animation:none;}
+}
 .sdet__none{padding:30px 22px;color:var(--text-dim);font-size:1.3rem;}
 .sdet__nonesub{margin-top:6px;font-size:1.2rem;opacity:.7;}
 .sdet{display:flex;flex-direction:column;gap:12px;padding:16px 20px 18px;}
@@ -1407,23 +1519,12 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 .sdet__btn--go{background:var(--tint);color:var(--accent);}
 .sdet__btn--go:hover{background:var(--tint);color:var(--accent);filter:brightness(1.25);}
 .sdet__btn--del{color:var(--warn);}
-/* Two-step delete, CSS-only: the checkbox is the arming state, so it can't
-   survive the swap that follows and leave a live confirm behind. */
-.sdet__delsure{display:none;align-items:center;gap:8px;}
-.sdet__deltxt{font-size:1.2rem;color:var(--warn);}
-.sdet__delchk:checked ~ .sdet__delsure{display:inline-flex;}
-.sdet__delchk:checked ~ .sdet__btn--del{display:none;}
-.sdet__del{display:inline-flex;align-items:center;gap:8px;}
+.sdet__btn--del:hover{background:rgba(255,83,112,.14);color:var(--warn);}
 
 /* The same form inside a modal: it scrolls on its own so the title bar stays. */
 .sdet--defaults{min-height:0;overflow-y:auto;}
 .sdef__intro{font-size:1.25rem;color:var(--text-dim);line-height:1.5;}
 
-.src__legend{
-  display:flex;align-items:center;gap:9px;flex-wrap:wrap;
-  padding:11px 16px;border-top:1px solid var(--hairline);
-  font-size:1.15rem;color:var(--text-dim);
-}
 .src__copy{
   padding:3px 11px;border:0;border-radius:8px;background:var(--fill);
   color:var(--text-dim);font:inherit;font-size:1.15rem;cursor:pointer;
@@ -1431,11 +1532,12 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 .src__copy:hover{background:var(--fill-hover);color:var(--accent);}
 .modal__acts{display:flex;align-items:center;gap:9px;}
 
-/* Narrow: the pane drops below the list instead of squeezing beside it. */
+/* Narrow: the pane drops below the list instead of squeezing beside it. Both
+   columns then scroll on their own, so the taller of the two can't push the
+   other out of the frame. */
 @media (max-width:900px){
-  .src__cols{grid-template-columns:minmax(0,1fr);}
-  .src__list{max-height:38vh;border-right:0;border-bottom:1px solid var(--hairline);}
-  .src__detail{max-height:none;}
+  .src__cols{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr);}
+  .src__col{border-right:0;border-bottom:1px solid var(--hairline);}
   .src__acts{margin-left:0;}
 }
 

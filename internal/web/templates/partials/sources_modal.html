@@ -1,0 +1,123 @@
+{{/* Sources: the feed set as settings rather than YAML. A dialog, not a page —
+     editing feeds is a detour from reading, and the runner next to it in the
+     side menu opens the same way. The header — search, filters, actions, counts
+     — sits outside #srcBody so a mutation can repaint the columns without wiping
+     what you typed in the search box.
+
+     Its own two dialogs (defaults, export) stack in #modalTop, so Escape drops
+     back here rather than closing everything. */}}
+{{define "sourcesModal"}}
+<div class="modal" id="sourcesModal">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__frame modal__frame--sources" role="dialog" aria-modal="true" aria-label="Sources">
+    <div class="modal__bar">
+      <span class="modal__title"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span>:<span class="modal__path">~/sources</span>$&nbsp;{{template "sourceCounts" .Counts}}<span class="blink">_</span></span>
+      <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+    </div>
+
+    <section class="src-pane" data-all-tags="{{.AllTags}}">
+      <div class="src__tools">
+        <div class="src__search">
+          <label class="src__searchlbl" for="srcQuery">search</label>
+          <input class="src__input" type="search" id="srcQuery" placeholder="name, url or tag&hellip;"
+                 autocomplete="off" spellcheck="false" data-src-query>
+          <span class="src__matches" data-src-matches></span>
+        </div>
+
+        {{/* One window at a time, so it's a radio set in a popmenu wearing its value
+             on the closed button — the same key + value shape as the feed page's
+             published filter, and the same fixed footprint, so picking a state
+             doesn't shove the search box along the bar. Deleted feeds are rendered
+             with the rest and held back here rather than fetched, which is what lets
+             a delete show up without a round trip. */}}
+        <div class="filter filter--srcstate">
+          <span class="filter__key">state</span>
+          <details class="popmenu popmenu--srcstate">
+            <summary class="popmenu__btn"><span class="popmenu__val" data-src-state-label>All</span><span class="popmenu__meta"><span class="popmenu__dot popmenu__dot--amber" data-src-state-dot hidden></span></span></summary>
+            <div class="popmenu__panel">
+              <label class="pill"><input type="radio" name="state" value="all" checked data-src-state><span>All</span></label>
+              <div class="popmenu__sep" role="separator"></div>
+              <label class="pill pill--opt"><input type="radio" name="state" value="on" data-src-state><span>enabled</span></label>
+              <label class="pill pill--opt"><input type="radio" name="state" value="off" data-src-state><span>disabled</span></label>
+              <label class="pill pill--opt"><input type="radio" name="state" value="gone" data-src-state><span>deleted</span></label>
+            </div>
+          </details>
+        </div>
+
+        {{/* Defaults and export stack over this dialog rather than replacing it —
+             the same move the runner makes for its config viewer. */}}
+        <div class="src__acts">
+          <a class="src__act src__act--add" href="#" hx-get="/sources/new" hx-target="#srcBody" hx-swap="outerHTML">+ add feed</a>
+          <a class="src__act" href="#" hx-get="/sources/defaults" hx-target="#modalTop" hx-swap="innerHTML">&#9881; defaults</a>
+          <a class="src__act" href="#" hx-get="/sources/export" hx-target="#modalTop" hx-swap="innerHTML">&#8681; export</a>
+        </div>
+      </div>
+
+      {{if .Error}}<div class="src__note">{{.Error}}</div>{{end}}
+
+      {{template "sourcesBody" .}}
+    </section>
+
+    {{/* Right-aligned: under the left-aligned feed names it read as one more
+         row in the list. */}}
+    <div class="modal__foot modal__foot--sources">defaults: {{.Defaults}}</div>
+  </div>
+</div>
+{{end}}
+
+{{/* The tally, rendered as the faux shell command's arguments — the same place
+     the Maze puts its counts. Re-rendered out of band by every mutation so it
+     stays true while the bar itself stays out of the swap. */}}
+{{/* Trimmed on both sides: this sits inline in the prompt, where a stray
+     newline would collapse into a space before the command and the cursor. */}}
+{{define "sourceCounts"}}{{- if .OOB -}}
+<span class="pane__cmd" id="srcCmd" hx-swap-oob="true">{{.Cmd}}</span>
+{{- else -}}
+<span class="pane__cmd" id="srcCmd">{{.Cmd}}</span>
+{{- end}}{{end}}
+
+{{/* The two columns. Every mutation swaps this whole block: the list is small,
+     and repainting it beats tracking which rows a change touched.
+
+     The pager is a sibling of the scroll box, not a child: static/js/sources.js
+     sizes a page from the list's own height, and a pager inside it would eat
+     into the number it is measuring. It carries no server state — which page
+     you're on lives in that script, so it survives these swaps. */}}
+{{define "sourcesBody"}}
+<div class="src__cols" id="srcBody">
+  <div class="src__col">
+    <div class="src__list" data-src-list>
+      {{if .Rows}}
+        {{range .Rows}}{{template "sourceRow" .}}{{end}}
+        <div class="src__none" data-src-none hidden>nothing matches that search</div>
+      {{else}}
+        <div class="src__empty">
+          <p>No feeds yet.</p>
+          <p class="src__emptysub">Add one above, or put it in the seed file and restart.</p>
+        </div>
+      {{end}}
+    </div>
+    {{/* Arrows hide when one page holds everything; the per-page chips stay, so
+         the setting is always reachable. Which size is picked lives in
+         localStorage, not here — the server has no say in it. */}}
+    <div class="src__pager">
+      <span class="src__pgnav" data-src-pagenav hidden>
+        <button class="src__pg" type="button" data-src-page="-1" aria-label="Previous page">&lsaquo;</button>
+        <span class="src__pg-n" data-src-pagelbl aria-live="polite"></span>
+        <button class="src__pg" type="button" data-src-page="1" aria-label="Next page">&rsaquo;</button>
+      </span>
+      <span class="src__per">
+        <span class="src__perlbl">per page</span>
+        <button class="src__perbtn" type="button" data-src-per="10">10</button>
+        <button class="src__perbtn" type="button" data-src-per="15">15</button>
+        <button class="src__perbtn" type="button" data-src-per="20">20</button>
+      </span>
+    </div>
+  </div>
+  {{template "sourceDetail" .Detail}}
+</div>
+{{/* Only in a mutation response, where it is an out-of-band update to the bar.
+     Rendered unconditionally it would put a second element with this id — and a
+     stray visible tally — into the dialog. */}}
+{{if .Counts.OOB}}{{template "sourceCounts" .Counts}}{{end}}
+{{end}}

@@ -155,8 +155,7 @@
         </div>
         <div class="settings-panel__divider"></div>
         <a class="settings-panel__item" href="#" hx-get="/config" hx-target="#modal" hx-swap="innerHTML">View Config</a>
-        {{/* Not a modal: editing feeds needs room, so this one leaves. */}}
-        <a class="settings-panel__item" href="/sources">Edit Sources <span class="settings-panel__go" aria-hidden="true">&#8663;</span></a>
+        <a class="settings-panel__item" href="#" hx-get="/sources" hx-target="#modal" hx-swap="innerHTML">Edit Sources</a>
         <div class="settings-panel__divider"></div>
         <a class="settings-panel__item settings-panel__item--ext" href="https://github.com/DanielBlei/rabbithole"
            target="_blank" rel="noopener noreferrer">Source code <span class="settings-panel__ext" aria-hidden="true">&#8599;</span></a>
@@ -207,12 +206,12 @@
          the ingest over them — both a drawer's length away from the pages. */}}
     <div class="navrail__foot">
       <div class="navrail__sec"><span>config</span></div>
-      <a class="navrail__item navrail__item--cmd{{if eq .Active "sources"}} navrail__item--on{{end}}" href="/sources"
-         {{if eq .Active "sources"}}aria-current="page"{{end}}>
+      <button class="navrail__item navrail__item--cmd" type="button"
+              hx-get="/sources" hx-target="#modal" hx-swap="innerHTML" aria-label="Sources">
         <span class="navrail__sig" aria-hidden="true">$</span>
         <span class="navrail__cmd">sources</span>
         <span class="navrail__note">feeds &amp; defaults</span>
-      </a>
+      </button>
       {{template "navIngest" .Chrome}}
     </div>
   </nav>
@@ -227,6 +226,10 @@
        Policy: none of this is inline, and none of it is needed before the DOM
        is parsed. Each file says at the top what it owns. -->
   <script src="/static/js/chrome.js" defer></script>
+  {{/* Ahead of modal.js on purpose: both bind Escape on document, and the
+       sources search box has to swallow the key before the dialog acts on it. */}}
+  <script src="/static/js/tagput.js" defer></script>
+  <script src="/static/js/sources.js" defer></script>
   <script src="/static/js/modal.js" defer></script>
   <script src="/static/js/ingest.js" defer></script>
   <script src="/static/js/clock.js" defer></script>

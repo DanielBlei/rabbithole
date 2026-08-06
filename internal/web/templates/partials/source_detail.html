@@ -4,7 +4,10 @@
      default, which its placeholder shows. */}}
 {{define "sourceDetail"}}
 <div class="src__detail" id="srcDetail">
-{{if not .}}
+{{with .}}{{with .Flash}}{{template "sourceFlash" .}}{{end}}{{end}}
+{{if not (and . (or .Adding .ID))}}
+  {{/* No feed in hand — either nothing is picked, or the one that was just
+       went. A delete's confirmation lands over this. */}}
   <div class="sdet__none">
     <p>Pick a feed to see and edit its settings.</p>
     <p class="sdet__nonesub">Toggles on the left take effect straight away.</p>
@@ -14,7 +17,7 @@
         {{if .Adding}}hx-post="/sources"{{else}}hx-post="/sources/{{.ID}}"{{end}}
         hx-target="#srcBody" hx-swap="outerHTML">
     <div class="sdet__hd">
-      <span class="sdet__title">{{if .Adding}}new feed{{else}}{{.Name}}{{end}}</span>
+      <span class="sdet__title">{{if .Adding}}Add Feed{{else}}{{.Name}}{{end}}</span>
       {{if .Deleted}}<span class="sdet__gone">deleted</span>{{end}}
     </div>
 
@@ -110,18 +113,11 @@
           <button class="sdet__btn sdet__btn--go" type="submit">add feed</button>
         </span>
       {{else}}
-        {{/* Two-step delete, the same checkbox-driven confirm the task list
-             uses: no dialog, no JS, and the arming state can't survive a swap. */}}
-        <span class="sdet__del">
-          <input class="sdet__delchk" type="checkbox" id="delFeed{{.ID}}" hidden>
-          <label class="sdet__btn sdet__btn--del" for="delFeed{{.ID}}">delete</label>
-          <span class="sdet__delsure">
-            <span class="sdet__deltxt">sure?</span>
-            <button class="sdet__btn sdet__btn--del" type="button"
-                    hx-delete="/sources/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML">yes, delete</button>
-            <label class="sdet__btn" for="delFeed{{.ID}}">no</label>
-          </span>
-        </span>
+        {{/* Asks in a dialog stacked over Sources. The confirmation used to
+             appear inline, right under the pointer that had just clicked
+             delete — the one place it must not be. */}}
+        <button class="sdet__btn sdet__btn--del" type="button"
+                hx-get="/sources/{{.ID}}/confirm-delete" hx-target="#modalTop" hx-swap="innerHTML">delete</button>
         <span class="sdet__btns">
           <a class="sdet__btn" href="#" hx-get="/sources/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML">reset</a>
           <button class="sdet__btn sdet__btn--go" type="submit">save</button>
@@ -130,5 +126,52 @@
     </div>
   </form>
 {{end}}
+</div>
+{{end}}
+
+{{/* A glimpse, not a bar: it covers the pane long enough to be read, then
+     clears itself and leaves you where you were. Laid over the form rather than
+     above it so it costs the pane no height — as an inline row it pushed the
+     form into a scrollbar. Written as the command you just ran and what it
+     printed, the register the drawer and the pane bars already speak. */}}
+{{define "sourceFlash"}}
+<div class="sdet__flash{{if .Bad}} sdet__flash--bad{{end}}" role="status">
+  {{/* Outcome first and centred — that is the one word you need; the command
+       under it is the detail you read only if you want it. */}}
+  <div class="sdet__flashcard">
+    <div class="sdet__flashok">{{if .Bad}}&#10007;{{else}}&#10003;{{end}} {{.Verb}}</div>
+    {{/* The name is the only part allowed to shrink, so a long one ellipsises
+         against the pane's width instead of stretching the card off it. */}}
+    <div class="sdet__flashline">
+      <span class="sdet__flashsig">$</span>
+      <span class="pane__cmd sdet__flashverb">{{.Cmd}}</span>
+      <span class="pane__cmd sdet__flashname">{{.Name}}</span>
+      <span class="blink">_</span>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{/* Confirming a delete. Stacked in #modalTop over Sources, so Escape drops
+     back to the feed you were looking at with nothing done. The delete is soft
+     — worth saying, because it changes what "delete" means here. */}}
+{{define "sourceConfirmDelete"}}
+<div class="modal" id="sourceDeleteModal">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__frame modal__frame--ask" role="dialog" aria-modal="true" aria-label="Delete feed">
+    <div class="modal__bar">
+      <span class="modal__title">delete feed</span>
+      <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+    </div>
+    <div class="ask">
+      <p class="ask__lead">Delete <span class="ask__name">{{.Name}}</span>?</p>
+      <p class="ask__sub">Its history is kept and can be restored via the <em>deleted</em> filter.</p>
+      <div class="ask__foot">
+        <button class="sdet__btn" type="button" data-modal-close>cancel</button>
+        <button class="sdet__btn sdet__btn--del" type="button"
+                hx-delete="/sources/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML">delete</button>
+      </div>
+    </div>
+  </div>
 </div>
 {{end}}

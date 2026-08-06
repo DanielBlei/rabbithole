@@ -77,12 +77,12 @@ with no database constraint behind them — see [Boundaries](#boundaries).
 
 Three groups, largely independent:
 
-| Group | Tables | Written by |
-|---|---|---|
-| **Feed config** | `feeds`, `feed_defaults` | The Sources page, seeded at startup |
-| **Feed pipeline** | `items`, `feed_fetches` | `internal/ingest` |
-| **Run history** | `ingest_history`, `ingest_run_logs` | `internal/ingest`'s run manager |
-| **Maze boards** | `todos`, `ideas` | The web UI only |
+| Group | Tables | Written by                          |
+|---|---|-------------------------------------|
+| **Feed config** | `feeds`, `feed_defaults` | The feed sources, seeded at startup |
+| **Feed pipeline** | `items`, `feed_fetches` | `internal/ingest`                   |
+| **Run history** | `ingest_history`, `ingest_run_logs` | `internal/ingest`'s run manager     |
+| **Maze boards** | `todos`, `ideas` | The web UI only                     |
 
 ## items
 
@@ -145,7 +145,7 @@ pruned link its feed still lists returns on the next run, rescored from scratch,
 
 ## feeds and feed_defaults
 
-The configured feed set — what to fetch and how. Written by the Sources page; `feeds.yaml`
+The configured feed set — what to fetch and how. Written by the Sources section; `feeds.yaml`
 only seeds feeds the store has never seen (see
 [configuration](configuration.md#feeds)).
 
@@ -195,7 +195,7 @@ Append-only log of every feed fetch attempt, one row per feed per run.
 
 Indexed on `(feed_id, fetched_at DESC, id DESC)`, which is exactly what the health query
 walks. `FeedHealthByID` aggregates this into the status dot, failure streak, last success
-and recent-attempt strip on the Sources page.
+and recent-attempt strip on the Sources section.
 
 Keying on `feed_id` rather than the name is why renaming a feed keeps its history. The ID
 is minted from the URL when the feed is first stored and then frozen on the row, so editing
@@ -361,8 +361,8 @@ Changing the schema therefore means editing the `CREATE TABLE` block and raising
 `schemaVersion`. Existing databases are then refused until they are replaced.
 
 That used to be cheap: everything could be rebuilt from `feeds.yaml`. It is less so now that
-the feed set lives here. A feed added, retuned or deleted on the Sources page exists nowhere
-else, and the seed file cannot bring it back. That is what the Sources page's **export** is
+the feed set lives here. A feed added, retuned or deleted on the Sources section exists nowhere
+else, and the seed file cannot bring it back. That is what the Sources section's **export** is
 for — save it before replacing a database. Upgrading in place instead, most likely with an
 ordered list of migrations, is the real answer, and is a question for the first change that
 has to keep existing data.
@@ -385,6 +385,6 @@ has to keep existing data.
   from splitting a feed's items into two sources.
 - **Deleted feed rows accumulate.** Nothing collects them, and each one goes on holding its
   name and URL against reuse. That is deliberate — it is what stops a re-seed from
-  resurrecting a feed you removed — and it can be undone: the Sources page lists deleted
+  resurrecting a feed you removed — and it can be undone: the Sources section lists deleted
   feeds under the state filter's `deleted` option with a restore button, and adding the same
   URL again undeletes the row rather than failing.

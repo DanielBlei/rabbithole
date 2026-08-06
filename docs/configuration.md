@@ -118,17 +118,17 @@ feeds it added.
 So both routes work, and neither undoes the other:
 
 - Adding an entry to the file and restarting picks it up.
-- Disabling, retuning or deleting a feed on the Sources page survives every restart. That is
+- Disabling, retuning or deleting a feed on the Sources popup survives every restart. That is
   why deleting hides a feed rather than dropping it — the database has to remember it, or
   the next restart would add it back from the file.
 
-The **export** button on the Sources page gives you the current set in this same YAML shape.
+The **export** button on the Sources popup gives you the current set in this same YAML shape.
 Copy it over `configs/feeds.yaml` to reproduce the set on another install.
 
 ### Feed URLs
 
 You can leave `https://` off — `example.com/feed.xml` is filled in for you, here and on the
-Sources page. Either way it is the same feed, not two.
+Sources window. Either way it is the same feed, not two.
 
 `http://` is accepted and left as you wrote it, because some feeds only serve it. The Sources
 page marks those insecure: the request goes over the network in the clear, so anyone in
@@ -175,7 +175,7 @@ feed  →  feed defaults  →  config.yaml ingest.since  →  built-in
 ```
 
 Tags are the exception: a feed's tags are added to the defaults rather than replacing them.
-On the Sources page, leaving `since` or `max items` blank means the feed takes the default —
+On the Sources window, leaving `since` or `max items` blank means the feed takes the default —
 the greyed value in the empty box is what it will use.
 
 `ingest.feeds` in `config.yaml` names the seed file. It defaults to `feeds.yaml` beside the
@@ -208,7 +208,7 @@ A deleted feed still counts as one the database has seen, so a feed you remove s
 even while it is still listed in `feeds.yaml`. Without that, every restart would bring it
 back.
 
-To be rid of a feed for good, delete it on the Sources page *and* take it out of the seed
+To be rid of a feed for good, delete it on the Sources section *and* take it out of the seed
 file. Otherwise adding it again later restores the old feed rather than starting fresh.
 
 ### Feed identity
@@ -216,7 +216,7 @@ file. Otherwise adding it again later restores the old feed rather than starting
 Every feed gets an ID when it is first stored, derived from its URL at that moment and then
 frozen. That ID is what fetch history hangs off, so:
 
-- **Renaming keeps the feed's history**, and the Sources page re-files its existing items
+- **Renaming keeps the feed's history**, and the Sources section re-files its existing items
   under the new name so they don't split into two sources in the feed list.
 - **Changing a URL also keeps its history.** The feed is the row, not the link.
 - **Names and URLs are unique.** One feed per name (items are stored under it) and one per
@@ -225,7 +225,7 @@ frozen. That ID is what fetch history hangs off, so:
 ### Feed health
 
 Each run records, per feed, whether the fetch succeeded, how many items it returned, and how
-long it took. The Sources page presents this as a status indicator, the current failure
+long it took. The Sources section presents this as a status indicator, the current failure
 streak, the time of the last success, and a strip of recent attempts, so trends are visible
 rather than only the most recent result.
 

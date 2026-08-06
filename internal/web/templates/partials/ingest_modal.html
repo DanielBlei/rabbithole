@@ -8,11 +8,10 @@
     </div>
     {{template "ingestBody" .Body}}
     <div class="modal__foot modal__foot--ingest">
-      {{/* Stack over the runner instead of replacing it; Esc drops back here. */}}
+      {{/* Both stack over the runner instead of replacing it; Esc drops back
+           here, with the run still streaming underneath. */}}
       <a class="ing__cfg" href="#" hx-get="/config" hx-target="#modalTop" hx-swap="innerHTML">⚙ view config</a>
-      {{/* Sources is a page, not a modal, so this one navigates. The run keeps
-           going behind it, and the page offers a chip back to this log. */}}
-      <a class="ing__cfg" href="/sources?from=ingest">▤ edit sources</a>
+      <a class="ing__cfg" href="#" hx-get="/sources" hx-target="#modalTop" hx-swap="innerHTML">▤ edit sources</a>
     </div>
   </div>
 </div>

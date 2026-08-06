@@ -34,7 +34,8 @@
 </div>
 {{end}}
 
+{{/* tagput.js is in the layout now — Sources needs it on every page, and loading
+     it here as well would run its IIFE twice. */}}
 {{define "scripts"}}
-<script src="/static/js/tagput.js" defer></script>
 <script src="/static/js/maze.js" defer></script>
 {{end}}

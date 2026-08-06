@@ -17,7 +17,7 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
-// sourcesTestWeb builds a Web over a store seeded with doc, so the page is
+// sourcesTestWeb builds a Web over a store seeded with doc, so the dialog is
 // tested against feeds that went through the real write path and the real
 // defaults cascade rather than a hand-built view model.
 func sourcesTestWeb(t *testing.T, doc config.FeedsDoc) (*Web, *store.Store) {
@@ -37,7 +37,7 @@ func sourcesTestWeb(t *testing.T, doc config.FeedsDoc) (*Web, *store.Store) {
 	return New(db, cfg, ":8080", "", testIngestManager(t, db)), db
 }
 
-// feedID looks up the stored ID for a feed by name, which is how the page
+// feedID looks up the stored ID for a feed by name, which is how the dialog
 // addresses it.
 func feedID(t *testing.T, db *store.Store, name string) string {
 	t.Helper()
@@ -81,7 +81,7 @@ func seedItem(t *testing.T, db *store.Store, source string) {
 	}
 }
 
-// The page's job is showing resolved values and where they came from.
+// The dialog's job is showing resolved values and where they came from.
 func TestSourcesRendersResolvedValues(t *testing.T) {
 	w, db := sourcesTestWeb(t, config.FeedsDoc{
 		Defaults: config.FeedDefaults{MaxItems: intPtr(5), Tags: []string{"all"}},
@@ -135,14 +135,14 @@ func TestSourcesRendersResolvedValues(t *testing.T) {
 }
 
 // The tally is rendered twice — inline in the bar and again out of band by
-// every mutation — so the full page must carry exactly one of it. Two would
-// mean a duplicate id and a stray visible copy below the columns.
+// every mutation — so the dialog must carry exactly one of it. Two would mean a
+// duplicate id and a stray visible copy below the columns.
 func TestSourcesCountsRenderOnce(t *testing.T) {
 	w, db := sourcesTestWeb(t, config.FeedsDoc{
 		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
 	})
 	if n := strings.Count(get(t, w, "/sources"), `id="srcCmd"`); n != 1 {
-		t.Errorf("the counts element appears %d times in the full page, want 1", n)
+		t.Errorf("the counts element appears %d times in the dialog, want 1", n)
 	}
 	// A mutation response carries it as an out-of-band update to that element.
 	body := postForm(t, w, "/sources/"+feedID(t, db, "Alpha")+"/enabled", url.Values{"enabled": {"off"}})
@@ -353,6 +353,105 @@ func TestSourcesAddThenDeleteThenRestore(t *testing.T) {
 	}
 }
 
+// Feeds arrive in batches, so a successful add leaves the form open and empty
+// for the next one instead of opening the feed it just made — landing in the
+// editor means reaching for "add feed" again after every single one.
+func TestSourcesAddLeavesTheFormReadyForAnother(t *testing.T) {
+	w, db := sourcesTestWeb(t, config.FeedsDoc{
+		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
+	})
+	body := postForm(t, w, "/sources", url.Values{
+		"name": {"Added"}, "url": {"https://added.test/feed"},
+	})
+
+	if !strings.Contains(body, `hx-post="/sources"`) {
+		t.Errorf("the add form did not come back; body=%s", body)
+	}
+	if !strings.Contains(body, "Add Feed") {
+		t.Errorf("the form is not titled as an add; body=%s", body)
+	}
+	// A flash, not the persistent notice bar: it clears itself, and being laid
+	// over the pane it costs no height — as an inline row it scrolled the form.
+	// The name sits in its own span so it can ellipsise on its own.
+	if !strings.Contains(body, `class="sdet__flash"`) ||
+		!strings.Contains(body, `sdet__flashname">Added<`) {
+		t.Errorf("no self-clearing confirmation naming the feed created; body=%s", body)
+	}
+	if strings.Contains(body, `class="sdet__ok"`) {
+		t.Errorf("the confirmation rendered as a bar that would stay put; body=%s", body)
+	}
+	// The empty form must not be carrying the feed just made, or the next add
+	// would resubmit it and collide on the name.
+	if strings.Contains(body, `value="https://added.test/feed"`) {
+		t.Errorf("the form kept the values it just saved; body=%s", body)
+	}
+	// It still landed, and shows in the list beside the form.
+	if len(mustFeeds(t, db)) != 2 {
+		t.Fatalf("feed was not added: %+v", mustFeeds(t, db))
+	}
+	if !strings.Contains(body, `data-name="Added"`) {
+		t.Errorf("the new feed is not in the list; body=%s", body)
+	}
+}
+
+// Saving says so. The pane keeps the feed open underneath — the confirmation
+// clears itself, so it can't be in the way of the next edit.
+func TestSourcesSaveFlashesSaved(t *testing.T) {
+	w, db := sourcesTestWeb(t, config.FeedsDoc{
+		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
+	})
+	body := postForm(t, w, "/sources/"+feedID(t, db, "Alpha"), url.Values{
+		"name": {"Alpha"}, "url": {"https://alpha.test/feed"},
+	})
+
+	if !strings.Contains(body, "&#10003; saved") {
+		t.Errorf("a save gave no confirmation; body=%s", body)
+	}
+	if strings.Contains(body, "sdet__flash--bad") {
+		t.Errorf("a save flashed as a removal; body=%s", body)
+	}
+	if !strings.Contains(body, `sdet__flashname">Alpha<`) {
+		t.Errorf("the confirmation did not name the feed; body=%s", body)
+	}
+}
+
+// Deleting asks first, in a dialog stacked over Sources rather than a second
+// button under the pointer that just clicked the first one.
+func TestSourcesDeleteAsksBeforeItActs(t *testing.T) {
+	w, db := sourcesTestWeb(t, config.FeedsDoc{
+		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
+	})
+	id := feedID(t, db, "Alpha")
+
+	ask := get(t, w, "/sources/"+id+"/confirm-delete")
+	if !strings.Contains(ask, `class="modal"`) || !strings.Contains(ask, "Alpha") {
+		t.Errorf("no dialog naming the feed; body=%s", ask)
+	}
+	if !strings.Contains(ask, `hx-delete="/sources/`+id+`"`) {
+		t.Errorf("the dialog does not carry the delete; body=%s", ask)
+	}
+	// Asking must not act.
+	if len(mustFeeds(t, db)) != 1 {
+		t.Fatal("opening the confirmation deleted the feed")
+	}
+
+	rec := httptest.NewRecorder()
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/sources/"+id, nil))
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `hx-swap-oob="innerHTML:#modalTop"`) {
+		t.Errorf("the confirmation dialog was left open; body=%s", body)
+	}
+	if !strings.Contains(body, "sdet__flash--bad") || !strings.Contains(body, "&#10007; deleted") {
+		t.Errorf("no removal confirmation; body=%s", body)
+	}
+	// It names what went — after the delete the resolved set no longer has it,
+	// so the handler has to read the feed before removing it.
+	if !strings.Contains(body, `sdet__flashname">Alpha<`) {
+		t.Errorf("the confirmation did not name what was deleted; body=%s", body)
+	}
+}
+
 // Renaming has to carry the feed's existing items with it: items.source records
 // the feed's name, so otherwise they'd be filed under a label nothing claims.
 func TestSourcesRenameRefilesItems(t *testing.T) {
@@ -470,7 +569,7 @@ func TestSourcesCommandOmitsEmptyFlags(t *testing.T) {
 	}
 }
 
-// A delete has to land on the page it was made from. The row stays in the list
+// A delete has to land in the response it was made from. The row stays in the list
 // marked deleted, so the response to the delete already carries it and the
 // filter has something to reveal — no reload, no second request.
 func TestSourcesDeleteShowsUpInTheSameResponse(t *testing.T) {
@@ -494,8 +593,8 @@ func TestSourcesDeleteShowsUpInTheSameResponse(t *testing.T) {
 }
 
 // The state filter is a single popmenu, and every state it offers is one the
-// client-side script can serve — including "deleted", whose rows are on the
-// page like the rest.
+// client-side script can serve — including "deleted", whose rows are in the
+// list like the rest.
 func TestSourcesStateFilterIsSelfContained(t *testing.T) {
 	w, _ := sourcesTestWeb(t, config.FeedsDoc{
 		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
@@ -587,7 +686,7 @@ func TestSourcesSchemeIsNotASecondFeed(t *testing.T) {
 	}
 }
 
-// http is accepted, so the page has to say what it is rather than let it pass
+// http is accepted, so the form has to say what it is rather than let it pass
 // unremarked.
 func TestSourcesFlagsInsecureURL(t *testing.T) {
 	w, db := sourcesTestWeb(t, config.FeedsDoc{
@@ -622,17 +721,89 @@ func TestSourcesExportRoundTrips(t *testing.T) {
 	}
 }
 
-// The back chip is the way out of an accidental click in the ingest runner, and
-// it has no business appearing when you didn't come from there.
-func TestSourcesBackChipOnlyFromIngest(t *testing.T) {
+// Sources answers with a dialog fragment, not a page. Anything else and it
+// would land a second <html> inside the modal layer.
+func TestSourcesRendersAsAFragment(t *testing.T) {
 	w, _ := sourcesTestWeb(t, config.FeedsDoc{
 		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
 	})
-	if !strings.Contains(get(t, w, "/sources?from=ingest"), "back to ingest") {
-		t.Error("no way back to the runner after arriving from it")
+	out := get(t, w, "/sources")
+
+	if strings.Contains(out, "<!doctype") || strings.Contains(out, "<html") {
+		t.Errorf("the dialog carried a whole page with it; body=%s", out)
 	}
-	if strings.Contains(get(t, w, "/sources"), "back to ingest") {
-		t.Error("the back chip showed without having come from the runner")
+	if !strings.Contains(out, `class="modal__frame modal__frame--sources"`) {
+		t.Errorf("no dialog frame; body=%s", out)
+	}
+	// Its own two dialogs stack above it, or opening one would close Sources.
+	for _, want := range []string{
+		`hx-get="/sources/defaults" hx-target="#modalTop"`,
+		`hx-get="/sources/export" hx-target="#modalTop"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q; body=%s", want, out)
+		}
+	}
+}
+
+// The pager is inert markup the client script drives, so the only server-side
+// contract is that it ships with the list and starts hidden — a pager visible
+// before the script has counted anything would flash on every open.
+func TestSourcesShipsThePagerMarkup(t *testing.T) {
+	w, _ := sourcesTestWeb(t, config.FeedsDoc{
+		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
+	})
+	out := get(t, w, "/sources")
+
+	cases := []struct {
+		name string
+		want string
+		why  string
+	}{
+		{
+			name: "arrows hidden until counted", want: "data-src-pagenav hidden",
+			why: "they must not flash before the script knows how many pages there are",
+		},
+		{name: "step back", want: `data-src-page="-1"`, why: "the previous-page arrow"},
+		{name: "step forward", want: `data-src-page="1"`, why: "the next-page arrow"},
+		{name: "range label", want: "data-src-pagelbl", why: "where the script writes 1-10 of 24"},
+		{
+			name: "footer clears the names", want: "modal__foot--sources",
+			why: "left-aligned it read as another feed row",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if !strings.Contains(out, c.want) {
+				t.Errorf("missing %q (%s); body=%s", c.want, c.why, out)
+			}
+		})
+	}
+
+	// The size picker is always reachable, even on a set small enough that the
+	// arrows are hidden — otherwise raising it from 10 would need 11 feeds first.
+	t.Run("every page size offered", func(t *testing.T) {
+		for _, size := range []string{"10", "15", "20"} {
+			if !strings.Contains(out, `data-src-per="`+size+`"`) {
+				t.Errorf("no %s-per-page control; body=%s", size, out)
+			}
+		}
+	})
+}
+
+// Saving the defaults has to close its own dialog. The response clears
+// #modalTop, which is only correct while that is the layer it opened into.
+func TestSourcesSaveDefaultsClosesItsDialog(t *testing.T) {
+	w, _ := sourcesTestWeb(t, config.FeedsDoc{
+		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
+	})
+	body := postForm(t, w, "/sources/defaults", url.Values{"since": {"3d"}})
+
+	if !strings.Contains(body, `hx-swap-oob="innerHTML:#modalTop"`) {
+		t.Errorf("saving defaults left its dialog open; body=%s", body)
+	}
+	if !strings.Contains(body, `id="srcBody"`) {
+		t.Errorf("saving defaults did not repaint the columns underneath; body=%s", body)
 	}
 }
 

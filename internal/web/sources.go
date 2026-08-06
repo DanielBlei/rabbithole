@@ -30,17 +30,10 @@ const (
 	offChoice     = "off"
 )
 
-// sourcesData is the Sources page model: the whole feed set as rows on the
+// sourcesData is the Sources dialog model: the whole feed set as rows on the
 // left, one feed's editable settings on the right.
 type sourcesData struct {
-	Title      string
-	Active     string
-	Chrome     chromeData
 	PromptUser string
-
-	// FromIngest marks an arrival from the ingest runner's footer, which is the
-	// only case where a way back to a modal is worth putting on a page.
-	FromIngest bool
 
 	Counts   sourceCounts
 	Defaults string // one-line summary of the cascade
@@ -61,10 +54,10 @@ type sourcesData struct {
 	DefaultCap   string
 }
 
-// sourceCounts is the page's tally, rendered as the arguments of the faux shell
-// command in the pane bar — the same place the Maze puts its own counts. It
-// re-renders out of band on every mutation, so it stays true without the header
-// being part of the swap that would wipe the search box.
+// sourceCounts is the dialog's tally, rendered as the arguments of the faux
+// shell command in its title bar — the same place the Maze puts its own counts.
+// It re-renders out of band on every mutation, so it stays true without the
+// header being part of the swap that would wipe the search box.
 type sourceCounts struct {
 	OOB     bool
 	Total   int
@@ -75,7 +68,7 @@ type sourceCounts struct {
 
 // Cmd renders the tally as the command line: `sources --feeds 6 --enabled 5`.
 // Feeds and enabled are always shown; the other two only when they have
-// something to report, so a healthy page isn't padded with zeroes.
+// something to report, so a healthy set isn't padded with zeroes.
 func (c sourceCounts) Cmd() string {
 	cmd := fmt.Sprintf("sources --feeds %d --enabled %d", c.Total, c.Enabled)
 	if c.Failing > 0 {
@@ -122,6 +115,20 @@ type feedDetail struct {
 
 	Err    string // validation failure, rendered against the form
 	Notice string // something that worked but is worth saying, e.g. items re-filed
+	// Flash is the confirmation laid over the pane after a change. It clears
+	// itself; Notice stays put, which is what a caveat like a half-done rename
+	// needs. A plain "saved" only has to be seen once.
+	Flash *flashData
+}
+
+// flashData is one self-clearing confirmation: the outcome in a word, over the
+// command that produced it. Written in the shell register the drawer and the
+// pane bars already speak, so a change reads as something that ran.
+type flashData struct {
+	Verb string // the outcome: added | saved | deleted
+	Cmd  string // the command it stands in for, e.g. "feed rm"
+	Name string // the feed it happened to
+	Bad  bool   // a removal — red, and a cross rather than a tick
 }
 
 // defaultsData backs the defaults editor modal. No tags field: a tag applied to
@@ -144,19 +151,16 @@ type exportData struct {
 	Err       string
 }
 
+// handleSources opens the whole thing as a dialog. It answers with a bare
+// fragment, not a page: every route below already spoke in fragments, and this
+// was the last one that didn't.
 func (s *Web) handleSources(w http.ResponseWriter, r *http.Request) {
 	data, err := s.sourcesData(r.Context(), r.URL.Query().Get("feed"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	data.FromIngest = r.URL.Query().Get("from") == "ingest"
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := sourcesTmpl.ExecuteTemplate(w, "layout", data); err != nil {
-		// Status is likely already written; log rather than double-write.
-		log.Error().Err(err).Msg("render sources")
-	}
+	s.renderFragment(w, "sourcesModal", data)
 }
 
 // handleSourceSelect opens one feed in the detail pane.
@@ -171,14 +175,19 @@ func (s *Web) handleSourceNew(w http.ResponseWriter, r *http.Request) {
 
 // handleSourceAdd creates a feed. A failure re-renders the form with the
 // message and everything the user typed still in it.
+//
+// A success leaves the add form open and empty rather than opening the feed it
+// just made: feeds arrive in batches, and landing in the editor for one you have
+// nothing more to say about means clicking "add feed" again for every single
+// one. The new feed is in the list beside it either way, and the notice names
+// what was added.
 func (s *Web) handleSourceAdd(w http.ResponseWriter, r *http.Request) {
 	feed, err := feedFromForm(r)
 	if err != nil {
 		s.renderSourcesBody(w, r, "", addFormWithError(r, err))
 		return
 	}
-	id, err := s.db.AddFeed(r.Context(), feed)
-	if err != nil {
+	if _, err := s.db.AddFeed(r.Context(), feed); err != nil {
 		if isFeedInputError(err) {
 			s.renderSourcesBody(w, r, "", addFormWithError(r, err))
 			return
@@ -187,7 +196,11 @@ func (s *Web) handleSourceAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.afterFeedChange(r.Context())
-	s.renderSourcesBody(w, r, id, nil)
+	s.renderSourcesBody(w, r, "", &feedDetail{
+		Adding:        true,
+		EnabledChoice: inheritChoice,
+		Flash:         &flashData{Verb: "added", Cmd: "feed add", Name: feed.Name},
+	})
 }
 
 // handleSourceSave writes the detail form back.
@@ -225,7 +238,10 @@ func (s *Web) handleSourceSave(w http.ResponseWriter, r *http.Request) {
 		notice = fmt.Sprintf("renamed · re-filed %s", itemsPhrase(int(moved)))
 	}
 	s.afterFeedChange(ctx)
-	s.renderSourcesBody(w, r, id, noticeOnly(notice))
+	s.renderSourcesBody(w, r, id, &feedDetail{
+		Notice: notice,
+		Flash:  &flashData{Verb: "saved", Cmd: "feed save", Name: feed.Name},
+	})
 }
 
 // handleSourceEnabled parks or unparks a feed from its row in the list.
@@ -239,15 +255,46 @@ func (s *Web) handleSourceEnabled(w http.ResponseWriter, r *http.Request) {
 	s.renderSourcesBody(w, r, r.PathValue("id"), nil)
 }
 
-// handleSourceDelete parks a feed out of sight. The row survives, so its fetch
-// history stays attached and re-seeding won't bring it back.
-func (s *Web) handleSourceDelete(w http.ResponseWriter, r *http.Request) {
-	if err := s.db.SoftDeleteFeed(r.Context(), r.PathValue("id")); err != nil {
+// handleSourceConfirmDelete asks before removing a feed. A dialog rather than a
+// second button beside the first: the button appeared where the pointer already
+// was, which is the one place a confirmation should never be.
+func (s *Web) handleSourceConfirmDelete(w http.ResponseWriter, r *http.Request) {
+	feed, err := s.db.FeedByID(r.Context(), r.PathValue("id"))
+	if err != nil {
 		httpFeedError(w, err)
 		return
 	}
-	s.afterFeedChange(r.Context())
-	s.renderSourcesBody(w, r, "", nil)
+	s.renderFragment(w, "sourceConfirmDelete", feed)
+}
+
+// handleSourceDelete parks a feed out of sight. The row survives, so its fetch
+// history stays attached and re-seeding won't bring it back.
+func (s *Web) handleSourceDelete(w http.ResponseWriter, r *http.Request) {
+	ctx, id := r.Context(), r.PathValue("id")
+	// Read it first: the confirmation names what went, and after the delete the
+	// resolved set no longer carries it.
+	feed, err := s.db.FeedByID(ctx, id)
+	if err != nil {
+		httpFeedError(w, err)
+		return
+	}
+	if err := s.db.SoftDeleteFeed(ctx, id); err != nil {
+		httpFeedError(w, err)
+		return
+	}
+	s.afterFeedChange(ctx)
+
+	// Closes the confirm dialog, then repaints the columns underneath it.
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if _, err := w.Write(
+		[]byte(`<span id="sourcesDeleteDone" hx-swap-oob="innerHTML:#modalTop"></span>`),
+	); err != nil {
+		log.Error().Err(err).Msg("write delete response")
+		return
+	}
+	s.writeSourcesBody(w, r, "", &feedDetail{
+		Flash: &flashData{Verb: "deleted", Cmd: "feed rm", Name: feed.Name, Bad: true},
+	})
 }
 
 func (s *Web) handleSourceRestore(w http.ResponseWriter, r *http.Request) {
@@ -270,8 +317,7 @@ func (s *Web) handleSourceDefaults(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSourceSaveDefaults writes the set-wide fallbacks. Every feed that
-// inherits moves at once, so this re-renders the whole page rather than a
-// fragment.
+// inherits moves at once, so this repaints the whole list rather than one row.
 func (s *Web) handleSourceSaveDefaults(w http.ResponseWriter, r *http.Request) {
 	defaults, err := defaultsFromForm(r)
 	if err == nil {
@@ -340,7 +386,7 @@ func marshalFeedsDoc(doc config.FeedsDoc) (string, error) {
 	return out.String(), nil
 }
 
-// sourcesData assembles the page: the resolved feed set joined with each feed's
+// sourcesData assembles the dialog: the resolved feed set joined with each feed's
 // fetch history, plus whichever feed the detail pane is showing.
 func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, error) {
 	doc, err := s.db.FeedsDoc(ctx)
@@ -358,9 +404,6 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 
 	defaultSince, defaultCap := blankFallbacks(doc.Defaults, s.cfg.Ingest.Since.Std())
 	data := sourcesData{
-		Title:        "Sources · The Rabbit Hole",
-		Active:       "sources",
-		Chrome:       s.chrome(ctx),
 		PromptUser:   s.user,
 		Defaults:     defaultsSummary(doc.Defaults, s.cfg.Ingest.Since.Std()),
 		DefaultSince: defaultSince,
@@ -368,7 +411,7 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 		Counts:       sourceCounts{Total: len(resolved), Deleted: len(deleted)},
 	}
 
-	// History is a join, not a requirement: losing it still leaves a page you
+	// History is a join, not a requirement: losing it still leaves a dialog you
 	// can edit, so it degrades to a note rather than an error.
 	health, err := s.db.FeedHealthByID(ctx, feedStripLen)
 	if err != nil {
@@ -411,10 +454,10 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 	return data, nil
 }
 
-// stampDefaults copies the page's blank-field fallbacks onto the detail pane,
+// stampDefaults copies the dialog's blank-field fallbacks onto the detail pane,
 // wherever that pane came from — the store, a fresh add form, or a rejected
 // submission being re-rendered. The template reads them as placeholders, and it
-// only has the pane as its dot, not the page.
+// only has the pane as its dot, not the dialog.
 func stampDefaults(data *sourcesData) {
 	if data.Detail != nil {
 		data.Detail.DefaultSince = data.DefaultSince
@@ -521,14 +564,17 @@ func (s *Web) writeSourcesBody(w http.ResponseWriter, r *http.Request, selected 
 		stampDefaults(&data)
 	}
 	data.Counts.OOB = true
-	if err := sourcesTmpl.ExecuteTemplate(w, "sourcesBody", data); err != nil {
+	if err := feedTmpl.ExecuteTemplate(w, "sourcesBody", data); err != nil {
 		log.Error().Err(err).Msg("render sources body")
 	}
 }
 
+// renderFragment writes one of the sources partials. They live in
+// templates/partials, so any page set carries them — feedTmpl will do, the same
+// call the config and ingest modals make.
 func (s *Web) renderFragment(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := sourcesTmpl.ExecuteTemplate(w, name, data); err != nil {
+	if err := feedTmpl.ExecuteTemplate(w, name, data); err != nil {
 		log.Error().Err(err).Str("fragment", name).Msg("render sources fragment")
 	}
 }
@@ -636,22 +682,17 @@ func editFormWithError(r *http.Request, id string, err error) *feedDetail {
 	return form
 }
 
-func noticeOnly(notice string) *feedDetail {
-	if notice == "" {
-		return nil
-	}
-	return &feedDetail{Notice: notice}
-}
-
 // mergeDetail lays the handler's overrides over the pane loaded from the store.
 // A notice on its own leaves the stored values alone; a form carrying an error
 // replaces them, because those are the values the user is still editing.
 func mergeDetail(stored, override *feedDetail) *feedDetail {
 	if override.Err == "" && !override.Adding {
 		if stored == nil {
-			return nil
+			// Nothing to lay it over — a delete's confirmation is the whole
+			// pane, above the placeholder that has taken the form's place.
+			return override
 		}
-		stored.Notice = override.Notice
+		stored.Notice, stored.Flash = override.Notice, override.Flash
 		return stored
 	}
 	if stored != nil {
