@@ -17,8 +17,9 @@ CSRF tokens, and anything that needs an attacker to already have a shell on the 
 ## Where things stand
 
 There is no login. Anyone who can reach the port gets the whole app: your items, the ingest
-runs, the todos and ideas. That works today because `serve` listens on `127.0.0.1:8080`, so
-whoever can reach it is already on your machine.
+runs, the todos and ideas, and the feed set — the Sources page can add, retune and delete
+feeds. That works today because `serve` listens on `127.0.0.1:8080`, so whoever can reach it
+is already on your machine.
 
 Authentication and CSRF protection are future work, waiting on a question that is still open:
 whether this should be reachable from another device at all.
@@ -37,8 +38,13 @@ Feed content and model output both end up on a page. Rendered Markdown is saniti
 [bluemonday](https://github.com/microcosm-cc/bluemonday) (`internal/web/markdown.go`);
 everything else goes through `html/template`, which escapes by default.
 
-Feeds are fetched as configured, local network addresses included, so treat `feeds.yaml` as
+Feeds are fetched as configured, local network addresses included. They live in the database
+and are edited from the Sources page; `feeds.yaml` seeds new ones at startup. Treat both as
 something only you write.
+
+A feed URL is taken as given, apart from filling in a missing `https://`. An `http://` feed
+is fetched over plain http and flagged as insecure on the Sources page — the request is
+readable in transit, so anyone on the network can see which feed you asked for.
 
 ## What leaves your machine
 

@@ -34,25 +34,42 @@ func writeConfigWithFeeds(t *testing.T, configBody, feedsBody string) string {
 	return cfgPath
 }
 
-// loadFeeds loads a config over the given feeds file and fails on error.
-func loadWithFeeds(t *testing.T, feedsBody string) *Config {
+// ptrDuration builds an optional window for a defaults or feed override.
+func ptrDuration(d time.Duration) *Duration {
+	v := Duration(d)
+	return &v
+}
+
+// resolveFeedsBody parses a feeds document and walks it through the cascade
+// against baseConfig's ingest.since, which is what these tests assert against.
+func resolveFeedsBody(t *testing.T, feedsBody string) []ResolvedFeed {
 	t.Helper()
-	cfg, err := Load(writeConfigWithFeeds(t, baseConfig, feedsBody))
+	cfgPath := writeConfigWithFeeds(t, baseConfig, feedsBody)
+	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	return cfg
+	path, _ := cfg.FeedsFilePath(cfgPath)
+	doc, found, err := ReadFeedsFile(path)
+	if err != nil || !found {
+		t.Fatalf("ReadFeedsFile(%s): found=%v err=%v", path, found, err)
+	}
+	resolved, err := ResolveFeeds(*doc, cfg.Ingest.Since.Std())
+	if err != nil {
+		t.Fatalf("ResolveFeeds: %v", err)
+	}
+	return resolved
 }
 
 // feedByName finds a resolved feed for assertions.
-func feedByName(t *testing.T, cfg *Config, name string) ResolvedFeed {
+func feedByName(t *testing.T, feeds []ResolvedFeed, name string) ResolvedFeed {
 	t.Helper()
-	for _, f := range cfg.Feeds.All {
+	for _, f := range feeds {
 		if f.Name == name {
 			return f
 		}
 	}
-	t.Fatalf("no resolved feed named %q in %+v", name, cfg.Feeds.All)
+	t.Fatalf("no resolved feed named %q in %+v", name, feeds)
 	return ResolvedFeed{}
 }
 
@@ -74,7 +91,7 @@ feeds:
   - name: Inherits
     url: http://b.test/feed
 `
-	cfg := loadWithFeeds(t, feedsBody)
+	resolved := resolveFeedsBody(t, feedsBody)
 
 	cases := []struct {
 		name         string
@@ -113,7 +130,7 @@ feeds:
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := feedByName(t, cfg, c.feed)
+			f := feedByName(t, resolved, c.feed)
 			if f.Since != c.wantSince {
 				t.Errorf("Since = %v, want %v", f.Since, c.wantSince)
 			}
@@ -141,8 +158,7 @@ feeds:
 
 // With no defaults block, each knob falls all the way to its outermost source.
 func TestResolveFeedOutermostFallbacks(t *testing.T) {
-	cfg := loadWithFeeds(t, "feeds:\n  - name: A\n    url: http://a.test/feed\n")
-	f := feedByName(t, cfg, "A")
+	f := feedByName(t, resolveFeedsBody(t, "feeds:\n  - name: A\n    url: http://a.test/feed\n"), "A")
 
 	cases := []struct {
 		field      string
@@ -166,7 +182,7 @@ func TestResolveFeedOutermostFallbacks(t *testing.T) {
 	}
 }
 
-func TestFeedSetEnabled(t *testing.T) {
+func TestEnabledFeeds(t *testing.T) {
 	const feedsBody = `
 defaults:
   enabled: false
@@ -180,17 +196,17 @@ feeds:
     url: http://c.test/feed
     enabled: false
 `
-	cfg := loadWithFeeds(t, feedsBody)
+	resolved := resolveFeedsBody(t, feedsBody)
 
-	enabled := cfg.Feeds.Enabled()
+	enabled := EnabledFeeds(resolved)
 	if len(enabled) != 1 || enabled[0].Name != "On" {
-		t.Fatalf("Enabled() = %+v, want just On", enabled)
+		t.Fatalf("EnabledFeeds() = %+v, want just On", enabled)
 	}
-	// All three stay in the set — parked, not removed, so the viewer shows them.
-	if cfg.Feeds.Len() != 3 {
-		t.Errorf("Len() = %d, want all 3 retained", cfg.Feeds.Len())
+	// All three stay in the set — parked, not removed, so the page shows them.
+	if len(resolved) != 3 {
+		t.Errorf("resolved = %d feeds, want all 3 retained", len(resolved))
 	}
-	if f := feedByName(t, cfg, "OffByDefault"); f.EnabledFrom != OriginDefaults {
+	if f := feedByName(t, resolved, "OffByDefault"); f.EnabledFrom != OriginDefaults {
 		t.Errorf("OffByDefault.EnabledFrom = %q, want defaults", f.EnabledFrom)
 	}
 }
@@ -220,16 +236,25 @@ func TestFeedID(t *testing.T) {
 	if n := len(FeedID(url)); n != feedIDLen {
 		t.Errorf("FeedID length = %d, want %d", n, feedIDLen)
 	}
-	// The ID must survive a rename: it's a function of the URL alone.
-	cfg := loadWithFeeds(t, "feeds:\n  - name: Before\n    url: "+url+"\n")
-	renamed := loadWithFeeds(t, "feeds:\n  - name: After\n    url: "+url+"\n")
-	if cfg.Feeds.All[0].ID != renamed.Feeds.All[0].ID {
+	// A feed straight from the seed file has its ID minted from the URL alone,
+	// so the same URL under a different name is the same feed.
+	before := resolveFeedsBody(t, "feeds:\n  - name: Before\n    url: "+url+"\n")
+	after := resolveFeedsBody(t, "feeds:\n  - name: After\n    url: "+url+"\n")
+	if before[0].ID != after[0].ID {
 		t.Error("renaming a feed changed its ID; history would be orphaned")
+	}
+
+	// Once stored, the ID is carried rather than re-derived, so changing the
+	// URL keeps the feed (and its history) instead of forking a new one.
+	stored := Feed{ID: "frozen00id00", Name: "Stored", URL: "https://moved.test/feed"}
+	if got := resolveFeed(stored, FeedDefaults{}, time.Hour).ID; got != stored.ID {
+		t.Errorf("stored ID = %q, want the frozen %q", got, stored.ID)
 	}
 }
 
-// An explicit ingest.feeds is honoured and its path is reported for the viewer.
-func TestLoadFeedsExplicitPath(t *testing.T) {
+// An explicit ingest.feeds is honoured; it names the seed file rather than the
+// live feed set, which is in the store.
+func TestFeedsFilePathExplicit(t *testing.T) {
 	dir := t.TempDir()
 	feedsPath := filepath.Join(dir, "sources.yaml")
 	if err := os.WriteFile(feedsPath,
@@ -245,58 +270,53 @@ func TestLoadFeedsExplicitPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Feeds.Path != feedsPath {
-		t.Errorf("Feeds.Path = %q, want %q", cfg.Feeds.Path, feedsPath)
+	path, explicit := cfg.FeedsFilePath(cfgPath)
+	if path != feedsPath || !explicit {
+		t.Fatalf("FeedsFilePath = (%q, %v), want (%q, true)", path, explicit, feedsPath)
 	}
-	if cfg.Feeds.Len() != 1 {
-		t.Errorf("Len() = %d, want 1", cfg.Feeds.Len())
+	doc, found, err := ReadFeedsFile(path)
+	if err != nil || !found || len(doc.Feeds) != 1 {
+		t.Fatalf("ReadFeedsFile: found=%v err=%v doc=%+v", found, err, doc)
 	}
 }
 
-// The implicit feeds file is found beside the config, whatever the cwd.
-func TestLoadFeedsImplicitPathIsBesideConfig(t *testing.T) {
+// The implicit seed file is found beside the config, whatever the cwd.
+func TestFeedsFilePathIsBesideConfig(t *testing.T) {
 	cfgPath := writeConfigWithFeeds(t, baseConfig, "feeds:\n  - name: A\n    url: http://a.test/feed\n")
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if want := filepath.Join(filepath.Dir(cfgPath), "feeds.yaml"); cfg.Feeds.Path != want {
-		t.Errorf("Feeds.Path = %q, want %q", cfg.Feeds.Path, want)
+	path, explicit := cfg.FeedsFilePath(cfgPath)
+	if want := filepath.Join(filepath.Dir(cfgPath), "feeds.yaml"); path != want || explicit {
+		t.Errorf("FeedsFilePath = (%q, %v), want (%q, false)", path, explicit, want)
 	}
 }
 
-// Load-time failures, each naming the fix rather than surfacing a raw error.
-func TestLoadFeedsErrors(t *testing.T) {
-	cases := []struct {
-		name    string
-		config  string
-		feeds   string // empty means "no feeds.yaml on disk"
-		wantErr string
-	}{
-		{
-			name:    "no feeds file at all",
-			config:  baseConfig,
-			wantErr: "no feeds configured",
-		},
-		{
-			name:    "explicit ingest.feeds missing",
-			config:  baseConfig + "  feeds: /nope/feeds.yaml\n",
-			wantErr: "does not exist",
-		},
-		{
-			name:    "unparseable feeds file",
-			config:  baseConfig,
-			feeds:   "feeds:\n  - name: [this is not\n",
-			wantErr: "parse feeds file",
-		},
+// A missing seed file is an ordinary state now that the store owns the feeds —
+// it must not stop the config from loading.
+func TestReadFeedsFileMissingIsNotAnError(t *testing.T) {
+	cfgPath := writeConfigWithFeeds(t, baseConfig, "")
+	if _, err := Load(cfgPath); err != nil {
+		t.Fatalf("Load with no seed file: %v", err)
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			_, err := Load(writeConfigWithFeeds(t, c.config, c.feeds))
-			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
-				t.Fatalf("err = %v, want one containing %q", err, c.wantErr)
-			}
-		})
+	path, _ := (&Config{}).FeedsFilePath(cfgPath)
+	doc, found, err := ReadFeedsFile(path)
+	if err != nil {
+		t.Fatalf("ReadFeedsFile: %v", err)
+	}
+	if found || doc != nil {
+		t.Errorf("found=%v doc=%+v, want a clean miss", found, doc)
+	}
+}
+
+// A seed file that won't parse says so, naming the file.
+func TestReadFeedsFileUnparseable(t *testing.T) {
+	cfgPath := writeConfigWithFeeds(t, baseConfig, "feeds:\n  - name: [this is not\n")
+	path, _ := (&Config{}).FeedsFilePath(cfgPath)
+	_, _, err := ReadFeedsFile(path)
+	if err == nil || !strings.Contains(err.Error(), "parse feeds file") {
+		t.Fatalf("err = %v, want one naming the parse failure", err)
 	}
 }
 
@@ -315,12 +335,6 @@ func TestResolveFeedsValidation(t *testing.T) {
 			name:    "missing name",
 			feeds:   "feeds:\n  - url: http://a.test/feed\n",
 			wantErr: "has no name",
-		},
-		{
-			// Items are stored under the feed name, so duplicates would merge.
-			name:    "duplicate name",
-			feeds:   "feeds:\n  - name: A\n    url: http://a.test/1\n  - name: A\n    url: http://a.test/2\n",
-			wantErr: "must be unique",
 		},
 		{
 			name:    "zero since",
@@ -342,17 +356,100 @@ func TestResolveFeedsValidation(t *testing.T) {
 			feeds:   "defaults:\n  max_items: -5\nfeeds:\n  - name: A\n    url: http://a.test/feed\n",
 			wantErr: "max_items must be",
 		},
-		{
-			name:    "empty list",
-			feeds:   "defaults:\n  since: 3d\nfeeds: []\n",
-			wantErr: "at least one feed",
-		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := Load(writeConfigWithFeeds(t, baseConfig, c.feeds))
+			cfgPath := writeConfigWithFeeds(t, baseConfig, c.feeds)
+			path, _ := (&Config{}).FeedsFilePath(cfgPath)
+			doc, _, err := ReadFeedsFile(path)
+			if err != nil {
+				t.Fatalf("ReadFeedsFile: %v", err)
+			}
+			_, err = ResolveFeeds(*doc, 10*24*time.Hour)
 			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
 				t.Fatalf("err = %v, want one containing %q", err, c.wantErr)
+			}
+		})
+	}
+}
+
+// An empty set resolves cleanly. Feeds live in the store, which can be empty on
+// a fresh install or after the last one is deleted — the ingest cycle and the
+// Sources page both handle it, so the resolver has no business refusing.
+func TestResolveFeedsAllowsAnEmptySet(t *testing.T) {
+	resolved, err := ResolveFeeds(FeedsDoc{Defaults: FeedDefaults{Since: ptrDuration(72 * time.Hour)}}, time.Hour)
+	if err != nil {
+		t.Fatalf("ResolveFeeds on an empty set: %v", err)
+	}
+	if len(resolved) != 0 {
+		t.Errorf("resolved = %+v, want none", resolved)
+	}
+}
+
+// Both functions read the same typed address, so they are checked over one set
+// of inputs: what it becomes, and whether it is worth warning about.
+func TestNormalizeFeedURL(t *testing.T) {
+	cases := []struct {
+		name         string
+		in           string
+		want         string
+		wantInsecure bool
+	}{
+		{name: "bare host", in: "example.test/feed.xml", want: "https://example.test/feed.xml"},
+		{name: "host only", in: "example.test", want: "https://example.test"},
+		{name: "protocol relative", in: "//example.test/feed", want: "https://example.test/feed"},
+		{name: "https untouched", in: "https://example.test/feed", want: "https://example.test/feed"},
+		{
+			name: "http kept as written", in: "http://example.test/feed",
+			want: "http://example.test/feed", wantInsecure: true,
+		},
+		{
+			name: "uppercase scheme", in: "HTTP://example.test/feed",
+			want: "HTTP://example.test/feed", wantInsecure: true,
+		},
+		{name: "surrounding space", in: "  example.test/feed  ", want: "https://example.test/feed"},
+		{name: "empty stays empty", in: "   ", want: ""},
+		// Left alone so ValidateFeedURL can reject it by name rather than
+		// reporting a URL the user never typed.
+		{name: "wrong scheme", in: "ftp://example.test/feed", want: "ftp://example.test/feed"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := NormalizeFeedURL(c.in); got != c.want {
+				t.Errorf("NormalizeFeedURL(%q) = %q, want %q", c.in, got, c.want)
+			}
+			if got := InsecureFeedURL(c.in); got != c.wantInsecure {
+				t.Errorf("InsecureFeedURL(%q) = %v, want %v", c.in, got, c.wantInsecure)
+			}
+		})
+	}
+}
+
+func TestValidateFeedURL(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		wantErr string
+	}{
+		{name: "https", in: "https://example.test/feed.xml"},
+		{name: "http", in: "http://example.test/rss"},
+		{name: "surrounding space is trimmed", in: "  https://example.test/feed  "},
+		{name: "empty", in: "", wantErr: "url is required"},
+		{name: "no scheme", in: "example.test/feed", wantErr: "must start with http"},
+		{name: "wrong scheme", in: "ftp://example.test/feed", wantErr: "must start with http"},
+		{name: "no host", in: "https:///feed", wantErr: "has no host"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := ValidateFeedURL(c.in)
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateFeedURL(%q) = %v, want nil", c.in, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+				t.Fatalf("ValidateFeedURL(%q) = %v, want one containing %q", c.in, err, c.wantErr)
 			}
 		})
 	}
@@ -361,13 +458,13 @@ func TestResolveFeedsValidation(t *testing.T) {
 // Two feeds may share a URL — they share one fetch-history entry, which is
 // warned about rather than rejected.
 func TestResolveFeedsAllowsDuplicateURLs(t *testing.T) {
-	cfg := loadWithFeeds(t, "feeds:\n"+
+	resolved := resolveFeedsBody(t, "feeds:\n"+
 		"  - name: One\n    url: http://a.test/feed\n"+
 		"  - name: Two\n    url: http://a.test/feed\n")
-	if cfg.Feeds.Len() != 2 {
-		t.Fatalf("Len() = %d, want 2", cfg.Feeds.Len())
+	if len(resolved) != 2 {
+		t.Fatalf("resolved = %d feeds, want 2", len(resolved))
 	}
-	if cfg.Feeds.All[0].ID != cfg.Feeds.All[1].ID {
+	if resolved[0].ID != resolved[1].ID {
 		t.Error("feeds sharing a URL should share an ID (and thus one history entry)")
 	}
 }
@@ -409,13 +506,15 @@ func TestFeedsExampleFileLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfgPath := writeConfigWithFeeds(t, baseConfig+"  feeds: "+examplePath+"\n", "")
-
-	cfg, err := Load(cfgPath)
-	if err != nil {
-		t.Fatalf("configs/feeds.example.yaml does not load: %v", err)
+	doc, found, err := ReadFeedsFile(examplePath)
+	if err != nil || !found {
+		t.Fatalf("configs/feeds.example.yaml does not parse: found=%v err=%v", found, err)
 	}
-	if cfg.Feeds.Len() == 0 {
+	resolved, err := ResolveFeeds(*doc, 10*24*time.Hour)
+	if err != nil {
+		t.Fatalf("configs/feeds.example.yaml does not resolve: %v", err)
+	}
+	if len(resolved) == 0 {
 		t.Fatal("example resolved to no feeds")
 	}
 
@@ -426,9 +525,9 @@ func TestFeedsExampleFileLoads(t *testing.T) {
 		withCap     int
 		withSince   int
 		withTags    int
-		defaultsSet = cfg.Feeds.Defaults.Since != nil && cfg.Feeds.Defaults.MaxItems != nil
+		defaultsSet = doc.Defaults.Since != nil && doc.Defaults.MaxItems != nil
 	)
-	for _, f := range cfg.Feeds.All {
+	for _, f := range resolved {
 		if !f.Enabled {
 			parked++
 		}
@@ -451,7 +550,7 @@ func TestFeedsExampleFileLoads(t *testing.T) {
 	if withCap == 0 || withSince == 0 {
 		t.Error("example should demonstrate per-feed since and max_items overrides")
 	}
-	if withTags != cfg.Feeds.Len() {
+	if withTags != len(resolved) {
 		t.Error("example should tag every feed")
 	}
 }

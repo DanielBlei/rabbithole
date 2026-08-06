@@ -49,7 +49,9 @@ func testConfig(t *testing.T, feeds ...config.Feed) *config.Config {
 }
 
 // testConfigWith is testConfig over a full feeds document, so a test can
-// exercise the defaults block and per-feed overrides.
+// exercise the defaults block and per-feed overrides. Feeds live in the store,
+// so the document is seeded into the database the config points at; the
+// openStore below reopens that same file.
 func testConfigWith(t *testing.T, doc config.FeedsDoc) *config.Config {
 	t.Helper()
 	cfg := &config.Config{
@@ -57,8 +59,13 @@ func testConfigWith(t *testing.T, doc config.FeedsDoc) *config.Config {
 		Ingest:    config.IngestConfig{Since: config.Duration(365 * 24 * time.Hour)},
 		Store:     config.StoreConfig{DBPath: filepath.Join(t.TempDir(), "test.db")},
 	}
-	if err := cfg.SetFeeds(doc); err != nil {
-		t.Fatalf("set feeds: %v", err)
+	db, err := store.Open(cfg.Store.DBPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.SeedFeeds(t.Context(), doc); err != nil {
+		t.Fatalf("seed feeds: %v", err)
 	}
 	return cfg
 }
@@ -145,12 +152,9 @@ func TestRunFetchedCountsOnlyItemsWithinAgeWindow(t *testing.T) {
 </channel></rss>`, recent, old)
 	feed := config.Feed{Name: "Mixed", URL: serveRSS(t, body)}
 	cfg := testConfig(t, feed)
-	// The per-feed window resolves from ingest.since at load time, so the
-	// global has to change before the feeds are re-resolved against it.
+	// The feed sets no window of its own, so it inherits ingest.since — which
+	// the run resolves against, not load.
 	cfg.Ingest.Since = config.Duration(24 * time.Hour) // narrow window: only the recent item survives
-	if err := cfg.SetFeeds(config.FeedsDoc{Feeds: []config.Feed{feed}}); err != nil {
-		t.Fatalf("set feeds: %v", err)
-	}
 	db := openStore(t, cfg)
 
 	out, err := Run(ctx, cfg, "test", db, time.Now(), Options{Record: true})
@@ -232,6 +236,48 @@ func TestRunSkipsDisabledFeeds(t *testing.T) {
 	}
 	if got := sourceCounts(t, db); got["Off"] != 0 {
 		t.Errorf("source counts = %v, want nothing recorded for Off", got)
+	}
+}
+
+// A deleted feed is invisible to a run. Deletion is soft, so the row is still
+// there — the run has to be reading the live set, not every row in the table.
+func TestRunSkipsDeletedFeeds(t *testing.T) {
+	ctx := context.Background()
+	var goneHits int32
+	gone := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&goneHits, 1)
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(feedRSS("Removed item", "https://x.test/gone")))
+	}))
+	defer gone.Close()
+
+	cfg := testConfigWith(t, config.FeedsDoc{Feeds: []config.Feed{
+		{Name: "Kept", URL: serveRSS(t, feedRSS("vLLM inference notes", "https://x.test/kept"))},
+		{Name: "Removed", URL: gone.URL},
+	}})
+	db := openStore(t, cfg)
+
+	feeds, err := db.Feeds(ctx)
+	if err != nil {
+		t.Fatalf("Feeds: %v", err)
+	}
+	for _, f := range feeds {
+		if f.Name == "Removed" {
+			if err := db.SoftDeleteFeed(ctx, f.ID); err != nil {
+				t.Fatalf("SoftDeleteFeed: %v", err)
+			}
+		}
+	}
+
+	out, err := Run(ctx, cfg, "vllm inference", db, time.Now(), Options{Record: true})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if n := atomic.LoadInt32(&goneHits); n != 0 {
+		t.Errorf("deleted feed was fetched %d times, want 0", n)
+	}
+	if len(out.Unseen) != 1 || out.Unseen[0].Source != "Kept" {
+		t.Errorf("Unseen = %+v, want only the kept feed's item", out.Unseen)
 	}
 }
 

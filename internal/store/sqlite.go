@@ -47,11 +47,15 @@ CREATE INDEX IF NOT EXISTS idx_items_date ON items(COALESCE(published_at, create
 CREATE INDEX IF NOT EXISTS idx_items_bookmarked ON items(bookmarked);
 `
 
-// schemaVersion stamps the database via PRAGMA user_version.
-const schemaVersion = 1
+// schemaVersion stamps the database via PRAGMA user_version. Version 2 moved
+// the configured feeds out of feeds.yaml and into the feeds table; there is no
+// migration path, so an older database is rejected and has to be recreated.
+const schemaVersion = 2
 
 // allSchemas is every table's DDL, applied in order to a new database.
-var allSchemas = []string{schema, todoSchema, ideaSchema, ingestSchema, ingestLogSchema, feedFetchSchema}
+var allSchemas = []string{
+	schema, todoSchema, ideaSchema, ingestSchema, ingestLogSchema, feedFetchSchema, feedConfigSchema,
+}
 
 // Status values for the items.status column. llm_score/llm_score_reason are
 // the model's verdict, written by the daily run; status/user_score/user_note

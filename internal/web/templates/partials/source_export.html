@@ -1,0 +1,25 @@
+{{/* Export: the live set rendered in the seed file's own shape, so it can be
+     copied straight into one. Read-only on purpose — the store is the source of
+     truth, and a file the app wrote back would be a second one. */}}
+{{define "sourceExport"}}
+<div class="modal" id="sourceExportModal">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__frame" role="dialog" aria-modal="true" aria-label="Export feeds">
+    <div class="modal__bar">
+      <span class="modal__title">export &mdash; <span class="modal__path">{{.FeedCount}} feed{{if ne .FeedCount 1}}s{{end}}</span></span>
+      <span class="modal__acts">
+        <button class="src__copy" type="button" data-copy="#srcExportYaml">copy</button>
+        <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+      </span>
+    </div>
+
+    {{if .Err}}
+      <div class="modal__error">could not render the feed set: {{.Err}}</div>
+    {{else}}
+      <pre class="yml"><code id="srcExportYaml">{{.YAML}}</code></pre>
+    {{end}}
+
+    <div class="modal__foot">paste over <span class="modal__path">{{.Path}}</span> to reproduce this set on a fresh install</div>
+  </div>
+</div>
+{{end}}

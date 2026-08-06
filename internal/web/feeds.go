@@ -4,13 +4,10 @@
 package web
 
 import (
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/store"
@@ -29,33 +26,25 @@ const (
 	feedStateOff   = "off"   // parked
 )
 
-// feedsData is the model for the read-only feeds viewer modal: the resolved
-// feed set, each entry's effective settings and where they came from, joined
-// with its fetch history.
-type feedsData struct {
-	Path     string // the file the feeds were read from
-	Total    int
-	Enabled  int
-	Failing  int    // enabled feeds whose latest fetch errored
-	Defaults string // one-line summary of the file's defaults block
-	Error    string
-	Rows     []feedRowData
-}
-
-// feedRowData is one feed's line in the viewer. The *On strings name where an
-// inherited value came from (rendered as the asterisk's tooltip); a value the
-// feed sets itself has an empty *On.
+// feedRowData is one feed's line on the Sources page. The *On strings name
+// where an inherited value came from (rendered as the asterisk's tooltip); a
+// value the feed sets itself has an empty *On.
 type feedRowData struct {
+	ID   string
 	Name string
 	URL  string
 	Host string // URL's host — the compact label under the feed name
 
 	Enabled bool
+	Deleted bool
 	Since   string
 	SinceOn string
 	Cap     string // max_items, or "—" when uncapped
 	CapOn   string
 	Tags    []string
+	// TagsAttr is Tags comma-joined — the row's data-tags, which the page's
+	// client-side search matches against alongside the name and URL.
+	TagsAttr string
 
 	// Health, aggregated from the feed's fetch history.
 	State      string
@@ -72,56 +61,18 @@ type feedTick struct {
 	Title string // hover text: outcome + when
 }
 
-// handleFeeds renders the feeds-viewer modal fragment: what the server
-// resolved from the feeds file, not the raw file text. Effective values matter
-// more than the source here — with dozens of feeds and a defaults cascade,
-// "what will actually be fetched, and is it still working" is the question.
-func (s *Web) handleFeeds(w http.ResponseWriter, r *http.Request) {
-	feedSet := s.cfg.Feeds
-	data := feedsData{
-		Path:     feedSet.Path,
-		Total:    feedSet.Len(),
-		Defaults: defaultsSummary(s.cfg),
-	}
-
-	// History is a join, not a requirement: a store read failure still leaves a
-	// useful config view, so it degrades to a note rather than an error page.
-	health, err := s.db.FeedHealthByID(r.Context(), feedStripLen)
-	if err != nil {
-		log.Error().Err(err).Msg("read feed health")
-		data.Error = "fetch history unavailable: " + err.Error()
-	}
-
-	now := time.Now()
-	data.Rows = make([]feedRowData, 0, feedSet.Len())
-	for _, f := range feedSet.All {
-		row := toFeedRow(f, health[f.ID], now)
-		if f.Enabled {
-			data.Enabled++
-		}
-		if row.State == feedStateError {
-			data.Failing++
-		}
-		data.Rows = append(data.Rows, row)
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := feedTmpl.ExecuteTemplate(w, "feedsModal", data); err != nil {
-		// Status is likely already written; log rather than double-write.
-		log.Error().Err(err).Msg("render feeds modal")
-	}
-}
-
 // toFeedRow shapes one resolved feed plus its health into a display row.
 func toFeedRow(f config.ResolvedFeed, h store.FeedHealth, now time.Time) feedRowData {
 	row := feedRowData{
-		Name:    f.Name,
-		URL:     f.URL,
-		Host:    hostOf(f.URL),
-		Enabled: f.Enabled,
-		Since:   shortDur(f.Since),
-		Cap:     capLabel(f.MaxItems),
-		Tags:    f.Tags,
+		ID:       f.ID,
+		Name:     f.Name,
+		URL:      f.URL,
+		Host:     hostOf(f.URL),
+		Enabled:  f.Enabled,
+		Since:    shortDur(f.Since),
+		Cap:      capLabel(f.MaxItems),
+		Tags:     f.Tags,
+		TagsAttr: strings.Join(f.Tags, ","),
 	}
 	if f.SinceFrom.Inherited() {
 		row.SinceOn = string(f.SinceFrom)
@@ -189,16 +140,15 @@ func itemsPhrase(n int) string {
 	return strconv.Itoa(n) + " items"
 }
 
-// defaultsSummary renders the feeds file's defaults block as one line for the
-// modal's legend, naming the global fallback for anything the block leaves
-// unset — so the cascade is legible without opening the file.
-func defaultsSummary(cfg *config.Config) string {
-	d := cfg.Feeds.Defaults
+// defaultsSummary renders the set-wide defaults as one line for the page's
+// legend, naming the global fallback for anything they leave unset — so the
+// cascade is legible without opening the defaults editor.
+func defaultsSummary(d config.FeedDefaults, globalSince time.Duration) string {
 	var parts []string
 	if d.Since != nil {
 		parts = append(parts, "since "+shortDur(d.Since.Std()))
 	} else {
-		parts = append(parts, "since "+shortDur(cfg.Ingest.Since.Std())+" (from ingest.since)")
+		parts = append(parts, "since "+shortDur(globalSince)+" (from ingest.since)")
 	}
 	if d.MaxItems != nil {
 		parts = append(parts, "max_items "+capLabel(*d.MaxItems))

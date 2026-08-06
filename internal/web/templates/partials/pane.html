@@ -150,13 +150,13 @@
   <p class="feed-empty__lead">Nothing has been ingested yet.<br>Run Ingest to dig your feeds.</p>
   <div class="feed-empty__acts">
     <button class="feed-empty__go" type="button" hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML">&#9654; run ingest</button>
-    <a class="feed-empty__alt" href="#" hx-get="/feeds" hx-target="#modal" hx-swap="innerHTML">&#9636; view feeds</a>
+    <a class="feed-empty__alt" href="/sources">&#9636; edit sources</a>
   </div>
   {{else if eq .Kind "dry"}}
   <p class="feed-empty__lead">The last run came back empty. Check the feed list, then run again.</p>
   <div class="feed-empty__acts">
     <button class="feed-empty__go" type="button" hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML">&#9654; run ingest</button>
-    <a class="feed-empty__alt" href="#" hx-get="/feeds" hx-target="#modal" hx-swap="innerHTML">&#9636; view feeds</a>
+    <a class="feed-empty__alt" href="/sources">&#9636; edit sources</a>
   </div>
   {{else}}
   <p class="feed-empty__lead">No items match these filters.</p>

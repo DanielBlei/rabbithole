@@ -1,0 +1,29 @@
+{{/* One feed in the list: status, name, and the enable toggle. The toggle is
+     here rather than in the detail pane so parking feeds down a long list never
+     costs a round trip through the editor. The data- attributes are what the
+     page's client-side search matches on. */}}
+{{define "sourceRow"}}
+<div class="srow{{if not .Enabled}} srow--off{{end}}{{if .Deleted}} srow--gone{{end}}"
+     data-src-row data-name="{{.Name}}" data-url="{{.URL}}" data-tags="{{.TagsAttr}}"
+     data-state="{{if .Deleted}}gone{{else if .Enabled}}on{{else}}off{{end}}">
+  <a class="srow__pick" href="#" hx-get="/sources/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML">
+    <span class="srow__dot srow__dot--{{.State}}" title="{{.Detail}}" aria-hidden="true"></span>
+    <span class="srow__nm">{{.Name}}</span>
+    {{if .FailStreak}}<span class="srow__streak" title="consecutive failures">&times;{{.FailStreak}}</span>{{end}}
+  </a>
+
+  {{if .Deleted}}
+    <button class="srow__tg srow__tg--restore" type="button"
+            hx-post="/sources/{{.ID}}/restore" hx-target="#srcBody" hx-swap="outerHTML">restore</button>
+  {{else}}
+    <button class="srow__tg{{if .Enabled}} is-on{{end}}" type="button"
+            role="switch" aria-checked="{{if .Enabled}}true{{else}}false{{end}}"
+            aria-label="{{if .Enabled}}Disable{{else}}Enable{{end}} {{.Name}}"
+            hx-post="/sources/{{.ID}}/enabled" hx-target="#srcBody" hx-swap="outerHTML"
+            hx-vals='{"enabled":"{{if .Enabled}}off{{else}}on{{end}}"}'>
+      <span class="srow__knob" aria-hidden="true"></span>
+      <span class="srow__tgtxt">{{if .Enabled}}on{{else}}off{{end}}</span>
+    </button>
+  {{end}}
+</div>
+{{end}}

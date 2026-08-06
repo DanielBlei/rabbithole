@@ -42,6 +42,31 @@ func (d Duration) Std() time.Duration { return time.Duration(d) }
 // String renders the underlying time.Duration.
 func (d Duration) String() string { return time.Duration(d).String() }
 
+// Short renders the duration the way it is written in config — "7d", "36h",
+// "90m" — rather than Go's "168h0m0s". This is the form the store persists and
+// the export emits, so a window survives the round trip looking like what was
+// typed instead of expanding into hours.
+func (d Duration) Short() string {
+	std := time.Duration(d)
+	switch {
+	case std == 0:
+		return "0s"
+	case std%(24*time.Hour) == 0:
+		return strconv.Itoa(int(std/(24*time.Hour))) + "d"
+	case std%time.Hour == 0:
+		return strconv.Itoa(int(std/time.Hour)) + "h"
+	case std%time.Minute == 0:
+		return strconv.Itoa(int(std/time.Minute)) + "m"
+	default:
+		return std.String()
+	}
+}
+
+// MarshalYAML writes the duration back as the short string it was parsed from.
+// Without this a Duration marshals as its raw nanosecond count, which the
+// exported feed set would not be able to read back in.
+func (d Duration) MarshalYAML() (any, error) { return d.Short(), nil }
+
 // ParseDuration parses durations with an optional "d" (days) suffix, falling
 // back to time.ParseDuration for all standard units (h, m, s, …).
 func ParseDuration(s string) (time.Duration, error) {
@@ -63,20 +88,15 @@ func ParseDuration(s string) (time.Duration, error) {
 	return dur, nil
 }
 
-// Config is the full run configuration loaded from YAML. Feeds live in their
-// own file (see feeds.go) — the fields at the bottom are how the two connect.
+// Config is the full run configuration loaded from YAML. Feeds are not in here:
+// they live in the store, and ingest.feeds names only the file new ones are
+// seeded from (see feeds.go).
 type Config struct {
 	User      string          `yaml:"user"`    // shell-prompt name on the web UI; blank falls back to the OS user
 	Profile   string          `yaml:"profile"` // path to the interest-profile markdown
 	Inference InferenceConfig `yaml:"inference"`
 	Ingest    IngestConfig    `yaml:"ingest"`
 	Store     StoreConfig     `yaml:"store"`
-
-	// Feeds is the resolved feed set: the feeds themselves plus the defaults
-	// and path they came from. Derived at load, never written in this file —
-	// hence a single field rather than declared and computed state mixed
-	// together at the top level.
-	Feeds FeedSet `yaml:"-"`
 }
 
 // InferenceConfig configures the scoring backend (the model and how to reach it).
@@ -101,7 +121,7 @@ type InferenceConfig struct {
 type IngestConfig struct {
 	Since     Duration `yaml:"since"`      // lookback window (e.g. 14d, 168h)
 	DigestDir string   `yaml:"digest_dir"` // optional: where `ingest --markdown` writes the digest; no default
-	Feeds     string   `yaml:"feeds"`      // path to the feeds file; empty looks for feeds.yaml beside the config
+	Feeds     string   `yaml:"feeds"`      // path to the feed seed file; empty looks for feeds.yaml beside the config
 }
 
 // StoreConfig configures item persistence. Local sqlite for now; host/credentials
@@ -132,11 +152,6 @@ func Load(path string) (*Config, error) {
 	}
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
-	// Feeds resolve last: the cascade's outermost fallback is ingest.since,
-	// so the defaults above must already be applied.
-	if err := cfg.loadFeeds(path); err != nil {
 		return nil, err
 	}
 	return &cfg, nil

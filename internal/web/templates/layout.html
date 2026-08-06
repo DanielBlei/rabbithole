@@ -148,7 +148,8 @@
         </div>
         <div class="settings-panel__divider"></div>
         <a class="settings-panel__item" href="#" hx-get="/config" hx-target="#modal" hx-swap="innerHTML">View config</a>
-        <a class="settings-panel__item" href="#" hx-get="/feeds" hx-target="#modal" hx-swap="innerHTML">View feeds</a>
+        {{/* Not a modal: editing feeds needs room, so this one leaves. */}}
+        <a class="settings-panel__item" href="/sources">Edit sources <span class="settings-panel__go" aria-hidden="true">&#8663;</span></a>
         <div class="settings-panel__divider"></div>
         <a class="settings-panel__item settings-panel__item--ext" href="https://github.com/DanielBlei/rabbithole"
            target="_blank" rel="noopener noreferrer">Source code <span class="settings-panel__ext" aria-hidden="true">&#8599;</span></a>
@@ -185,6 +186,12 @@
       <span class="navrail__txt"><span class="navrail__nm">Maze</span><span class="navrail__ds">day-to-day</span></span>
     </a>
     <div class="navrail__div" aria-hidden="true"></div>
+    {{/* Below the rule with Ingest: pages above, working on the app below —
+         configure the sources, then run the ingest over them. */}}
+    <a class="navrail__item{{if eq .Active "sources"}} navrail__item--on{{end}}" href="/sources">
+      <span class="navrail__gl" aria-hidden="true">⌗</span>
+      <span class="navrail__txt"><span class="navrail__nm">Sources</span><span class="navrail__ds">feeds &amp; defaults</span></span>
+    </a>
     {{template "navIngest" .Chrome}}
   </nav>
   {{template "ingWatch" .Chrome}}

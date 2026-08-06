@@ -7,12 +7,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,30 +25,41 @@ const defaultFeedsFileName = "feeds.yaml"
 // list statistically impossible while staying readable in a log line.
 const feedIDLen = 12
 
-// Feed is one RSS/Atom source exactly as written in the feeds file. Every knob
-// past name/url is a pointer so an omitted field is distinguishable from a
-// zero value and can fall through to the file's defaults — see resolveFeed for
-// the cascade.
+// Feed is one RSS/Atom source as declared, before the defaults cascade runs.
+// Feeds live in the store; this is the shape they take in the seed file and in
+// the exported YAML, and the shape the store hands back. Every knob past
+// name/url is a pointer so an unset field is distinguishable from a zero value
+// and can fall through to the defaults — see resolveFeed for the cascade. The
+// store spells the same distinction as a NULL column.
 type Feed struct {
-	Name     string    `yaml:"name"`
-	URL      string    `yaml:"url"`
-	Enabled  *bool     `yaml:"enabled"`   // park a feed without deleting it
-	Since    *Duration `yaml:"since"`     // per-feed lookback window
-	MaxItems *int      `yaml:"max_items"` // cap on newest items contributed per run
-	Tags     []string  `yaml:"tags"`      // free-form labels, unioned with the defaults'
+	// ID is empty in the seed file and in the export — it is not something you
+	// declare. The store fills it in on the way out so callers can address a
+	// feed without going through its name or URL, both of which are editable.
+	ID   string `yaml:"-"`
+	Name string `yaml:"name"`
+	URL  string `yaml:"url"`
+	// omitempty on every optional knob: an unset one has to come back out of the
+	// export as an absent key, not as `enabled: null`. Absent is what "inherit"
+	// looks like in a hand-written file, and it is what re-importing reads back.
+	Enabled  *bool     `yaml:"enabled,omitempty"`   // park a feed without deleting it
+	Since    *Duration `yaml:"since,omitempty"`     // per-feed lookback window
+	MaxItems *int      `yaml:"max_items,omitempty"` // cap on newest items contributed per run
+	Tags     []string  `yaml:"tags,omitempty"`      // free-form labels, unioned with the defaults'
 }
 
-// FeedDefaults are the file-wide fallbacks applied to any feed that doesn't
-// set a knob itself. Tags are the exception: they union onto every feed's own
-// tags rather than being overridden by them.
+// FeedDefaults are the set-wide fallbacks applied to any feed that doesn't set
+// a knob itself. Tags are the exception: they union onto every feed's own tags
+// rather than being overridden by them.
 type FeedDefaults struct {
-	Enabled  *bool     `yaml:"enabled"`
-	Since    *Duration `yaml:"since"`
-	MaxItems *int      `yaml:"max_items"`
-	Tags     []string  `yaml:"tags"`
+	Enabled  *bool     `yaml:"enabled,omitempty"`
+	Since    *Duration `yaml:"since,omitempty"`
+	MaxItems *int      `yaml:"max_items,omitempty"`
+	Tags     []string  `yaml:"tags,omitempty"`
 }
 
-// FeedsDoc is a parsed feeds file: file-wide defaults plus the feed list.
+// FeedsDoc is a whole feed set in its declared form: the defaults plus the
+// feeds. It is what the seed file parses into and what the export renders from,
+// so a set can make the round trip out of the store and back into a fresh one.
 type FeedsDoc struct {
 	Defaults FeedDefaults `yaml:"defaults"`
 	Feeds    []Feed       `yaml:"feeds"`
@@ -70,15 +81,13 @@ const (
 func (o Origin) Inherited() bool { return o != OriginFeed }
 
 // ResolvedFeed is a Feed with every knob resolved through the cascade
-// (feed → feeds-file defaults → global config → built-in), carrying the
-// provenance of each resolved value alongside it. This is what the ingest
-// cycle and the feeds viewer both consume; nothing downstream re-implements
-// the fallback rules.
+// (feed → defaults → global config → built-in), carrying the provenance of each
+// resolved value alongside it. This is what the ingest cycle and the Sources
+// page both consume; nothing downstream re-implements the fallback rules.
 type ResolvedFeed struct {
-	// ID is the feed's stable identity, derived from its URL — see FeedID.
-	// Persisted state (fetch history) is keyed on this rather than on Name, so
-	// renaming a feed keeps its history. Renaming is a label change; changing
-	// the URL makes it a different feed.
+	// ID is the feed's stable identity. It is minted from the URL when the feed
+	// is first stored (see FeedID) and frozen from then on, so persisted state —
+	// fetch history — survives both a rename and a change of URL.
 	ID       string
 	Name     string
 	URL      string
@@ -95,103 +104,72 @@ type ResolvedFeed struct {
 // uncapped is the MaxItems value meaning "take every item in the window".
 const uncapped = 0
 
-// FeedID derives a feed's stable identity from its URL. The URL is what makes
-// a feed that feed — the name is a label the user is free to change — so it is
-// the identity persisted state hangs off.
+// FeedID mints a feed's identity from its URL. It is called once, when a feed
+// is first added to the store, and the result is kept as that row's primary key
+// forever after — so a later edit to either the name or the URL keeps the
+// feed's fetch history rather than starting a new one.
 //
-// Two entries pointing at the same URL therefore share an ID and, with it, one
-// row of fetch history. That's accepted rather than forbidden: it is a
-// harmless, self-inflicted duplicate, and rejecting it would be a validation
-// error for something that still works fine. resolveFeeds logs a warning so it
-// isn't silent.
+// Deriving it from the URL rather than using a counter means a feed re-added
+// after being deleted, or seeded again into a fresh database, lands on the same
+// ID and picks its history back up.
 func FeedID(url string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(url)))
 	return hex.EncodeToString(sum[:])[:feedIDLen]
 }
 
-// FeedSet is the resolved feed configuration: the feeds themselves, the
-// defaults they were resolved against, and where they were read from. It is
-// derived state — the product of loading, not something written in a file —
-// so it lives behind one field on Config rather than being scattered across
-// several alongside the declared YAML fields.
-//
-// A FeedSet is immutable once Load returns. Nothing takes a lock around it
-// because nothing mutates it after startup; a future feature that edits feeds
-// at runtime (see the feed-management backlog item) must not simply reassign
-// it in place while an ingest run holds a reference.
-type FeedSet struct {
-	All      []ResolvedFeed
-	Defaults FeedDefaults
-	Path     string // the file the feeds were read from
-}
-
-// Len reports how many feeds are configured, enabled or not.
-func (s FeedSet) Len() int { return len(s.All) }
-
-// Enabled returns only the feeds an ingest run should fetch.
-func (s FeedSet) Enabled() []ResolvedFeed {
-	out := make([]ResolvedFeed, 0, len(s.All))
-	for _, f := range s.All {
-		if f.Enabled {
-			out = append(out, f)
-		}
+// NormalizeFeedURL fills in a missing scheme with https, so "example.com/feed"
+// is a URL rather than a validation error.
+func NormalizeFeedURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || strings.Contains(trimmed, "://") {
+		return trimmed
 	}
-	return out
+	return "https://" + strings.TrimPrefix(trimmed, "//")
 }
 
-// loadFeeds resolves the config's feed set from the feeds file. configPath is
-// the config file's own path — the implicit feeds file is looked for beside it.
-func (c *Config) loadFeeds(configPath string) error {
-	path, explicit := c.feedsFilePath(configPath)
-	doc, found, err := readFeedsFile(path)
+// InsecureFeedURL reports whether a feed would be fetched over plain http —
+// what the Sources page warns about under the field.
+func InsecureFeedURL(raw string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw)), "http://")
+}
+
+// ValidateFeedURL checks that a feed URL is one the fetcher could actually
+// call. The seed file was hand-written and could be trusted to hold something
+// URL-shaped; a form field cannot, and "asdf" should fail on the way in rather
+// than as a fetch error on the next run.
+func ValidateFeedURL(raw string) error {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return fmt.Errorf("url is required")
+	}
+	u, err := url.Parse(trimmed)
 	if err != nil {
-		return err
+		return fmt.Errorf("invalid url %q: %w", raw, err)
 	}
-	if !found {
-		if explicit {
-			return fmt.Errorf("ingest.feeds %q does not exist", path)
-		}
-		return fmt.Errorf("no feeds configured: create %s (copy configs/feeds.example.yaml)", path)
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("url must start with http:// or https://, got %q", raw)
 	}
-
-	if err := c.SetFeeds(*doc); err != nil {
-		return fmt.Errorf("%s: %w", path, err)
+	if u.Host == "" {
+		return fmt.Errorf("url %q has no host", raw)
 	}
-	c.Feeds.Path = path
 	return nil
 }
 
-// SetFeeds resolves doc against this config and installs the result as the
-// config's feed set — the same path Load takes, exposed for callers that build
-// a Config programmatically rather than from a file. It is the only way to
-// populate Feeds, so the defaults cascade can't be sidestepped.
-//
-// Load-time only: see FeedSet on why this must not be used to swap feeds under
-// a running ingest.
-func (c *Config) SetFeeds(doc FeedsDoc) error {
-	resolved, err := c.resolveFeeds(doc)
-	if err != nil {
-		return err
-	}
-	c.Feeds = FeedSet{All: resolved, Defaults: doc.Defaults}
-	return nil
-}
-
-// feedsFilePath returns the feeds file to read and whether the user named it
+// FeedsFilePath returns the seed file to read and whether the user named it
 // explicitly. An explicit ingest.feeds is taken as written (resolved against the
 // process working directory, like `profile`); when unset, the default sits
 // beside the config file so moving the config directory keeps them together.
-func (c *Config) feedsFilePath(configPath string) (path string, explicit bool) {
+func (c *Config) FeedsFilePath(configPath string) (path string, explicit bool) {
 	if c.Ingest.Feeds != "" {
 		return c.Ingest.Feeds, true
 	}
 	return filepath.Join(filepath.Dir(configPath), defaultFeedsFileName), false
 }
 
-// readFeedsFile parses the feeds file at path. A missing file is not an error —
-// it reports found=false so the caller can produce a better message than a
-// bare ENOENT.
-func readFeedsFile(path string) (doc *FeedsDoc, found bool, err error) {
+// ReadFeedsFile parses the feed seed file at path. A missing file is not an
+// error — it reports found=false, which is an ordinary state now that feeds
+// live in the store and the file only seeds new ones.
+func ReadFeedsFile(path string) (doc *FeedsDoc, found bool, err error) {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, false, nil
@@ -206,21 +184,19 @@ func readFeedsFile(path string) (doc *FeedsDoc, found bool, err error) {
 	return doc, true, nil
 }
 
-// resolveFeeds applies the defaults cascade to every entry and validates the
-// result. Names must be present and unique: the ingest cycle groups items by
-// feed name and items are stored under it, so two feeds sharing a name would
-// silently merge into one source.
-func (c *Config) resolveFeeds(doc FeedsDoc) ([]ResolvedFeed, error) {
-	if len(doc.Feeds) == 0 {
-		return nil, fmt.Errorf("at least one feed is required")
-	}
-	if err := doc.Defaults.validate(); err != nil {
+// ResolveFeeds applies the defaults cascade to every entry in doc. globalSince
+// is the cascade's outermost fallback for `since` — the main config's
+// ingest.since — passed in rather than read from a Config so the resolver has
+// no opinion about where the feeds came from.
+//
+// An empty doc resolves to an empty set. That is not an error: the store can
+// legitimately hold no feeds, on a fresh install or after the last one is
+// removed, and both the ingest cycle and the Sources page handle it.
+func ResolveFeeds(doc FeedsDoc, globalSince time.Duration) ([]ResolvedFeed, error) {
+	if err := doc.Defaults.Validate(); err != nil {
 		return nil, err
 	}
-
 	out := make([]ResolvedFeed, 0, len(doc.Feeds))
-	byName := make(map[string]int, len(doc.Feeds))
-	byURL := make(map[string]string, len(doc.Feeds))
 	for i, f := range doc.Feeds {
 		if f.Name == "" {
 			return nil, fmt.Errorf("feed %d (%s) has no name", i, f.URL)
@@ -228,30 +204,35 @@ func (c *Config) resolveFeeds(doc FeedsDoc) ([]ResolvedFeed, error) {
 		if f.URL == "" {
 			return nil, fmt.Errorf("feed %d (%q) has no url", i, f.Name)
 		}
-		if prev, dup := byName[f.Name]; dup {
-			return nil, fmt.Errorf(
-				"feed %d (%q) reuses the name of feed %d; feed names must be unique", i, f.Name, prev)
-		}
-		byName[f.Name] = i
-		if err := f.validate(); err != nil {
+		if err := f.Validate(); err != nil {
 			return nil, fmt.Errorf("feed %d (%q): %w", i, f.Name, err)
 		}
-		// Not fatal (see FeedID) — but the two entries will share one row of
-		// fetch history, which is worth knowing about.
-		if prev, dup := byURL[f.URL]; dup {
-			log.Warn().Str("feed", f.Name).Str("duplicate_of", prev).Str("url", f.URL).
-				Msg("two feeds share a url; they will share one fetch-history entry")
-		}
-		byURL[f.URL] = f.Name
-		out = append(out, c.resolveFeed(f, doc.Defaults))
+		out = append(out, resolveFeed(f, doc.Defaults, globalSince))
 	}
 	return out, nil
 }
 
+// EnabledFeeds returns only the feeds an ingest run should fetch.
+func EnabledFeeds(all []ResolvedFeed) []ResolvedFeed {
+	out := make([]ResolvedFeed, 0, len(all))
+	for _, f := range all {
+		if f.Enabled {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // resolveFeed walks one feed through the cascade, recording where each value
 // came from.
-func (c *Config) resolveFeed(f Feed, d FeedDefaults) ResolvedFeed {
-	r := ResolvedFeed{ID: FeedID(f.URL), Name: f.Name, URL: f.URL, Tags: mergeTags(d.Tags, f.Tags)}
+func resolveFeed(f Feed, d FeedDefaults, globalSince time.Duration) ResolvedFeed {
+	// A stored feed carries the ID it was minted with; only one that has never
+	// been stored (straight from the seed file) needs one derived.
+	id := f.ID
+	if id == "" {
+		id = FeedID(f.URL)
+	}
+	r := ResolvedFeed{ID: id, Name: f.Name, URL: f.URL, Tags: mergeTags(d.Tags, f.Tags)}
 
 	switch {
 	case f.Enabled != nil:
@@ -270,7 +251,7 @@ func (c *Config) resolveFeed(f Feed, d FeedDefaults) ResolvedFeed {
 	default:
 		// The main config's ingest.since is the global lookback; it always has
 		// a value by this point (applyDefaults ran first).
-		r.Since, r.SinceFrom = c.Ingest.Since.Std(), OriginGlobal
+		r.Since, r.SinceFrom = globalSince, OriginGlobal
 	}
 
 	switch {
@@ -284,9 +265,9 @@ func (c *Config) resolveFeed(f Feed, d FeedDefaults) ResolvedFeed {
 	return r
 }
 
-// validate checks one feed's tuning knobs. A zero since would drop everything
+// Validate checks one feed's tuning knobs. A zero since would drop everything
 // and a negative cap is meaningless; both are more likely typos than intent.
-func (f Feed) validate() error {
+func (f Feed) Validate() error {
 	if f.Since != nil && f.Since.Std() <= 0 {
 		return fmt.Errorf("since must be positive, got %s", f.Since)
 	}
@@ -296,9 +277,9 @@ func (f Feed) validate() error {
 	return nil
 }
 
-// validate checks the defaults block with the same rules as a feed entry.
-func (d FeedDefaults) validate() error {
-	return Feed{Since: d.Since, MaxItems: d.MaxItems}.validate()
+// Validate checks the defaults block with the same rules as a feed entry.
+func (d FeedDefaults) Validate() error {
+	return Feed{Since: d.Since, MaxItems: d.MaxItems}.Validate()
 }
 
 // mergeTags unions the defaults' tags with a feed's own, preserving order

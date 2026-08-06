@@ -1,4 +1,9 @@
 # The Rabbit Hole feed list. Copy to configs/feeds.yaml and edit.
+#
+# This is a seed file, not the live feed set. Feeds live in the database and are managed from the Sources page;
+# on every startup, anything here the store has never seen is added, and everything else is ignored.
+# Nothing writes back to this file — use the Sources page's export to get the live set out.
+#
 # Inheritance, feed identity, health: docs/configuration.md
 
 # Applied to any feed that doesn't set the knob itself.

@@ -28,6 +28,17 @@ erDiagram
         INTEGER llm_score "model-owned"
         TEXT status "user-owned"
     }
+    feeds {
+        TEXT id PK "sha256(url)[:12], frozen"
+        TEXT name UK "items.source holds this"
+        TEXT url UK
+        TIMESTAMP deleted_at "soft delete"
+    }
+    feed_defaults {
+        INTEGER id PK "always 1"
+        TEXT since "NULL = fall through"
+        INTEGER max_items "NULL = fall through"
+    }
     feed_fetches {
         INTEGER id PK
         TEXT feed_id "sha256(url)[:12]"
@@ -57,6 +68,8 @@ erDiagram
     ingest_history }o..o{ items : "a run writes items"
     ingest_history }o..o{ feed_fetches : "a run writes fetches"
     items }o..o{ feed_fetches : "same feed, by name/url"
+    feeds }o..o{ feed_fetches : "by id, no constraint"
+    feeds }o..o{ items : "by name"
 ```
 
 Solid lines are real foreign keys. Dotted lines are conventions the application maintains,
@@ -66,6 +79,7 @@ Three groups, largely independent:
 
 | Group | Tables | Written by |
 |---|---|---|
+| **Feed config** | `feeds`, `feed_defaults` | The Sources page, seeded at startup |
 | **Feed pipeline** | `items`, `feed_fetches` | `internal/ingest` |
 | **Run history** | `ingest_history`, `ingest_run_logs` | `internal/ingest`'s run manager |
 | **Maze boards** | `todos`, `ideas` | The web UI only |
@@ -129,6 +143,40 @@ unless `IncludeSaved`: that state is the only part of a row re-ingest cannot res
 pruned link its feed still lists returns on the next run, rescored from scratch, because
 `ScoredLinks` only sees rows that still exist.
 
+## feeds and feed_defaults
+
+The configured feed set — what to fetch and how. Written by the Sources page; `feeds.yaml`
+only seeds feeds the store has never seen (see
+[configuration](configuration.md#feeds)).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | `config.FeedID` — `sha256(url)[:12]`, set on the first write and never changed |
+| `name` | TEXT UNIQUE | What `items.source` records; unique so two feeds can't merge |
+| `url` | TEXT UNIQUE | One feed per link. A missing scheme is filled in before the row is written, so the same address always gives the same `id` |
+| `enabled` | BOOLEAN | NULL falls through to `feed_defaults`, then to the built-in `true` |
+| `since` | TEXT | Written as typed (`7d`), NULL to fall through |
+| `max_items` | INTEGER | NULL to fall through; `0` is uncapped |
+| `tags` | TEXT | Comma-joined, like `items.tags` |
+| `deleted_at` | TIMESTAMP | Soft delete |
+
+Three things the column types decide:
+
+- **The tuning columns are nullable because NULL is the point.** It means "take the
+  default", matching the pointer fields on `config.Feed`. A zero would mean something
+  else — `max_items` 0 is *uncapped*, not *nothing*.
+- **`id` never changes after the first write.** `feed_fetches` uses the same value, so a
+  feed keeps its history through both a rename and a change of URL. Building it from the URL
+  rather than a counter also means a feed you add again, or seed into a fresh database,
+  picks its old history back up.
+- **Deletion is soft.** History stays with the feed in case it comes back, and seeding treats
+  a deleted feed as one it has already seen — without that, removing a feed that came from
+  `feeds.yaml` would undo itself on the next boot.
+
+`feed_defaults` is a single row (`CHECK (id = 1)`) holding the same four tuning columns,
+applied to any feed that leaves one unset. Names and URLs stay unique across deleted rows
+too, so adding back something you removed restores that row rather than clashing with it.
+
 ## feed_fetches
 
 Append-only log of every feed fetch attempt, one row per feed per run.
@@ -147,11 +195,13 @@ Append-only log of every feed fetch attempt, one row per feed per run.
 
 Indexed on `(feed_id, fetched_at DESC, id DESC)`, which is exactly what the health query
 walks. `FeedHealthByID` aggregates this into the status dot, failure streak, last success
-and recent-attempt strip in the feeds viewer.
+and recent-attempt strip on the Sources page.
 
-Keying on `feed_id` rather than the name is why renaming a feed keeps its history and
-changing its URL starts fresh. Rows for feeds no longer in `feeds.yaml` are simply never
-read, so re-adding a feed restores its history.
+Keying on `feed_id` rather than the name is why renaming a feed keeps its history. The ID
+is minted from the URL when the feed is first stored and then frozen on the row, so editing
+a feed's URL keeps its history too. Rows for feeds no longer configured are simply never
+read, so re-adding a feed restores its history — which is also why there is no foreign key
+here: a cascade would throw that away.
 
 `PruneFeedFetches` keeps the newest 200 rows per feed and runs at the end of every fetch
 phase. This is the only automatic retention policy; items have a manual one in `PruneItems`.
@@ -293,12 +343,12 @@ Three relationships exist by convention only, with no constraint enforcing them:
 - **`items.tags` → the feed's tags.** Copied in at insert time. Since a scored item is never
   re-inserted, retagging a feed reaches existing items only through `SyncSourceTags`, which
   runs at server startup and at the start of every ingest run.
-- **`feed_fetches.feed_id` → a feed in `feeds.yaml`.** Derived from the URL, so the store
-  has no idea whether the feed is still configured.
+- **`feed_fetches.feed_id` → `feeds.id`.** Deliberately soft: history outlives the feed so
+  that re-adding one restores it, which a foreign key with a cascade would prevent.
 
-All three follow from feeds living in a YAML file rather than in the database. Moving feed
-management into the store would turn them into real foreign keys — and would be the natural
-first step for editing feeds from the UI.
+The first two follow from `items.source` holding the feed's *name*. `RenameSource` re-files
+existing items when a feed is renamed, which keeps them from splitting into two sources, but
+an `items.feed_id` column is the real fix and the natural next step.
 
 ## Schema version
 
@@ -308,9 +358,14 @@ Each table's DDL lives beside its feature (`todos.go`, `ideas.go`, …) and is l
 returns `ErrSchemaVersion` on a mismatch, naming the file rather than touching it.
 
 Changing the schema therefore means editing the `CREATE TABLE` block and raising
-`schemaVersion`. Existing databases are then refused until they are replaced, which is
-cheap while the data is re-derivable from feeds. Upgrading one in place — most likely a
-script — is a question for when that stops being true.
+`schemaVersion`. Existing databases are then refused until they are replaced.
+
+That used to be cheap: everything could be rebuilt from `feeds.yaml`. It is less so now that
+the feed set lives here. A feed added, retuned or deleted on the Sources page exists nowhere
+else, and the seed file cannot bring it back. That is what the Sources page's **export** is
+for — save it before replacing a database. Upgrading in place instead, most likely with an
+ordered list of migrations, is the real answer, and is a question for the first change that
+has to keep existing data.
 
 ## Known gaps
 
@@ -324,4 +379,12 @@ script — is a question for when that stops being true.
   stopped.
 - **No `Store` interface.** Callers take `*store.Store` directly. Supporting a second backend
   means introducing one first.
-- **Feeds are not in the database**, which is what makes the three soft links above soft.
+- **`items.source` holds the feed's name, not its ID.** Feeds are in the database now, so
+  the link could be real; making it one means adding `items.feed_id`, backfilling it, and
+  reworking every query that filters on `source`. Until then `RenameSource` keeps a rename
+  from splitting a feed's items into two sources.
+- **Deleted feed rows accumulate.** Nothing collects them, and each one goes on holding its
+  name and URL against reuse. That is deliberate — it is what stops a re-seed from
+  resurrecting a feed you removed — and it can be undone: the Sources page lists deleted
+  feeds under the state filter's `deleted` option with a restore button, and adding the same
+  URL again undeletes the row rather than failing.

@@ -178,6 +178,8 @@ header.topbar{
   display:block;padding:8px 12px;font-size:1.3rem;color:var(--text-dim);border-radius:999px;
 }
 .settings-panel__item:hover{color:var(--accent);background:rgba(128,203,196,.07);}
+/* Marks the one entry that navigates instead of opening a modal. */
+.settings-panel__go{float:right;opacity:.5;}
 .settings-panel__item:focus-visible{outline:1px solid var(--accent);outline-offset:-2px;}
 .settings-panel__label{
   padding:6px 12px 5px;font-size:1.05rem;letter-spacing:.12em;
@@ -1125,82 +1127,229 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 .ing__pg--off{color:var(--text-dim);opacity:.4;cursor:default;}
 .ing__pg-n{color:var(--text-dim);letter-spacing:.06em;}
 
-/* --- Feeds: read-only viewer modal --------------------------------------- */
-/* A dense table, not a YAML dump: at two dozen feeds the question is "what did
-   the server resolve and is it still fetching", so effective values (with a *
-   on inherited ones) and last-fetch health are the content. */
-.modal__frame--feeds{width:min(940px,95vw);max-height:88vh;}
-.fds{padding:14px 20px 18px;min-height:0;display:flex;flex-direction:column;overflow:hidden;}
-.fds__sum{display:flex;align-items:center;gap:9px;font-size:1.3rem;color:var(--text-dim);}
-.fds__cnt{color:var(--text);}
-.fds__cnt--err{color:var(--warn);}
-.fds__sep{color:var(--line);}
-.fds__note{
-  margin-top:10px;padding:9px 13px;border-radius:8px;font-size:1.25rem;
-  background:var(--fill);color:var(--text-dim);
+/* --- Sources: the feed set as settings ----------------------------------- */
+/* Two columns: a dense list you scan and toggle, and a pane for the one feed
+   you're editing. The list carries the enable switch because parking feeds is
+   the common errand and shouldn't cost a trip through the editor. */
+.src-pane{display:flex;flex-direction:column;min-height:0;}
+.src__sep{color:var(--line);}
+
+/* Only rendered when the ingest runner sent you here. */
+.src__back{padding:10px 16px 0;}
+.src__backlink{
+  display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:999px;
+  background:var(--fill);color:var(--text-dim);font-size:1.2rem;text-decoration:none;
 }
-/* The table scrolls inside the modal, so the summary and legend stay put. */
-.fds__scroll{margin-top:12px;min-height:0;overflow-y:auto;overscroll-behavior:contain;}
-.fds__t{width:100%;border-collapse:collapse;font-size:1.3rem;}
-.fds__t thead th{
-  position:sticky;top:0;z-index:1;background:var(--pane);
-  padding:6px 10px;text-align:left;font-weight:400;font-size:1.1rem;
-  letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);
-  border-bottom:1px solid var(--hairline);
+.src__backlink:hover{background:var(--fill-hover);color:var(--accent);}
+
+/* The toolbar sits outside the swapped body, so a filtered view survives an
+   edit and the search box never loses focus mid-repaint. */
+.src__tools{
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:12px 16px;border-bottom:1px solid var(--hairline);
 }
-.fds__t td{padding:8px 10px;color:var(--text-dim);border-top:1px solid var(--hairline);vertical-align:top;}
-.fds__t tbody tr:first-child td{border-top:0;}
-.fds__r--off{opacity:.5;}
-.fds__th-st{width:2.2rem;}
-.fds__th-n{width:5.5rem;}
-.fds__st{padding-right:0;}
+.src__search{display:flex;align-items:center;gap:8px;flex:1 1 22rem;min-width:0;}
+.src__searchlbl{font-size:1.1rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);}
+.src__input{
+  flex:1 1 auto;min-width:0;padding:6px 11px;border:0;border-radius:8px;
+  background:var(--fill);color:var(--text);font:inherit;font-size:1.3rem;
+}
+.src__input:focus{outline:0;background:var(--fill-hover);box-shadow:0 0 0 1px var(--accent-dim);}
+/* Always on screen and right-aligned in a reserved slot, so counting up to a
+   wider number doesn't nudge the search box beside it. */
+.src__matches{
+  flex:none;min-width:5.5rem;text-align:right;
+  font-size:1.15rem;color:var(--text-dim);white-space:nowrap;
+}
+
+/* The state filter takes the published filter's treatment — centred value,
+   pinned caret, fixed width — so picking a state never resizes the button and
+   shifts the rest of the toolbar. */
+.popmenu--srcstate .popmenu__btn{position:relative;width:11.5rem;padding:5px 38px 5px 14px;}
+.popmenu--srcstate .popmenu__val{flex:1;text-align:center;}
+.popmenu--srcstate .popmenu__meta{
+  position:absolute;right:24px;top:50%;transform:translateY(-50%);
+  display:flex;align-items:center;
+}
+.popmenu--srcstate .popmenu__btn::after{
+  position:absolute;right:13px;top:50%;transform:translateY(-50%);
+}
+
+/* Chips, not text links: these are the page's controls and have to read as
+   pressable. Same shape as .sdet__btn, which sits just below them in the pane. */
+.src__acts{display:flex;align-items:center;gap:8px;margin-left:auto;}
+.src__act{
+  padding:5px 12px;border-radius:8px;background:var(--fill);
+  color:var(--text-dim);font-size:1.2rem;text-decoration:none;white-space:nowrap;
+}
+.src__act:hover{background:var(--fill-hover);color:var(--text);}
+/* The one primary action, matching .sdet__btn--go. */
+.src__act--add{background:var(--tint);color:var(--accent);}
+.src__act--add:hover{background:var(--tint);color:var(--accent);filter:brightness(1.25);}
+.src__note{margin:10px 16px 0;padding:9px 13px;border-radius:8px;background:var(--fill);
+  font-size:1.25rem;color:var(--text-dim);}
+
+.src__cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);
+  gap:0;min-height:0;flex:1 1 auto;}
+.src__list{
+  min-height:0;max-height:62vh;overflow-y:auto;overscroll-behavior:contain;
+  padding:8px 0;border-right:1px solid var(--hairline);
+}
+.src__empty{padding:28px 20px;color:var(--text-dim);font-size:1.3rem;}
+.src__emptysub{margin-top:6px;font-size:1.2rem;opacity:.7;}
+.src__none{padding:18px 20px;color:var(--text-dim);font-size:1.25rem;font-style:italic;}
+
+/* One feed. The whole left side is the pick target; the switch is its own. */
+.srow{display:flex;align-items:center;gap:10px;padding:0 14px 0 16px;}
+.srow--filtered{display:none;}
+.srow--off .srow__nm{color:var(--text-dim);}
+.srow--gone{opacity:.55;}
+.srow--gone .srow__nm{text-decoration:line-through;}
+.srow__pick{
+  flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:9px;
+  padding:9px 0;text-decoration:none;color:inherit;
+}
+.srow__pick:hover .srow__nm{color:var(--accent);}
+.srow__nm{
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--title);font-size:1.35rem;
+}
 /* Status dot: green ok, red error, gold never-fetched, hollow when parked. */
-.fds__dot{display:inline-block;width:.8rem;height:.8rem;border-radius:50%;margin-top:.45rem;}
-.fds__dot--ok{background:var(--score-high);box-shadow:0 0 5px rgba(195,232,141,.35);}
-.fds__dot--error{background:var(--warn);box-shadow:0 0 5px rgba(255,83,112,.4);}
-.fds__dot--never{background:var(--caution);opacity:.7;}
-.fds__dot--off{background:none;box-shadow:inset 0 0 0 1px var(--text-dim);}
-.fds__name{min-width:16rem;}
-.fds__nm{display:block;color:var(--title);}
-.fds__url{
-  display:block;margin-top:2px;font-size:1.1rem;color:var(--text-dim);
-  opacity:.75;text-decoration:none;
+.srow__dot{flex:0 0 auto;width:.8rem;height:.8rem;border-radius:50%;}
+.srow__dot--ok{background:var(--score-high);box-shadow:0 0 5px rgba(195,232,141,.35);}
+.srow__dot--error{background:var(--warn);box-shadow:0 0 5px rgba(255,83,112,.4);}
+.srow__dot--never{background:var(--caution);opacity:.7;}
+.srow__dot--off{background:none;box-shadow:inset 0 0 0 1px var(--text-dim);}
+.srow__streak{flex:0 0 auto;color:var(--warn);opacity:.8;font-size:1.1rem;}
+
+.srow__tg{
+  flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;
+  padding:3px 9px 3px 4px;border:0;border-radius:999px;
+  background:var(--fill);color:var(--text-dim);font:inherit;font-size:1.1rem;cursor:pointer;
 }
-.fds__url:hover{color:var(--accent);opacity:1;}
-.fds__n{white-space:nowrap;color:var(--text);}
-/* Inherited marker — deliberately faint; the value is the signal, the
-   asterisk only answers "did I set this or did it fall through". */
-.fds__inh{color:var(--accent-dim);cursor:help;margin-left:1px;}
-.fds__tags{max-width:14rem;}
-.fds__tag{
-  display:inline-block;margin:0 4px 3px 0;padding:1px 8px;border-radius:999px;
+.srow__tg:hover{background:var(--fill-hover);}
+.srow__tg.is-on{background:var(--tint);color:var(--accent);}
+.srow__knob{
+  width:.9rem;height:.9rem;border-radius:50%;
+  background:var(--text-dim);transition:background .12s ease;
+}
+.srow__tg.is-on .srow__knob{background:var(--accent);box-shadow:0 0 5px rgba(128,203,196,.5);}
+.srow__tgtxt{min-width:1.9rem;text-align:left;}
+.srow__tg--restore{padding:3px 11px;}
+
+/* --- Sources: the detail pane -------------------------------------------- */
+.src__detail{min-height:0;overflow-y:auto;overscroll-behavior:contain;max-height:62vh;}
+.sdet__none{padding:30px 22px;color:var(--text-dim);font-size:1.3rem;}
+.sdet__nonesub{margin-top:6px;font-size:1.2rem;opacity:.7;}
+.sdet{display:flex;flex-direction:column;gap:12px;padding:16px 20px 18px;}
+.sdet__hd{display:flex;align-items:baseline;gap:9px;}
+.sdet__title{color:var(--title);font-size:1.5rem;}
+.sdet__gone{
+  padding:1px 8px;border-radius:999px;background:var(--fill);
+  color:var(--warn);font-size:1.05rem;
+}
+.sdet__err{padding:8px 12px;border-radius:8px;background:rgba(255,83,112,.12);
+  color:var(--warn);font-size:1.2rem;}
+.sdet__ok{padding:8px 12px;border-radius:8px;background:var(--tint);
+  color:var(--accent);font-size:1.2rem;}
+
+.sdet__f{display:flex;align-items:baseline;gap:12px;}
+.sdet__lbl{
+  flex:0 0 7.5rem;font-size:1.1rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--text-dim);
+}
+.sdet__in{
+  flex:1 1 auto;min-width:0;padding:6px 11px;border:0;border-radius:8px;
+  background:var(--fill);color:var(--text);font:inherit;font-size:1.3rem;
+}
+.sdet__in:focus{outline:0;background:var(--fill-hover);box-shadow:0 0 0 1px var(--accent-dim);}
+.sdet__in--sm{flex:0 0 8rem;}
+/* A field that carries a note under it, rather than beside the label. */
+.sdet__fld{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:5px;}
+.sdet__warn{color:var(--caution);font-size:1.1rem;}
+
+.sdet__tags{flex:1 1 auto;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+.sdet__inhtags{display:flex;flex-wrap:wrap;gap:5px;}
+.src__tag{
+  display:inline-block;padding:1px 9px;border-radius:999px;
   background:var(--fill);color:var(--text-dim);font-size:1.05rem;
 }
-.fds__health{max-width:22rem;}
-.fds__ok{color:var(--text);}
-.fds__err{
-  color:var(--warn);display:inline-block;max-width:20rem;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;
+.src__tag--fixed{opacity:.7;cursor:help;}
+
+/* Everyday fields above, set-once fields below. */
+.sdet__adv{
+  margin-top:2px;padding-top:10px;border-top:1px solid var(--hairline);
+  font-size:1.1rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);opacity:.75;
 }
-.fds__streak{margin-left:5px;color:var(--warn);opacity:.8;font-size:1.1rem;}
-.fds__dim{color:var(--text-dim);opacity:.7;font-style:italic;}
-.fds__when{display:block;margin-top:2px;font-size:1.1rem;color:var(--text-dim);opacity:.7;}
+.sdet__tri{display:flex;gap:2px;padding:2px;border-radius:8px;background:var(--fill);}
+.sdet__opt{position:relative;}
+.sdet__opt input{position:absolute;opacity:0;width:0;height:0;}
+.sdet__opt span{
+  display:inline-block;padding:4px 11px;border-radius:6px;
+  color:var(--text-dim);font-size:1.2rem;cursor:pointer;
+}
+.sdet__opt input:checked + span{background:var(--tint);color:var(--accent);}
+.sdet__opt input:focus-visible + span{box-shadow:0 0 0 1px var(--accent-dim);}
+
 /* Fetch-history strip: one tick per past attempt, oldest left. Reads as a
    shape (solid run vs gaps) rather than as data you parse tick by tick. */
-.fds__th-hist{width:9rem;}
-.fds__strip{white-space:nowrap;line-height:1;}
-.fds__tick{
+.sdet__health{display:flex;align-items:center;gap:11px;flex-wrap:wrap;
+  padding-top:10px;border-top:1px solid var(--hairline);}
+.sdet__strip{white-space:nowrap;line-height:1;}
+.sdet__tick{
   display:inline-block;width:.4rem;height:1.4rem;margin-right:2px;
   border-radius:1px;background:var(--score-high);opacity:.55;cursor:help;
 }
-.fds__tick--bad{background:var(--warn);opacity:.85;}
-.fds__strip .fds__tick:last-child{opacity:1;}
-.fds__legend{
+.sdet__tick--bad{background:var(--warn);opacity:.85;}
+.sdet__strip .sdet__tick:last-child{opacity:1;}
+.sdet__htxt{font-size:1.2rem;color:var(--text-dim);}
+.sdet__hbad{color:var(--warn);}
+.sdet__when{margin-left:7px;opacity:.7;}
+
+.sdet__foot{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin-top:4px;padding-top:12px;border-top:1px solid var(--hairline);
+}
+.sdet__btns{display:flex;align-items:center;gap:8px;}
+.sdet__btn{
+  padding:5px 13px;border:0;border-radius:8px;background:var(--fill);
+  color:var(--text-dim);font:inherit;font-size:1.2rem;cursor:pointer;text-decoration:none;
+}
+.sdet__btn:hover{background:var(--fill-hover);color:var(--text);}
+.sdet__btn--go{background:var(--tint);color:var(--accent);}
+.sdet__btn--go:hover{background:var(--tint);color:var(--accent);filter:brightness(1.25);}
+.sdet__btn--del{color:var(--warn);}
+/* Two-step delete, CSS-only: the checkbox is the arming state, so it can't
+   survive the swap that follows and leave a live confirm behind. */
+.sdet__delsure{display:none;align-items:center;gap:8px;}
+.sdet__deltxt{font-size:1.2rem;color:var(--warn);}
+.sdet__delchk:checked ~ .sdet__delsure{display:inline-flex;}
+.sdet__delchk:checked ~ .sdet__btn--del{display:none;}
+.sdet__del{display:inline-flex;align-items:center;gap:8px;}
+
+/* The same form inside a modal: it scrolls on its own so the title bar stays. */
+.sdet--defaults{min-height:0;overflow-y:auto;}
+.sdef__intro{font-size:1.25rem;color:var(--text-dim);line-height:1.5;}
+
+.src__legend{
   display:flex;align-items:center;gap:9px;flex-wrap:wrap;
-  margin-top:12px;padding-top:10px;border-top:1px solid var(--hairline);
+  padding:11px 16px;border-top:1px solid var(--hairline);
   font-size:1.15rem;color:var(--text-dim);
 }
-.fds__legend b{color:var(--accent-dim);font-weight:400;}
+.src__copy{
+  padding:3px 11px;border:0;border-radius:8px;background:var(--fill);
+  color:var(--text-dim);font:inherit;font-size:1.15rem;cursor:pointer;
+}
+.src__copy:hover{background:var(--fill-hover);color:var(--accent);}
+.modal__acts{display:flex;align-items:center;gap:9px;}
+
+/* Narrow: the pane drops below the list instead of squeezing beside it. */
+@media (max-width:900px){
+  .src__cols{grid-template-columns:minmax(0,1fr);}
+  .src__list{max-height:38vh;border-right:0;border-bottom:1px solid var(--hairline);}
+  .src__detail{max-height:none;}
+  .src__acts{margin-left:0;}
+}
 
 /* ── Maze: the day-to-day tools home. First widget is the todo board. ────────
    Reuses the .pane terminal frame from the feed; the pieces below are the

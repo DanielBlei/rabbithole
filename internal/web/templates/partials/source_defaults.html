@@ -1,0 +1,58 @@
+{{/* The set-wide fallbacks. Editing these moves every feed that inherits them
+     at once, which is why saving repaints the whole list rather than a row. */}}
+{{define "sourceDefaults"}}
+<div class="modal" id="sourceDefaultsModal">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__frame" role="dialog" aria-modal="true" aria-label="Feed defaults">
+    <div class="modal__bar">
+      <span class="modal__title">feed defaults</span>
+      <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+    </div>
+
+    <form class="sdet sdet--defaults" hx-post="/sources/defaults" hx-target="#srcBody" hx-swap="outerHTML">
+      <p class="sdef__intro">
+        What every feed uses unless it sets the value itself. Leave a field blank and it
+        falls through to the built-in.
+      </p>
+
+      {{if .Err}}<div class="sdet__err" role="alert">{{.Err}}</div>{{end}}
+
+      <div class="sdet__f">
+        <span class="sdet__lbl">state</span>
+        <div class="sdet__tri" role="group" aria-label="Enabled by default">
+          <label class="sdet__opt"><input type="radio" name="enabled" value="" {{if eq .EnabledChoice ""}}checked{{end}}><span>on (built-in)</span></label>
+          <label class="sdet__opt"><input type="radio" name="enabled" value="on" {{if eq .EnabledChoice "on"}}checked{{end}}><span>on</span></label>
+          <label class="sdet__opt"><input type="radio" name="enabled" value="off" {{if eq .EnabledChoice "off"}}checked{{end}}><span>off</span></label>
+        </div>
+      </div>
+
+      {{/* Same rule as the feed pane: blank takes the fallback, and the
+           placeholder is that fallback. Here the chain has run out, so it is
+           ingest.since and the built-in uncapped. */}}
+      <label class="sdet__f">
+        <span class="sdet__lbl">since</span>
+        <input class="sdet__in sdet__in--sm" type="text" name="since" value="{{.Since}}"
+               placeholder="{{.GlobalSince}}" autocomplete="off" spellcheck="false">
+      </label>
+
+      <label class="sdet__f">
+        <span class="sdet__lbl">max items</span>
+        <input class="sdet__in sdet__in--sm" type="text" name="max_items" value="{{.MaxItems}}"
+               placeholder="uncapped" inputmode="numeric" autocomplete="off">
+      </label>
+
+      {{/* No tags here on purpose: a tag on every feed tells no two apart, so
+           it would only break the feed page's tag filter. A seed file can still
+           set defaults.tags, and saving this form preserves it. */}}
+
+      <div class="sdet__foot">
+        <span></span>
+        <span class="sdet__btns">
+          <button class="sdet__btn" type="button" data-modal-close>cancel</button>
+          <button class="sdet__btn sdet__btn--go" type="submit">save defaults</button>
+        </span>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}

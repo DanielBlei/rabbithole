@@ -30,8 +30,9 @@ import (
 // is harmless (a page just ignores the ones it doesn't use). Parsed once at
 // startup; a parse failure is a build-time mistake, so fail fast.
 var (
-	feedTmpl = pageTmpl("feed.html")
-	mazeTmpl = pageTmpl("maze.html")
+	feedTmpl    = pageTmpl("feed.html")
+	mazeTmpl    = pageTmpl("maze.html")
+	sourcesTmpl = pageTmpl("sources.html")
 )
 
 // pageTmpl builds the template set for one page: the shared layout and partials
@@ -95,7 +96,17 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /feed", s.handleFeed)
 	mux.HandleFunc("GET /maze", s.handleMaze)
 	mux.HandleFunc("GET /config", s.handleConfig)
-	mux.HandleFunc("GET /feeds", s.handleFeeds)
+	mux.HandleFunc("GET /sources", s.handleSources)
+	mux.HandleFunc("GET /sources/new", s.handleSourceNew)
+	mux.HandleFunc("GET /sources/defaults", s.handleSourceDefaults)
+	mux.HandleFunc("GET /sources/export", s.handleSourceExport)
+	mux.HandleFunc("GET /sources/{id}", s.handleSourceSelect)
+	mux.HandleFunc("POST /sources", s.handleSourceAdd)
+	mux.HandleFunc("POST /sources/defaults", s.handleSourceSaveDefaults)
+	mux.HandleFunc("POST /sources/{id}", s.handleSourceSave)
+	mux.HandleFunc("POST /sources/{id}/enabled", s.handleSourceEnabled)
+	mux.HandleFunc("POST /sources/{id}/restore", s.handleSourceRestore)
+	mux.HandleFunc("DELETE /sources/{id}", s.handleSourceDelete)
 	mux.HandleFunc("GET /ingest", s.handleIngest)
 	mux.HandleFunc("GET /ingest/status", s.handleIngestStatus)
 	mux.HandleFunc("GET /ingest/chrome", s.handleIngestChrome)

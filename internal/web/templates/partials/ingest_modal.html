@@ -10,7 +10,9 @@
     <div class="modal__foot modal__foot--ingest">
       {{/* Stack over the runner instead of replacing it; Esc drops back here. */}}
       <a class="ing__cfg" href="#" hx-get="/config" hx-target="#modalTop" hx-swap="innerHTML">⚙ view config</a>
-      <a class="ing__cfg" href="#" hx-get="/feeds" hx-target="#modalTop" hx-swap="innerHTML">▤ view feeds</a>
+      {{/* Sources is a page, not a modal, so this one navigates. The run keeps
+           going behind it, and the page offers a chip back to this log. */}}
+      <a class="ing__cfg" href="/sources?from=ingest">▤ edit sources</a>
     </div>
   </div>
 </div>

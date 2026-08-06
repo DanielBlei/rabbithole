@@ -1,148 +1,33 @@
-// The Maze page: the tag-chip input, tag colours, the tag filter, the idea
-// board's drag-to-reorder, and the wheel gesture that swaps boards.
+// The Maze page: the tag filter, click-to-recolour tags, the idea board's
+// drag-to-reorder, and the wheel gesture that swaps boards. The tag-chip input
+// and the colour palette live in tagput.js, shared with the Sources page.
 (function () {
   // The todo widget re-renders whole on every mutation, so init runs again on
   // each htmx swap; the tag filter's selection is kept in a closure Set so it
   // survives those swaps. All state lives in the DOM otherwise (no framework).
 
-  // ---- tag-chip input -------------------------------------------------
-  function universe() {
-    var w = document.getElementById('todoWidget');
-    var raw = (w && w.dataset.allTags) || '';
-    return raw ? raw.split(',') : [];
-  }
-  function parseList(v) {
-    return (v || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
-  }
-
-  // ---- tag colours (theme palette, deterministic + click-to-recolour) --
-  // Each tag name maps to one of TAG_COLORS palette classes (.tag--cN in the
-  // CSS). Default is a stable hash of the name; a click on a row chip cycles it
-  // and the choice persists in localStorage, so a tag stays the same colour
-  // everywhere it appears.
-  var TAG_COLORS = 8;
-  function colorStore() { try { return JSON.parse(localStorage.getItem('rh.tagColors') || '{}'); } catch (e) { return {}; } }
-  function saveColorStore(m) { try { localStorage.setItem('rh.tagColors', JSON.stringify(m)); } catch (e) {} }
-  function tagHash(name) {
-    var h = 5381; name = name.toLowerCase();
-    for (var i = 0; i < name.length; i++) { h = ((h << 5) + h + name.charCodeAt(i)) >>> 0; }
-    return h;
-  }
-  function colorIndex(name) {
-    var m = colorStore(), k = name.toLowerCase();
-    return (k in m ? m[k] : tagHash(name)) % TAG_COLORS;
-  }
-  function colorize(el, name) {
-    for (var i = 0; i < TAG_COLORS; i++) { el.classList.remove('tag--c' + i); }
-    el.classList.add('tag--c' + colorIndex(name));
-  }
+  // ---- tag chips ------------------------------------------------------
+  // The chip input and the colour palette live in tagput.js, shared with the
+  // Sources page. What stays here is the Maze's own use of them: recolouring a
+  // task's tag by clicking it.
   function applyTagColors() {
     document.querySelectorAll('#todoWidget .todo__tag').forEach(function (el) {
-      colorize(el, (el.dataset.tag || el.textContent).trim());
+      window.tagput.colorize(el, (el.dataset.tag || el.textContent).trim());
     });
     document.querySelectorAll('.pill--tag').forEach(function (el) {
-      var s = el.querySelector('span'); colorize(el, (s ? s.textContent : '').trim());
+      var s = el.querySelector('span');
+      window.tagput.colorize(el, (s ? s.textContent : '').trim());
     });
-    document.querySelectorAll('.tagput__chip, .tagput__sug').forEach(function (el) {
-      if (el.dataset.tag) { colorize(el, el.dataset.tag); }
-    });
+    window.tagput.colorChips();
   }
   // Click a row tag chip to advance its colour (persists for that tag name).
   document.addEventListener('click', function (e) {
     var el = e.target.closest && e.target.closest('.todo__tag');
     if (!el) return;
-    var name = (el.dataset.tag || el.textContent).trim(), k = name.toLowerCase();
-    var m = colorStore();
-    m[k] = ((k in m ? m[k] : tagHash(name)) + 1) % TAG_COLORS;
-    saveColorStore(m);
+    window.tagput.cycleColor((el.dataset.tag || el.textContent).trim());
     applyTagColors();
   });
-  function tpHidden(tp) { return tp.querySelector('input[type=hidden]'); }
-  function tpTags(tp) { return parseList(tpHidden(tp).value); }
 
-  function tpSet(tp, tags) {
-    var seen = {}, out = [];
-    tags.forEach(function (t) {
-      t = t.replace(/,/g, '').trim();
-      var k = t.toLowerCase();
-      if (t && !seen[k]) { seen[k] = 1; out.push(t); }
-    });
-    tpHidden(tp).value = out.join(',');
-    tpRender(tp);
-  }
-  function tpAdd(tp, text) {
-    if (text && text.trim()) { tpSet(tp, tpTags(tp).concat(text.split(','))); }
-  }
-  function tpRender(tp) {
-    var chips = tp.querySelector('.tagput__chips');
-    chips.innerHTML = '';
-    tpTags(tp).forEach(function (t) {
-      var chip = document.createElement('span');
-      chip.className = 'tagput__chip';
-      chip.dataset.tag = t;
-      chip.textContent = t;
-      colorize(chip, t);
-      var x = document.createElement('button');
-      x.type = 'button';
-      x.className = 'tagput__x';
-      x.setAttribute('aria-label', 'Remove tag ' + t);
-      x.innerHTML = '&times;';
-      x.addEventListener('click', function () {
-        tpSet(tp, tpTags(tp).filter(function (o) { return o !== t; }));
-      });
-      chip.appendChild(x);
-      chips.appendChild(chip);
-    });
-  }
-  function tpSuggest(tp) {
-    var input = tp.querySelector('.tagput__input');
-    var box = tp.querySelector('.tagput__suggest');
-    var q = input.value.trim().toLowerCase();
-    var have = {};
-    tpTags(tp).forEach(function (t) { have[t.toLowerCase()] = 1; });
-    var matches = universe().filter(function (t) {
-      return !have[t.toLowerCase()] && t.toLowerCase().indexOf(q) !== -1;
-    });
-    box.innerHTML = '';
-    if (!matches.length) { box.hidden = true; return; }
-    // Anchor the popover under the text input (the last item), not the box's
-    // left edge, so it drops from where you're actually typing.
-    box.style.left = input.offsetLeft + 'px';
-    matches.slice(0, 8).forEach(function (t) {
-      var b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'tagput__sug';
-      b.dataset.tag = t;
-      b.textContent = t;
-      colorize(b, t);
-      b.addEventListener('mousedown', function (e) {
-        e.preventDefault();
-        tpAdd(tp, t); input.value = ''; tpSuggest(tp); input.focus();
-      });
-      box.appendChild(b);
-    });
-    box.hidden = false;
-  }
-  function initTagput(tp) {
-    if (tp.dataset.ready) return;
-    tp.dataset.ready = '1';
-    var input = tp.querySelector('.tagput__input');
-    tpRender(tp);
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === ',') {
-        e.preventDefault(); tpAdd(tp, input.value); input.value = ''; tpSuggest(tp);
-      } else if (e.key === 'Backspace' && !input.value) {
-        var tags = tpTags(tp);
-        if (tags.length) { tpSet(tp, tags.slice(0, -1)); }
-      }
-    });
-    input.addEventListener('input', function () { tpSuggest(tp); });
-    input.addEventListener('focus', function () { tpSuggest(tp); });
-    input.addEventListener('blur', function () {
-      tpAdd(tp, input.value); input.value = '';
-      setTimeout(function () { tp.querySelector('.tagput__suggest').hidden = true; }, 120);
-    });
-  }
   // Panels show via CSS :checked; radios can't uncheck themselves, so this only
   // handles the collapse-on-re-click case. State is stashed on the tab element
   // between its own mousedown and click (same element, so it survives). Same
@@ -159,12 +44,6 @@
     var input = document.getElementById(tab.getAttribute('for'));
     if (input) { e.preventDefault(); input.checked = false; }
   });
-
-  // Commit any pending typed text before an hx-post form submits.
-  document.addEventListener('submit', function (e) {
-    var tp = e.target.querySelector && e.target.querySelector('[data-tagput]');
-    if (tp) { var input = tp.querySelector('.tagput__input'); tpAdd(tp, input.value); input.value = ''; }
-  }, true);
 
   // ---- idea note: live colour preview ---------------------------------
   // Picking a swatch recolours its note immediately (the .note--<colour> class is
@@ -289,7 +168,6 @@
   }
 
   function initMaze() {
-    document.querySelectorAll('[data-tagput]').forEach(initTagput);
     initFilter();
     applyTagColors();
     initIdeas();

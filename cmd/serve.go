@@ -71,10 +71,20 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}()
 	log.Debug().Str("db", cfg.Store.DBPath).Msg("store opened")
 
+	// Feeds live in the store; the feeds file only seeds ones it has never seen.
+	// Running this every boot means adding an entry to the file is enough to
+	// pick it up, while anything you changed on the Sources page — disabled,
+	// retuned, deleted — is left exactly as you left it.
+	seedFeeds(ctx, db, cfg)
+
 	// Items carry their feed's tags, which the feed page filters on. Syncing at
-	// startup means editing tags in the feeds file takes effect on restart,
-	// rather than waiting for the next ingest run to notice.
-	if err := db.SyncSourceTags(ctx, ingest.ConfiguredTags(cfg)); err != nil {
+	// startup means a tag edit reaches items recorded before it, rather than
+	// waiting for the next ingest run to notice.
+	configured, err := ingest.ResolveFeeds(ctx, db, cfg)
+	if err != nil {
+		return err
+	}
+	if err := db.SyncSourceTags(ctx, ingest.ConfiguredTags(configured)); err != nil {
 		log.Warn().Err(err).Msg("syncing feed tags failed")
 	}
 
@@ -134,4 +144,33 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+// seedFeeds imports feeds the store has never seen from the seed file.
+//
+// Every failure here is a warning, never a boot failure: the store already
+// holds the feed set, and a missing, unreadable or half-broken seed file is a
+// reason to say so and carry on rather than to refuse to serve.
+func seedFeeds(ctx context.Context, db *store.Store, cfg *config.Config) {
+	path, _ := cfg.FeedsFilePath(configPath)
+	doc, found, err := config.ReadFeedsFile(path)
+	if err != nil {
+		log.Warn().Err(err).Str("feeds", path).Msg("reading the feed seed file failed")
+		return
+	}
+	if !found {
+		log.Info().Str("feeds", path).Msg("no feed seed file; feeds come from the store")
+		return
+	}
+	result, err := db.SeedFeeds(ctx, *doc)
+	if err != nil {
+		log.Warn().Err(err).Str("feeds", path).Msg("seeding feeds failed")
+		return
+	}
+	for _, warning := range result.Warnings {
+		log.Warn().Str("feeds", path).Msg("skipped while seeding: " + warning)
+	}
+	// Logged whether or not anything was added from a seed file
+	log.Debug().Str("feeds", path).Int("added", result.Added).Int("skipped", result.Skipped).
+		Msg("seeded feeds from the seed file")
 }

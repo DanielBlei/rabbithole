@@ -1,0 +1,134 @@
+{{/* The detail pane: one feed's settings. Name, url and tags are the everyday
+     fields; since and max_items sit under an "advanced" rule because they are
+     the ones you set once and forget. A tuning field left blank takes the
+     default, which its placeholder shows. */}}
+{{define "sourceDetail"}}
+<div class="src__detail" id="srcDetail">
+{{if not .}}
+  <div class="sdet__none">
+    <p>Pick a feed to see and edit its settings.</p>
+    <p class="sdet__nonesub">Toggles on the left take effect straight away.</p>
+  </div>
+{{else}}
+  <form class="sdet"
+        {{if .Adding}}hx-post="/sources"{{else}}hx-post="/sources/{{.ID}}"{{end}}
+        hx-target="#srcBody" hx-swap="outerHTML">
+    <div class="sdet__hd">
+      <span class="sdet__title">{{if .Adding}}new feed{{else}}{{.Name}}{{end}}</span>
+      {{if .Deleted}}<span class="sdet__gone">deleted</span>{{end}}
+    </div>
+
+    {{if .Err}}<div class="sdet__err" role="alert">{{.Err}}</div>{{end}}
+    {{if .Notice}}<div class="sdet__ok" role="status">{{.Notice}}</div>{{end}}
+
+    <label class="sdet__f">
+      <span class="sdet__lbl">name</span>
+      <input class="sdet__in" type="text" name="name" value="{{.Name}}" required
+             autocomplete="off" spellcheck="false">
+    </label>
+
+    {{/* Deliberately not type="url": the browser would reject a scheme-less
+         address before it could be sent, and the server fills https in for you.
+         Plain http is accepted but flagged under the field — a feed that only
+         serves http is worth having, and worth knowing about. */}}
+    <label class="sdet__f">
+      <span class="sdet__lbl">url</span>
+      <span class="sdet__fld">
+        <input class="sdet__in" type="text" name="url" value="{{.URL}}" required
+               inputmode="url" autocomplete="off" spellcheck="false"
+               placeholder="example.com/feed.xml" data-src-url>
+        <span class="sdet__warn" data-src-insecure hidden>insecure &mdash; consider https over plain http</span>
+      </span>
+    </label>
+
+    <div class="sdet__f">
+      <span class="sdet__lbl">tags</span>
+      <div class="sdet__tags">
+        <div class="tagput" data-tagput>
+          <span class="tagput__chips"></span>
+          <input class="tagput__input" type="text" placeholder="+ tag&hellip;" aria-label="Add tag" autocomplete="off">
+          <input type="hidden" name="tags" value="{{.TagsValue}}">
+          <div class="tagput__suggest" hidden></div>
+        </div>
+        {{if .InheritedTags}}
+        {{/* From the defaults, unioned onto whatever the feed sets. Shown so the
+             feed's real tag list is visible, but not removable from here. */}}
+        <span class="sdet__inhtags">
+          {{range .InheritedTags}}<span class="src__tag src__tag--fixed" data-tag="{{.}}" title="from the defaults">{{.}}</span>{{end}}
+        </span>
+        {{end}}
+      </div>
+    </div>
+
+    <div class="sdet__adv">advanced</div>
+
+    <div class="sdet__f">
+      <span class="sdet__lbl">state</span>
+      <div class="sdet__tri" role="group" aria-label="Enabled">
+        <label class="sdet__opt"><input type="radio" name="enabled" value="" {{if eq .EnabledChoice ""}}checked{{end}}><span>default</span></label>
+        <label class="sdet__opt"><input type="radio" name="enabled" value="on" {{if eq .EnabledChoice "on"}}checked{{end}}><span>on</span></label>
+        <label class="sdet__opt"><input type="radio" name="enabled" value="off" {{if eq .EnabledChoice "off"}}checked{{end}}><span>off</span></label>
+      </div>
+    </div>
+
+    {{/* Leave a field blank and the feed takes the default; the placeholder is
+         that default, so the empty box says what it will do without a word of
+         explanation beside it. The visible label above still names the field,
+         so the placeholder never does a label's job. */}}
+    <label class="sdet__f">
+      <span class="sdet__lbl">since</span>
+      <input class="sdet__in sdet__in--sm" type="text" name="since" value="{{.Since}}"
+             placeholder="{{.DefaultSince}}" autocomplete="off" spellcheck="false">
+    </label>
+
+    <label class="sdet__f">
+      <span class="sdet__lbl">max items</span>
+      <input class="sdet__in sdet__in--sm" type="text" name="max_items" value="{{.MaxItems}}"
+             placeholder="{{.DefaultCap}}" inputmode="numeric" autocomplete="off">
+    </label>
+
+    {{if and (not .Adding) .Eff.Strip}}
+    {{/* Oldest-to-newest run of past attempts: the shape of a feed's recent
+         behaviour, which a single current-status dot can't show. */}}
+    <div class="sdet__health">
+      <span class="sdet__strip">
+        {{range .Eff.Strip}}<i class="sdet__tick{{if not .OK}} sdet__tick--bad{{end}}" title="{{.Title}}"></i>{{end}}
+      </span>
+      <span class="sdet__htxt">
+        {{if eq .Eff.State "error"}}<span class="sdet__hbad">{{.Eff.Detail}}</span>{{else}}{{.Eff.Detail}}{{end}}
+        {{if .Eff.Since1st}}<span class="sdet__when">failing since {{.Eff.Since1st}}</span>
+        {{else if .Eff.LastFetch}}<span class="sdet__when">{{.Eff.LastFetch}}</span>{{end}}
+      </span>
+    </div>
+    {{end}}
+
+    <div class="sdet__foot">
+      {{if .Adding}}
+        <span></span>
+        <span class="sdet__btns">
+          <a class="sdet__btn" href="#" hx-get="/sources" hx-target="#srcBody" hx-swap="outerHTML" hx-select="#srcBody">cancel</a>
+          <button class="sdet__btn sdet__btn--go" type="submit">add feed</button>
+        </span>
+      {{else}}
+        {{/* Two-step delete, the same checkbox-driven confirm the task list
+             uses: no dialog, no JS, and the arming state can't survive a swap. */}}
+        <span class="sdet__del">
+          <input class="sdet__delchk" type="checkbox" id="delFeed{{.ID}}" hidden>
+          <label class="sdet__btn sdet__btn--del" for="delFeed{{.ID}}">delete</label>
+          <span class="sdet__delsure">
+            <span class="sdet__deltxt">sure?</span>
+            <button class="sdet__btn sdet__btn--del" type="button"
+                    hx-delete="/sources/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML">yes, delete</button>
+            <label class="sdet__btn" for="delFeed{{.ID}}">no</label>
+          </span>
+        </span>
+        <span class="sdet__btns">
+          <a class="sdet__btn" href="#" hx-get="/sources/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML">reset</a>
+          <button class="sdet__btn sdet__btn--go" type="submit">save</button>
+        </span>
+      {{end}}
+    </div>
+  </form>
+{{end}}
+</div>
+{{end}}

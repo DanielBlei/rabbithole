@@ -56,16 +56,23 @@ func Run(
 	opts Options,
 ) (Outcome, error) {
 	logger := zerolog.Ctx(ctx)
+	// One read of the feed set for the whole run. The Sources page can edit
+	// feeds while this is in flight, and a run that re-read the store partway
+	// through would fetch one set and tag against another.
+	configured, err := ResolveFeeds(ctx, db, cfg)
+	if err != nil {
+		return Outcome{}, err
+	}
 	// Only enabled feeds are fetched; a disabled one is parked, not deleted,
-	// so it stays in the config (and the viewer) without costing a request.
-	active := cfg.Feeds.Enabled()
+	// so it stays in the store (and on the Sources page) without costing a request.
+	active := config.EnabledFeeds(configured)
 	sources := make([]feeds.Source, len(active))
 	for i, f := range active {
 		sources[i] = feeds.Source{Name: f.Name, URL: f.URL, Tags: f.Tags}
 		logger.Debug().Str("feed", f.Name).Str("url", f.URL).
 			Str("since", f.Since.String()).Int("max_items", f.MaxItems).Msg("configured feed")
 	}
-	if disabled := cfg.Feeds.Len() - len(active); disabled > 0 {
+	if disabled := len(configured) - len(active); disabled > 0 {
 		logger.Info().Int("disabled", disabled).Msg("skipping disabled feeds")
 	}
 	if len(sources) == 0 {
@@ -96,7 +103,7 @@ func Run(
 	// scored item is never re-inserted, so retagging a feed in the feeds file
 	// reaches its existing items only through this sync. Best-effort, like the
 	// history above.
-	if err := db.SyncSourceTags(ctx, ConfiguredTags(cfg)); err != nil {
+	if err := db.SyncSourceTags(ctx, ConfiguredTags(configured)); err != nil {
 		logger.Warn().Err(err).Msg("syncing feed tags failed")
 	}
 
@@ -206,12 +213,24 @@ func Run(
 	return outcome, nil
 }
 
+// ResolveFeeds reads the configured feeds out of the store and walks them
+// through the defaults cascade. Feeds live in the store, but the cascade's
+// outermost fallback for `since` is still ingest.since from the main config —
+// so both are needed to answer "what will this feed actually fetch".
+func ResolveFeeds(ctx context.Context, db *store.Store, cfg *config.Config) ([]config.ResolvedFeed, error) {
+	doc, err := db.FeedsDoc(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return config.ResolveFeeds(doc, cfg.Ingest.Since.Std())
+}
+
 // ConfiguredTags maps every configured feed's name — the value items record as
 // their source — to its resolved tags. Disabled feeds are included: their
 // items are still in the store and still belong to their tags.
-func ConfiguredTags(cfg *config.Config) map[string][]string {
-	tags := make(map[string][]string, cfg.Feeds.Len())
-	for _, f := range cfg.Feeds.All {
+func ConfiguredTags(configured []config.ResolvedFeed) map[string][]string {
+	tags := make(map[string][]string, len(configured))
+	for _, f := range configured {
 		tags[f.Name] = f.Tags
 	}
 	return tags
