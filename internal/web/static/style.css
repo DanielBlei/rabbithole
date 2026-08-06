@@ -107,13 +107,24 @@ header.topbar{
 }
 /* Terminal mascot: a tiny ASCII bunny centred over the bar. Absolutely placed so
    it doesn't affect the bar's height or the left/right clusters; non-interactive.
-   Ears teal, face dim, monospace + tight line-height so the two lines read as one
-   little creature. Hidden where the bar gets tight. */
+   Ears teal over a dim face, monospace + tight line-height so the two lines read
+   as one little creature. Hidden where the bar gets tight. */
 .topbar__bunny{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   margin:0;font-family:inherit;font-size:1.1rem;line-height:1.05;
-  text-align:center;letter-spacing:1px;color:var(--accent);
+  text-align:center;letter-spacing:1px;color:var(--text-dim);
   user-select:none;pointer-events:none;
+}
+.topbar__bunny .bunny__ears{color:var(--accent);}
+/* It blinks roughly every 7s. Squashing the eyes on their own baseline keeps the
+   blink inside the character box — swapping the glyph would jitter the face. */
+.topbar__bunny .bunny__eye{
+  display:inline-block;font-style:normal;color:var(--accent);
+  animation:bunny-blink 7s ease-in-out infinite;
+}
+@keyframes bunny-blink{0%,94%,100%{transform:scaleY(1);}97%{transform:scaleY(.12);}}
+@media (prefers-reduced-motion: reduce){
+  .topbar__bunny .bunny__eye{animation:none;}
 }
 @media (max-width: 920px){ .topbar__bunny{display:none;} }
 .topbar__left{display:flex;align-items:center;gap:10px;}
@@ -137,6 +148,20 @@ header.topbar{
 .topbar__nav a.active{
   color:var(--accent);background:var(--tint);
   box-shadow:inset 0 0 0 1px rgba(128,203,196,.22);
+}
+/* With the side menu open its page names are the biggest type on screen, and
+   the bar's own cluster reads as an afterthought beside them. A small step up
+   while it's out — the bar's height is pinned, so nothing reflows. */
+.topbar__left .wordmark b,
+.topbar__left .breaker,
+.topbar__nav{transition:font-size .22s cubic-bezier(.2,.9,.3,1.05);}
+body.nav-open .topbar__left .wordmark b{font-size:1.78rem;}
+body.nav-open .topbar__left .breaker{font-size:1.55rem;}
+body.nav-open .topbar__nav{font-size:1.22rem;}
+@media (prefers-reduced-motion: reduce){
+  .topbar__left .wordmark b,
+  .topbar__left .breaker,
+  .topbar__nav{transition:none;}
 }
 
 .topbar__right{position:relative;display:flex;align-items:center;gap:14px;}
@@ -855,14 +880,16 @@ pre.yml code{font-family:inherit;}
    mouse-leave / click-away / Escape / picking an item. The topbar keeps a
    pinned height (--topbar-h) so the menu's top offset can't drift from it.
    z-index: menu 45 (over the bar's 40, under the modal's 50), tab + hot zone
-   just beneath it. */
+   just beneath it.
+   Inside, two tiers that never read as one list: the pages sit at the top as
+   prompt lines, the config pair at the very floor as typed commands. */
 :root{ --topbar-h:58px; }
 header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
 .nav-hot{position:fixed;left:0;top:var(--topbar-h);bottom:0;width:12px;z-index:44;}
 .navrail{
-  position:fixed;left:0;top:var(--topbar-h);bottom:0;z-index:45;width:250px;
+  position:fixed;left:0;top:var(--topbar-h);bottom:0;z-index:45;width:262px;
   overflow-y:auto;
-  display:flex;flex-direction:column;gap:3px;padding:12px 10px;
+  display:flex;flex-direction:column;gap:2px;padding:22px 12px 14px;
   background:var(--overlay);
   border-right:1px solid var(--hairline-strong);
   -webkit-backdrop-filter:blur(22px) saturate(1.6);
@@ -873,43 +900,104 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
 }
 .navrail.open{transform:none;}
 .navrail__item{
-  position:relative;display:flex;align-items:center;gap:13px;
-  padding:9px 12px;border-radius:10px;white-space:nowrap;cursor:pointer;
+  position:relative;display:flex;align-items:center;white-space:nowrap;cursor:pointer;
   background:none;border:0;font-family:inherit;color:var(--text);text-align:left;
-  overflow:hidden;text-overflow:ellipsis;
+  border-radius:10px;
+}
+
+/* Tier 1 — destinations, read as the shell prompt: a ❯ that only the current
+   page keeps lit, a name at nearly twice the config rows' size, and an accent
+   wash that fades out to the right instead of filling the row. */
+.navrail__item--page{
+  gap:11px;padding:11px 12px;
+  transition:background .16s ease;
+}
+.navrail__item--page:hover{background:var(--fill-hover);}
+.navrail__mk{
+  flex:none;width:13px;font-size:1.6rem;line-height:1;color:var(--text-dim);
+  opacity:0;transform:translateX(-5px);
+  transition:opacity .16s ease,transform .16s ease,color .16s ease;
+}
+.navrail__item--page:hover .navrail__mk{opacity:.6;transform:none;}
+.navrail__txt{min-width:0;}
+.navrail__nm{
+  display:block;font-size:1.9rem;line-height:1.15;color:var(--title);
+  transition:color .16s ease;
+}
+.navrail__ds{display:block;margin-top:1px;font-size:1.15rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;}
+/* The lit state. The glow is the whole point of the tier — a teal bloom on the
+   name and marker, over a wash that decays across the row. */
+.navrail__item--on.navrail__item--page{
+  background:linear-gradient(90deg, rgba(128,203,196,.15), rgba(128,203,196,0) 82%);
+}
+/* Doubled class so the lit marker outranks the hover rule above — the current
+   page's ❯ stays at full strength under the pointer. */
+.navrail__item--page.navrail__item--on .navrail__mk{
+  opacity:1;transform:none;color:var(--accent);
+  text-shadow:0 0 12px rgba(128,203,196,.7);
+}
+.navrail__item--on .navrail__nm{
+  color:var(--accent);text-shadow:0 0 22px rgba(128,203,196,.45);
+}
+.navrail__item--on.navrail__item--page::before{
+  content:"";position:absolute;left:0;top:9px;bottom:9px;width:2px;
+  border-radius:2px;background:var(--accent);box-shadow:0 0 10px rgba(128,203,196,.65);
+}
+/* Terminal cursor parked after the current page's name. */
+.navrail__cur{display:none;}
+.navrail__item--on .navrail__cur{
+  display:inline-block;width:8px;height:1.5rem;margin-left:7px;
+  vertical-align:-2px;background:var(--accent);
+  box-shadow:0 0 10px rgba(128,203,196,.6);
+  animation:nav-cursor 1.15s steps(1) infinite;
+}
+@keyframes nav-cursor{0%,45%{opacity:1;}46%,100%{opacity:0;}}
+
+/* Tier 2 — the config pair, tucked under the pages rather than pushed away
+   from them. The size and colour split already says these are a different kind
+   of thing, so the gap only has to separate the groups, not carry the
+   hierarchy; a long one just makes the eye travel to find them.
+   One dim line each, the subline demoted to a shell comment. */
+.navrail__foot{margin-top:18px;}
+.navrail__sec{display:flex;align-items:center;gap:9px;padding:0 12px;margin-bottom:5px;}
+.navrail__sec span{font-size:1rem;letter-spacing:.14em;color:var(--text-dim);text-transform:uppercase;}
+.navrail__sec::after{content:"";flex:1;height:1px;background:var(--hairline);}
+.navrail__item--cmd{
+  gap:7px;padding:6px 12px;width:100%;font-size:1.25rem;
   transition:background .13s ease;
 }
-.navrail__item:hover{background:var(--fill-hover);}
-.navrail__item--on{background:var(--tint);}
-.navrail__item--on::before{
-  content:"";position:absolute;left:0;top:8px;bottom:8px;width:2.5px;
-  border-radius:2px;background:var(--accent);
+.navrail__item--cmd:hover{background:var(--fill-hover);}
+.navrail__sig{flex:none;color:var(--accent-dim);}
+.navrail__cmd{position:relative;flex:none;color:var(--text);transition:color .13s ease;}
+.navrail__item--cmd:hover .navrail__cmd{color:var(--accent);}
+.navrail__item--on.navrail__item--cmd{background:var(--tint);}
+.navrail__item--on.navrail__item--cmd .navrail__cmd{color:var(--accent);}
+.navrail__note{
+  min-width:0;font-size:1.1rem;color:var(--text-dim);
+  overflow:hidden;text-overflow:ellipsis;
 }
-.navrail__gl{
-  position:relative;font-size:1.9rem;width:24px;flex:none;text-align:center;
-  color:var(--text-dim);line-height:1;
-}
-.navrail__item--on .navrail__gl{color:var(--accent);}
-.navrail__txt{min-width:0;}
-.navrail__nm{display:block;font-size:1.4rem;color:var(--title);}
-.navrail__item--on .navrail__nm{color:var(--accent);}
-.navrail__ds{display:block;font-size:1.1rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;}
-.navrail__div{height:1px;background:var(--hairline);margin:6px 14px;flex:none;}
-/* The ingest action's status dot rides the ⟳ glyph's corner. It only exists
-   for the states that need attention — pulsing while a run is live, red after
-   a failure. A healthy history renders no dot at all (no green anywhere). */
-.navrail__dot{position:absolute;right:-4px;top:-3px;width:7px;height:7px;border-radius:50%;}
+.navrail__note::before{content:"# ";}
+/* The ingest command's status dot rides its name. It only exists for the
+   states that need attention — pulsing while a run is live, red after a
+   failure. A healthy history renders no dot at all (no green anywhere). */
+.navrail__dot{position:absolute;right:-7px;top:-2px;width:6px;height:6px;border-radius:50%;}
 .navrail__dot--err{background:var(--warn);box-shadow:0 0 6px rgba(255,83,112,.4);}
 .navrail__dot--warn{background:var(--caution);box-shadow:0 0 6px rgba(255,203,107,.4);}
 .navrail__dot--run{background:var(--accent);animation:ing-pulse 1.1s ease-in-out infinite;}
-/* An incomplete run colours the whole item, not just the dot: red = error
-   (broken), gold = cancelled (didn't finish, nothing broke). */
-.navrail__item--err .navrail__gl,
-.navrail__item--err .navrail__nm,
-.navrail__item--err .navrail__ds{color:var(--warn);}
-.navrail__item--warn .navrail__gl,
-.navrail__item--warn .navrail__nm,
-.navrail__item--warn .navrail__ds{color:var(--caution);}
+/* An incomplete run colours the whole row, not just the dot: red = error
+   (broken), gold = cancelled (didn't finish, nothing broke). Doubled class so
+   these outrank the hover tint — a failed run must not read teal under the
+   pointer. */
+.navrail__item--cmd.navrail__item--err .navrail__sig,
+.navrail__item--cmd.navrail__item--err .navrail__cmd,
+.navrail__item--cmd.navrail__item--err .navrail__note{color:var(--warn);}
+.navrail__item--cmd.navrail__item--warn .navrail__sig,
+.navrail__item--cmd.navrail__item--warn .navrail__cmd,
+.navrail__item--cmd.navrail__item--warn .navrail__note{color:var(--caution);}
+.navrail__item:focus-visible{outline:1px solid var(--accent);outline-offset:-1px;}
+@media (prefers-reduced-motion: reduce){
+  .navrail__item--on .navrail__cur{animation:none;}
+}
 
 /* The 3-line tab that summons the menu — mid-height at the very edge. It
    mirrors the ingest state so trouble shows with the menu closed: red lines

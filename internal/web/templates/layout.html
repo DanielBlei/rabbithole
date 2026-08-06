@@ -10,15 +10,22 @@
      in style.css; browsers only download the ones the current prefs use. -->
 <!-- Blocking, not deferred: it has to run before the first paint. -->
 <script src="/static/js/fonts-preload.js"></script>
+<!-- The rabbit head from the logo, without the wordmark: unreadable at tab size.
+     Modern browsers take the SVG and render it crisp at whatever size they need;
+     the .ico carries hand-tuned 16/32/48 bitmaps for the ones that don't. Naming
+     both here also stops the browser's blind guess at /favicon.ico. -->
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="/static/favicon.ico" sizes="16x16 32x32 48x48">
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/htmx.min.js" defer></script>
 </head>
 <body>
   <header class="topbar">
     <!-- terminal mascot: a tiny ASCII bunny centred in the bar (absolute overlay,
-         so it never shifts the wordmark/clock); hidden on narrow screens. -->
-    <pre class="topbar__bunny" aria-hidden="true">(\_/)
-(&bull;_&bull;)</pre>
+         so it never shifts the wordmark/clock); hidden on narrow screens.
+         Unindented on purpose — this is a <pre>, so leading spaces would show. -->
+    <pre class="topbar__bunny" aria-hidden="true"><span class="bunny__ears">(\_/)</span>
+(<i class="bunny__eye">&bull;</i>_<i class="bunny__eye">&bull;</i>)</pre>
     <div class="topbar__left">
       <span class="wordmark"><b>The Rabbit Hole</b></span>
       <span class="breaker">/</span>
@@ -147,9 +154,9 @@
           </div>
         </div>
         <div class="settings-panel__divider"></div>
-        <a class="settings-panel__item" href="#" hx-get="/config" hx-target="#modal" hx-swap="innerHTML">View config</a>
+        <a class="settings-panel__item" href="#" hx-get="/config" hx-target="#modal" hx-swap="innerHTML">View Config</a>
         {{/* Not a modal: editing feeds needs room, so this one leaves. */}}
-        <a class="settings-panel__item" href="/sources">Edit sources <span class="settings-panel__go" aria-hidden="true">&#8663;</span></a>
+        <a class="settings-panel__item" href="/sources">Edit Sources <span class="settings-panel__go" aria-hidden="true">&#8663;</span></a>
         <div class="settings-panel__divider"></div>
         <a class="settings-panel__item settings-panel__item--ext" href="https://github.com/DanielBlei/rabbithole"
            target="_blank" rel="noopener noreferrer">Source code <span class="settings-panel__ext" aria-hidden="true">&#8599;</span></a>
@@ -158,8 +165,8 @@
   </header>
   <!-- Hidden side menu: nothing on screen but a slim 3-line tab hugging the
        left edge; hovering the edge (or clicking the tab) slides out a docked
-       full-height column sitting below the topbar. Pages up top, then a
-       divider and the ingest action (glyph + status dot). The tab, the menu's ingest item and
+       full-height column sitting below the topbar. Pages up top, the config
+       pair at the floor. The tab, the menu's ingest item and
        the ingWatch poller are standalone templates so ingest responses can
        re-render them out-of-band and keep them current. -->
   {{template "navTab" .Chrome}}
@@ -177,22 +184,37 @@
   {{end}}
   <div class="nav-hot" id="navHot" aria-hidden="true"></div>
   <nav class="navrail" id="navRail" aria-label="Pages">
-    <a class="navrail__item{{if eq .Active "feed"}} navrail__item--on{{end}}" href="/feed">
-      <span class="navrail__gl" aria-hidden="true">▤</span>
-      <span class="navrail__txt"><span class="navrail__nm">Feed</span><span class="navrail__ds">the rabbit hole</span></span>
+    {{/* Two tiers, in the shell register the rest of the app already speaks.
+         Destinations up top read as the prompt — a ❯ marker and a lit name;
+         the config pair sits at the far foot as commands you type. */}}
+    <a class="navrail__item navrail__item--page{{if eq .Active "feed"}} navrail__item--on{{end}}" href="/feed"
+       {{if eq .Active "feed"}}aria-current="page"{{end}}>
+      <span class="navrail__mk" aria-hidden="true">&#10095;</span>
+      <span class="navrail__txt">
+        <span class="navrail__nm">Feed<i class="navrail__cur" aria-hidden="true"></i></span>
+        <span class="navrail__ds">the rabbit hole</span>
+      </span>
     </a>
-    <a class="navrail__item{{if eq .Active "maze"}} navrail__item--on{{end}}" href="/maze">
-      <span class="navrail__gl" aria-hidden="true">▦</span>
-      <span class="navrail__txt"><span class="navrail__nm">Maze</span><span class="navrail__ds">day-to-day</span></span>
+    <a class="navrail__item navrail__item--page{{if eq .Active "maze"}} navrail__item--on{{end}}" href="/maze"
+       {{if eq .Active "maze"}}aria-current="page"{{end}}>
+      <span class="navrail__mk" aria-hidden="true">&#10095;</span>
+      <span class="navrail__txt">
+        <span class="navrail__nm">Maze<i class="navrail__cur" aria-hidden="true"></i></span>
+        <span class="navrail__ds">day-to-day</span>
+      </span>
     </a>
-    <div class="navrail__div" aria-hidden="true"></div>
-    {{/* Below the rule with Ingest: pages above, working on the app below —
-         configure the sources, then run the ingest over them. */}}
-    <a class="navrail__item{{if eq .Active "sources"}} navrail__item--on{{end}}" href="/sources">
-      <span class="navrail__gl" aria-hidden="true">⌗</span>
-      <span class="navrail__txt"><span class="navrail__nm">Sources</span><span class="navrail__ds">feeds &amp; defaults</span></span>
-    </a>
-    {{template "navIngest" .Chrome}}
+    {{/* The gap above this is the hierarchy: configure the sources, then run
+         the ingest over them — both a drawer's length away from the pages. */}}
+    <div class="navrail__foot">
+      <div class="navrail__sec"><span>config</span></div>
+      <a class="navrail__item navrail__item--cmd{{if eq .Active "sources"}} navrail__item--on{{end}}" href="/sources"
+         {{if eq .Active "sources"}}aria-current="page"{{end}}>
+        <span class="navrail__sig" aria-hidden="true">$</span>
+        <span class="navrail__cmd">sources</span>
+        <span class="navrail__note">feeds &amp; defaults</span>
+      </a>
+      {{template "navIngest" .Chrome}}
+    </div>
   </nav>
   {{template "ingWatch" .Chrome}}
   <div class="content">
@@ -220,15 +242,17 @@
      modal-dismiss chrome refresh, the ingWatch poller), so the ambient ingest
      state can never go stale on an open page. */}}
 
-{{/* The side menu's ingest action: ⟳ glyph + status dot (pulsing while
-     running, red on failure — no dot when healthy) + subline. Whole item
-     turns red on failure so it reads the moment the menu opens. */}}
+{{/* The side menu's ingest action, in the config foot: a typed command whose
+     trailing comment is the last run's outcome, plus a status dot (pulsing
+     while running, red on failure — no dot when healthy). Whole row turns red
+     on failure so it reads the moment the menu opens. */}}
 {{define "navIngest"}}
-<button id="navIngest" class="navrail__item navrail__item--act{{if eq .IngDot "err"}} navrail__item--err{{else if eq .IngDot "warn"}} navrail__item--warn{{end}}" type="button"
+<button id="navIngest" class="navrail__item navrail__item--cmd{{if eq .IngDot "err"}} navrail__item--err{{else if eq .IngDot "warn"}} navrail__item--warn{{end}}" type="button"
         {{if .OOB}}hx-swap-oob="true"{{end}}
         hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML" aria-label="Ingest runner">
-  <span class="navrail__gl" aria-hidden="true">⟳{{if .IngDot}}<i class="navrail__dot navrail__dot--{{.IngDot}}"></i>{{end}}</span>
-  <span class="navrail__txt"><span class="navrail__nm">Ingest</span><span class="navrail__ds">{{.IngSub}}</span></span>
+  <span class="navrail__sig" aria-hidden="true">$</span>
+  <span class="navrail__cmd">ingest{{if .IngDot}}<i class="navrail__dot navrail__dot--{{.IngDot}}"></i>{{end}}</span>
+  <span class="navrail__note">{{.IngSub}}</span>
 </button>
 {{end}}
 
