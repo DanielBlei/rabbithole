@@ -7,21 +7,21 @@ profile: ./configs/profile.example.md   # what you're interested in, driving the
 inference:
   provider: ollama              # ollama | vllm | heuristic (keywords, no model)
   host: http://localhost:11434
-  model: qwen3:4b               # gemma4:e4b | phi3:3.8b | etc
+  model: qwen3.5:4b             # gemma4:e4b | ministral-3:8b | etc
   think: false                  # model reasoning before scoring; default true
   # api_key: ""                 # bearer token, if your endpoint needs one
 
-  batch_size: 5                 # articles per scoring request
+  batch_size: 1                 # articles per scoring request (lower helps smaller models focus)
   max_parallel: 1               # requests in flight; keep at 1 for Ollama, it queues anyway
 
   # Decoding limits. Omit the block, or any field, to take the defaults below.
   model_tuning:
     num_ctx: 8192               # input window; unset lets Ollama silently truncate long prompts
     max_tokens: 0               # whole reply; 0 sizes it from the three below
-    tokens_per_item: 256        # per article in a batch
-    tokens_overhead: 256        # threshold for the JSON score response
+    tokens_per_item: 1024       # per article in a batch
+    tokens_overhead: 512        # threshold for the JSON score response
     tokens_thinking: 2048       # thinking allowance when think is on
-    reason_max_chars: 200       # threshold for the "why" behind a model's score
+    reason_max_chars: 512       # threshold for the "why" behind a model's score
 
 ingest:
   since: 7d                             # how far back to look; accepts d/h/m (7d, 168h, 90m)

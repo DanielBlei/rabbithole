@@ -37,8 +37,8 @@ file.
 ## Quickstart
 
 ```bash
-ollama pull qwen3:4b   # the default model
-make serve             # runs on the shipped example config
+ollama pull qwen3.5:4b   # the default model
+make serve               # runs on the shipped example config
 ```
 
 Open <http://localhost:8080> and hit ingest. The first run fetches the feeds and scores them,

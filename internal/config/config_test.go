@@ -18,7 +18,7 @@ func TestParseDuration(t *testing.T) {
 		{"7d", 7 * 24 * time.Hour, false},
 		{"168h", 168 * time.Hour, false},
 		{"1h30m", 90 * time.Minute, false},
-		{" 14d ", 14 * 24 * time.Hour, false},
+		{" 7d ", 7 * 24 * time.Hour, false},
 		{"", 0, true},
 		{"abc", 0, true},
 		{"d", 0, true},   // missing number before 'd'
@@ -62,7 +62,7 @@ func TestLoadSinceDaysAndHours(t *testing.T) {
 	}{
 		{"ingest:\n  since: 14d\n", 14 * 24 * time.Hour},
 		{"ingest:\n  since: 168h\n", 168 * time.Hour},
-		{"", 14 * 24 * time.Hour}, // omitted -> default 14d
+		{"", 7 * 24 * time.Hour}, // omitted -> default 7d
 	} {
 		cfg, err := Load(writeConfig(t, baseFeeds+tc.since))
 		if err != nil {
