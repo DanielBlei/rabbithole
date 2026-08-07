@@ -332,10 +332,13 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEnt
 // fields are left unchanged. JSON-shaped so a future HTTP handler can decode
 // a request body straight into it and call UpdateUserState unchanged.
 type UserPatch struct {
-	Status     *string
-	UserScore  *int
-	UserNote   *string
-	Bookmarked *bool
+	Status    *string
+	UserScore *int
+	// ClearUserScore drops the rating back to unrated. A nil UserScore means
+	// "leave alone" and 0 is a valid rating, so removing one needs its own field.
+	ClearUserScore bool
+	UserNote       *string
+	Bookmarked     *bool
 }
 
 // isValidStatus reports whether status is one of the recognized items.status
@@ -361,6 +364,9 @@ func (s *Store) UpdateUserState(ctx context.Context, identifier string, patch Us
 	if patch.UserScore != nil && (*patch.UserScore < minUserScore || *patch.UserScore > maxUserScore) {
 		return fmt.Errorf("user score %d out of range %d-%d", *patch.UserScore, minUserScore, maxUserScore)
 	}
+	if patch.ClearUserScore && patch.UserScore != nil {
+		return errors.New("user score cannot be set and cleared at once")
+	}
 
 	sets := []string{"updated_at = ?"}
 	args := []any{sqlTime(time.Now())}
@@ -371,6 +377,9 @@ func (s *Store) UpdateUserState(ctx context.Context, identifier string, patch Us
 	if patch.UserScore != nil {
 		sets = append(sets, "user_score = ?")
 		args = append(args, *patch.UserScore)
+	}
+	if patch.ClearUserScore {
+		sets = append(sets, "user_score = NULL")
 	}
 	if patch.UserNote != nil {
 		sets = append(sets, "user_note = ?")
@@ -670,7 +679,10 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]ItemRow, error) 
 	case SortByOldest:
 		q += " ORDER BY " + itemDate + " ASC, id ASC"
 	default:
-		q += " ORDER BY COALESCE(user_score, llm_score, ?) DESC, source ASC"
+		// The model's score alone: a user rating is recorded for later use and
+		// does not reorder anything yet. Source then id break ties, so a page of
+		// equally scored items holds still between renders.
+		q += " ORDER BY COALESCE(llm_score, ?) DESC, source ASC, id ASC"
 		args = append(args, unscoredSentinel)
 	}
 	q += " LIMIT ?"

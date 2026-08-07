@@ -821,6 +821,9 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
    bottom padding keeps an expanded panel's last line clear of the bookmark
    fold tucked into the card's bottom-right corner. */
 .tg-panel{display:none;margin:7px 0 0;padding-bottom:14px;}
+/* The why panel always ends on the footnote, which is short and left-aligned,
+   so it can sit closer to the bottom than a wrapping note can. */
+.tg-panel-why{padding-bottom:4px;}
 .tg-radio-why:checked ~ .tg-panel-why{display:block;}
 .tg-radio-note:checked ~ .tg-panel-note{display:block;}
 /* .md wraps server-rendered markdown (why text + saved notes). goldmark emits
@@ -849,7 +852,20 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 .tg-panel-why .md strong,.tg-panel-why .md h1,.tg-panel-why .md h2,.tg-panel-why .md h3,.tg-panel-why .md h4{color:#9DBF9B;}
 /* attribution footnote under the why text: which model scored it, and what it
    gave — dimmer and smaller than the reason it annotates. */
-.tg-panel-why .tg-footnote{margin-top:12px;color:var(--text-dim);font-size:1.1rem;}
+.tg-panel-why .tg-footnote{margin:12px 0 0;color:var(--text-dim);}
+/* Thumbs, riding the footnote line as its last field. They borrow .act for the
+   chip shape, tightened up because there's no label beside the icon, and split
+   the same green/red as the seen/hide toggles: up agrees with a high score,
+   down zeroes it. */
+.rate{padding:1px 5px;vertical-align:middle;}
+.rate + .rate{margin-left:2px;}
+.rate .act__icon{display:flex;}
+.rate .act__icon svg{width:1.2rem;height:1.2rem;display:block;}
+/* The down thumb hangs level with the text; the up one reads low without it. */
+.rate-up .act__icon{transform:translateY(-1px);}
+.rate-down:hover{color:var(--warn);border-color:var(--warn);}
+.rate-up.is-active{color:var(--score-high);border-color:var(--score-high);}
+.rate-down.is-active{color:var(--warn);border-color:var(--warn);}
 
 /* note panel: view mode shows the note + an edit/add trigger; the hidden
    note-toggle checkbox flips to the edit form (textarea + apply/cancel). Apply
@@ -1464,7 +1480,7 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
   background:rgba(26,35,39,.58);
   -webkit-backdrop-filter:blur(6px) saturate(1.3);
   backdrop-filter:blur(6px) saturate(1.3);
-  animation:sdet-flash 3s ease forwards;
+  animation:sdet-flash 1.5s ease forwards;
 }
 .sdet__flashcard{
   max-width:calc(100% - 44px);
@@ -1495,11 +1511,11 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    you can't undo by typing the value back. Off the screen half a second sooner
    than the rest: "deleted" is a shorter read, and the row leaving the list has
    already said it. */
-.sdet__flash--bad{background:rgba(38,26,30,.60);animation-duration:2.5s;}
+.sdet__flash--bad{background:rgba(38,26,30,.60);animation-duration:1s;}
 .sdet__flash--bad .sdet__flashok{color:var(--warn);}
 .sdet__flash--bad .sdet__flashname{color:var(--warn);}
-/* Holds for a bit over two seconds, then takes the last third to go — long
-   enough to read without sitting in the way of the next feed. */
+/* Holds for about a second, then takes the last third to go: long enough to
+   read without sitting in the way of the next feed. */
 @keyframes sdet-flash{
   0%,72%{opacity:1;}
   100%{opacity:0;visibility:hidden;}
@@ -2153,7 +2169,7 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    at every size step */
 .tg-panel .md,.tg-why-msg{font-size:var(--fs-body);}
 .note-empty,.todo-add__title,.idea__body,.note__new-input{font-size:calc(var(--fs-body) + .05rem);}
-.note-input{font-size:calc(var(--fs-body) - .05rem);}
+.tg-footnote,.note-input{font-size:calc(var(--fs-body) - .05rem);}
 .todo-add__note textarea{font-size:calc(var(--fs-body) - .1rem);}
 .idea__input{font-size:calc(var(--fs-body) - .15rem);}
 /* code stays mono whatever the text face */

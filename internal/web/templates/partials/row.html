@@ -23,7 +23,24 @@
       {{if .Reason}}<div class="md">{{.ReasonHTML}}</div>
       {{else if .HasLLMScore}}<p class="tg-why-msg tg-why-msg--error">Scored, but no explanation was recorded &mdash; an error may have occurred.</p>
       {{else}}<p class="tg-why-msg">No score computed for this item yet.</p>{{end}}
-      {{if .HasLLMScore}}<p class="tg-footnote">LLM Score {{.LLMScore}}/10{{if .ScoreModel}} &middot; {{.ScoreModel}}{{end}}</p>{{end}}
+      {{/* The thumbs ride this line as one more field. They record user_score
+           and nothing more: the gauge above still shows the model's score.
+           Re-posting the lit one clears the rating. Icons from Feather (MIT). */}}
+      <p class="tg-footnote">
+        {{- if .HasLLMScore}}LLM Score {{.LLMScore}}/10{{if .ScoreModel}} &middot; {{.ScoreModel}}{{end}} &middot; {{end -}}
+        <button type="button" class="act rate rate-up{{if .RatedUp}} is-active{{end}}"
+          hx-post="/items/{{.ID}}/rate" hx-vals='{"score":"10"}'
+          hx-target="closest .row" hx-swap="outerHTML"
+          aria-pressed="{{if .RatedUp}}true{{else}}false{{end}}"
+          aria-label="{{if .RatedUp}}Clear your rating{{else}}Rate this 10 out of 10{{end}}"
+          title="{{if .RatedUp}}Clear your rating{{else}}Worth reading &mdash; score it 10{{end}}"><span class="act__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg></span></button>
+        <button type="button" class="act rate rate-down{{if .RatedDown}} is-active{{end}}"
+          hx-post="/items/{{.ID}}/rate" hx-vals='{"score":"0"}'
+          hx-target="closest .row" hx-swap="outerHTML"
+          aria-pressed="{{if .RatedDown}}true{{else}}false{{end}}"
+          aria-label="{{if .RatedDown}}Clear your rating{{else}}Rate this 0 out of 10{{end}}"
+          title="{{if .RatedDown}}Clear your rating{{else}}Not worth it &mdash; score it 0{{end}}"><span class="act__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg></span></button>
+      </p>
     </div>
     <div class="tg-panel tg-panel-note{{if not .HasNote}} empty{{end}}">
       <input type="checkbox" id="note-edit-{{.ID}}" class="note-toggle">

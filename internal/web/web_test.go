@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -57,6 +58,15 @@ func post(t *testing.T, w *Web, path string) *httptest.ResponseRecorder {
 		t.Fatalf("POST %s: status = %d, want 200; body=%s", path, rec.Code, rec.Body)
 	}
 	return rec
+}
+
+// postFormCode is postForm without the 200 assertion, for the rejection paths.
+func postFormCode(w *Web, path string, form url.Values) int {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	w.Routes().ServeHTTP(rec, req)
+	return rec.Code
 }
 
 func statusOf(t *testing.T, w *Web, id string) string {
@@ -110,6 +120,63 @@ func TestSeenHideMutuallyExclusive(t *testing.T) {
 	post(t, w, "/items/a/hide")
 	if got := statusOf(t, w, "a"); got != store.StatusSkipped {
 		t.Errorf("hide after seen: status = %q, want %q", got, store.StatusSkipped)
+	}
+}
+
+// scoreOf reads back an item's stored rating, nil when it has none.
+func scoreOf(t *testing.T, w *Web, id string) *int {
+	t.Helper()
+	row, err := w.db.Get(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	return row.UserScore
+}
+
+// A thumb writes user_score and lights up in the returned row; the same thumb
+// again clears the rating rather than rewriting it, so 0 (thumbs down) stays
+// distinguishable from unrated.
+func TestRateTogglesUserScore(t *testing.T) {
+	w := newTestWeb(t)
+
+	body := postForm(t, w, "/items/a/rate", url.Values{"score": {"10"}})
+	if got := scoreOf(t, w, "a"); got == nil || *got != 10 {
+		t.Fatalf("after thumbs up: user score = %v, want 10", got)
+	}
+	if !strings.Contains(body, "rate-up is-active") {
+		t.Errorf("rated row missing lit up-thumb; body=%s", body)
+	}
+
+	body = postForm(t, w, "/items/a/rate", url.Values{"score": {"10"}})
+	if got := scoreOf(t, w, "a"); got != nil {
+		t.Fatalf("re-posting the same score: user score = %d, want cleared", *got)
+	}
+	if strings.Contains(body, "is-active") {
+		t.Errorf("cleared row still lights a thumb; body=%s", body)
+	}
+
+	// Thumbs down is a real 0, not a clear.
+	postForm(t, w, "/items/a/rate", url.Values{"score": {"0"}})
+	if got := scoreOf(t, w, "a"); got == nil || *got != 0 {
+		t.Fatalf("after thumbs down: user score = %v, want 0", got)
+	}
+}
+
+// A score outside the store's range, or one that isn't a number, is the
+// request's fault — a 400, not the 500 the store's own range error would map to.
+func TestRateRejectsBadScore(t *testing.T) {
+	w := newTestWeb(t)
+
+	for _, score := range []string{"99", "-1", "up", ""} {
+		if code := postFormCode(w, "/items/a/rate", url.Values{"score": {score}}); code != http.StatusBadRequest {
+			t.Errorf("rate score=%q: status = %d, want 400", score, code)
+		}
+	}
+	if got := scoreOf(t, w, "a"); got != nil {
+		t.Errorf("a rejected rate wrote %d, want nothing stored", *got)
+	}
+	if code := postFormCode(w, "/items/nope/rate", url.Values{"score": {"10"}}); code != http.StatusNotFound {
+		t.Errorf("rating an unknown item: status = %d, want 404", code)
 	}
 }
 

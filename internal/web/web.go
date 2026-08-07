@@ -59,6 +59,13 @@ const (
 	midSignalScore  = 4
 )
 
+// What the thumbs write to user_score. Both sit inside the store's 0-10 range,
+// so a finer-grained control can replace them without touching the column.
+const (
+	rateUp   = 10
+	rateDown = 0
+)
+
 // Web renders the HTML frontend over the same store the JSON API uses.
 type Web struct {
 	db      *store.Store
@@ -121,6 +128,7 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /items/{id}/seen", s.handleSeen)
 	mux.HandleFunc("POST /items/{id}/hide", s.handleHide)
 	mux.HandleFunc("POST /items/{id}/bookmark", s.handleBookmark)
+	mux.HandleFunc("POST /items/{id}/rate", s.handleRate)
 	mux.HandleFunc("POST /todos", s.handleAddTodo)
 	mux.HandleFunc("POST /todos/{id}/toggle", s.handleToggleTodo)
 	mux.HandleFunc("POST /todos/{id}/tags", s.handleSetTodoTags)
@@ -236,9 +244,13 @@ type rowData struct {
 	HasLLMScore bool
 	LLMScore    int
 	ScoreModel  string
-	HasNote     bool
-	Note        string        // raw markdown source (also the textarea value)
-	NoteHTML    template.HTML // Note rendered to sanitised HTML for the view
+	// The user's own rating, recorded but not yet scoring anything: it lights a
+	// thumb and nothing else. Either one re-posted clears it.
+	RatedUp   bool
+	RatedDown bool
+	HasNote   bool
+	Note      string        // raw markdown source (also the textarea value)
+	NoteHTML  template.HTML // Note rendered to sanitised HTML for the view
 	// Triage state, derived from the item's Status: Seen == read, Hidden ==
 	// skipped. Read-only here; the seen/hide mutation routes are a follow-up.
 	Seen   bool
@@ -579,6 +591,45 @@ func (s *Web) handleBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleRate records the user's own score for an item, which outranks the
+// model's wherever a score is read. Re-posting the score an item already
+// carries clears it, so the same thumb un-rates. The score is validated here
+// rather than left to the store, whose range error carries no kind and would
+// come back a 500.
+func (s *Web) handleRate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	n, err := strconv.Atoi(r.FormValue("score"))
+	if err != nil || n < rateDown || n > rateUp {
+		http.Error(w, "bad score", http.StatusBadRequest)
+		return
+	}
+
+	cur, err := s.db.Get(r.Context(), id)
+	if err != nil {
+		httpStoreError(w, err)
+		return
+	}
+
+	patch := store.UserPatch{UserScore: &n}
+	next := &n
+	if cur.UserScore != nil && *cur.UserScore == n {
+		patch, next = store.UserPatch{ClearUserScore: true}, nil
+	}
+	if err := s.db.UpdateUserState(r.Context(), id, patch); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Only the rating changed, so render the in-memory row.
+	cur.UserScore = next
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := feedTmpl.ExecuteTemplate(w, "row", toRow(cur)); err != nil {
+		// Status is likely already written; log rather than double-write.
+		log.Error().Err(err).Msg("render rate row")
+	}
+}
+
 // stats computes the dashboard tiles. UnreadToday is a dedicated count;
 // AvgScore is the mean score over the rows currently shown; SourcesActive is
 // the number of distinct sources in the store. Available is the total item
@@ -723,12 +774,15 @@ func toRow(row store.ItemRow) rowData {
 		TagsAttr:   strings.Join(row.Tags, ","),
 	}
 	rd.ReasonHTML = renderMarkdown(rd.Reason)
-	// The "why" footnote attributes the reason to the model's own score, not the
-	// effective Score above — so the user can see "model said 8, I rated 3".
+	// The "why" footnote names the model that scored it alongside the score.
 	if row.LLMScore != nil {
 		rd.HasLLMScore = true
 		rd.LLMScore = *row.LLMScore
 		rd.ScoreModel = strOf(row.LLMScoreModel)
+	}
+	if row.UserScore != nil {
+		rd.RatedUp = *row.UserScore == rateUp
+		rd.RatedDown = *row.UserScore == rateDown
 	}
 	// A stored empty note reads the same as no note at all — both show the
 	// "No note yet" placeholder and the "+ add" affordance.
@@ -740,17 +794,15 @@ func toRow(row store.ItemRow) rowData {
 	return rd
 }
 
-// score returns the effective 0-10 score (user score wins over the model's) and
-// whether the item was scored at all.
+// score returns the 0-10 score the page shows and whether the item was scored
+// at all. A user rating is recorded but does not feed this: the gauge, the
+// tiers and the stat tiles all read the model's verdict, so rating an item
+// does not move it. The single seam to change if that stops being true.
 func score(row store.ItemRow) (int, bool) {
-	switch {
-	case row.UserScore != nil:
-		return *row.UserScore, true
-	case row.LLMScore != nil:
+	if row.LLMScore != nil {
 		return *row.LLMScore, true
-	default:
-		return 0, false
 	}
+	return 0, false
 }
 
 func tierOf(score int) string {

@@ -305,6 +305,8 @@ func TestBookmark(t *testing.T) {
 func TestUpdateUserStateErrors(t *testing.T) {
 	readStatus := StatusRead
 	badStatus := "archived"
+	badScore := maxUserScore + 1
+	okScore := maxUserScore
 	tests := []struct {
 		name      string
 		seedItem  bool
@@ -324,6 +326,20 @@ func TestUpdateUserStateErrors(t *testing.T) {
 			seedItem: true,
 			link:     "https://x/a",
 			patch:    UserPatch{Status: &badStatus},
+			wantErr:  true,
+		},
+		{
+			name:     "score out of range",
+			seedItem: true,
+			link:     "https://x/a",
+			patch:    UserPatch{UserScore: &badScore},
+			wantErr:  true,
+		},
+		{
+			name:     "score set and cleared at once",
+			seedItem: true,
+			link:     "https://x/a",
+			patch:    UserPatch{UserScore: &okScore, ClearUserScore: true},
 			wantErr:  true,
 		},
 	}
@@ -354,6 +370,44 @@ func TestUpdateUserStateErrors(t *testing.T) {
 				t.Error("UpdateUserState() error = nil, want non-nil")
 			}
 		})
+	}
+}
+
+// ClearUserScore puts the column back to NULL, which a zero score must not: 0
+// is the lowest rating, and the two have to stay distinguishable.
+func TestClearUserScore(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	items := []feeds.Item{{ID: "a", Source: "S", Title: "A", Link: "https://x/a"}}
+	if err := db.Record(ctx, items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	zero := 0
+	if err := db.UpdateUserState(ctx, "a", UserPatch{UserScore: &zero}); err != nil {
+		t.Fatalf("UpdateUserState: %v", err)
+	}
+	row, err := db.Get(ctx, "a")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if row.UserScore == nil || *row.UserScore != 0 {
+		t.Fatalf("after rating 0: user score = %v, want 0", row.UserScore)
+	}
+
+	if err := db.UpdateUserState(ctx, "a", UserPatch{ClearUserScore: true}); err != nil {
+		t.Fatalf("UpdateUserState clear: %v", err)
+	}
+	if row, err = db.Get(ctx, "a"); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if row.UserScore != nil {
+		t.Errorf("after clear: user score = %d, want nil", *row.UserScore)
 	}
 }
 
@@ -407,8 +461,9 @@ func TestList(t *testing.T) {
 	if err := db.Record(ctx, items, digested, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	// d: a user_score that outranks every llm_score, plus status=read.
-	// c: left seen-only, no score at all — must sort last.
+	// d: status=read, plus a top user_score that must NOT lift it up the score
+	// sort — a rating is recorded, not ranked on.
+	// c: no score at all — must sort last alongside d.
 	userScore := 10
 	readStatus := StatusRead
 	if err := db.UpdateUserState(
@@ -450,7 +505,7 @@ func TestList(t *testing.T) {
 		{
 			name:    "no filter, best score first, nulls last",
 			filter:  ListFilter{},
-			wantIDs: []string{"d", "b", "a", "c"},
+			wantIDs: []string{"b", "a", "c", "d"},
 		},
 		{
 			name:    "status filter",
@@ -465,12 +520,12 @@ func TestList(t *testing.T) {
 		{
 			name:    "limit caps results",
 			filter:  ListFilter{Limit: 2},
-			wantIDs: []string{"d", "b"},
+			wantIDs: []string{"b", "a"},
 		},
 		{
 			name:    "zero limit falls back to default, not zero rows",
 			filter:  ListFilter{Limit: 0},
-			wantIDs: []string{"d", "b", "a", "c"},
+			wantIDs: []string{"b", "a", "c", "d"},
 		},
 		{
 			name:    "invalid status filter",
@@ -480,7 +535,7 @@ func TestList(t *testing.T) {
 		{
 			name:    "after filter, recent items only",
 			filter:  ListFilter{After: now.Add(-60 * time.Hour)}, // > 2.5 days ago
-			wantIDs: []string{"d", "c"},
+			wantIDs: []string{"c", "d"},
 		},
 		{
 			name:    "before filter, older items only",
