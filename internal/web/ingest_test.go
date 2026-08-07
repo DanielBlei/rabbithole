@@ -102,4 +102,21 @@ func TestIngestModalAndRun(t *testing.T) {
 	if !strings.Contains(out, "hidden") {
 		t.Errorf("idle chip should render hidden; body=%s", out)
 	}
+
+	// Reopening once the run is done starts over: the finished run stays as the
+	// summary and in the history, but its completion banner and log pane are the
+	// watched run's, not the next one's.
+	out = get(t, w, "/ingest")
+	if !strings.Contains(out, "✓ ok") {
+		t.Errorf("reopened modal missing ok runline; body=%s", out)
+	}
+	if !strings.Contains(out, "ing__hist") {
+		t.Errorf("reopened modal missing run history; body=%s", out)
+	}
+	if strings.Contains(out, "ing__done") {
+		t.Errorf("reopened modal still shows the completion banner; body=%s", out)
+	}
+	if strings.Contains(out, "ingest complete") {
+		t.Errorf("reopened modal still shows the finished run's log; body=%s", out)
+	}
 }

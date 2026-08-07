@@ -23,7 +23,7 @@ import (
 const ingestHistoryLimit = 10
 
 // ingestBannerWindow is how long after a successful run the "run complete"
-// banner keeps rendering when the modal is opened.
+// banner keeps rendering while the modal that watched it stays open.
 const ingestBannerWindow = 5 * time.Minute
 
 // ingestChipData drives the topbar status chip. The chip is ambient signal
@@ -156,9 +156,11 @@ func (s *Web) chrome(ctx context.Context) chromeData {
 }
 
 // handleIngest returns the runner modal fragment (opened from the side menu
-// into #modal), showing the current state — idle summary or live run.
+// into #modal), showing the current state — idle summary or live run. It is the
+// only entry point that means "just opened", so it renders fresh: no completion
+// banner and no leftover log from a run that already ended.
 func (s *Web) handleIngest(w http.ResponseWriter, r *http.Request) {
-	body, err := s.ingestBody(r.Context(), histPageFromQuery(r))
+	body, err := s.ingestBody(r.Context(), histPageFromQuery(r), true)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -234,7 +236,9 @@ func (s *Web) handleIngestRunLog(w http.ResponseWriter, r *http.Request) {
 // updates, so every poll/mutation response also keeps the topbar chip, the
 // side menu's ingest item and the edge tab in sync on whatever page is open.
 func (s *Web) renderIngestBody(w http.ResponseWriter, ctx context.Context, page int) {
-	body, err := s.ingestBody(ctx, page)
+	// Poll, run and cancel all continue a modal that is already open, so they
+	// render the watched state rather than the fresh one.
+	body, err := s.ingestBody(ctx, page, false)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -278,7 +282,12 @@ func (s *Web) writeIngestChrome(w http.ResponseWriter, ctx context.Context) {
 // and the requested history page. The top summary (last run, counts, banner,
 // chip) always reflects the newest runs, independent of which history page is
 // shown; only the History table pages.
-func (s *Web) ingestBody(ctx context.Context, page int) (ingestBodyData, error) {
+//
+// fresh marks a just-opened modal. The manager keeps a finished run's log until
+// the next one starts, and the banner is a completion notice, so with no run in
+// flight a fresh render drops both: the panel opens ready for the next ingest,
+// with the finished run readable in the history table below.
+func (s *Web) ingestBody(ctx context.Context, page int, fresh bool) (ingestBodyData, error) {
 	st := s.ing.Status()
 	if page < 0 {
 		page = 0
@@ -308,8 +317,10 @@ func (s *Web) ingestBody(ctx context.Context, page int) (ingestBodyData, error) 
 	if st.Running {
 		data.StartedAgo = agoPhrase(st.StartedAt, now)
 	}
-	for _, raw := range st.Lines {
-		data.Lines = append(data.Lines, parseIngestLogLine(raw))
+	if st.Running || !fresh {
+		for _, raw := range st.Lines {
+			data.Lines = append(data.Lines, parseIngestLogLine(raw))
+		}
 	}
 	for _, r := range history {
 		data.History = append(data.History, ingestHistRowData{Run: toIngestRunView(r, now)})
@@ -321,7 +332,10 @@ func (s *Web) ingestBody(ctx context.Context, page int) (ingestBodyData, error) 
 		}
 		last := toIngestRunView(r, now)
 		data.Last = &last
-		if r.Status == store.IngestStatusOK && r.FinishedAt != nil &&
+		// Only for the run this modal watched finish: not on a fresh open, and
+		// not under a live run, where "complete" would name the previous one.
+		if !fresh && !st.Running &&
+			r.Status == store.IngestStatusOK && r.FinishedAt != nil &&
 			now.Sub(*r.FinishedAt) < ingestBannerWindow {
 			data.ShowBanner = true
 		}
