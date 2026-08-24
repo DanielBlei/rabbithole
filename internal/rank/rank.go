@@ -35,6 +35,26 @@ type Result struct {
 	Reason string
 }
 
+// Option adjusts a ScoreAll run. Variadic so the common caller stays a plain
+// call and only a caller that wants progress pays for it.
+type Option func(*options)
+
+type options struct {
+	onBatch func(done, total, scored int)
+}
+
+// OnBatch registers a callback fired as each batch finishes, receiving the
+// number of batches done so far, the total, and how many items are scored in
+// all. It exists for the callers a human waits on: scoring is the slow part,
+// and without it a long run is indistinguishable from a hung one.
+//
+// Batches complete out of order, so done counts completions rather than
+// identifying which batch. Calls are serialised under the lock that merges
+// results, so an implementation needs no locking of its own but must not block.
+func OnBatch(fn func(done, total, scored int)) Option {
+	return func(o *options) { o.onBatch = fn }
+}
+
 // ScoreAll scores every item in batches of batchSize, running up to maxParallel
 // batches concurrently. A batch that fails to score is retried item-by-item;
 // items that still fail are omitted from the result.
@@ -44,7 +64,12 @@ func ScoreAll(
 	profile string,
 	items []feeds.Item,
 	batchSize, maxParallel int,
+	opts ...Option,
 ) map[string]ItemScore {
+	var o options
+	for _, apply := range opts {
+		apply(&o)
+	}
 	if batchSize < 1 {
 		batchSize = 1
 	}
@@ -56,9 +81,10 @@ func ScoreAll(
 
 	sem := make(chan struct{}, maxParallel)
 	var (
-		mu  sync.Mutex
-		wg  sync.WaitGroup
-		out = make(map[string]ItemScore, len(items))
+		mu   sync.Mutex
+		wg   sync.WaitGroup
+		done int
+		out  = make(map[string]ItemScore, len(items))
 	)
 	for i, batch := range batches {
 		wg.Add(1)
@@ -81,6 +107,10 @@ func ScoreAll(
 				out[sc.ID] = sc
 				logger.Debug().Int("score", sc.Score).Str("reason", sc.Reason).
 					Str("title", truncate(titles[sc.ID], 80)).Msg("scored item")
+			}
+			done++
+			if o.onBatch != nil {
+				o.onBatch(done, len(batches), len(out))
 			}
 			mu.Unlock()
 

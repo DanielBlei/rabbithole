@@ -69,6 +69,7 @@ your own machine. Read [SECURITY.md](SECURITY.md) before exposing it to anything
 - [docs/api.md](docs/api.md): the HTTP API
 - [docs/architecture.md](docs/architecture.md): how the pieces fit together, and what is
   planned next
+- [docs/evals.md](docs/evals.md): checking whether the model actually agrees with your profile
 - [docs/store.md](docs/store.md): the SQLite schema and item lifecycle
 
 ## Getting help

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/DanielBlei/rabbithole/internal/feeds"
@@ -173,5 +174,66 @@ func TestHeuristicScoresOverlap(t *testing.T) {
 	}
 	if byID["match"].Score <= byID["none"].Score {
 		t.Error("matching item should outscore unrelated item")
+	}
+}
+
+// Without progress a long run is indistinguishable from a hung one, so the hook
+// has to fire once per batch and report a total that lets a caller show how far
+// through it is.
+func TestScoreAllReportsBatchProgress(t *testing.T) {
+	items := make([]feeds.Item, 7)
+	for i := range items {
+		items[i] = feeds.Item{ID: fmt.Sprintf("i%d", i), Title: "t"}
+	}
+	scorer := &stubScorer{fn: func(batch []feeds.Item) ([]ItemScore, error) {
+		out := make([]ItemScore, len(batch))
+		for i, it := range batch {
+			out[i] = ItemScore{ID: it.ID, Score: 5, Reason: "x"}
+		}
+		return out, nil
+	}}
+
+	type call struct{ done, total, scored int }
+	var (
+		mu    sync.Mutex
+		calls []call
+	)
+	// batchSize 2 over 7 items is 4 batches, the last one short.
+	got := ScoreAll(context.Background(), scorer, "profile", items, 2, 4,
+		OnBatch(func(done, total, scored int) {
+			mu.Lock()
+			defer mu.Unlock()
+			calls = append(calls, call{done, total, scored})
+		}))
+
+	if len(got) != len(items) {
+		t.Fatalf("scored %d items, want %d", len(got), len(items))
+	}
+	if len(calls) != 4 {
+		t.Fatalf("hook fired %d times, want once per batch (4): %+v", len(calls), calls)
+	}
+	for i, c := range calls {
+		if c.done != i+1 {
+			t.Errorf("call %d reported done=%d, want %d: progress must count up", i, c.done, i+1)
+		}
+		if c.total != 4 {
+			t.Errorf("call %d reported total=%d, want 4", i, c.total)
+		}
+	}
+	// Batches finish out of order, so only the final tally is pinned.
+	if last := calls[len(calls)-1]; last.scored != len(items) {
+		t.Errorf("final call reported scored=%d, want %d", last.scored, len(items))
+	}
+}
+
+// The hook is optional: the callers that do not want progress must keep working
+// without passing one.
+func TestScoreAllWithoutProgressHook(t *testing.T) {
+	items := []feeds.Item{{ID: "a", Title: "a"}}
+	scorer := &stubScorer{fn: func(batch []feeds.Item) ([]ItemScore, error) {
+		return []ItemScore{{ID: batch[0].ID, Score: 5}}, nil
+	}}
+	if got := ScoreAll(context.Background(), scorer, "profile", items, 1, 1); len(got) != 1 {
+		t.Fatalf("scored %d items, want 1", len(got))
 	}
 }

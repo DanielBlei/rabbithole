@@ -1,0 +1,460 @@
+# The Rabbit Hole benchmark set. Copy to configs/golden.yaml and edit.
+#
+# A small pile of articles you have marked yourself. `rabbithole eval benchmark` asks the
+# model to mark the same ones, then shows you where it disagreed with you. That is how
+# you find out whether an edit to profile.md actually helped. See docs/evals.md.
+#
+# expected_llm_score is the mark you would give, 0 to 10. Close is fine: if you said 9
+# and the model said 8, nothing is wrong. Nothing here has to match exactly.
+#
+# Two things to keep in mind when writing your own:
+#
+#   1. You should be able to point at the reason. profile.md says what you like, and the
+#      scoring guide (in the system prompt) turns that into a number. If neither one
+#      explains your mark, add the missing line instead of changing the mark. Always give
+#      the mark you actually believe.
+#   2. Include the awkward ones. Anything can mark the obvious articles, so a pile of
+#      obvious articles teaches you nothing. What is worth having is the sales pitch
+#      stuffed with your favourite words, and the genuinely good article that happens to
+#      use none of them.
+
+metadata:
+  name: rabbithole-relevance
+  version: 1
+
+# Tags are your own labels for grouping articles. The report scores each group separately,
+# which is how you find out the model is fine with most things but hopeless with, say,
+# vendor blog posts. Invent whatever groups are useful to you.
+#
+# Give each tag at least three articles. With one or two, the group's score is really just
+# that one article, and the report will say so rather than let you read into it.
+tags:
+  # Roughly where you expect the article to land.
+  on-target: what you most want to read
+  relevant: worth reading, not a highlight
+  shallow: not really a match, but honest about what it is
+  off-topic: not for you
+
+  # The useful ones: where first impressions and real worth pull apart.
+  keyword-bait: your vocabulary, no substance behind it
+  substance-no-keywords: relevant, and never uses your words
+  deep-but-off-topic: excellent, wrong domain
+  right-topic-wrong-depth: a topic you like, at a depth you don't
+  clickbait-framing: clickbait headline over a real article
+  vendor-with-substance: vendor post carrying real numbers
+  research-no-practice: theory with no practical angle
+
+# note: why you gave it that mark. The report prints it next to the article whenever the
+# model disagrees, so later on you remember what you meant.
+samples:
+  # ---- 9-10: something you want most, and the article delivers -------------
+
+  - id: rb001
+    source: Source One
+    title: "Running Qwen3-30B locally with llama.cpp on a single 3090"
+    summary: |
+      Walks through the quantisation choices, measures tokens/sec at q4_K_M
+      against q8_0, and lists the llama.cpp flags that actually mattered.
+      Includes the failed attempts and why they failed.
+    expected_llm_score: 10
+    tags: [on-target]
+    note: Profile "Running open-source language models" and "Practical write-ups". Two high lines, delivered.
+
+  - id: rb015
+    source: Source One
+    title: "Fine-tuning Gemma on a single 4090 with QLoRA, including the runs that failed"
+    summary: |
+      Full parameter sweep, VRAM ceiling at each rank, the two configurations
+      that diverged and what the loss curve looked like when they did.
+    expected_llm_score: 10
+    tags: [on-target]
+    note: Profile "Running open-source language models" plus "what worked, what didn't", stated outright.
+
+  - id: rb002
+    source: Source Two
+    title: "Multi-cluster GPU scheduling with Kueue and dynamic resource allocation"
+    summary: |
+      How DRA changes GPU sharing across clusters, with the API shapes, a worked
+      example, and the failure modes hit while rolling it out on a real fleet.
+    expected_llm_score: 9
+    tags: [on-target]
+    note: Profile "Kubernetes and cloud-native infrastructure", at depth.
+
+  - id: rb013
+    source: Source Two
+    title: "Moving a 40-node inference cluster from Deployments to LeaderWorkerSet"
+    summary: |
+      Why the pattern exists, what the migration broke, and the rollout order
+      that avoided a cold start across the whole fleet.
+    expected_llm_score: 9
+    tags: [on-target]
+    note: Profile "Kubernetes and cloud-native infrastructure" and "Practical write-ups".
+
+  - id: rb007
+    source: Source Three
+    title: "Making integer matrix multiplication fast on commodity CPUs"
+    summary: |
+      A careful look at cache blocking and AVX-512 for int8 GEMM, with
+      measurements at each step and the assembly that came out.
+    expected_llm_score: 9
+    tags: [on-target, substance-no-keywords]
+    note: |
+      Profile "The systems work underneath inference: kernels, quantisation". The engine
+      under every quantised model you run locally, and it never says LLM, AI or inference.
+      Buried here means the profile is being read as a keyword list.
+
+  - id: rb010
+    source: Source One
+    title: "This one llama.cpp flag made my local model 3x faster (I was shocked)"
+    summary: |
+      Behind the headline: a careful investigation of why prompt processing was
+      slow, a bisect through build flags, benchmarks before and after on two
+      GPUs, and an explanation of why the win does not generalise.
+    expected_llm_score: 9
+    tags: [on-target, clickbait-framing]
+    note: |
+      The scoring guide says to judge the article, not the headline. Under the bait is
+      exactly the practical write-up on a local model the profile's top list asks for.
+
+  - id: rb014
+    source: Source Four
+    title: "Nobody is talking about what Qwen3.5 quietly changed in the tokenizer"
+    summary: |
+      Hands-on with the new release: the vocabulary diff, what it does to
+      throughput on non-English input, and the two prompts it now handles worse.
+    expected_llm_score: 9
+    tags: [on-target, clickbait-framing]
+    note: |
+      Profile "New models and tools worth trying out", with measurements. The headline is
+      bait, and the scoring guide says to judge the article rather than the headline.
+
+  # ---- 7-8: what you want most but nothing special, or a side interest done
+  #           really well ----------------------------------------------------
+
+  - id: rb016
+    source: Source Two
+    title: "A tour of the Kubernetes Gateway API inference extension"
+    summary: |
+      Accurate walkthrough of the new API surface, resource by resource. No
+      deployment experience, no measurements, no discussion of failure modes.
+    expected_llm_score: 8
+    tags: [relevant]
+    note: |
+      Profile "Kubernetes and cloud-native infrastructure" is a high line, so it clears
+      the medium tier, but the execution is a tour rather than a write-up. Tests whether
+      topic alone pushes it to 9.
+
+  - id: rb018
+    source: Source Five
+    title: "RAG is far more expensive than anyone admits"
+    summary: |
+      Costs out embeddings, vector storage and query-time tokens on a real
+      corpus at three scales, with the spreadsheet and the pricing assumptions.
+    expected_llm_score: 8
+    tags: [relevant, clickbait-framing]
+    note: |
+      Profile "Cost/performance trade-off analyses" is medium, done exceptionally well.
+      The headline is bait over a rigorous article.
+
+  - id: rb021
+    source: Source Six
+    title: "Structured output in practice: grammars, JSON schema, and where they still fail"
+    summary: |
+      An inference vendor's engineering post. Shows the grammar compilation
+      step, benchmarks the token-level overhead, and documents three schemas
+      their own server handles badly.
+    expected_llm_score: 8
+    tags: [relevant, vendor-with-substance]
+    note: |
+      Profile rejects marketing "with no technical details". This has them, including its
+      own failures. Medium tier ("Developer tooling") executed exceptionally.
+
+  - id: rb011
+    source: Source Six
+    title: "Inference cost per million tokens: A100 against L40S at four batch sizes"
+    summary: |
+      A vendor benchmark that publishes methodology, hardware, model versions and
+      raw numbers, including the configurations where their own platform loses.
+    expected_llm_score: 7
+    tags: [relevant, vendor-with-substance]
+    note: |
+      Profile "Cost/performance trade-off analyses", medium tier, done well. Tests
+      whether vendor origin alone disqualifies.
+
+  - id: rb022
+    source: Source Six
+    title: "How we run 200 tenants on one GPU pool"
+    summary: |
+      Real architecture, the isolation model, MIG partition sizes and the
+      utilisation numbers before and after. A product plug in the last paragraph.
+    expected_llm_score: 7
+    tags: [relevant, vendor-with-substance]
+    note: |
+      Profile "Cost/performance trade-off analyses". A closing plug is not "no technical
+      details"; the substance is the article.
+
+  # ---- 5-6: a side interest, done normally --------------------------------
+
+  - id: rb020
+    source: Source Seven
+    title: "Cutting a build farm's cloud bill by 60% with spot instances and better bin packing"
+    summary: |
+      The bidding strategy, the interruption handling, and the packing change
+      that did most of the work. Costs before and after, month by month.
+    expected_llm_score: 6
+    tags: [relevant, substance-no-keywords]
+    note: |
+      Profile "Cost/performance trade-off analyses", medium tier. Never says AI, LLM or
+      model. Buried here means the profile is being read as a keyword list.
+
+  - id: rb033
+    source: Source Three
+    title: "Comparing three Go dependency-injection libraries on a real service"
+    summary: |
+      Wires the same service three ways, compares compile times, error messages
+      and what each does when a dependency is missing.
+    expected_llm_score: 6
+    tags: [relevant]
+    note: Profile "Developer tooling", medium tier, careful but unremarkable.
+
+  - id: rb003
+    source: Source Three
+    title: "A faster Go test runner that caches at the package level"
+    summary: |
+      Introduces a drop-in runner that skips packages whose inputs have not
+      changed, with the cache key design and the cases where it is unsafe.
+    expected_llm_score: 5
+    tags: [relevant]
+    note: Profile "Developer tooling", the medium tier rather than the high one.
+
+  - id: rb017
+    source: Source Three
+    title: "Profiling allocations with the new pprof flame view"
+    summary: |
+      How to read the new view, what the colours encode, and a worked example
+      finding a retained buffer in a long-running service.
+    expected_llm_score: 5
+    tags: [relevant, substance-no-keywords]
+    note: |
+      Profile "Developer tooling", medium tier. Practical and useful, and never uses any
+      of your vocabulary.
+
+  - id: rb034
+    source: Source Seven
+    title: "Makefile patterns worth stealing for Go projects"
+    summary: |
+      A short collection of targets and variable idioms, with a note on what
+      breaks under parallel make.
+    expected_llm_score: 5
+    tags: [relevant]
+    note: Profile "Developer tooling". Useful, small, nothing learned beyond the recipes.
+
+  # ---- 3-4: not what you asked for, however good it is ---------------------
+
+  - id: rb008
+    source: Source Eight
+    title: "How the Postgres planner chooses between a nested loop and a hash join"
+    summary: |
+      Traces the cost model through a real query, shows where the row estimates
+      go wrong, and explains how to read the resulting plan. Deep and original.
+    expected_llm_score: 4
+    tags: [shallow, deep-but-off-topic]
+    note: |
+      Profile "Anything outside the lists above, however well written", and the scoring
+      guide caps an off-topic article at 4 however good it is. Excellent, and nothing
+      asks for databases. Tests whether "prefer depth and substance" overrides relevance.
+
+  - id: rb023
+    source: Source Eight
+    title: "Writing a toy compiler backend for RISC-V"
+    summary: |
+      Instruction selection, register allocation and the peephole pass, built up
+      from nothing with the source at each stage.
+    expected_llm_score: 4
+    tags: [shallow, deep-but-off-topic]
+    note: |
+      Profile "Anything outside the lists above". Genuinely excellent, adjacent to
+      systems work, and not on any list. The 4 cap applies.
+
+  - id: rb026
+    source: Source Eight
+    title: "The ARPANET's congestion collapse, and what the fix actually was"
+    summary: |
+      Archival research through the RFCs and mailing lists, correcting the
+      version of the story that usually gets retold.
+    expected_llm_score: 4
+    tags: [shallow, deep-but-off-topic]
+    note: Profile "Anything outside the lists above, however well written". Superb, entirely off-topic.
+
+  - id: rb012
+    source: Source Nine
+    title: "Tighter convergence bounds for adaptive gradient methods"
+    summary: |
+      Improves the known regret bound under relaxed smoothness assumptions.
+      Proofs in the appendix, no experiments, no code, no implementation notes.
+    expected_llm_score: 4
+    tags: [shallow, research-no-practice]
+    note: |
+      Profile asks for research "with a clear practical angle". This has none, so the
+      medium line does not apply and it falls to "anything outside the lists above".
+      Tests whether the qualifier is honoured or the topic alone counts.
+
+  - id: rb024
+    source: Source Nine
+    title: "On the sample complexity of in-context learning"
+    summary: |
+      A PAC-style bound for in-context learners under distribution shift.
+      Theorems and proofs, no experiments, no released code.
+    expected_llm_score: 4
+    tags: [shallow, research-no-practice]
+    note: Same as rb012. Rigorous, and the "clear practical angle" qualifier is not met.
+
+  - id: rb035
+    source: Source Nine
+    title: "Provable guarantees for speculative decoding acceptance rates"
+    summary: |
+      Derives a bound on acceptance rate given draft and target model entropy.
+      No implementation, no measurements on a real pair of models.
+    expected_llm_score: 4
+    tags: [shallow, research-no-practice]
+    note: |
+      The topic sits close to the high tier, and the profile's qualifier still decides:
+      research without a practical angle is not the medium line.
+
+  - id: rb004
+    source: Source Ten
+    title: "What is a large language model? A beginner's guide"
+    summary: |
+      Explains tokens, parameters and training in plain language, with a diagram
+      of the transformer block and no code.
+    expected_llm_score: 3
+    tags: [shallow]
+    note: Profile "Beginner tutorials and 'what is an LLM' explainers", named outright.
+
+  - id: rb009
+    source: Source Ten
+    title: "Kubernetes for absolute beginners: what is a pod?"
+    summary: |
+      A pod is the smallest deployable unit in Kubernetes. Walks through a first
+      pod with a diagram and a copy-paste manifest.
+    expected_llm_score: 3
+    tags: [shallow, right-topic-wrong-depth]
+    note: |
+      "Kubernetes" is high and "Beginner tutorials" is low. Profile settles it: "a
+      beginner tutorial stays a beginner tutorial even on a topic I like".
+
+  - id: rb025
+    source: Source Ten
+    title: "Your first local LLM in 5 minutes with Ollama"
+    summary: |
+      Install, pull a model, type a prompt. No configuration, no quantisation
+      choices, no measurements.
+    expected_llm_score: 3
+    tags: [shallow, right-topic-wrong-depth]
+    note: |
+      The single most on-topic subject in the profile, at the one depth it rules out.
+      Above a 5 means "Running open-source language models" is outcompeting the
+      beginner-tutorial line.
+
+  - id: rb019
+    source: Source Four
+    title: "Ollama vs llama.cpp: which should you use?"
+    summary: |
+      A side-by-side of the two, opinions only. No benchmarks, no versions, no
+      hardware named.
+    expected_llm_score: 3
+    tags: [shallow, right-topic-wrong-depth]
+    note: |
+      Right topic, and the profile asks for depth and substance. A thin take on a topic
+      you like is a 3, not a 7.
+
+  # ---- 0-2: the stuff you would rather skip --------------------------------
+
+  - id: rb027
+    source: Source Five
+    title: "Enterprise AI transformation: a leadership framework"
+    summary: |
+      Four pillars, a maturity model and a readiness checklist. No systems, no
+      numbers, no implementation of any kind.
+    expected_llm_score: 2
+    tags: [off-topic]
+    note: Profile "Business and strategy takes with no technical content".
+
+  - id: rb029
+    source: Source Five
+    title: "7 Kubernetes mistakes that are silently costing you thousands"
+    summary: |
+      A listicle of well-known defaults, one paragraph each, no configuration
+      shown and no measurement of the claimed cost.
+    expected_llm_score: 2
+    tags: [off-topic, keyword-bait]
+    note: |
+      Profile "Listicles and clickbait". On a high-tier topic, with nothing behind it.
+      The counterpart to rb010: same shape of headline, no article underneath.
+
+  - id: rb031
+    source: Source Six
+    title: "Q3 earnings: our AI segment grew 40 percent"
+    summary: |
+      Quarterly results and guidance, with a paragraph on AI demand. No product
+      detail, no architecture, no numbers beyond the financial ones.
+    expected_llm_score: 2
+    tags: [off-topic]
+    note: Profile "Marketing/press releases with no technical details".
+
+  - id: rb005
+    source: Source Five
+    title: "10 AI tools that will completely change how you work in 2026"
+    summary: |
+      A roundup of chatbots and image generators, one paragraph each, with
+      affiliate links and a newsletter signup at the end.
+    expected_llm_score: 1
+    tags: [off-topic]
+    note: Profile "Listicles and clickbait". Anything above a 2 here means the low end is not working.
+
+  - id: rb006
+    source: Source Six
+    title: "Why AcmeCloud is the future of local, open-source AI infrastructure"
+    summary: |
+      We are thrilled to announce our new GPU tier. Enterprises are embracing
+      local LLMs and open source, and AcmeCloud is leading that transformation.
+      Contact sales to learn more about our AI-ready platform.
+    expected_llm_score: 1
+    tags: [off-topic, keyword-bait]
+    note: |
+      Profile "Marketing/press releases with no technical details". Says your words
+      repeatedly, measures nothing. Above a 3 means the penalty language is not landing.
+
+  - id: rb028
+    source: Source Six
+    title: "Announcing KubeForge: Kubernetes-native, open-source, GPU-ready"
+    summary: |
+      Launch post. Cloud-native, open source and GPU-accelerated, with a request
+      for a demo booking. No architecture, no API, no benchmarks.
+    expected_llm_score: 1
+    tags: [off-topic, keyword-bait]
+    note: |
+      Every high-tier word in the profile, in one headline, with nothing behind it. The
+      purest test of keyword matching in the set.
+
+  - id: rb032
+    source: Source Five
+    title: "The 15 best productivity apps for remote teams"
+    summary: |
+      Ranked roundup with screenshots and pricing tiers. Unrelated to anything
+      in the profile.
+    expected_llm_score: 1
+    tags: [off-topic]
+    note: Profile "Listicles and clickbait", and off-topic besides.
+
+  - id: rb030
+    source: Source Five
+    title: "You won't believe what this AI said to a journalist"
+    summary: |
+      A transcript excerpt, three paragraphs of reaction, and an embedded
+      newsletter form. No model named, no method, nothing to learn.
+    expected_llm_score: 0
+    tags: [off-topic]
+    note: |
+      Pure engagement bait. The floor of the scale: if anything in the set deserves a 0
+      it is this, and a model that never uses 0 is not using the range you gave it.
