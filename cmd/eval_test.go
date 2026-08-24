@@ -14,9 +14,10 @@ import (
 // cobra would have installed, so each case starts from a bare invocation.
 func resetBenchmarkFlags() {
 	benchRepeats = eval.DefaultRepeats
+	benchLimit = 0
 	benchProvider, benchHost, benchModel = "", "", ""
-	benchNoThink = false
-	benchFormat, benchOutput = string(eval.FormatMarkdown), ""
+	benchNoThink, benchShowWhy = false, false
+	benchFormat, benchOutput = string(eval.FormatText), ""
 }
 
 func resetAuditFlags() {
@@ -24,19 +25,20 @@ func resetAuditFlags() {
 	auditLimit = eval.DefaultLimit
 	auditSeed = 0
 	auditSince, auditSource, auditScoredBy = "", "", ""
-	auditFormat, auditOutput = string(eval.FormatMarkdown), ""
+	auditFormat, auditOutput = string(eval.FormatText), ""
 }
 
 func TestResolveBenchmarkOptions(t *testing.T) {
 	tests := []struct {
-		name    string
-		args    []string
-		setup   func()
-		wantErr bool
-		check   func(t *testing.T, o eval.BenchmarkOptions)
+		name     string
+		args     []string
+		limitSet bool
+		setup    func()
+		wantErr  bool
+		check    func(t *testing.T, o eval.BenchmarkOptions)
 	}{
 		{
-			name: "bare benchmark defaults to the fixture beside the config",
+			name: "bare benchmark defaults to the golden file beside the config",
 			check: func(t *testing.T, o eval.BenchmarkOptions) {
 				if o.Path != defaultBenchmarkPath {
 					t.Errorf("Path = %q, want %q", o.Path, defaultBenchmarkPath)
@@ -44,8 +46,14 @@ func TestResolveBenchmarkOptions(t *testing.T) {
 				if o.Repeats != eval.DefaultRepeats {
 					t.Errorf("Repeats = %d, want %d", o.Repeats, eval.DefaultRepeats)
 				}
-				if o.Output.Format != eval.FormatMarkdown {
-					t.Errorf("Format = %q, want markdown", o.Output.Format)
+				if o.Output.Format != eval.FormatText {
+					t.Errorf("Format = %q, want text", o.Output.Format)
+				}
+				if o.Limit != 0 {
+					t.Errorf("Limit = %d, want 0 (every sample)", o.Limit)
+				}
+				if o.ShowWhy {
+					t.Error("ShowWhy = true, want false by default")
 				}
 				if o.Output.Path != "" {
 					t.Errorf("Output.Path = %q, want empty (stdout)", o.Output.Path)
@@ -53,11 +61,45 @@ func TestResolveBenchmarkOptions(t *testing.T) {
 			},
 		},
 		{
-			name: "positional argument overrides the default fixture",
+			name: "positional argument overrides the default golden file",
 			args: []string{"testdata/other.yaml"},
 			check: func(t *testing.T, o eval.BenchmarkOptions) {
 				if o.Path != "testdata/other.yaml" {
 					t.Errorf("Path = %q, want testdata/other.yaml", o.Path)
+				}
+			},
+		},
+		{
+			name:     "limit narrows the run",
+			limitSet: true,
+			setup:    func() { benchLimit = 5 },
+			check: func(t *testing.T, o eval.BenchmarkOptions) {
+				if o.Limit != 5 {
+					t.Errorf("Limit = %d, want 5", o.Limit)
+				}
+			},
+		},
+		{
+			name:     "limit below one is refused",
+			limitSet: true,
+			setup:    func() { benchLimit = 0 },
+			wantErr:  true,
+		},
+		{
+			name:  "show-why carries through",
+			setup: func() { benchShowWhy = true },
+			check: func(t *testing.T, o eval.BenchmarkOptions) {
+				if !o.ShowWhy {
+					t.Error("ShowWhy = false, want true")
+				}
+			},
+		},
+		{
+			name:  "markdown format is accepted",
+			setup: func() { benchFormat = "markdown" },
+			check: func(t *testing.T, o eval.BenchmarkOptions) {
+				if o.Output.Format != eval.FormatMarkdown {
+					t.Errorf("Format = %q, want markdown", o.Output.Format)
 				}
 			},
 		},
@@ -97,7 +139,7 @@ func TestResolveBenchmarkOptions(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup()
 			}
-			o, err := resolveBenchmarkOptions(tt.args)
+			o, err := resolveBenchmarkOptions(tt.args, tt.limitSet)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("resolveBenchmarkOptions() error = nil, want non-nil")
@@ -230,11 +272,12 @@ func TestParseFormat(t *testing.T) {
 		want    eval.Format
 		wantErr bool
 	}{
+		{in: "text", want: eval.FormatText},
 		{in: "markdown", want: eval.FormatMarkdown},
 		{in: "json", want: eval.FormatJSON},
 		{in: "", wantErr: true},
 		{in: "MARKDOWN", wantErr: true},
-		{in: "text", wantErr: true},
+		{in: "yaml", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {

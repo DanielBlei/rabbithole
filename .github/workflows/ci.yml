@@ -37,6 +37,11 @@ jobs:
       - name: Test with the race detector
         run: make test-race
 
+      # The reports are only correct when rendered. Nothing else here runs the
+      # renderers end to end, and the heuristic scorer needs no backend.
+      - name: Render the eval reports
+        run: make eval-smoke
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -36,10 +36,12 @@ var evalCmd = &cobra.Command{
 
 var (
 	benchRepeats  int
+	benchLimit    int
 	benchProvider string
 	benchHost     string
 	benchModel    string
 	benchNoThink  bool
+	benchShowWhy  bool
 	benchFormat   string
 	benchOutput   string
 )
@@ -59,18 +61,25 @@ var (
 
 func init() {
 	benchmarkCmd := &cobra.Command{
-		Use:   "benchmark [file]",
-		Short: "Score a labelled fixture with the current profile and prompt, and report the gap",
-		Long: "Loads a benchmark fixture, scores every sample with your current profile.md and " +
-			"system prompt, and compares the result against the label each sample carries. " +
-			"Because it re-scores rather than reading stored values, two runs either side of a " +
-			"profile edit are directly comparable.\n\n" +
-			"Defaults to " + defaultBenchmarkPath + ". Nothing is written to the store.",
+		Use:   "benchmark [golden-file]",
+		Short: "Score a labelled golden dataset with the current profile and prompt, and report the gap",
+		Long: "Loads a golden dataset — articles you scored by hand — re-scores every sample with " +
+			"your current profile.md and system prompt, and reports how far the model landed from " +
+			"your scores. Because it re-scores rather than reading stored values, two runs either " +
+			"side of a profile edit are directly comparable.\n\n" +
+			"Defaults to " + defaultBenchmarkPath + ". Copy configs/golden.example.yaml to start " +
+			"one of your own. Nothing is written to the store.",
+		Example: "  rabbithole eval benchmark\n" +
+			"  rabbithole eval benchmark configs/golden.example.yaml\n" +
+			"  rabbithole eval benchmark --model qwen3.6:35b --repeats 5\n" +
+			"  rabbithole eval benchmark --format json --output-path before.json",
 		Args: cobra.MaximumNArgs(1),
 		RunE: runBenchmark,
 	}
 	benchmarkCmd.Flags().
-		IntVar(&benchRepeats, "repeats", eval.DefaultRepeats, "score the fixture this many times and report the spread; the model has no temperature or seed, so a single run cannot tell a real change from jitter")
+		IntVar(&benchRepeats, "repeats", eval.DefaultRepeats, "score the dataset this many times and report the spread; the model has no temperature or seed, so a single run cannot tell a real change from jitter")
+	benchmarkCmd.Flags().
+		IntVar(&benchLimit, "limit", 0, "score only the first N samples, in file order; a quick pass while iterating, not a representative sample (default: every sample)")
 	benchmarkCmd.Flags().
 		StringVar(&benchProvider, "provider", "", "override the configured provider (ollama|vllm|heuristic)")
 	benchmarkCmd.Flags().StringVar(&benchHost, "host", "", "override the configured backend host")
@@ -78,7 +87,10 @@ func init() {
 		StringVar(&benchModel, "model", "", "override the configured model, e.g. to benchmark a bigger one than you ingest with")
 	benchmarkCmd.Flags().
 		BoolVar(&benchNoThink, "no-think", false, "override config to disable model reasoning/thinking for this run")
-	benchmarkCmd.Flags().StringVar(&benchFormat, "format", string(eval.FormatMarkdown), "report format (markdown|json)")
+	benchmarkCmd.Flags().
+		BoolVar(&benchShowWhy, "show-why", false, "also print the model's stated reason and your golden note beside each sample")
+	benchmarkCmd.Flags().
+		StringVar(&benchFormat, "format", string(eval.FormatText), "report format (text|markdown|json)")
 	benchmarkCmd.Flags().StringVar(&benchOutput, "output-path", "", "write the report here (default: stdout)")
 
 	auditCmd := &cobra.Command{
@@ -108,7 +120,7 @@ func init() {
 	auditCmd.Flags().StringVar(&auditSource, "source", "", "only items from this source")
 	auditCmd.Flags().
 		StringVar(&auditScoredBy, "scored-by", "", "only items scored by this model; llm_score_model is the only provenance stored, so a mixed sample can compare rows scored under different configs")
-	auditCmd.Flags().StringVar(&auditFormat, "format", string(eval.FormatMarkdown), "report format (markdown|json)")
+	auditCmd.Flags().StringVar(&auditFormat, "format", string(eval.FormatText), "report format (text|markdown|json)")
 	auditCmd.Flags().StringVar(&auditOutput, "output-path", "", "write the report here (default: stdout)")
 
 	evalCmd.AddCommand(benchmarkCmd, auditCmd)
@@ -127,19 +139,24 @@ func resolveOutput(format, path string) (eval.Output, error) {
 // resolveBenchmarkOptions turns the `eval benchmark` flags and its optional
 // path argument into eval.BenchmarkOptions. Think is left to the caller, which
 // needs the config to know what it is overriding.
-func resolveBenchmarkOptions(args []string) (eval.BenchmarkOptions, error) {
+func resolveBenchmarkOptions(args []string, limitSet bool) (eval.BenchmarkOptions, error) {
 	opts := eval.BenchmarkOptions{
 		Path:     defaultBenchmarkPath,
 		Repeats:  benchRepeats,
+		Limit:    benchLimit,
 		Provider: benchProvider,
 		Host:     benchHost,
 		Model:    benchModel,
+		ShowWhy:  benchShowWhy,
 	}
 	if len(args) == 1 {
 		opts.Path = args[0]
 	}
 	if opts.Repeats < 1 {
 		return eval.BenchmarkOptions{}, fmt.Errorf("--repeats must be at least 1, got %d", opts.Repeats)
+	}
+	if limitSet && opts.Limit < 1 {
+		return eval.BenchmarkOptions{}, fmt.Errorf("--limit must be at least 1, got %d", opts.Limit)
 	}
 	out, err := resolveOutput(benchFormat, benchOutput)
 	if err != nil {
@@ -194,7 +211,7 @@ func resolveAuditOptions(now time.Time, limitSet bool) (eval.AuditOptions, error
 func runBenchmark(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	opts, err := resolveBenchmarkOptions(args)
+	opts, err := resolveBenchmarkOptions(args, cmd.Flags().Changed("limit"))
 	if err != nil {
 		return err
 	}
@@ -217,11 +234,15 @@ func runBenchmark(cmd *cobra.Command, args []string) error {
 	}
 	ds, err := eval.Load(opts.Path)
 	if err != nil {
-		return err
+		return missingGoldenError(opts.Path, err)
 	}
+	datasetSamples := len(ds.Samples)
+	ds = ds.Limit(opts.Limit)
+
 	log.Info().
 		Str("fixture", opts.Path).
 		Int("samples", len(ds.Samples)).
+		Int("of", datasetSamples).
 		Str("provider", cfg.Inference.Provider).
 		Str("model", cfg.Inference.Model).
 		Bool("think", opts.Think).
@@ -245,25 +266,42 @@ func runBenchmark(cmd *cobra.Command, args []string) error {
 	}
 
 	res, err := eval.Run(ctx, eval.RunConfig{
-		Dataset:     ds,
-		Profile:     profile,
-		Scorer:      scorer,
-		BatchSize:   cfg.Inference.BatchSize,
-		MaxParallel: cfg.Inference.MaxParallel,
-		Repeats:     opts.Repeats,
-		Provider:    cfg.Inference.Provider,
-		Model:       model,
-		Think:       opts.Think,
+		Dataset:        ds,
+		Profile:        profile,
+		Scorer:         scorer,
+		BatchSize:      cfg.Inference.BatchSize,
+		MaxParallel:    cfg.Inference.MaxParallel,
+		Repeats:        opts.Repeats,
+		DatasetSamples: datasetSamples,
+		Limit:          opts.Limit,
+		Provider:       cfg.Inference.Provider,
+		Model:          model,
+		Think:          opts.Think,
 	})
 	if err != nil {
 		return err
 	}
-	return writeReport(eval.Summarize(res, ds), opts.Output)
+	rep := eval.Summarize(res, ds)
+	return writeReport(rep, opts.Output, eval.RenderOptions{
+		Format:  opts.Output.Format,
+		ShowWhy: opts.ShowWhy,
+	})
+}
+
+// missingGoldenError points at the example dataset when the default path is the
+// one that is missing, since a fresh checkout does not ship configs/golden.yaml.
+func missingGoldenError(path string, err error) error {
+	if path != defaultBenchmarkPath || !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return fmt.Errorf("no golden dataset at %s; copy configs/golden.example.yaml to %s, "+
+		"or pass a path", defaultBenchmarkPath, defaultBenchmarkPath)
 }
 
 // writeReport renders the report to the requested destination, stdout when no
-// path was given.
-func writeReport(rep *eval.Report, out eval.Output) error {
+// path was given. Opening the file is this layer's job; the renderers only
+// ever see a writer.
+func writeReport(rep *eval.Report, out eval.Output, render eval.RenderOptions) error {
 	w := io.Writer(os.Stdout)
 	if out.Path != "" {
 		f, err := os.Create(out.Path)
@@ -278,14 +316,9 @@ func writeReport(rep *eval.Report, out eval.Output) error {
 		w = f
 	}
 
-	if out.Format == eval.FormatJSON {
-		if err := rep.WriteJSON(w); err != nil {
-			return err
-		}
-	} else if err := rep.WriteMarkdown(w); err != nil {
+	if err := rep.Write(w, render); err != nil {
 		return err
 	}
-
 	if out.Path != "" {
 		fmt.Printf("Wrote %s\n", out.Path)
 	}

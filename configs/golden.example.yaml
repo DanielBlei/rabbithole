@@ -32,8 +32,8 @@ tags:
   # Roughly where you expect the article to land.
   on-target: what you most want to read
   relevant: worth reading, not a highlight
-  shallow: not really a match, but honest about what it is
-  off-topic: not for you
+  weak-match: not what you asked for, however good it is
+  rather-skip: may not be relevant to you
 
   # The useful ones: where first impressions and real worth pull apart.
   keyword-bait: your vocabulary, no substance behind it
@@ -193,6 +193,19 @@ samples:
       Profile "Cost/performance trade-off analyses". A closing plug is not "no technical
       details"; the substance is the article.
 
+  - id: rb035
+    source: Source Nine
+    title: "Provable guarantees for speculative decoding acceptance rates"
+    summary: |
+      Derives a bound on acceptance rate given draft and target model entropy.
+      No implementation, no measurements on a real pair of models.
+    expected_llm_score: 7
+    tags: [relevant, research-no-practice]
+    note: |
+      Profile "The systems work underneath inference: ... schedulers", a high line, so the
+      topic carries it. Rigorous with nothing to run: worth reading, not a highlight.
+      Contrast rb012 and rb024, where the research line is the only claim available.
+
   # ---- 5-6: a side interest, done normally --------------------------------
 
   - id: rb020
@@ -258,7 +271,7 @@ samples:
       Traces the cost model through a real query, shows where the row estimates
       go wrong, and explains how to read the resulting plan. Deep and original.
     expected_llm_score: 4
-    tags: [shallow, deep-but-off-topic]
+    tags: [weak-match, deep-but-off-topic]
     note: |
       Profile "Anything outside the lists above, however well written", and the scoring
       guide caps an off-topic article at 4 however good it is. Excellent, and nothing
@@ -271,7 +284,7 @@ samples:
       Instruction selection, register allocation and the peephole pass, built up
       from nothing with the source at each stage.
     expected_llm_score: 4
-    tags: [shallow, deep-but-off-topic]
+    tags: [weak-match, deep-but-off-topic]
     note: |
       Profile "Anything outside the lists above". Genuinely excellent, adjacent to
       systems work, and not on any list. The 4 cap applies.
@@ -283,7 +296,7 @@ samples:
       Archival research through the RFCs and mailing lists, correcting the
       version of the story that usually gets retold.
     expected_llm_score: 4
-    tags: [shallow, deep-but-off-topic]
+    tags: [weak-match, deep-but-off-topic]
     note: Profile "Anything outside the lists above, however well written". Superb, entirely off-topic.
 
   - id: rb012
@@ -293,7 +306,7 @@ samples:
       Improves the known regret bound under relaxed smoothness assumptions.
       Proofs in the appendix, no experiments, no code, no implementation notes.
     expected_llm_score: 4
-    tags: [shallow, research-no-practice]
+    tags: [weak-match, research-no-practice]
     note: |
       Profile asks for research "with a clear practical angle". This has none, so the
       medium line does not apply and it falls to "anything outside the lists above".
@@ -306,20 +319,8 @@ samples:
       A PAC-style bound for in-context learners under distribution shift.
       Theorems and proofs, no experiments, no released code.
     expected_llm_score: 4
-    tags: [shallow, research-no-practice]
+    tags: [weak-match, research-no-practice]
     note: Same as rb012. Rigorous, and the "clear practical angle" qualifier is not met.
-
-  - id: rb035
-    source: Source Nine
-    title: "Provable guarantees for speculative decoding acceptance rates"
-    summary: |
-      Derives a bound on acceptance rate given draft and target model entropy.
-      No implementation, no measurements on a real pair of models.
-    expected_llm_score: 4
-    tags: [shallow, research-no-practice]
-    note: |
-      The topic sits close to the high tier, and the profile's qualifier still decides:
-      research without a practical angle is not the medium line.
 
   - id: rb004
     source: Source Ten
@@ -328,7 +329,7 @@ samples:
       Explains tokens, parameters and training in plain language, with a diagram
       of the transformer block and no code.
     expected_llm_score: 3
-    tags: [shallow]
+    tags: [weak-match]
     note: Profile "Beginner tutorials and 'what is an LLM' explainers", named outright.
 
   - id: rb009
@@ -338,7 +339,7 @@ samples:
       A pod is the smallest deployable unit in Kubernetes. Walks through a first
       pod with a diagram and a copy-paste manifest.
     expected_llm_score: 3
-    tags: [shallow, right-topic-wrong-depth]
+    tags: [weak-match, right-topic-wrong-depth]
     note: |
       "Kubernetes" is high and "Beginner tutorials" is low. Profile settles it: "a
       beginner tutorial stays a beginner tutorial even on a topic I like".
@@ -350,7 +351,7 @@ samples:
       Install, pull a model, type a prompt. No configuration, no quantisation
       choices, no measurements.
     expected_llm_score: 3
-    tags: [shallow, right-topic-wrong-depth]
+    tags: [weak-match, right-topic-wrong-depth]
     note: |
       The single most on-topic subject in the profile, at the one depth it rules out.
       Above a 5 means "Running open-source language models" is outcompeting the
@@ -363,7 +364,7 @@ samples:
       A side-by-side of the two, opinions only. No benchmarks, no versions, no
       hardware named.
     expected_llm_score: 3
-    tags: [shallow, right-topic-wrong-depth]
+    tags: [weak-match, right-topic-wrong-depth]
     note: |
       Right topic, and the profile asks for depth and substance. A thin take on a topic
       you like is a 3, not a 7.
@@ -377,7 +378,7 @@ samples:
       Four pillars, a maturity model and a readiness checklist. No systems, no
       numbers, no implementation of any kind.
     expected_llm_score: 2
-    tags: [off-topic]
+    tags: [rather-skip]
     note: Profile "Business and strategy takes with no technical content".
 
   - id: rb029
@@ -387,7 +388,7 @@ samples:
       A listicle of well-known defaults, one paragraph each, no configuration
       shown and no measurement of the claimed cost.
     expected_llm_score: 2
-    tags: [off-topic, keyword-bait]
+    tags: [rather-skip, keyword-bait]
     note: |
       Profile "Listicles and clickbait". On a high-tier topic, with nothing behind it.
       The counterpart to rb010: same shape of headline, no article underneath.
@@ -399,7 +400,7 @@ samples:
       Quarterly results and guidance, with a paragraph on AI demand. No product
       detail, no architecture, no numbers beyond the financial ones.
     expected_llm_score: 2
-    tags: [off-topic]
+    tags: [rather-skip]
     note: Profile "Marketing/press releases with no technical details".
 
   - id: rb005
@@ -409,7 +410,7 @@ samples:
       A roundup of chatbots and image generators, one paragraph each, with
       affiliate links and a newsletter signup at the end.
     expected_llm_score: 1
-    tags: [off-topic]
+    tags: [rather-skip]
     note: Profile "Listicles and clickbait". Anything above a 2 here means the low end is not working.
 
   - id: rb006
@@ -420,7 +421,7 @@ samples:
       local LLMs and open source, and AcmeCloud is leading that transformation.
       Contact sales to learn more about our AI-ready platform.
     expected_llm_score: 1
-    tags: [off-topic, keyword-bait]
+    tags: [rather-skip, keyword-bait]
     note: |
       Profile "Marketing/press releases with no technical details". Says your words
       repeatedly, measures nothing. Above a 3 means the penalty language is not landing.
@@ -432,7 +433,7 @@ samples:
       Launch post. Cloud-native, open source and GPU-accelerated, with a request
       for a demo booking. No architecture, no API, no benchmarks.
     expected_llm_score: 1
-    tags: [off-topic, keyword-bait]
+    tags: [rather-skip, keyword-bait]
     note: |
       Every high-tier word in the profile, in one headline, with nothing behind it. The
       purest test of keyword matching in the set.
@@ -444,7 +445,7 @@ samples:
       Ranked roundup with screenshots and pricing tiers. Unrelated to anything
       in the profile.
     expected_llm_score: 1
-    tags: [off-topic]
+    tags: [rather-skip]
     note: Profile "Listicles and clickbait", and off-topic besides.
 
   - id: rb030
@@ -454,7 +455,7 @@ samples:
       A transcript excerpt, three paragraphs of reaction, and an embedded
       newsletter form. No model named, no method, nothing to learn.
     expected_llm_score: 0
-    tags: [off-topic]
+    tags: [rather-skip]
     note: |
       Pure engagement bait. The floor of the scale: if anything in the set deserves a 0
       it is this, and a model that never uses 0 is not using the range you gave it.

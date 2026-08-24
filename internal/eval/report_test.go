@@ -4,11 +4,9 @@
 package eval
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 )
 
 // reportOf summarises one run of the given outcomes.
@@ -17,86 +15,92 @@ func reportOf(t *testing.T, outcomes []Outcome, tags map[Tag]string) *Report {
 	return Summarize(&Results{Runs: [][]Outcome{outcomes}}, &Dataset{Tags: tags})
 }
 
-func render(t *testing.T, r *Report) string {
-	t.Helper()
-	var b strings.Builder
-	if err := r.WriteMarkdown(&b); err != nil {
-		t.Fatalf("WriteMarkdown() error = %v", err)
-	}
-	return b.String()
-}
-
-// A model that answers with one value is not scoring, and every other metric
-// then measures where the labels happen to coincide with that value. The report
-// has to say so, because MAE and the tag table look ordinary.
-func TestReportFlagsADegenerateModel(t *testing.T) {
-	// Eleven samples spread across the scale, all answered 9.
+// constantScorer answers every sample with one value, spread across labels that
+// are not. Three of them expect that value, so the run also looks like partial
+// agreement, which is the trap the warning exists to call out.
+func constantScorer() []Outcome {
 	var outcomes []Outcome
 	for i, want := range []int{9, 9, 7, 4, 1, 1, 7, 4, 3, 9, 4} {
 		outcomes = append(outcomes, scored(string(rune('a'+i)), want, 9))
 	}
-	got := render(t, reportOf(t, outcomes, nil))
+	return outcomes
+}
 
-	if !strings.Contains(got, "1 different values across") {
-		t.Errorf("report does not flag the degenerate model:\n%s", got)
+// codesOf lists the warning codes a report raised, in order.
+func codesOf(rep *Report) []string {
+	codes := make([]string, 0, len(rep.Warnings))
+	for _, w := range rep.Warnings {
+		codes = append(codes, w.Code)
 	}
-	if !strings.Contains(got, "not a judgement") {
-		t.Error("the warning does not explain why the other metrics cannot be read")
+	return codes
+}
+
+func TestSummarizeWarnings(t *testing.T) {
+	tests := []struct {
+		name     string
+		outcomes []Outcome
+		want     []string
+	}{
+		{
+			// A constant scorer lands at kappa 0 by construction, so
+			// no_agreement would always fire beside it saying a weaker version
+			// of the same thing.
+			name:     "a constant scorer suppresses the weaker agreement warning",
+			outcomes: constantScorer(),
+			want:     []string{WarnConstantScorer},
+		},
+		{
+			name: "a discriminating model raises nothing",
+			outcomes: []Outcome{
+				scored("a", 9, 9), scored("b", 7, 6), scored("c", 4, 5), scored("d", 1, 2),
+			},
+			want: []string{},
+		},
+		{
+			name: "scores unrelated to golden raise no_agreement on their own",
+			outcomes: []Outcome{
+				scored("a", 9, 1), scored("b", 1, 9), scored("c", 7, 3),
+				scored("d", 3, 7), scored("e", 4, 8),
+			},
+			want: []string{WarnNoAgreement},
+		},
+		{
+			name:     "an unanswered sample is reported, not folded into a score",
+			outcomes: []Outcome{scored("a", 9, 9), scored("b", 7, 6), scored("c", 1, 2), unscored("d", 4)},
+			want:     []string{WarnUnanswered},
+		},
 	}
-	// The three samples that expected 9 look like agreement and are not.
-	if !strings.Contains(got, "3 of 11 matched golden exactly") {
-		t.Errorf("agreement count missing or wrong:\n%s", got)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := codesOf(reportOf(t, tt.outcomes, nil))
+			if len(got) != len(tt.want) {
+				t.Fatalf("warnings = %v, want %v", got, tt.want)
+			}
+			for i, code := range tt.want {
+				if got[i] != code {
+					t.Errorf("warning %d = %q, want %q", i, got[i], code)
+				}
+			}
+		})
 	}
 }
 
-func TestReportDoesNotFlagADiscriminatingModel(t *testing.T) {
-	outcomes := []Outcome{
-		scored("a", 9, 9), scored("b", 7, 6), scored("c", 4, 5), scored("d", 1, 2),
-	}
-	got := render(t, reportOf(t, outcomes, nil))
+func TestSummarizeOrdersSamplesWorstFirst(t *testing.T) {
+	rep := reportOf(t, []Outcome{
+		scored("exact", 9, 9),
+		unscored("none", 4),
+		scored("near", 7, 6),
+		scored("far", 1, 8),
+	}, nil)
 
-	if strings.Contains(got, "not telling them apart") {
-		t.Errorf("false positive: four distinct scores should not warn:\n%s", got)
-	}
-	if !strings.Contains(got, "4 different, against") {
-		t.Errorf("score spread not reported:\n%s", got)
-	}
-}
-
-func TestReportAgreementPrecedesDisagreements(t *testing.T) {
-	got := render(t, reportOf(t, []Outcome{
-		scored("hit", 9, 9), scored("miss", 1, 8),
-	}, nil))
-
-	agree, disagree := strings.Index(got, "## Agreement"), strings.Index(got, "## Disagreements")
-	switch {
-	case agree < 0:
-		t.Fatal("no Agreement section")
-	case disagree < 0:
-		t.Fatal("no Disagreements section")
-	case agree > disagree:
-		t.Error("Agreement should come before Disagreements")
-	}
-	if !strings.Contains(got, "1 of 2 matched golden exactly") {
-		t.Error("agreement count missing")
-	}
-}
-
-func TestReportOmitsAgreementWhenNothingMatched(t *testing.T) {
-	got := render(t, reportOf(t, []Outcome{scored("a", 9, 2)}, nil))
-	if strings.Contains(got, "## Agreement") {
-		t.Error("an empty Agreement section should not be printed")
-	}
-}
-
-// Unanswered samples must be visible rather than folded into a score.
-func TestReportSurfacesUnanswered(t *testing.T) {
-	got := render(t, reportOf(t, []Outcome{scored("a", 9, 9), unscored("b", 1)}, nil))
-	if !strings.Contains(got, "1 unanswered") {
-		t.Errorf("unanswered count missing from the summary:\n%s", got)
-	}
-	if !strings.Contains(got, "the model returned no score") {
-		t.Error("unanswered sample not listed")
+	// Unanswered has no distance to rank by, so it sorts last rather than
+	// competing with a real disagreement.
+	want := []string{"far", "near", "exact", "none"}
+	for i, id := range want {
+		if rep.Samples[i].ID != id {
+			t.Errorf("sample %d = %q, want %q (order: %v)", i, rep.Samples[i].ID, id, want)
+		}
 	}
 }
 
@@ -124,70 +128,72 @@ func TestScoreSpreadCoversTheWholeScale(t *testing.T) {
 	}
 }
 
-// The JSON is what a future renderer draws from, so it has to carry every
-// sample rather than only the ones markdown chose to print.
-func TestJSONCarriesEverySample(t *testing.T) {
-	rep := reportOf(t, []Outcome{
-		scored("a", 9, 9), scored("b", 1, 8), unscored("c", 4),
-	}, nil)
-
-	var b strings.Builder
-	if err := rep.WriteJSON(&b); err != nil {
-		t.Fatalf("WriteJSON() error = %v", err)
-	}
-	var round map[string]any
-	if err := json.Unmarshal([]byte(b.String()), &round); err != nil {
-		t.Fatalf("output is not valid JSON: %v", err)
-	}
-	for _, key := range []string{"config", "results", "by_tag", "samples", "higher_is_better"} {
-		if _, ok := round[key]; !ok {
-			t.Errorf("JSON is missing %q", key)
-		}
-	}
-	if n := len(round["samples"].([]any)); n != 3 {
-		t.Errorf("samples = %d, want all 3 including the unanswered one", n)
-	}
-}
-
 func TestSpreadBlockOnlyWithRepeats(t *testing.T) {
 	one := Summarize(&Results{Runs: [][]Outcome{{scored("a", 5, 5)}}}, &Dataset{})
 	if one.Spread != nil {
 		t.Error("a single run should carry no spread block")
 	}
 
-	two := Summarize(&Results{Runs: [][]Outcome{
-		{scored("a", 5, 5)}, {scored("a", 5, 8)},
-	}}, &Dataset{})
+	two := Summarize(&Results{
+		Runs:       [][]Outcome{{scored("a", 5, 5)}, {scored("a", 5, 8)}},
+		RunSeconds: []float64{1.5, 1.25},
+	}, &Dataset{})
 	if two.Spread == nil {
 		t.Fatal("repeated runs should carry a spread block")
 	}
 	if two.Spread.WidestSample != 3 {
 		t.Errorf("widest swing = %d, want 3", two.Spread.WidestSample)
 	}
-	if got := render(t, two); !strings.Contains(got, "Noise floor") {
-		t.Error("noise floor section missing from the markdown")
+	// Per-run timings sit beside the per-run MAE they explain.
+	if got := two.Spread.RunSeconds; len(got) != 2 || got[0] != 1.5 {
+		t.Errorf("RunSeconds = %v, want [1.5 1.25]", got)
 	}
 }
 
-// A backend that answered nothing leaves every aggregate at its zero value, and
-// MAE 0.00 reads as a flawless run. The report must refuse to print the table.
-func TestReportRefusesToScoreAnUnansweredRun(t *testing.T) {
-	rep := reportOf(t, []Outcome{unscored("a", 9), unscored("b", 1)}, nil)
-
-	out := render(t, rep)
-	if !strings.Contains(out, "No sample was scored") {
-		t.Errorf("report does not say nothing was measured:\n%s", out)
+func TestDatasetLimit(t *testing.T) {
+	full := &Dataset{
+		Hash:    "sha256:abc",
+		Samples: []Sample{{ID: "a"}, {ID: "b"}, {ID: "c"}},
 	}
-	for _, banned := range []string{"average miss (MAE)", "nothing missed", "score agreement"} {
-		if strings.Contains(out, banned) {
-			t.Errorf("report prints %q on a run where nothing was scored:\n%s", banned, out)
-		}
+
+	tests := []struct {
+		name string
+		n    int
+		want []string
+	}{
+		{name: "narrows to the first n in file order", n: 2, want: []string{"a", "b"}},
+		{name: "one keeps only the first", n: 1, want: []string{"a"}},
+		{name: "n at the sample count is not a narrowing", n: 3, want: []string{"a", "b", "c"}},
+		{name: "n above the sample count means all", n: 99, want: []string{"a", "b", "c"}},
+		{name: "zero means all", n: 0, want: []string{"a", "b", "c"}},
+		{name: "negative means all", n: -1, want: []string{"a", "b", "c"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := full.Limit(tt.n)
+			if len(got.Samples) != len(tt.want) {
+				t.Fatalf("Limit(%d) kept %d samples, want %d", tt.n, len(got.Samples), len(tt.want))
+			}
+			for i, id := range tt.want {
+				if got.Samples[i].ID != id {
+					t.Errorf("sample %d = %q, want %q", i, got.Samples[i].ID, id)
+				}
+			}
+			// The hash fingerprints the file, not the slice taken from it.
+			if got.Hash != full.Hash {
+				t.Errorf("Hash = %q, want it carried over unchanged", got.Hash)
+			}
+			if len(full.Samples) != 3 {
+				t.Errorf("Limit mutated the original dataset: %d samples left", len(full.Samples))
+			}
+		})
 	}
 }
 
 // The sweep is what separates a model that ranks badly from one that ranks well
-// and scores everything low, so it must survive the case that produces them
-// both: nothing reaching the badge threshold.
+// and scores low, so it has to survive the case where the badge threshold
+// flagged nothing at all.
 func TestSweepSurvivesNothingFlagged(t *testing.T) {
 	rep := reportOf(t, []Outcome{
 		scored("a", 9, 4), scored("b", 8, 3),
@@ -201,8 +207,9 @@ func TestSweepSurvivesNothingFlagged(t *testing.T) {
 		t.Fatalf("expected nothing badged at the threshold, got %d",
 			rep.Results.HighSignal.Flagged)
 	}
-	out := render(t, rep)
-	if !strings.Contains(out, "At other marks") {
+
+	out := render(t, rep, RenderOptions{Format: FormatText})
+	if !strings.Contains(out, "AT OTHER MARKS") {
 		t.Errorf("sweep missing when nothing reached the threshold:\n%s", out)
 	}
 	// Every mark gets a row, including the badge threshold that flagged nothing.
@@ -230,7 +237,7 @@ func TestThinTagsSortBelowFullOnes(t *testing.T) {
 	if !rep.ByTag[1].Thin {
 		t.Errorf("tag %q with %d samples is not marked thin", rep.ByTag[1].Tag, rep.ByTag[1].Samples)
 	}
-	if out := render(t, rep); !strings.Contains(out, "thin *") {
+	if out := render(t, rep, RenderOptions{Format: FormatText}); !strings.Contains(out, "thin *") {
 		t.Errorf("thin group is not marked in the table:\n%s", out)
 	}
 }
@@ -239,8 +246,8 @@ func TestThinTagsSortBelowFullOnes(t *testing.T) {
 // what it cost in wall clock.
 func TestTimingReportsTheHeadlineRun(t *testing.T) {
 	rep := Summarize(&Results{
-		Runs:    [][]Outcome{{scored("a", 9, 9)}},
-		Elapsed: []time.Duration{4 * time.Second},
+		Runs:       [][]Outcome{{scored("a", 9, 9)}},
+		RunSeconds: []float64{4},
 	}, &Dataset{})
 
 	if rep.Timing.Seconds != 4 {
@@ -248,8 +255,5 @@ func TestTimingReportsTheHeadlineRun(t *testing.T) {
 	}
 	if rep.Timing.PerSample != 4 {
 		t.Errorf("Timing.PerSample = %v, want 4 over one sample", rep.Timing.PerSample)
-	}
-	if out := render(t, rep); !strings.Contains(out, "/sample)") {
-		t.Errorf("header omits timing:\n%s", out)
 	}
 }
