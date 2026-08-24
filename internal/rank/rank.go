@@ -122,11 +122,15 @@ func ScoreAll(
 	return out
 }
 
+// truncate shortens s to at most n runes, appending "…" when it does. Counting
+// runes rather than bytes keeps a multibyte title from being cut mid-character,
+// which would put invalid UTF-8 into the log line.
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return string(r[:n-1]) + "…"
 }
 
 // scoreBatch scores a multi-item batch, decomposing to per-item scoring on

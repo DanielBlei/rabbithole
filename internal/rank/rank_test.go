@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
@@ -235,5 +236,35 @@ func TestScoreAllWithoutProgressHook(t *testing.T) {
 	}}
 	if got := ScoreAll(context.Background(), scorer, "profile", items, 1, 1); len(got) != 1 {
 		t.Fatalf("scored %d items, want 1", len(got))
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		n    int
+		want string
+	}{
+		{name: "shorter than the limit is untouched", in: "short", n: 10, want: "short"},
+		{name: "exactly the limit is untouched", in: "abcde", n: 5, want: "abcde"},
+		{name: "ascii is cut and marked", in: "abcdefgh", n: 5, want: "abcd…"},
+		{name: "accented text counts runes, not bytes", in: "Ünïcödé wörds", n: 6, want: "Ünïcö…"},
+		{name: "cjk counts runes, not bytes", in: "分散システムの設計", n: 4, want: "分散シ…"},
+		{name: "emoji is not split", in: "ship it 🚀🚀🚀", n: 10, want: "ship it 🚀…"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncate(tt.in, tt.n)
+			if got != tt.want {
+				t.Errorf("truncate(%q, %d) = %q, want %q", tt.in, tt.n, got, tt.want)
+			}
+			if !utf8.ValidString(got) {
+				t.Errorf("truncate(%q, %d) produced invalid UTF-8: %q", tt.in, tt.n, got)
+			}
+			if n := utf8.RuneCountInString(got); n > tt.n {
+				t.Errorf("truncate(%q, %d) returned %d runes, want at most %d", tt.in, tt.n, n, tt.n)
+			}
+		})
 	}
 }
