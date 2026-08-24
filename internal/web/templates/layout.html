@@ -20,6 +20,10 @@
 <script src="/static/htmx.min.js" defer></script>
 </head>
 <body>
+  <!-- First stop for a keyboard tab, off-screen until it takes focus: the bar
+       carries the nav, clock and settings, and without this every page starts
+       by tabbing through all of it. -->
+  <a class="skip-link" href="#main">Skip to content</a>
   <header class="topbar">
     <!-- terminal mascot: a tiny ASCII bunny centred in the bar (absolute overlay,
          so it never shifts the wordmark/clock); hidden on narrow screens.
@@ -216,15 +220,17 @@
     </div>
   </nav>
   {{template "ingWatch" .Chrome}}
-  <div class="content">
+  <!-- tabindex -1 so the skip link moves keyboard focus here, not just scroll. -->
+  <main class="content" id="main" tabindex="-1">
     {{block "content" .}}{{end}}
-  </div>
+  </main>
   <div id="modal"></div>
   <!-- Second layer: dialogs opened from inside another one stack here. -->
   <div id="modalTop"></div>
   <!-- Every script is external so the page can carry a strict Content-Security-
        Policy: none of this is inline, and none of it is needed before the DOM
        is parsed. Each file says at the top what it owns. -->
+  <script src="/static/js/net.js" defer></script>
   <script src="/static/js/chrome.js" defer></script>
   {{/* Ahead of modal.js on purpose: both bind Escape on document, and the
        sources search box has to swallow the key before the dialog acts on it. */}}

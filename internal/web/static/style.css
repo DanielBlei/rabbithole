@@ -88,22 +88,55 @@
      rail layout widens from it — two copies would drift. Sized so the feed's
      filter bar holds all six controls plus the reset on one line. */
   --content-w:1180px;
+
+  /* Shell stacking order in one place, so the layers can't drift apart as
+     pieces move. Panels sit inside the bar, the drawer rides over it, dialogs
+     clear everything. Purely local stacking (a badge over its own card) keeps
+     its own small literal — those aren't part of this ladder. */
+  --z-panel:10;
+  --z-flyout:11;
+  --z-topbar:40;
+  --z-nav-hot:44;
+  --z-navrail:45;
+  --z-modal:50;
+  --z-modal-top:60;
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
+@media (prefers-reduced-motion: no-preference){ html{scroll-behavior:smooth;} }
 body{
   /* radial fade: a faint lift up top easing down into a darker foot — gives the
      page depth without a flat fill. `fixed` so it doesn't scroll with content. */
   background:radial-gradient(120% 80% at 50% -10%, #233139 0%, var(--bg) 45%, var(--bg-2) 100%) fixed;
   color:var(--text);
   font-family:var(--font-mono);
+  /* dvh tracks the mobile URL bar collapsing; the vh line above it is the
+     fallback for browsers that don't know the unit. */
   min-height:100vh;
+  min-height:100dvh;
 }
 a{color:inherit;text-decoration:none;}
-/* sticky translucent bar; content scrolls beneath it. z-index 40 keeps it over
-   the page but under the modal (50). */
+/* Keyboard-only escape hatch past the topbar. Parked off-screen rather than
+   display:none so it stays focusable, and drops into the corner on focus as a
+   normal floating surface. */
+.skip-link{
+  position:fixed;left:12px;top:-100px;z-index:var(--z-modal-top);
+  padding:9px 16px;border-radius:999px;
+  background:var(--overlay);color:var(--accent);
+  border:1px solid var(--hairline-strong);
+  -webkit-backdrop-filter:blur(22px) saturate(1.6);
+  backdrop-filter:blur(22px) saturate(1.6);
+  box-shadow:0 1px 2px rgba(0,0,0,.30), 0 12px 28px rgba(0,0,0,.38);
+  font-size:1.3rem;letter-spacing:.03em;
+  transition:top .18s cubic-bezier(.2,.9,.3,1.05);
+}
+.skip-link:focus-visible{top:12px;outline:1px solid var(--accent);outline-offset:2px;}
+@media (prefers-reduced-motion: reduce){ .skip-link{transition:none;} }
+
+/* sticky translucent bar; content scrolls beneath it. The --z-* scale keeps it
+   over the page but under the modal. */
 header.topbar{
-  position:sticky;top:0;z-index:40;
+  position:sticky;top:0;z-index:var(--z-topbar);
   display:flex;align-items:center;justify-content:space-between;
   padding:16px 30px;border-bottom:1px solid var(--hairline);
   background:rgba(26,35,39,.62);
@@ -200,7 +233,7 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
   -webkit-backdrop-filter:blur(22px) saturate(1.6);
   backdrop-filter:blur(22px) saturate(1.6);
   box-shadow:0 1px 2px rgba(0,0,0,.30), 0 12px 28px rgba(0,0,0,.38), 0 28px 64px rgba(0,0,0,.30);
-  padding:7px;z-index:10;
+  padding:7px;z-index:var(--z-panel);
 }
 .settings-panel:not([hidden]){animation:pop-in .16s cubic-bezier(.2,1.1,.4,1);transform-origin:top right;}
 .settings-panel[hidden]{display:none;}
@@ -232,7 +265,7 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
   -webkit-backdrop-filter:blur(22px) saturate(1.6);
   backdrop-filter:blur(22px) saturate(1.6);
   box-shadow:0 1px 2px rgba(0,0,0,.30), 0 12px 28px rgba(0,0,0,.38), 0 28px 64px rgba(0,0,0,.30);
-  padding:8px 10px 11px;z-index:11;
+  padding:8px 10px 11px;z-index:var(--z-flyout);
   transform-origin:top right;
 }
 /* invisible bridge across the gap so the hover doesn't drop mid-travel */
@@ -312,7 +345,13 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 }
 .clk-slider input[type=range]:focus-visible{outline:1px solid var(--accent);outline-offset:4px;}
 
-.content{max-width:var(--content-w);margin:0 auto;padding:28px 30px 80px;}
+/* scroll-margin clears the sticky bar when the skip link jumps here, so the
+   first line of content doesn't land underneath it. */
+.content{
+  max-width:var(--content-w);margin:0 auto;padding:28px 30px 80px;
+  scroll-margin-top:calc(var(--topbar-h) + 12px);
+}
+.content:focus{outline:none;}
 
 /* Tiles split the full section width evenly, whatever the count: flex:1 1 0 on
    each gives equal shares that grow to fill the row, so 3 / 4 / 5+ tiles each
@@ -477,7 +516,7 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
   /* Never narrower than the trigger it hangs off, so a wide button doesn't
      open a cramped list — but a menu of short labels (Sort, View) stays close
      to its content rather than opening a half-empty surface. */
-  position:absolute;right:0;top:calc(100% + 8px);z-index:10;min-width:max(100%,13rem);
+  position:absolute;right:0;top:calc(100% + 8px);z-index:var(--z-panel);min-width:max(100%,13rem);
   display:flex;flex-direction:column;gap:8px;align-items:stretch;
   background:var(--overlay);border:1px solid var(--hairline-strong);border-radius:16px;
   -webkit-backdrop-filter:blur(22px) saturate(1.6);
@@ -783,7 +822,11 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 .gauge-bar:focus-visible{outline:1px solid var(--accent);outline-offset:3px;}
 .gauge-bar::after{
   content:attr(data-tip);position:absolute;left:0;bottom:200%;
-  background:#000;color:var(--accent);border:1px solid var(--line);border-radius:6px;
+  background:var(--overlay);color:var(--accent);
+  border:1px solid var(--hairline-strong);border-radius:8px;
+  -webkit-backdrop-filter:blur(22px) saturate(1.6);
+  backdrop-filter:blur(22px) saturate(1.6);
+  box-shadow:0 1px 2px rgba(0,0,0,.30), 0 8px 20px rgba(0,0,0,.34);
   padding:2px 7px;font-size:1.2rem;white-space:nowrap;
   opacity:0;pointer-events:none;transition:opacity .12s;
 }
@@ -906,7 +949,7 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 }
 
 /* Config viewer — a terminal-style frame that drops in over a dimmed page. */
-.modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:24px;}
+.modal{position:fixed;inset:0;z-index:var(--z-modal);display:flex;align-items:center;justify-content:center;padding:24px;}
 /* The page scrolls on the root element, so the modal lock must land there:
    freeze <html> whenever #modal has content (class set by the observer in
    layout.html; the :has() variant covers the pre-JS instant). */
@@ -916,7 +959,7 @@ html.modal-open,
 html.modal-open body{overflow:hidden;}
 /* Stacked layer: sits above the base dialog, and skips the blur so the two
    glass panes don't compound into mush. */
-#modalTop .modal{z-index:60;}
+#modalTop .modal{z-index:var(--z-modal-top);}
 #modalTop .modal__backdrop{
   background:rgba(0,0,0,.42);
   -webkit-backdrop-filter:none;backdrop-filter:none;
@@ -965,15 +1008,15 @@ pre.yml code{font-family:inherit;}
    floor — a proper side menu, not a floating window. It retracts on
    mouse-leave / click-away / Escape / picking an item. The topbar keeps a
    pinned height (--topbar-h) so the menu's top offset can't drift from it.
-   z-index: menu 45 (over the bar's 40, under the modal's 50), tab + hot zone
-   just beneath it.
+   Stacking runs off the --z-* scale at the top of the file: the menu clears
+   the topbar and sits under the modal, tab + hot zone just beneath it.
    Inside, two tiers that never read as one list: the pages sit at the top as
    prompt lines, the config pair at the very floor as typed commands. */
 :root{ --topbar-h:58px; }
 header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
-.nav-hot{position:fixed;left:0;top:var(--topbar-h);bottom:0;width:12px;z-index:44;}
+.nav-hot{position:fixed;left:0;top:var(--topbar-h);bottom:0;width:12px;z-index:var(--z-nav-hot);}
 .navrail{
-  position:fixed;left:0;top:var(--topbar-h);bottom:0;z-index:45;width:262px;
+  position:fixed;left:0;top:var(--topbar-h);bottom:0;z-index:var(--z-navrail);width:262px;
   overflow-y:auto;
   display:flex;flex-direction:column;gap:2px;padding:22px 12px 14px;
   background:var(--overlay);
@@ -1089,7 +1132,7 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
    mirrors the ingest state so trouble shows with the menu closed: red lines
    on failure, pulsing while a run is live. Hidden while the menu is open. */
 .navtab{
-  position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:44;
+  position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:var(--z-nav-hot);
   display:flex;flex-direction:column;gap:4px;padding:14px 8px 14px 7px;
   background:var(--fill);border:1px solid var(--hairline);border-left:0;
   border-radius:0 8px 8px 0;cursor:pointer;
@@ -1117,7 +1160,7 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    surface recipe as the menu it points at. Non-modal on purpose — it never
    blocks the page, and the first click anywhere retires it for good. */
 .navhint{
-  position:fixed;left:34px;top:50%;transform:translateY(-50%) translateX(-6px);z-index:45;
+  position:fixed;left:34px;top:50%;transform:translateY(-50%) translateX(-6px);z-index:var(--z-navrail);
   background:var(--overlay);border:1px solid var(--hairline-strong);border-radius:12px;
   -webkit-backdrop-filter:blur(22px) saturate(1.6);
   backdrop-filter:blur(22px) saturate(1.6);
@@ -1816,7 +1859,7 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 .tagput__input::placeholder{color:var(--text-dim);}
 .tagput__input:focus-visible{outline:none;}
 .tagput__suggest{
-  position:absolute;left:0;top:calc(100% + 6px);z-index:10;
+  position:absolute;left:0;top:calc(100% + 6px);z-index:var(--z-panel);
   display:flex;flex-wrap:wrap;gap:6px;max-width:300px;
   background:var(--overlay);border:1px solid var(--hairline-strong);border-radius:12px;
   -webkit-backdrop-filter:blur(22px) saturate(1.6);
@@ -2240,3 +2283,81 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
   font-weight:var(--fw-title,500);letter-spacing:var(--ls-title,normal);
 }
 .font-preview--body{font-family:var(--font-body);font-size:var(--fs-body);}
+
+/* --- Request feedback ------------------------------------------------------ */
+/* In-flight and failed requests. Both surfaces follow the floating recipe used
+   everywhere else: translucent fill, backdrop blur, hairline, layered shadow. */
+
+/* Thin progress bar across the very top. It only carries "something is
+   happening" — there is no real progress to report over an XHR, so it runs an
+   indeterminate sweep rather than faking a percentage. JS holds it back until
+   a request outlives a frame or two, so quick local calls never flash it. */
+.netbar{
+  position:fixed;left:0;top:0;height:2px;width:100%;
+  z-index:var(--z-modal-top);pointer-events:none;
+  opacity:0;transition:opacity .18s ease;
+}
+.netbar--on{opacity:1;}
+.netbar::before{
+  content:"";position:absolute;top:0;bottom:0;width:38%;
+  background:linear-gradient(90deg,transparent,var(--accent),transparent);
+  box-shadow:0 0 10px rgba(128,203,196,.55);
+  animation:netbar-sweep 1.05s ease-in-out infinite;
+}
+@keyframes netbar-sweep{
+  0%{transform:translateX(-100%);}
+  100%{transform:translateX(365%);}
+}
+/* Reduced motion still needs the signal, so the bar stays — as a steady dim
+   line rather than a sweep. */
+@media (prefers-reduced-motion: reduce){
+  .netbar::before{
+    animation:none;width:100%;
+    background:var(--accent-dim);box-shadow:none;
+  }
+}
+
+/* The element that issued the request dims and stops taking clicks while it is
+   waiting. htmx puts .htmx-request on it for us. */
+.htmx-request.navrail__item,
+.htmx-request.settings-panel__item,
+.htmx-request.feed-empty__go,
+.htmx-request.feed-empty__alt,
+.htmx-request.src__act,
+.htmx-request.sdet__btn,
+.htmx-request.srow__pick,
+.htmx-request.ing__cfg{
+  opacity:.55;pointer-events:none;
+}
+
+/* Failure toasts, bottom-right, newest at the foot. */
+.toasts{
+  position:fixed;right:18px;bottom:18px;z-index:var(--z-modal-top);
+  display:flex;flex-direction:column;gap:8px;
+  max-width:min(380px, calc(100vw - 36px));
+}
+.toast{
+  display:flex;align-items:flex-start;gap:10px;
+  padding:11px 12px 11px 14px;border-radius:12px;
+  background:var(--overlay);border:1px solid var(--hairline-strong);
+  -webkit-backdrop-filter:blur(22px) saturate(1.6);
+  backdrop-filter:blur(22px) saturate(1.6);
+  box-shadow:0 1px 2px rgba(0,0,0,.30), 0 12px 28px rgba(0,0,0,.38);
+  /* A red rule rather than a red fill: it marks the toast as a failure without
+     turning the whole surface into an alarm. */
+  border-left:2px solid var(--warn);
+  font-size:1.25rem;line-height:1.45;color:var(--text);
+  opacity:0;transform:translateY(6px) scale(.98);
+  transition:opacity .2s ease, transform .2s cubic-bezier(.2,1.1,.4,1);
+}
+.toast--on{opacity:1;transform:none;}
+.toast__msg{flex:1;min-width:0;text-wrap:pretty;}
+.toast__x{
+  flex:none;font-family:inherit;cursor:pointer;
+  background:none;border:0;padding:0 2px;line-height:1;
+  font-size:1.6rem;color:var(--text-dim);
+  transition:color .15s ease;
+}
+.toast__x:hover{color:var(--accent);}
+.toast__x:focus-visible{outline:1px solid var(--accent);outline-offset:2px;border-radius:4px;}
+@media (prefers-reduced-motion: reduce){ .toast{transition:none;} }
