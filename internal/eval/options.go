@@ -28,7 +28,11 @@ const (
 type Format string
 
 const (
-	// FormatMarkdown is the human-readable report.
+	// FormatText is the terminal report and the default: aligned columns, no
+	// markup, the same bytes whether it lands on a TTY or in a file.
+	FormatText Format = "text"
+	// FormatMarkdown is the same report as a document, for pasting into an
+	// issue or a pull request.
 	FormatMarkdown Format = "markdown"
 	// FormatJSON is the machine-readable results file. Two of these can be
 	// diffed to answer whether a profile or prompt edit moved the numbers.
@@ -38,10 +42,10 @@ const (
 // ParseFormat validates a --format value.
 func ParseFormat(s string) (Format, error) {
 	switch Format(s) {
-	case FormatMarkdown, FormatJSON:
+	case FormatText, FormatMarkdown, FormatJSON:
 		return Format(s), nil
 	default:
-		return "", fmt.Errorf("unknown format %q, must be markdown or json", s)
+		return "", fmt.Errorf("unknown format %q, must be text, markdown or json", s)
 	}
 }
 
@@ -52,14 +56,27 @@ type Output struct {
 	Path string
 }
 
+// RenderOptions is everything a renderer needs. Where the bytes end up is the
+// caller's problem, so there is no path here.
+type RenderOptions struct {
+	Format Format
+	// ShowWhy adds the model's stated reason and the golden note beside every
+	// sample. Off by default: the sample list is a scan, not a read.
+	ShowWhy bool
+}
+
 // BenchmarkOptions is a resolved `eval benchmark` invocation: score a fixture
 // with the current profile and system prompt, and compare against its labels.
 type BenchmarkOptions struct {
-	// Path is the fixture to load.
+	// Path is the golden dataset to load.
 	Path string
 	// Repeats scores the fixture this many times. Above 1 the report gains a
 	// spread, which is the only way to tell a real change from run-to-run jitter.
 	Repeats int
+	// Limit scores only the first Limit samples, in file order. Zero scores
+	// them all. File order rather than a draw, so a limited run stays
+	// comparable to the limited run before it.
+	Limit int
 
 	// Provider, Host and Model override the configured backend when non-empty,
 	// so a bigger local model can be measured without editing the config.
@@ -68,6 +85,10 @@ type BenchmarkOptions struct {
 	Model    string
 	// Think mirrors the resolved inference.think for this run.
 	Think bool
+
+	// ShowWhy adds the model's reason and your golden note beside each sample.
+	// The samples themselves are listed either way.
+	ShowWhy bool
 
 	Output Output
 }

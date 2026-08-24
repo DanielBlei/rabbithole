@@ -158,6 +158,22 @@ func (d *Dataset) validate() error {
 	return nil
 }
 
+// Limit returns a copy holding only the first n samples, in file order, or the
+// dataset itself when n is not a narrowing.
+//
+// File order rather than a random draw, so two runs either side of a profile
+// edit score the same samples and the difference between them means something.
+// Hash is carried over unchanged: it fingerprints the file, not the slice, and
+// RunInfo records the narrowing separately.
+func (d *Dataset) Limit(n int) *Dataset {
+	if n < 1 || n >= len(d.Samples) {
+		return d
+	}
+	limited := *d
+	limited.Samples = d.Samples[:n:n]
+	return &limited
+}
+
 // Items converts the samples into the type the scorer takes.
 //
 // Only Source, Title and Summary are carried, because those are the only

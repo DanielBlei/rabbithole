@@ -1,0 +1,110 @@
+# Benchmark report: rabbithole-relevance
+
+2026-08-15 21:04 UTC · qwen3.5:4b via ollama · think on · batch 8 · 2 runs
+5 of 12 samples (--limit 5) · 1m1.8s · 6.18s/sample
+profile 4f2a9c1b8e3d · prompt 9a1c33bd0e12 · benchmark 71b2c9ff41aa
+
+This is for tuning, not grading. No model will match the golden marks perfectly. What matters is whether an edit moves the dial. If results are far off, your profile or system prompt may be worth fine-tuning.
+
+> **The model returned no score for 1 of 5 samples. They are counted here and excluded from every metric, rather than read as a zero.**
+
+## Scoring
+
+4 scored, 1 unanswered · QWK volatile below 30 samples
+
+| metric | value | range | measures |
+|---|---|---|---|
+| QWK | +0.47 | -1..1 up | agreement beyond what chance alone gives |
+| MAE | 1.75 | 0..10 down | mean distance from the golden score |
+| RMSE | 2.60 | 0..10 down | the same, weighting big misses more |
+| SIGNED MEAN | -1.25 | -10..10 ->0 | which way the model leans overall |
+
+## Is the high-signal tier trustworthy?
+
+At the 7+ mark the feed page badges as high signal. Nothing is hidden below it, so this is about whether the badge tells the truth rather than what reaches the page.
+
+| metric | value | range | measures |
+|---|---|---|---|
+| PRECISION | — | 0..1 up | of what it badges, how much you want |
+| RECALL | 0.00 | 0..1 up | of what you want, how much it badges |
+
+- the model badges **0**; golden says **2** deserve it
+- nothing reached the mark, so the tier would have been empty
+- recall **0.00** — it misses 2 of the 2 that do
+
+At other marks:
+
+| mark | badged | wanted | precision | chance | recall |
+|---|---|---|---|---|---|
+| 3+ | 3 | 3 | 1.00 | 0.75 | 1.00 |
+| 4+ | 3 | 3 | 1.00 | 0.75 | 1.00 |
+| 5+ | 1 | 2 | 1.00 | 0.50 | 0.50 |
+| 6+ | 1 | 2 | 1.00 | 0.50 | 0.50 |
+| 7+ | 0 | 2 | — | 0.50 | 0.00 |
+| 8+ | 0 | 1 | — | 0.25 | 0.00 |
+| 9+ | 0 | 1 | — | 0.25 | 0.00 |
+
+CHANCE is the precision a scorer picking at random would reach at that mark.
+
+## Distance from golden
+
+- exact: **1 of 4**
+- within 1: 3 of 4
+- within 2: 3 of 4
+- within 3: 3 of 4
+
+Scores the model used: 2×1 4×2 6×1 (3 distinct, against 5 in golden)
+
+## Error distribution
+
+Signed, model minus golden.
+
+```
+ -5  ████████████████████████ 1
+ -4                           0
+ -3                           0
+ -2                           0
+ -1  ████████████████████████ 1
+ +0  ████████████████████████ 1
+ +1  ████████████████████████ 1
+```
+
+## By tag
+
+Worst first.
+
+| tag | n | mae | signed | description |
+|---|---|---|---|---|
+| on-target \* | 1/2 | 5.00 | -5.00 | what you most want to read |
+| keyword-bait \* | 1 | 1.00 | +1.00 | no substance |
+| relevant \* | 1 | 1.00 | -1.00 | worth reading, not a highlight |
+| shallow \* | 1 | 0.00 | +0.00 | maybe not a match, but honest about it |
+
+\* fewer than 3 samples: that MAE is one or two articles, not a property of the group. Add samples to the tag before acting on it.
+
+## Samples
+
+Worst first.
+
+| id | golden | model | diff | title |
+|---|---|---|---|---|
+| rb001 | 9 | 4 | -5 | Running Qwen3-30B locally with llama.cpp on a single 3090 |
+| rb002 | 7 | 6 | -1 | rb002 |
+| rb003 | 1 | 2 | +1 | 10 AI tools that will completely change how you work |
+| rb004 | 4 | 4 | +0 | rb004 |
+| rb005 | 8 | — | — | rb005 |
+
+## Noise floor
+
+2 runs of the same dataset, unchanged.
+
+| run | mae | time |
+|---|---|---|
+| 1 | 1.75 | 31.5s |
+| 2 | 1.75 | 30.3s |
+
+A change smaller than this is not evidence of anything.
+
+---
+
+The model has no temperature or seed set, so re-running will not reproduce these numbers exactly.

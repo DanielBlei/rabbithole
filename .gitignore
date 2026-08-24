@@ -34,3 +34,8 @@ CLAUDE.md
 /configs/feeds.yaml
 /configs/profile.md
 /configs/golden.yaml
+
+# Claude
+.serena
+.headroom
+.claude/settings.local.json

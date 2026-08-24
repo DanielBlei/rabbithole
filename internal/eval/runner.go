@@ -34,17 +34,29 @@ type RunConfig struct {
 	// measure the noise floor, not to improve the estimate.
 	Repeats int
 
+	// DatasetSamples is what the golden file holds before --limit narrowed it.
+	// Zero means the run used the whole file.
+	DatasetSamples int
+	// Limit is the --limit that produced Dataset, recorded so a partial run is
+	// not read as a full one.
+	Limit int
+
 	// Identity of the run, recorded so two reports can be compared.
 	Provider string
 	Model    string
 	Think    bool
 }
 
-// RunInfo identifies a run precisely enough that two reports can be diffed.
+// RunInfo identifies what produced a report: which model, which profile, which
+// golden file, and how long it took.
 //
 // The three hashes are the point: without them "did my profile edit help" is
 // unanswerable, because there is nothing to prove the two runs differed only in
 // the way you think they did.
+//
+// This block is provenance, not something to diff. StartedAt and ElapsedSeconds
+// differ on every run by design, so comparing two reports means comparing
+// results and reading config to check the two runs were comparable at all.
 type RunInfo struct {
 	Benchmark   string    `json:"benchmark"`
 	StartedAt   time.Time `json:"run_started_at"`
@@ -57,16 +69,34 @@ type RunInfo struct {
 	ProfileHash string    `json:"profile_hash"`
 	PromptHash  string    `json:"prompt_hash"`
 	DatasetHash string    `json:"dataset_hash"`
+
+	// ElapsedSeconds is the wall clock across every repeat. Seconds rather than
+	// a Duration so the JSON stays readable and comparable, as go test -json does.
+	ElapsedSeconds float64 `json:"elapsed_seconds"`
+
+	// DatasetSamples is what the golden file holds; the report's own sample
+	// count is what this run scored. They differ under Limit.
+	//
+	// Both are recorded because DatasetHash cannot tell them apart: it
+	// fingerprints the file, so a limited run and a full one over the same file
+	// would otherwise look equally authoritative.
+	DatasetSamples int `json:"dataset_samples"`
+	Limit          int `json:"limit,omitempty"`
+}
+
+// Duration is ElapsedSeconds as a Duration, for Go callers and the renderers.
+func (i RunInfo) Duration() time.Duration {
+	return time.Duration(i.ElapsedSeconds * float64(time.Second))
 }
 
 // Results is the raw output of a run: one slice of outcomes per repeat.
 type Results struct {
 	Info RunInfo
 	Runs [][]Outcome
-	// Elapsed is how long each repeat took, parallel to Runs. Recorded because
-	// the decision --model exists to serve is quality against speed, and a
-	// report carrying only the quality half answers half the question.
-	Elapsed []time.Duration
+	// RunSeconds is how long each repeat took, parallel to Runs. Recorded
+	// because the decision --model exists to serve is quality against speed,
+	// and a report carrying only the quality half answers half the question.
+	RunSeconds []float64
 }
 
 // Run scores the fixture Repeats times and pairs every score back to its label.
@@ -81,19 +111,28 @@ func Run(ctx context.Context, cfg RunConfig) (*Results, error) {
 	}
 	repeats := max(cfg.Repeats, 1)
 
+	// A run over the whole file still records how big the file was, so every
+	// report answers "how much of the dataset is this" the same way.
+	datasetSamples := cfg.DatasetSamples
+	if datasetSamples == 0 {
+		datasetSamples = len(cfg.Dataset.Samples)
+	}
+
 	res := &Results{
 		Info: RunInfo{
-			Benchmark:   cfg.Dataset.Metadata.Name,
-			StartedAt:   time.Now().UTC(),
-			Provider:    cfg.Provider,
-			Model:       cfg.Model,
-			Think:       cfg.Think,
-			BatchSize:   cfg.BatchSize,
-			MaxParallel: cfg.MaxParallel,
-			Repeats:     repeats,
-			ProfileHash: hash(cfg.Profile),
-			PromptHash:  hash(rank.SystemPrompt),
-			DatasetHash: cfg.Dataset.Hash,
+			Benchmark:      cfg.Dataset.Metadata.Name,
+			StartedAt:      time.Now().UTC(),
+			Provider:       cfg.Provider,
+			Model:          cfg.Model,
+			Think:          cfg.Think,
+			BatchSize:      cfg.BatchSize,
+			MaxParallel:    cfg.MaxParallel,
+			Repeats:        repeats,
+			ProfileHash:    hash(cfg.Profile),
+			PromptHash:     hash(rank.SystemPrompt),
+			DatasetHash:    cfg.Dataset.Hash,
+			DatasetSamples: datasetSamples,
+			Limit:          cfg.Limit,
 		},
 	}
 
@@ -110,7 +149,7 @@ func Run(ctx context.Context, cfg RunConfig) (*Results, error) {
 		Int("repeats", repeats).
 		Msg("scoring fixture")
 
-	overall := time.Now()
+	wallClock := time.Now()
 	for i := range repeats {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -121,7 +160,7 @@ func Run(ctx context.Context, cfg RunConfig) (*Results, error) {
 		elapsed := time.Since(started)
 		outcomes := reconcile(cfg.Dataset.Samples, scores)
 		res.Runs = append(res.Runs, outcomes)
-		res.Elapsed = append(res.Elapsed, elapsed)
+		res.RunSeconds = append(res.RunSeconds, elapsed.Seconds())
 
 		m := Compute(outcomes)
 		e := log.Info()
@@ -137,9 +176,10 @@ func Run(ctx context.Context, cfg RunConfig) (*Results, error) {
 			Msg("run complete")
 	}
 	if repeats > 1 {
-		log.Info().Int("runs", repeats).Str("elapsed", dur(time.Since(overall))).
+		log.Info().Int("runs", repeats).Str("elapsed", dur(time.Since(wallClock))).
 			Msg("benchmark complete")
 	}
+	res.Info.ElapsedSeconds = time.Since(wallClock).Seconds()
 	return res, nil
 }
 

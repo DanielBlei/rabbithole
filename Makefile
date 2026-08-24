@@ -6,6 +6,8 @@ THINK_FLAG := $(if $(NO_THINK),--no-think,)
 ADDR     ?= 127.0.0.1:8080
 DEBUG    ?=
 DEBUG_FLAG := $(if $(DEBUG),--debug,)
+GOLDEN   ?= ./configs/golden.example.yaml
+FORMAT   ?= text
 
 # Nearest git tag plus any commits past it.
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -93,6 +95,26 @@ dry-run: config-hint ## Print the ingest to stdout without writing files or reco
 .PHONY: heuristic
 heuristic: config-hint ## Offline ingest with the model-free keyword scorer (no Ollama needed)
 	go run . ingest --config $(CONFIG) --provider heuristic --markdown $(THINK_FLAG)
+
+##@ Eval
+
+.PHONY: eval
+eval: config-hint ## Benchmark scoring against configs/golden.yaml (uses CONFIG, GOLDEN, FORMAT)
+	go run . eval benchmark $(GOLDEN) --config $(CONFIG) --format $(FORMAT) $(THINK_FLAG)
+
+.PHONY: eval-example
+eval-example: ## Benchmark the shipped example dataset with the model-free scorer (no Ollama needed)
+	go run . eval benchmark configs/golden.example.yaml --config $(CONFIG) --provider heuristic
+
+.PHONY: eval-smoke
+eval-smoke: ## Render every report format from the example dataset, model-free
+	@for format in text markdown json; do \
+	  printf '\033[36m==> %s\033[0m\n' "$$format"; \
+	  go run . eval benchmark configs/golden.example.yaml --config configs/config.example.yaml \
+	    --provider heuristic --format "$$format" > /dev/null || exit 1; \
+	done
+	@go run . eval benchmark configs/golden.example.yaml --config configs/config.example.yaml \
+	  --provider heuristic | awk 'length > 120 { print "line over 120 columns: " $$0; fail=1 } END { exit fail }'
 
 ##@ Serve
 

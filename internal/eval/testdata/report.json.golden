@@ -1,0 +1,382 @@
+{
+  "schema_version": 1,
+  "config": {
+    "benchmark": "rabbithole-relevance",
+    "run_started_at": "2026-08-15T21:04:00Z",
+    "provider": "ollama",
+    "model": "qwen3.5:4b",
+    "think": true,
+    "batch_size": 8,
+    "max_parallel": 2,
+    "repeats": 2,
+    "profile_hash": "sha256:4f2a9c1b8e3d0000000000000000000000000000000000000000000000000000",
+    "prompt_hash": "sha256:9a1c33bd0e120000000000000000000000000000000000000000000000000000",
+    "dataset_hash": "sha256:71b2c9ff41aa0000000000000000000000000000000000000000000000000000",
+    "elapsed_seconds": 61.75,
+    "dataset_samples": 12,
+    "limit": 5
+  },
+  "timing": {
+    "seconds": 31.5,
+    "seconds_per_sample": 6.3
+  },
+  "results": {
+    "n_samples": 5,
+    "n_scored": 4,
+    "n_unanswered": 1,
+    "mae": 1.75,
+    "rmse": 2.598076211353316,
+    "signed_mean": -1.25,
+    "qwk": 0.47058823529411764,
+    "high_signal": {
+      "threshold": 7,
+      "n_flagged": 0,
+      "wanted": 2,
+      "hit": 0,
+      "noise": 0,
+      "missed": 2,
+      "precision": null,
+      "recall": 0,
+      "n_scored": 4,
+      "base_rate": 0.5
+    },
+    "high_signal_sweep": [
+      {
+        "threshold": 3,
+        "n_flagged": 3,
+        "wanted": 3,
+        "hit": 3,
+        "noise": 0,
+        "missed": 0,
+        "precision": 1,
+        "recall": 1,
+        "n_scored": 4,
+        "base_rate": 0.75
+      },
+      {
+        "threshold": 4,
+        "n_flagged": 3,
+        "wanted": 3,
+        "hit": 3,
+        "noise": 0,
+        "missed": 0,
+        "precision": 1,
+        "recall": 1,
+        "n_scored": 4,
+        "base_rate": 0.75
+      },
+      {
+        "threshold": 5,
+        "n_flagged": 1,
+        "wanted": 2,
+        "hit": 1,
+        "noise": 0,
+        "missed": 1,
+        "precision": 1,
+        "recall": 0.5,
+        "n_scored": 4,
+        "base_rate": 0.5
+      },
+      {
+        "threshold": 6,
+        "n_flagged": 1,
+        "wanted": 2,
+        "hit": 1,
+        "noise": 0,
+        "missed": 1,
+        "precision": 1,
+        "recall": 0.5,
+        "n_scored": 4,
+        "base_rate": 0.5
+      },
+      {
+        "threshold": 7,
+        "n_flagged": 0,
+        "wanted": 2,
+        "hit": 0,
+        "noise": 0,
+        "missed": 2,
+        "precision": null,
+        "recall": 0,
+        "n_scored": 4,
+        "base_rate": 0.5
+      },
+      {
+        "threshold": 8,
+        "n_flagged": 0,
+        "wanted": 1,
+        "hit": 0,
+        "noise": 0,
+        "missed": 1,
+        "precision": null,
+        "recall": 0,
+        "n_scored": 4,
+        "base_rate": 0.25
+      },
+      {
+        "threshold": 9,
+        "n_flagged": 0,
+        "wanted": 1,
+        "hit": 0,
+        "noise": 0,
+        "missed": 1,
+        "precision": null,
+        "recall": 0,
+        "n_scored": 4,
+        "base_rate": 0.25
+      }
+    ],
+    "within": {
+      "0": 1,
+      "1": 3,
+      "2": 3,
+      "3": 3
+    },
+    "histogram": [
+      {
+        "err": -5,
+        "count": 1
+      },
+      {
+        "err": -4,
+        "count": 0
+      },
+      {
+        "err": -3,
+        "count": 0
+      },
+      {
+        "err": -2,
+        "count": 0
+      },
+      {
+        "err": -1,
+        "count": 1
+      },
+      {
+        "err": 0,
+        "count": 1
+      },
+      {
+        "err": 1,
+        "count": 1
+      }
+    ],
+    "score_spread": [
+      {
+        "score": 0,
+        "count": 0
+      },
+      {
+        "score": 1,
+        "count": 0
+      },
+      {
+        "score": 2,
+        "count": 1
+      },
+      {
+        "score": 3,
+        "count": 0
+      },
+      {
+        "score": 4,
+        "count": 2
+      },
+      {
+        "score": 5,
+        "count": 0
+      },
+      {
+        "score": 6,
+        "count": 1
+      },
+      {
+        "score": 7,
+        "count": 0
+      },
+      {
+        "score": 8,
+        "count": 0
+      },
+      {
+        "score": 9,
+        "count": 0
+      },
+      {
+        "score": 10,
+        "count": 0
+      }
+    ],
+    "label_spread": [
+      {
+        "score": 0,
+        "count": 0
+      },
+      {
+        "score": 1,
+        "count": 1
+      },
+      {
+        "score": 2,
+        "count": 0
+      },
+      {
+        "score": 3,
+        "count": 0
+      },
+      {
+        "score": 4,
+        "count": 1
+      },
+      {
+        "score": 5,
+        "count": 0
+      },
+      {
+        "score": 6,
+        "count": 0
+      },
+      {
+        "score": 7,
+        "count": 1
+      },
+      {
+        "score": 8,
+        "count": 1
+      },
+      {
+        "score": 9,
+        "count": 1
+      },
+      {
+        "score": 10,
+        "count": 0
+      }
+    ]
+  },
+  "by_tag": [
+    {
+      "tag": "on-target",
+      "description": "what you most want to read",
+      "n_samples": 2,
+      "n_scored": 1,
+      "mae": 5,
+      "signed_mean": -5,
+      "thin": true
+    },
+    {
+      "tag": "keyword-bait",
+      "description": "no substance",
+      "n_samples": 1,
+      "n_scored": 1,
+      "mae": 1,
+      "signed_mean": 1,
+      "thin": true
+    },
+    {
+      "tag": "relevant",
+      "description": "worth reading, not a highlight",
+      "n_samples": 1,
+      "n_scored": 1,
+      "mae": 1,
+      "signed_mean": -1,
+      "thin": true
+    },
+    {
+      "tag": "shallow",
+      "description": "maybe not a match, but honest about it",
+      "n_samples": 1,
+      "n_scored": 1,
+      "mae": 0,
+      "signed_mean": 0,
+      "thin": true
+    }
+  ],
+  "samples": [
+    {
+      "id": "rb001",
+      "title": "Running Qwen3-30B locally with llama.cpp on a single 3090",
+      "tags": [
+        "on-target"
+      ],
+      "expected_llm_score": 9,
+      "scored": true,
+      "llm_score": 4,
+      "err": -5,
+      "llm_score_reason": "Covers local model serving in depth, with numbers.",
+      "note": "Two profile lines at once: open-source models and practical write-ups."
+    },
+    {
+      "id": "rb002",
+      "title": "rb002",
+      "tags": [
+        "relevant"
+      ],
+      "expected_llm_score": 7,
+      "scored": true,
+      "llm_score": 6,
+      "err": -1
+    },
+    {
+      "id": "rb003",
+      "title": "10 AI tools that will completely change how you work",
+      "tags": [
+        "keyword-bait"
+      ],
+      "expected_llm_score": 1,
+      "scored": true,
+      "llm_score": 2,
+      "err": 1
+    },
+    {
+      "id": "rb004",
+      "title": "rb004",
+      "tags": [
+        "shallow"
+      ],
+      "expected_llm_score": 4,
+      "scored": true,
+      "llm_score": 4,
+      "err": 0
+    },
+    {
+      "id": "rb005",
+      "title": "rb005",
+      "tags": [
+        "on-target"
+      ],
+      "expected_llm_score": 8,
+      "scored": false,
+      "llm_score": 0,
+      "err": 0
+    }
+  ],
+  "spread": {
+    "runs": 2,
+    "mae_per_run": [
+      1.75,
+      1.75
+    ],
+    "mae_min": 1.75,
+    "mae_max": 1.75,
+    "run_seconds": [
+      31.5,
+      30.25
+    ],
+    "widest_sample_swing": 0
+  },
+  "warnings": [
+    {
+      "code": "unanswered",
+      "text": "The model returned no score for 1 of 5 samples. They are counted here and excluded from every metric, rather than read as a zero."
+    }
+  ],
+  "higher_is_better": {
+    "high_signal.precision": true,
+    "high_signal.recall": true,
+    "mae": false,
+    "qwk": true,
+    "rmse": false
+  }
+}
