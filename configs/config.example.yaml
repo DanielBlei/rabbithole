@@ -7,7 +7,7 @@ profile: ./configs/profile.example.md   # what you're interested in, driving the
 inference:
   provider: ollama              # ollama | vllm | heuristic (keywords, no model)
   host: http://localhost:11434
-  model: qwen3.5:4b             # gemma4:e4b | ministral-3:8b | etc
+  model: qwen3.5:4b             # gemma4:26b | qwen3.6:35b | etc
   think: false                  # model reasoning before scoring; default true
   # api_key: ""                 # bearer token, if your endpoint needs one
 

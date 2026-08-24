@@ -19,6 +19,7 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/httplog"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
+	"github.com/DanielBlei/rabbithole/internal/rank"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -53,10 +54,11 @@ const listLimit = 100
 // short enough that the query string stays a link someone can share.
 const maxSearchLen = 120
 
-// Score tiers: high signal at 7 and above, mid at 4, low below.
+// Score tiers: high signal at 7 and above, mid at 4, low below. Aliased from
+// rank so the page and the benchmark's digest cutoff cannot drift apart.
 const (
-	highSignalScore = 7
-	midSignalScore  = 4
+	highSignalScore = rank.HighSignalScore
+	midSignalScore  = rank.MidSignalScore
 )
 
 // What the thumbs write to user_score. Both sit inside the store's 0-10 range,

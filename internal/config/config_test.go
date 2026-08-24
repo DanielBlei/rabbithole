@@ -4,6 +4,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -117,5 +119,38 @@ func TestStripHTMLComments(t *testing.T) {
 		if got := stripHTMLComments(tc.in); got != tc.want {
 			t.Errorf("%s: stripHTMLComments(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
 		}
+	}
+}
+
+// The shipped template is mostly an HTML comment, so a profile that looks filled
+// in can strip to nothing. Scoring every article against nothing is meaningless
+// rather than degraded, and it used to happen without a word.
+func TestLoadProfileRejectsAnEmptyProfile(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+		wantErr bool
+	}{
+		{"real profile", "# Profile\n- Local LLMs", false},
+		{"empty file", "", true},
+		{"whitespace only", "\n\n   \n", true},
+		{"comment only", "<!--\nDescribe what you want to read.\n-->\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "profile.md")
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := (&Config{Profile: path}).LoadProfile()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("LoadProfile() = %q, want an error", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadProfile() error = %v", err)
+			}
+		})
 	}
 }

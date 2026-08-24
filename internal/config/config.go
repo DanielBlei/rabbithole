@@ -213,5 +213,15 @@ func (c *Config) LoadProfile() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read profile %q: %w", c.Profile, err)
 	}
-	return stripHTMLComments(string(raw)), nil
+	profile := stripHTMLComments(string(raw))
+	// The shipped template is mostly an HTML comment, so a file that looks
+	// filled in can strip to nothing. Without it every score is arbitrary while
+	// the run still looks like it worked.
+	if strings.TrimSpace(profile) == "" {
+		return "", fmt.Errorf(
+			"profile %q is empty; it is required in order to make meaningful suggestions",
+			c.Profile,
+		)
+	}
+	return profile, nil
 }

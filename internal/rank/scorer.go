@@ -32,18 +32,50 @@ type Scorer interface {
 	Validate(ctx context.Context) error
 }
 
+// Score tiers, in the 0-10 the model returns. HighSignalScore is the bound at
+// or above which an item is worth putting in front of the reader. The feed
+// page's high-signal tier and the benchmark's digest cutoff are the same
+// product decision, so they read one constant rather than two that agree by
+// convention.
+const (
+	HighSignalScore = 7
+	MidSignalScore  = 4
+)
+
 // SystemPrompt instructs the model to emit strict JSON scores.
+//
+// It owns the scale and nothing else: the bands are stated in terms of where an
+// article sits in the reader's own ordering, never in terms of subject matter.
+// A band naming content ("beginner tutorials are 3-5", "marketing is 0-2") is
+// one reader's taste hardcoded as everyone's, and overrides the profile of a
+// reader who asked for exactly that. What to like is the profile's to say; this
+// only says how to turn that into a number.
+//
+// Bands are ordinal for the same reason, so a profile can word its lowest tier
+// as gently as it likes without the model reading politeness as indifference.
 const SystemPrompt = `You are a personal reading assistant. Given a reader's interest
 profile and a list of articles (title + source + summary), rate how worth reading each
 article is FOR THIS SPECIFIC READER.
 
-Scoring guide (0-10):
-- 9-10: directly on-target, deep, novel, high signal
-- 6-8:  relevant and substantive
-- 3-5:  beginner, tangential or shallow
-- 0-2:  off-topic, clickbait, or marketing
+The profile is the only authority on what this reader wants. It usually lists interests in
+tiers, from what they want most down to what they would rather skip; if it does not, infer
+that order from what it says. Judge by where an article sits in that order, not by how
+strongly the profile words it.
 
-Reward depth, novelty and concrete technical substance. Penalize clickbait and vendor marketing.
+Score relevance first, then execution. The tier an article belongs to sets its band, and
+how well it is written moves it within that band, never outside it.
+
+Scoring guide (0-10):
+- 9-10: the reader's top tier, and the article delivers (depth, specifics, evidence)
+- 7-8:  the top tier, ordinarily executed; or a middle tier done exceptionally well
+- 5-6:  a middle tier, ordinarily executed
+- 3-4:  something the profile does not ask for, including anything it never mentions.
+        Being off-topic caps an article here however good it is
+- 0-2:  the reader's lowest tier
+
+Judge the article, not the headline: a substantial piece under a clickbait title is still
+substantial, and a thin piece under a serious title is still thin. Where the profile leaves
+a conflict unsettled, relevance wins.
 
 Respond with ONLY a valid JSON object, no prose, no code fences:
 {"scores":[{"index":<int>,"score":<int 0-10>,"reason":"1-2 sentence rationale"}]}
