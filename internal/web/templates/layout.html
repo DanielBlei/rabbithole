@@ -30,6 +30,9 @@
          Unindented on purpose — this is a <pre>, so leading spaces would show. -->
     <pre class="topbar__bunny" aria-hidden="true"><span class="bunny__ears">(\_/)</span>
 (<i class="bunny__eye">&bull;</i>_<i class="bunny__eye">&bull;</i>)</pre>
+    {{/* The bar's own copy of the page's content column, so the wordmark and
+         the first tile below it share a left edge on a wide screen. */}}
+    <div class="topbar__in">
     <div class="topbar__left">
       <span class="wordmark"><b>The Rabbit Hole</b></span>
       <span class="breaker">/</span>
@@ -39,12 +42,17 @@
       </nav>
     </div>
     <div class="topbar__right">
-      {{template "ingestChip" .Chrome.Chip}}
-      <div class="clock" id="clock" aria-label="Current date and time">
-        <span class="clock__time"></span>
-        <span class="clock__date"></span>
+      {{/* What the app is doing and when: one recessed well, because neither is
+           a control. The divider hides itself when the chip does. */}}
+      <div class="topbar__amb">
+        {{template "ingestChip" .Chrome.Chip}}
+        <span class="topbar__sep" aria-hidden="true"></span>
+        <div class="clock" id="clock" aria-label="Current date and time">
+          <span class="clock__time"></span>
+          <span class="clock__date"></span>
+        </div>
       </div>
-      <button class="settings-btn" id="settingsToggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Settings">
+      <button class="settings-btn" id="settingsToggle" type="button" data-stg-open aria-haspopup="dialog" aria-label="Settings">
         <span class="gear" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3"></circle>
@@ -52,126 +60,16 @@
           </svg>
         </span>
       </button>
-      <div class="settings-panel" id="settingsPanel" hidden>
-        <div class="settings-sub">
-          <a class="settings-panel__item settings-sub__trigger" href="#" role="button" tabindex="0">
-            Date &amp; time <span class="settings-sub__caret">&#8249;</span>
-          </a>
-          <div class="settings-sub__flyout">
-            <div class="settings-panel__label">Time</div>
-            <div class="clk-row">
-              <button type="button" class="clk-btn" data-clk-toggle="time24">24-hour</button>
-              <button type="button" class="clk-btn" data-clk-toggle="seconds">Show seconds</button>
-            </div>
-            <div class="settings-panel__label">Date</div>
-            <div class="clk-slider">
-              <div class="clk-slider__preview" data-clk-preview></div>
-              <input type="range" min="0" max="5" step="1" value="2" data-clk-range="dateFmt" aria-label="Date format">
-            </div>
-          </div>
-        </div>
-        <div class="settings-panel__divider"></div>
-        <div class="settings-sub">
-          <a class="settings-panel__item settings-sub__trigger" href="#" role="button" tabindex="0">
-            Weather <span class="settings-sub__caret">&#8249;</span>
-          </a>
-          <div class="settings-sub__flyout">
-            <div class="settings-panel__label">Display</div>
-            <!-- Named on the left, state on the right: the pill alone did not
-                 say whether it was the current state or the action. Pollen
-                 follows Weather, since it has nowhere to render without it. -->
-            <div class="wx-switches">
-              <div class="wx-switch">
-                <span>Weather</span>
-                <button type="button" class="clk-btn" data-wx-toggle="show" aria-label="Weather" aria-pressed="true">On</button>
-              </div>
-              <div class="wx-switch">
-                <span>Pollen</span>
-                <button type="button" class="clk-btn" data-wx-toggle="showPollen" aria-label="Pollen" aria-pressed="true">On</button>
-              </div>
-            </div>
-            <div class="settings-panel__label">Layout</div>
-            <div class="wx-layout-step" data-wx-layout-step>
-              <button type="button" class="font-step__arrow" data-wx-layout-prev aria-label="Previous weather layout">&#8249;</button>
-              <div class="font-step__face">
-                <span class="font-step__name" data-wx-layout-name></span>
-                <span class="font-step__dots" data-wx-layout-dots aria-hidden="true"></span>
-              </div>
-              <button type="button" class="font-step__arrow" data-wx-layout-next aria-label="Next weather layout">&#8250;</button>
-            </div>
-            <div class="settings-panel__label">Units</div>
-            <div class="clk-row">
-              <button type="button" class="clk-btn" data-wx-unit="C">&deg;C</button>
-              <button type="button" class="clk-btn" data-wx-unit="F">&deg;F</button>
-            </div>
-            <div class="settings-panel__label">Hours</div>
-            <div class="clk-row">
-              <button type="button" class="clk-btn" data-wx-toggle="time24">24-hour</button>
-            </div>
-            <div class="settings-panel__label">Location</div>
-            <div class="wx-loc">
-              <input type="text" class="wx-loc__input" id="wxLocSearch" placeholder="Search a city&hellip;" autocomplete="off" spellcheck="false">
-              <div class="wx-loc__results" id="wxLocResults" hidden></div>
-              <button type="button" class="clk-btn" id="wxLocBtn">Use my location</button>
-            </div>
-            <!-- Open-Meteo's free API is CC BY 4.0, which requires the credit to
-                 be visible where the data is used. Here rather than in the four
-                 placements: reachable from all of them, and it leaves the
-                 compact sub-bar and chip uncluttered. -->
-            <p class="wx-credit">Weather and pollen data by
-              <a href="https://open-meteo.com" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a>
-            </p>
-          </div>
-        </div>
-        <div class="settings-panel__divider"></div>
-        <div class="settings-sub">
-          <a class="settings-panel__item settings-sub__trigger" href="#" role="button" tabindex="0">
-            Fonts <span class="settings-sub__caret">&#8249;</span>
-          </a>
-          <div class="settings-sub__flyout">
-            <div class="settings-panel__label">Titles</div>
-            <div class="font-step" data-font-step="title">
-              <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous titles font">&#8249;</button>
-              <div class="font-step__face">
-                <span class="font-step__name" data-font-name></span>
-                <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
-              </div>
-              <button type="button" class="font-step__arrow" data-font-next aria-label="Next titles font">&#8250;</button>
-            </div>
-            <div class="clk-slider">
-              <div class="clk-slider__preview font-preview--title">Follow the rabbit</div>
-              <input type="range" min="0" max="4" step="1" value="1" data-font-range="titleSize" aria-label="Title size">
-            </div>
-            <div class="settings-panel__label">Text</div>
-            <div class="font-step" data-font-step="body">
-              <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous text font">&#8249;</button>
-              <div class="font-step__face">
-                <span class="font-step__name" data-font-name></span>
-                <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
-              </div>
-              <button type="button" class="font-step__arrow" data-font-next aria-label="Next text font">&#8250;</button>
-            </div>
-            <div class="clk-slider">
-              <div class="clk-slider__preview font-preview--body">Down the rabbit hole&hellip;</div>
-              <input type="range" min="0" max="4" step="1" value="1" data-font-range="bodySize" aria-label="Text size">
-            </div>
-          </div>
-        </div>
-        <div class="settings-panel__divider"></div>
-        <a class="settings-panel__item" href="#" hx-get="/config" hx-target="#modal" hx-swap="innerHTML">View Config</a>
-        <a class="settings-panel__item" href="#" hx-get="/sources" hx-target="#modal" hx-swap="innerHTML">Edit Sources</a>
-        <div class="settings-panel__divider"></div>
-        <a class="settings-panel__item settings-panel__item--ext" href="https://github.com/DanielBlei/rabbithole"
-           target="_blank" rel="noopener noreferrer">Source code <span class="settings-panel__ext" aria-hidden="true">&#8599;</span></a>
-      </div>
+    </div>
     </div>
   </header>
-  <!-- Hidden side menu: nothing on screen but a slim 3-line tab hugging the
-       left edge; hovering the edge (or clicking the tab) slides out a docked
-       full-height column sitting below the topbar. Pages up top, the config
-       pair at the floor. The tab, the menu's ingest item and
-       the ingWatch poller are standalone templates so ingest responses can
-       re-render them out-of-band and keep them current. -->
+  <!-- Side menu: a full-height column below the topbar, docked and part of the
+       frame by default. The chevron inside it puts it away; once away, a slim
+       3-line tab hugs the left edge, hovering the edge slides the menu back out
+       over the page, and clicking the tab (or the chevron) docks it again. The
+       choice is remembered. Pages up top, the config commands at the floor.
+       The tab, the menu's ingest item and the ingWatch poller are standalone
+       templates so ingest responses can re-render them out-of-band. -->
   {{template "navTab" .Chrome}}
   {{/* First-run hint: the drawer is the only route to the ingest runner and
        nothing on screen advertises it, so before the first run ever the feed
@@ -187,6 +85,27 @@
   {{end}}
   <div class="nav-hot" id="navHot" aria-hidden="true"></div>
   <nav class="navrail" id="navRail" aria-label="Pages">
+    {{/* The menu crosses the topbar, and that band of it was empty glass. It
+         holds the prompt now, in the same shape every other title bar uses —
+         and nothing else, because the pages underneath are the rest of the
+         line: the one you are on wears the cursor, so the menu reads as a
+         command half typed rather than as a list with a heading. Its rule picks
+         up where the topbar's stops, so the two make one line across. */}}
+    <div class="navrail__id">
+      {{/* aria-hidden on the prompt alone, not the band: it is framing, but the
+           two controls beside it are not. */}}
+      <span class="navrail__ps1" aria-hidden="true"><span class="pane__path">~/serve</span><span class="navrail__sig">$</span></span>
+      {{/* The menu's own controls, at the prompt's far end. The cursor switch
+           stops every blinking cursor in the chrome; the chevron puts the menu
+           away, and once away a hover at the left edge brings it back and the
+           chevron keeps it out again. */}}
+      <span class="navrail__ctls">
+        <button class="navrail__ctl navrail__cursor" type="button" data-blink-toggle
+                aria-label="Hide the cursors"><i>_</i></button>
+        <button class="navrail__ctl navrail__pin" type="button" data-rail-toggle
+                aria-label="Hide the menu">&#8249;</button>
+      </span>
+    </div>
     {{/* Two tiers, in the shell register the rest of the app already speaks.
          Destinations up top read as the prompt — a ❯ marker and a lit name;
          the config pair sits at the far foot as commands you type. */}}
@@ -207,7 +126,8 @@
       </span>
     </a>
     {{/* The gap above this is the hierarchy: configure the sources, then run
-         the ingest over them — both a drawer's length away from the pages. */}}
+         the ingest over them, with the prefs behind the same kind of window —
+         all three a drawer's length away from the pages. */}}
     <div class="navrail__foot">
       <div class="navrail__sec"><span>config</span></div>
       <button class="navrail__item navrail__item--cmd" type="button"
@@ -217,6 +137,12 @@
         <span class="navrail__note">feeds &amp; defaults</span>
       </button>
       {{template "navIngest" .Chrome}}
+      {{/* The gear opens the same dialog; this is the route for anyone already
+           in the menu. */}}
+      <button class="navrail__item navrail__item--cmd" type="button" data-stg-open aria-label="Settings">
+        <span class="navrail__sig" aria-hidden="true">$</span>
+        <span class="navrail__cmd">settings</span>
+      </button>
     </div>
   </nav>
   {{template "ingWatch" .Chrome}}
@@ -227,6 +153,183 @@
   <div id="modal"></div>
   <!-- Second layer: dialogs opened from inside another one stack here. -->
   <div id="modalTop"></div>
+
+  {{/* Settings, in the same frame Config, Sources and Ingest use. Two reasons
+       it is rendered here rather than fetched like those three:
+
+       - clock.js, weather.js and fonts.js bind these controls once at load, so
+         markup that came and went over htmx would need re-initialising on every
+         swap. It stays in the page and hides instead.
+       - it cannot live in the topbar: that is a sticky stacking context below
+         --z-modal, so a dialog nested in it could never clear the others.
+
+       The rail is a radio group, not an ARIA tablist — the question really is
+       "which section am I looking at", and arrow keys then work for free. */}}
+  <div class="modal modal--stg" id="settingsModal" hidden>
+    <div class="modal__backdrop" data-modal-close></div>
+    <div class="modal__frame modal__frame--stg" role="dialog" aria-modal="true" aria-label="Settings">
+      <div class="modal__bar">
+        <span class="modal__title"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span>:<span class="pane__path">~/settings</span>$&nbsp;<span class="pane__cmd stg__cmd"></span><span class="blink">_</span></span>
+        <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+      </div>
+
+      <div class="stg">
+        <fieldset class="stg__rail">
+          <legend class="stg__legend">Settings section</legend>
+          <label class="stg__tab"><input type="radio" name="stgSect" id="stgTime" checked><span>Date &amp; time</span></label>
+          <label class="stg__tab"><input type="radio" name="stgSect" id="stgWx"><span>Weather</span></label>
+          <label class="stg__tab"><input type="radio" name="stgSect" id="stgFonts"><span>Fonts</span></label>
+          <label class="stg__tab"><input type="radio" name="stgSect" id="stgTheme"><span>Theme</span></label>
+        </fieldset>
+
+        <div class="stg__pane">
+          <section class="stg__sect stg__sect--time">
+            {{/* The hours read the way the dates below do: each tile is the
+                 clock as that setting would render it, ticking live, so the
+                 choice is made by looking rather than by decoding a label that
+                 could be either the state or the action. */}}
+            <div class="stg__lbl">Clock</div>
+            <div class="dfmt dfmt--pair" role="radiogroup" aria-label="Clock format">
+              <label class="dfmt__opt"><input type="radio" name="clkHours" value="24" data-clk-hours><span data-clk-tsample="24"></span></label>
+              <label class="dfmt__opt"><input type="radio" name="clkHours" value="12" data-clk-hours><span data-clk-tsample="12"></span></label>
+            </div>
+            {{/* Named on the left, state on the right — the same switch the
+                 Weather section uses, and for the same reason. */}}
+            <div class="wx-switches">
+              <div class="wx-switch">
+                <span>Seconds</span>
+                <button type="button" class="clk-btn" data-clk-toggle="seconds" aria-pressed="false">Off</button>
+              </div>
+            </div>
+            {{/* Six discrete styles, not a scale, so each one shows itself:
+                 every tile renders today's date the way that setting would.
+                 static/js/clock.js fills them and keeps them current. */}}
+            <div class="stg__lbl">Date</div>
+            <div class="dfmt" role="radiogroup" aria-label="Date format">
+              <label class="dfmt__opt"><input type="radio" name="clkDateFmt" value="numeric" data-clk-fmt><span data-clk-sample="numeric"></span></label>
+              <label class="dfmt__opt"><input type="radio" name="clkDateFmt" value="short"   data-clk-fmt><span data-clk-sample="short"></span></label>
+              <label class="dfmt__opt"><input type="radio" name="clkDateFmt" value="medium"  data-clk-fmt><span data-clk-sample="medium"></span></label>
+              <label class="dfmt__opt"><input type="radio" name="clkDateFmt" value="long"    data-clk-fmt><span data-clk-sample="long"></span></label>
+              <label class="dfmt__opt"><input type="radio" name="clkDateFmt" value="ordinal" data-clk-fmt><span data-clk-sample="ordinal"></span></label>
+              <label class="dfmt__opt dfmt__opt--off"><input type="radio" name="clkDateFmt" value="hidden" data-clk-fmt><span data-clk-sample="hidden"></span></label>
+            </div>
+          </section>
+
+          <section class="stg__sect stg__sect--wx">
+            <div class="stg__lbl">Display</div>
+            <!-- Named on the left, state on the right: the pill alone did not
+                 say whether it was the current state or the action. Pollen
+                 follows Weather, since it has nowhere to render without it. -->
+            <div class="wx-switches">
+              <div class="wx-switch">
+                <span>Weather</span>
+                <button type="button" class="clk-btn" data-wx-toggle="show" aria-label="Weather" aria-pressed="true">On</button>
+              </div>
+              <div class="wx-switch">
+                <span>Pollen</span>
+                <button type="button" class="clk-btn" data-wx-toggle="showPollen" aria-label="Pollen" aria-pressed="true">On</button>
+              </div>
+            </div>
+            <div class="stg__lbl">Layout</div>
+            <div class="wx-layout-step" data-wx-layout-step>
+              <button type="button" class="font-step__arrow" data-wx-layout-prev aria-label="Previous weather layout">&#8249;</button>
+              <div class="font-step__face">
+                <span class="font-step__name" data-wx-layout-name></span>
+                <span class="font-step__dots" data-wx-layout-dots aria-hidden="true"></span>
+              </div>
+              <button type="button" class="font-step__arrow" data-wx-layout-next aria-label="Next weather layout">&#8250;</button>
+            </div>
+            <div class="stg__lbl">Units</div>
+            <div class="clk-row">
+              <button type="button" class="clk-btn" data-wx-unit="C">&deg;C</button>
+              <button type="button" class="clk-btn" data-wx-unit="F">&deg;F</button>
+            </div>
+            <div class="stg__lbl">Hours</div>
+            <div class="clk-row">
+              <button type="button" class="clk-btn" data-wx-toggle="time24">24-hour</button>
+            </div>
+            <div class="stg__lbl">Location</div>
+            <div class="wx-loc">
+              <input type="text" class="wx-loc__input" id="wxLocSearch" placeholder="Search a city&hellip;" autocomplete="off" spellcheck="false">
+              <div class="wx-loc__results" id="wxLocResults" hidden></div>
+              <button type="button" class="clk-btn" id="wxLocBtn">Use my location</button>
+            </div>
+            <!-- Open-Meteo's free API is CC BY 4.0, which requires the credit to
+                 be visible where the data is used. Here rather than in the four
+                 placements: reachable from all of them, and it leaves the
+                 compact sub-bar and chip uncluttered. -->
+            <p class="wx-credit">Weather and pollen data by
+              <a href="https://open-meteo.com" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a>
+            </p>
+          </section>
+
+          <section class="stg__sect stg__sect--fonts">
+            <div class="stg__lbl">Titles</div>
+            <div class="font-step" data-font-step="title">
+              <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous titles font">&#8249;</button>
+              <div class="font-step__face">
+                <span class="font-step__name" data-font-name></span>
+                <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
+              </div>
+              <button type="button" class="font-step__arrow" data-font-next aria-label="Next titles font">&#8250;</button>
+            </div>
+            <div class="clk-slider">
+              <div class="clk-slider__preview font-preview--title">Follow the rabbit</div>
+              <input type="range" min="0" max="4" step="1" value="1" data-font-range="titleSize" aria-label="Title size">
+            </div>
+            <div class="stg__lbl">Text</div>
+            <div class="font-step" data-font-step="body">
+              <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous text font">&#8249;</button>
+              <div class="font-step__face">
+                <span class="font-step__name" data-font-name></span>
+                <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
+              </div>
+              <button type="button" class="font-step__arrow" data-font-next aria-label="Next text font">&#8250;</button>
+            </div>
+            <div class="clk-slider">
+              <div class="clk-slider__preview font-preview--body">Down the rabbit hole&hellip;</div>
+              <input type="range" min="0" max="4" step="1" value="1" data-font-range="bodySize" aria-label="Text size">
+            </div>
+          </section>
+
+          {{/* The chrome layout, not the palette. One variant today; the grid
+               takes more without changing shape, and static/js/theme.js already
+               stores the choice, so a second is a card and a stylesheet layer. */}}
+          <section class="stg__sect stg__sect--theme">
+            <div class="stg__lbl">Layout</div>
+            <div class="thm" role="radiogroup" aria-label="Chrome layout">
+              <label class="thm__card">
+                <input type="radio" name="theme" value="default" data-theme-pick checked>
+                <span class="thm__body">
+                  <span class="thm__wire" aria-hidden="true">
+                    <i class="w-bar"></i>
+                    <span class="w-body">
+                      <i class="w-rail"></i>
+                      <span class="w-rows"><i></i><i></i><i></i></span>
+                    </span>
+                  </span>
+                  <span class="thm__hd">
+                    <span class="thm__nm">Default</span>
+                    <span class="thm__st">active</span>
+                  </span>
+                  <span class="thm__ds">terminal chrome, dense feed</span>
+                </span>
+              </label>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      {{/* Config and sources stack over this in #modalTop, so Escape drops back
+           to settings — the same move the ingest runner makes. */}}
+      <div class="modal__foot modal__foot--acts">
+        <a class="modal__act modal__act--ext" href="https://github.com/DanielBlei/rabbithole"
+           target="_blank" rel="noopener noreferrer">&#8599; source code</a>
+        <a class="modal__act" href="#" hx-get="/config" hx-target="#modalTop" hx-swap="innerHTML">&#9881; view config</a>
+        <a class="modal__act" href="#" hx-get="/sources" hx-target="#modalTop" hx-swap="innerHTML">&#9636; edit sources</a>
+      </div>
+    </div>
+  </div>
   <!-- Every script is external so the page can carry a strict Content-Security-
        Policy: none of this is inline, and none of it is needed before the DOM
        is parsed. Each file says at the top what it owns. -->
@@ -241,6 +344,7 @@
   <script src="/static/js/clock.js" defer></script>
   <script src="/static/js/weather.js" defer></script>
   <script src="/static/js/fonts.js" defer></script>
+  <script src="/static/js/theme.js" defer></script>
   {{block "scripts" .}}{{end}}
 </body>
 </html>

@@ -3,10 +3,11 @@
      costs a round trip through the editor. The data- attributes are what the
      page's client-side search matches on. */}}
 {{define "sourceRow"}}
-<div class="srow{{if not .Enabled}} srow--off{{end}}{{if .Deleted}} srow--gone{{end}}"
+<div class="srow{{if .Selected}} srow--on{{end}}{{if not .Enabled}} srow--off{{end}}{{if .Deleted}} srow--gone{{end}}"
      data-src-row data-name="{{.Name}}" data-url="{{.URL}}" data-tags="{{.TagsAttr}}"
      data-state="{{if .Deleted}}gone{{else if .Enabled}}on{{else}}off{{end}}">
-  <a class="srow__pick" href="#" hx-get="/sources/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML">
+  <a class="srow__pick" href="#" hx-get="/sources/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML"
+     {{if .Selected}}aria-current="true"{{end}}>
     <span class="srow__dot srow__dot--{{.State}}" title="{{.Detail}}" aria-hidden="true"></span>
     <span class="srow__nm">{{.Name}}</span>
     {{if .FailStreak}}<span class="srow__streak" title="consecutive failures">&times;{{.FailStreak}}</span>{{end}}

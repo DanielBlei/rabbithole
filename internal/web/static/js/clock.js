@@ -27,22 +27,29 @@
     seconds: get('seconds', false),
     dateFmt: get('dateFmt', 'medium')
   };
-  // Date formats ordered compact→verbose so the slider reads left-to-right.
+  // Date formats ordered compact→verbose, which is the order the settings
+  // tiles read in.
   var FMTS = ['numeric','short','medium','long','ordinal','hidden'];
 
-  function fmtTime(d){
+  // time24 defaults to the current pref; the settings tiles pass their own so
+  // each can show the clock as that setting would render it.
+  function fmtTime(d, time24){
+    if (time24 === undefined) time24 = prefs.time24;
     var h = d.getHours(), ap = '';
-    if (!prefs.time24){ ap = h < 12 ? ' AM' : ' PM'; h = h % 12 || 12; }
-    var out = (prefs.time24 ? pad(h) : h) + ':' + pad(d.getMinutes());
+    if (!time24){ ap = h < 12 ? ' AM' : ' PM'; h = h % 12 || 12; }
+    var out = (time24 ? pad(h) : h) + ':' + pad(d.getMinutes());
     if (prefs.seconds) out += ':' + pad(d.getSeconds());
     return out + ap;
   }
-  function fmtDate(d){
-    if (prefs.dateFmt === 'hidden') return '';
+  // fmt defaults to the current pref; the settings tiles pass their own so each
+  // can render today's date in the style it offers.
+  function fmtDate(d, fmt){
+    fmt = fmt || prefs.dateFmt;
+    if (fmt === 'hidden') return '';
     var wS = WD[d.getDay()].slice(0,3), wL = WD[d.getDay()];
     var mS = MO[d.getMonth()].slice(0,3), mL = MO[d.getMonth()];
     var day = d.getDate(), yr = d.getFullYear();
-    switch (prefs.dateFmt){
+    switch (fmt){
       case 'medium':  return wS+' '+day+' '+mS+' '+yr;
       case 'long':    return wL+' '+day+' '+mL+' '+yr;
       case 'ordinal': return wL+' '+ord(day)+' '+mL+' '+yr;
@@ -58,43 +65,81 @@
     dateEl.hidden = !ds;
   }
 
-  // Settings controls: two toggle buttons + a date-format slider, styled like
-  // the page's other pills (no native select/checkbox). syncControls reflects
-  // current prefs back onto the controls; clicks/slides write prefs live.
-  var toggles = document.querySelectorAll('[data-clk-toggle]');
-  var range   = document.querySelector('[data-clk-range="dateFmt"]');
-  var preview = document.querySelector('[data-clk-preview]');
+  // Settings controls: the clock tiles, the seconds switch and the date tiles.
+  // syncControls reflects current prefs back onto them; a click writes them
+  // live. The two tile groups preview themselves rather than naming a state.
+  var toggles  = document.querySelectorAll('[data-clk-toggle]');
+  var fmtOpts  = document.querySelectorAll('[data-clk-fmt]');
+  var samples  = document.querySelectorAll('[data-clk-sample]');
+  var hourOpts = document.querySelectorAll('[data-clk-hours]');
+  var hourSamples = document.querySelectorAll('[data-clk-tsample]');
+
+  // The clock tiles tick with the clock itself — unlike the date samples, what
+  // they show changes every second.
+  function fillHourSamples(){
+    var now = new Date();
+    hourSamples.forEach(function(el){
+      el.textContent = fmtTime(now, el.getAttribute('data-clk-tsample') === '24');
+    });
+  }
+
+  // Each tile carries today's date in the style it offers, so the choice is
+  // made by reading rather than by trying each one.
+  function fillSamples(){
+    var now = new Date();
+    samples.forEach(function(el){
+      var fmt = el.getAttribute('data-clk-sample');
+      el.textContent = fmt === 'hidden' ? 'No date' : fmtDate(now, fmt);
+    });
+  }
 
   function syncControls(){
     toggles.forEach(function(btn){
       var key = btn.getAttribute('data-clk-toggle');
       btn.classList.toggle('is-on', !!prefs[key]);
       btn.setAttribute('aria-pressed', prefs[key] ? 'true' : 'false');
-      if (key === 'time24') btn.textContent = prefs.time24 ? '24-hour' : 'AM / PM';
+      if (key === 'seconds') btn.textContent = prefs.seconds ? 'On' : 'Off';
     });
-    if (range){
-      var i = FMTS.indexOf(prefs.dateFmt); if (i < 0) i = FMTS.indexOf('medium');
-      range.value = i;
-    }
-    if (preview) preview.textContent = prefs.dateFmt === 'hidden' ? 'No date' : fmtDate(new Date());
+    fmtOpts.forEach(function(opt){ opt.checked = opt.value === prefs.dateFmt; });
+    hourOpts.forEach(function(opt){ opt.checked = (opt.value === '24') === !!prefs.time24; });
   }
 
   toggles.forEach(function(btn){
     btn.addEventListener('click', function(){
       var key = btn.getAttribute('data-clk-toggle');
       prefs[key] = !prefs[key]; set(key, prefs[key]);
-      syncControls(); render();
+      // Seconds changes what the clock tiles show, not just the topbar.
+      syncControls(); render(); fillHourSamples();
     });
   });
-  if (range){
-    range.addEventListener('input', function(){
-      prefs.dateFmt = FMTS[parseInt(range.value, 10)] || 'medium';
+  fmtOpts.forEach(function(opt){
+    opt.addEventListener('change', function(){
+      if (!opt.checked) return;
+      prefs.dateFmt = FMTS.indexOf(opt.value) < 0 ? 'medium' : opt.value;
       set('dateFmt', prefs.dateFmt);
-      syncControls(); render();
+      render();
     });
-  }
+  });
+  hourOpts.forEach(function(opt){
+    opt.addEventListener('change', function(){
+      if (!opt.checked) return;
+      prefs.time24 = opt.value === '24';
+      set('time24', prefs.time24);
+      render(); fillHourSamples();
+    });
+  });
 
   syncControls();
+  fillSamples();
+  fillHourSamples();
   render();
-  setInterval(render, 1000);
+  // The samples are a day's worth of text, so they only need rewriting when the
+  // day turns over — not on every tick with the clock.
+  var sampleDay = new Date().getDate();
+  setInterval(function(){
+    render();
+    fillHourSamples();
+    var today = new Date().getDate();
+    if (today !== sampleDay){ sampleDay = today; fillSamples(); }
+  }, 1000);
 })();
