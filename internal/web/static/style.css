@@ -46,6 +46,10 @@
 :root{
   font-size:10px;
 
+  /* The page's ground. Named because the side menu continues it rather than
+     painting over it — see .navrail. */
+  --page-field:radial-gradient(120% 80% at 50% -10%, #233139 0%, var(--bg) 45%, var(--bg-2) 100%);
+
   /* Material "Oceanic" palette */
   --bg:#1A2327;
   --bg-2:#10171A;          /* darker foot of the page background fade */
@@ -75,6 +79,23 @@
   --fill-hover:rgba(255,255,255,.10);
   --tint:rgba(128,203,196,.14);        /* selected control tint */
 
+  /* Selectable surfaces in the settings dialog. Flat fills read as labels; a
+     control you can press wants a lit top edge and something to cast onto the
+     panel, and the chosen one wants to look lit from within rather than merely
+     coloured in. One recipe, so every pill, tile and card in there agrees. */
+  --sel-fill:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.015) 62%), rgba(255,255,255,.028);
+  --sel-fill-hover:linear-gradient(180deg, rgba(255,255,255,.11), rgba(255,255,255,.035) 62%), rgba(255,255,255,.05);
+  --sel-shadow:inset 0 1px 0 rgba(255,255,255,.07), 0 1px 2px rgba(0,0,0,.22);
+  --sel-on-fill:linear-gradient(180deg, rgba(128,203,196,.22), rgba(128,203,196,.09) 70%), rgba(128,203,196,.05);
+  --sel-on-shadow:inset 0 0 0 1px rgba(128,203,196,.34), inset 0 1px 0 rgba(255,255,255,.10),
+                  0 1px 2px rgba(0,0,0,.24), 0 0 14px rgba(128,203,196,.10);
+  /* One width for the settings dialog's content, and it is a centred column,
+     not a left margin. A stepper stretched to the full pane puts its two arrows
+     a hand apart; capped but pinned left, all the slack piles up on one side
+     instead. Labels and controls share the column's left edge, so the block
+     reads as a column rather than as things that happen to line up. */
+  --stg-col:30rem;
+
   /* User type prefs (settings → Fonts). Chrome stays mono; only the title and
      text layers read these. Face/size blocks at the end of the file override
      them per the data-ft/fb/fts/fbs attrs the font IIFE sets on <html>. */
@@ -88,26 +109,78 @@
      rail layout widens from it — two copies would drift. Sized so the feed's
      filter bar holds all six controls plus the reset on one line. */
   --content-w:1180px;
+  /* What the CURRENT page's column actually measures. The topbar reads this
+     too, so the bar and the content below it stay on one edge — the Maze's rail
+     layout widens the column, and a bar pinned to --content-w would come adrift
+     of it on that page alone. */
+  --page-w:var(--content-w);
 
   /* Shell stacking order in one place, so the layers can't drift apart as
      pieces move. Panels sit inside the bar, the drawer rides over it, dialogs
      clear everything. Purely local stacking (a badge over its own card) keeps
      its own small literal — those aren't part of this ladder. */
   --z-panel:10;
-  --z-flyout:11;
+  /* The side menu runs the full height and lies OVER the bar, as the same glass
+     the bar is made of — what is under the menu shows through it, the topbar
+     included. Hot zone just under the menu so the menu wins the pointer where
+     the two overlap. */
   --z-topbar:40;
   --z-nav-hot:44;
   --z-navrail:45;
   --z-modal:50;
   --z-modal-top:60;
+
+  /* The visual half of the stacking order above. Every floating surface used to
+     wear the same glass, so four z-levels rendered as one depth. Three steps
+     instead: the bar sits just off the page (e1), the side menu over it (e2),
+     dialogs clear both (e3). Higher means more opaque, more blur, more shadow. */
+  --e1-fill:rgba(26,35,39,.72);
+  --e1-line:rgba(255,255,255,.06);
+  --e1-blur:blur(14px) saturate(1.3);
+  --e1-shadow:0 2px 8px rgba(0,0,0,.22);
+
+  --e2-fill:rgba(38,50,56,.90);
+  --e2-line:rgba(255,255,255,.12);
+  --e2-blur:blur(26px) saturate(1.7);
+  --e2-shadow:inset 0 1px 0 rgba(255,255,255,.07), 0 2px 6px rgba(0,0,0,.32),
+              0 18px 44px rgba(0,0,0,.46);
+
+  --e3-fill:rgba(43,57,63,.96);
+  --e3-line:rgba(255,255,255,.16);
+  --e3-blur:blur(34px) saturate(1.8);
+  --e3-shadow:inset 0 1px 0 rgba(255,255,255,.09), 0 4px 12px rgba(0,0,0,.40),
+              0 40px 90px rgba(0,0,0,.62);
+
+
+  /* One shape scale for the chrome, replacing eight values picked one at a
+     time. Sized by how large the thing is: chips take xs, controls sm, cards
+     md, dialogs lg. */
+  --r-xs:6px;
+  --r-sm:9px;
+  --r-md:13px;
+  --r-lg:18px;
+  --r-xl:26px;
+  --r-full:999px;
+
+  /* The two curves the interface moves on: --ease for anything that travels,
+     --spring for surfaces that arrive. */
+  --ease:cubic-bezier(.2,.9,.3,1.05);
+  --spring:cubic-bezier(.2,1.1,.4,1);
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
+/* [hidden] means hidden. The browser's own rule for the attribute is a plain
+   display:none at the same specificity as any class, so an author class that
+   sets a display quietly outranks it — which is how the ingest chip, the
+   geocoding results, the tag suggester and the search clear button all ended up
+   rendering as empty blobs when they were meant to be gone. Settled once, here,
+   instead of being patched per component. */
+[hidden]{display:none !important;}
 @media (prefers-reduced-motion: no-preference){ html{scroll-behavior:smooth;} }
 body{
   /* radial fade: a faint lift up top easing down into a darker foot — gives the
      page depth without a flat fill. `fixed` so it doesn't scroll with content. */
-  background:radial-gradient(120% 80% at 50% -10%, #233139 0%, var(--bg) 45%, var(--bg-2) 100%) fixed;
+  background:var(--page-field) fixed;
   color:var(--text);
   font-family:var(--font-mono);
   /* dvh tracks the mobile URL bar collapsing; the vh line above it is the
@@ -121,27 +194,36 @@ a{color:inherit;text-decoration:none;}
    normal floating surface. */
 .skip-link{
   position:fixed;left:12px;top:-100px;z-index:var(--z-modal-top);
-  padding:9px 16px;border-radius:999px;
-  background:var(--overlay);color:var(--accent);
-  border:1px solid var(--hairline-strong);
+  padding:9px 16px;border-radius:var(--r-full);
+  background:var(--e2-fill);color:var(--accent);
+  border:1px solid var(--e2-line);
   -webkit-backdrop-filter:blur(22px) saturate(1.6);
   backdrop-filter:blur(22px) saturate(1.6);
   box-shadow:0 1px 2px rgba(0,0,0,.30), 0 12px 28px rgba(0,0,0,.38);
   font-size:1.3rem;letter-spacing:.03em;
-  transition:top .18s cubic-bezier(.2,.9,.3,1.05);
+  transition:top .18s var(--ease);
 }
 .skip-link:focus-visible{top:12px;outline:1px solid var(--accent);outline-offset:2px;}
 @media (prefers-reduced-motion: reduce){ .skip-link{transition:none;} }
 
 /* sticky translucent bar; content scrolls beneath it. The --z-* scale keeps it
-   over the page but under the modal. */
+   over the page but under the modal, and e1 is the lightest of the three
+   elevations — it belongs to the page, not over it. */
 header.topbar{
   position:sticky;top:0;z-index:var(--z-topbar);
-  display:flex;align-items:center;justify-content:space-between;
-  padding:16px 30px;border-bottom:1px solid var(--hairline);
-  background:rgba(26,35,39,.62);
-  -webkit-backdrop-filter:blur(16px) saturate(1.5);
-  backdrop-filter:blur(16px) saturate(1.5);
+  display:flex;align-items:center;
+  padding:16px 0;border-bottom:1px solid var(--e1-line);
+  background:var(--e1-fill);
+  -webkit-backdrop-filter:var(--e1-blur);
+  backdrop-filter:var(--e1-blur);
+  box-shadow:var(--e1-shadow);
+}
+/* The bar's own content column. Without it the bar padded off the viewport edge
+   while the page below sat in a centred --content-w column, so on a wide screen
+   the wordmark and the first tile never shared a left edge. */
+.topbar__in{
+  flex:1;min-width:0;max-width:var(--page-w);margin:0 auto;padding:0 30px;
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
 }
 /* Terminal mascot: a tiny ASCII bunny centred over the bar. Absolutely placed so
    it doesn't affect the bar's height or the left/right clusters; non-interactive.
@@ -164,7 +246,9 @@ header.topbar{
 @media (prefers-reduced-motion: reduce){
   .topbar__bunny .bunny__eye{animation:none;}
 }
-@media (max-width: 920px){ .topbar__bunny{display:none;} }
+/* Clears the grouped status well, which is wider than the loose cluster it
+   replaced — at the old 920px the bunny collided before it hid. */
+@media (max-width: 1040px){ .topbar__bunny{display:none;} }
 .topbar__left{display:flex;align-items:center;gap:10px;}
 .topbar__left .wordmark{font-size:1.4rem;color:var(--text-dim);}
 /* Brand title: a display face (Archivo) set bright + uppercase so the wordmark
@@ -178,31 +262,30 @@ header.topbar{
    tinted teal, so the links unmistakably read as buttons (the bare-text nav
    didn't). No sliding thumb: page switches are full navigations. */
 .topbar__nav{
-  display:flex;background:var(--fill);border-radius:999px;padding:3px;
+  display:flex;background:var(--fill);border-radius:var(--r-full);padding:3px;
   font-size:1.1rem;letter-spacing:.05em;text-transform:uppercase;color:var(--text-dim);
 }
-.topbar__nav a{padding:4px 14px;border-radius:999px;transition:color .15s ease,background .15s ease;}
+.topbar__nav a{padding:4px 14px;border-radius:var(--r-full);transition:color .15s ease,background .15s ease;}
 .topbar__nav a:hover{color:var(--accent);}
 .topbar__nav a.active{
   color:var(--accent);background:var(--tint);
   box-shadow:inset 0 0 0 1px rgba(128,203,196,.22);
 }
-/* With the side menu open its page names are the biggest type on screen, and
-   the bar's own cluster reads as an afterthought beside them. A small step up
-   while it's out — the bar's height is pinned, so nothing reflows. */
-.topbar__left .wordmark b,
-.topbar__left .breaker,
-.topbar__nav{transition:font-size .22s cubic-bezier(.2,.9,.3,1.05);}
-body.nav-open .topbar__left .wordmark b{font-size:1.78rem;}
-body.nav-open .topbar__left .breaker{font-size:1.55rem;}
-body.nav-open .topbar__nav{font-size:1.22rem;}
-@media (prefers-reduced-motion: reduce){
-  .topbar__left .wordmark b,
-  .topbar__left .breaker,
-  .topbar__nav{transition:none;}
-}
 
 .topbar__right{position:relative;display:flex;align-items:center;gap:14px;}
+/* Ambient status well: the ingest chip and the clock are one thing — what the
+   app is doing and when — so they share a recessed slot rather than floating
+   loose beside the gear. Sunk rather than raised: nothing in here is a control. */
+.topbar__amb{
+  display:flex;align-items:center;gap:11px;padding:5px 13px;
+  border-radius:var(--r-full);background:rgba(0,0,0,.20);
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.24);
+}
+.topbar__sep{width:1px;height:14px;background:var(--hairline-strong);}
+/* The chip renders hidden when idle and healthy, and a divider against nothing
+   is just a tick mark. :has re-runs on the chip's out-of-band swaps, so this
+   tracks the run state without any JS. */
+.topbar__amb:not(:has(#ingChip:not([hidden]))) .topbar__sep{display:none;}
 .clock{
   display:flex;align-items:baseline;gap:8px;
   font-size:1.3rem;color:var(--text-dim);
@@ -210,10 +293,12 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 }
 .clock__time{color:var(--accent);font-weight:500;letter-spacing:.04em;}
 .clock__date{color:var(--text-dim);}
+/* Bigger than the well beside it: it is the only control in the cluster, and it
+   used to be the smallest thing in it. */
 .settings-btn{
   display:inline-flex;align-items:center;justify-content:center;
   background:var(--fill);border:1px solid transparent;color:var(--text-dim);
-  width:30px;height:30px;border-radius:999px;cursor:pointer;font-family:inherit;
+  width:34px;height:34px;border-radius:var(--r-full);cursor:pointer;font-family:inherit;
   transition:color .15s ease,border-color .15s ease,background .15s ease;
 }
 .settings-btn .gear{display:inline-flex;align-items:center;}
@@ -221,87 +306,170 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 .settings-btn:hover{color:var(--accent);background:var(--tint);}
 .settings-btn:hover .gear svg{transform:rotate(35deg);}
 .settings-btn:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
-.settings-btn[aria-expanded="true"]{color:var(--accent);background:var(--tint);}
-.settings-btn[aria-expanded="true"] .gear svg{transform:rotate(90deg);}
+/* Lit while its dialog is up. The button no longer controls a popup, so there
+   is no aria-expanded to hang this on. */
+body:has(#settingsModal:not([hidden])) .settings-btn{color:var(--accent);background:var(--tint);}
+body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(90deg);}
 
-/* floating surfaces share one recipe: translucent fill + backdrop blur +
-   hairline border + layered shadows, entering with a small spring. */
+/* floating surfaces enter with a small spring. */
 @keyframes pop-in{from{opacity:0;transform:scale(.96) translateY(-4px);}}
-.settings-panel{
-  position:absolute;right:0;top:calc(100% + 8px);min-width:168px;
-  background:var(--overlay);border:1px solid var(--hairline-strong);border-radius:16px;
-  -webkit-backdrop-filter:blur(22px) saturate(1.6);
-  backdrop-filter:blur(22px) saturate(1.6);
-  box-shadow:0 1px 2px rgba(0,0,0,.30), 0 12px 28px rgba(0,0,0,.38), 0 28px 64px rgba(0,0,0,.30);
-  padding:7px;z-index:var(--z-panel);
+
+/* --- Settings: the prefs dialog ------------------------------------------ */
+/* Settings was the one config surface that wasn't a window: a narrow dropdown
+   with three hover-only flyouts, unreachable by touch and colliding with the
+   screen edge on a laptop. It is a dialog now, in the same frame Config,
+   Sources and Ingest use — a section rail on the left, one section's controls
+   on the right. The rail is a radio group rather than an ARIA tablist: the
+   question really is "which section am I looking at", and arrow keys then work
+   without a line of script.
+   The markup lives in layout.html and stays in the DOM hidden, because
+   clock.js, weather.js and fonts.js bind their controls once at load. */
+/* One under the htmx layer, so the config and sources dialogs this one opens
+   always land on top of it whichever way the document is ordered. */
+.modal--stg{z-index:calc(var(--z-modal) - 1);}
+.modal__frame--stg{width:min(720px,94vw);}
+/* One height for every section, so switching never resizes the dialog under
+   the pointer — Weather is the tallest and the rest carry the slack. Set as a
+   height with flex-shrink live, the same trick the sources columns use: this
+   tall, but give way when 84vh says otherwise. */
+.stg{
+  display:grid;grid-template-columns:180px minmax(0,1fr);
+  height:428px;min-height:0;flex:1 1 auto;
 }
-.settings-panel:not([hidden]){animation:pop-in .16s cubic-bezier(.2,1.1,.4,1);transform-origin:top right;}
-.settings-panel[hidden]{display:none;}
-.settings-panel__item{
-  display:block;padding:8px 12px;font-size:1.3rem;color:var(--text-dim);border-radius:999px;
+.stg__rail{
+  display:flex;flex-direction:column;gap:2px;min-width:0;min-height:0;
+  margin:0;padding:10px 8px;border:0;border-right:1px solid var(--hairline);
 }
-.settings-panel__item:hover{color:var(--accent);background:rgba(128,203,196,.07);}
-/* Marks the one entry that navigates instead of opening a modal. */
-.settings-panel__go{float:right;opacity:.5;}
-.settings-panel__item:focus-visible{outline:1px solid var(--accent);outline-offset:-2px;}
-.settings-panel__label{
-  padding:6px 12px 5px;font-size:1.05rem;letter-spacing:.12em;
+/* The group needs a name for screen readers; on screen the title bar says it. */
+.stg__legend{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
+.stg__tab{position:relative;display:block;cursor:pointer;}
+.stg__tab input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;}
+.stg__tab span{
+  display:block;padding:8px 12px;border-radius:var(--r-sm);
+  font-size:1.3rem;color:var(--text-dim);
+  transition:color .14s var(--ease),background .14s var(--ease);
+}
+.stg__tab input:hover ~ span{background:var(--fill-hover);color:var(--text);}
+.stg__tab input:checked ~ span{color:var(--accent);background:var(--tint);}
+.stg__tab input:focus-visible ~ span{outline:1px solid var(--accent);outline-offset:-2px;}
+/* Weather is the one section tall enough to scroll on a short window, and a
+   scrollbar appearing there alone would inset its controls relative to every
+   other section. The gutter is reserved either way. */
+.stg__pane{
+  min-height:0;padding:12px 6px 16px;
+  overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;
+}
+/* The column: capped, centred, and the same width in every section so the
+   block does not shift under the pointer when the tab changes. */
+.stg__sect{display:none;width:min(100%, var(--stg-col));margin:0 auto;}
+.stg:has(#stgTime:checked)  .stg__sect--time {display:block;}
+.stg:has(#stgWx:checked)    .stg__sect--wx   {display:block;}
+.stg:has(#stgFonts:checked) .stg__sect--fonts{display:block;}
+.stg:has(#stgTheme:checked) .stg__sect--theme{display:block;}
+/* The section label, at the same 12px inset every control row below it uses. */
+.stg__lbl{
+  padding:6px 0 5px;font-size:1.05rem;letter-spacing:.12em;
   text-transform:uppercase;color:var(--accent-dim);
 }
-.settings-panel__divider{height:1px;background:var(--line);margin:5px 6px;}
-/* Outbound links carry an arrow so they read as leaving the app. */
-.settings-panel__item--ext{display:flex;align-items:center;justify-content:space-between;gap:10px;}
-.settings-panel__ext{color:var(--text-dim);font-size:1.2rem;line-height:1;}
-.settings-panel__item--ext:hover .settings-panel__ext{color:var(--accent);}
+/* The title bar wears the open section as the command it just ran, the way the
+   sources dialog wears its counts. */
+.modal__frame--stg:has(#stgTime:checked)  .stg__cmd::after{content:"date-time";}
+.modal__frame--stg:has(#stgWx:checked)    .stg__cmd::after{content:"weather";}
+.modal__frame--stg:has(#stgFonts:checked) .stg__cmd::after{content:"fonts";}
+.modal__frame--stg:has(#stgTheme:checked) .stg__cmd::after{content:"theme";}
 
-/* "Date & time" sub-menu: hovering/focusing the trigger reveals a flyout that
-   opens to the left of the panel (the panel hugs the right screen edge). */
-.settings-sub{position:relative;}
-.settings-sub__trigger{display:flex;align-items:center;justify-content:space-between;gap:10px;}
-.settings-sub__caret{color:var(--text-dim);font-size:1.5rem;line-height:1;}
-.settings-sub__flyout{
-  display:none;position:absolute;right:calc(100% + 9px);top:-7px;min-width:212px;
-  background:var(--overlay);border:1px solid var(--hairline-strong);border-radius:16px;
-  -webkit-backdrop-filter:blur(22px) saturate(1.6);
-  backdrop-filter:blur(22px) saturate(1.6);
-  box-shadow:0 1px 2px rgba(0,0,0,.30), 0 12px 28px rgba(0,0,0,.38), 0 28px 64px rgba(0,0,0,.30);
-  padding:8px 10px 11px;z-index:var(--z-flyout);
-  transform-origin:top right;
+/* --- Settings → Date format ----------------------------------------------- */
+/* The six date styles are choices, not a scale, and a slider showed you only
+   the one you had landed on — you had to sweep it to find out what the others
+   were. As tiles each one renders today's date in its own style, so the setting
+   is picked by reading rather than by trial. One per row: the longest style
+   ("Monday 25th August 2026") gets the column whole rather than being clipped
+   into half of it, and stacked they read as the list of options they are. */
+.dfmt{display:grid;grid-template-columns:minmax(0,1fr);gap:5px;padding:2px 0 6px;}
+/* The clock is two tiles of a few characters each, so they pair across. */
+.dfmt--pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}
+.dfmt--pair span{text-align:center;font-variant-numeric:tabular-nums;}
+.dfmt__opt{position:relative;display:block;cursor:pointer;}
+.dfmt__opt input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;}
+.dfmt__opt span{
+  display:block;padding:8px 10px;border-radius:var(--r-sm);
+  background:var(--sel-fill);box-shadow:var(--sel-shadow);color:var(--text-dim);
+  font-size:1.15rem;line-height:1.2;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;
+  transition:color .14s var(--ease),background .14s var(--ease),box-shadow .14s var(--ease);
 }
-/* invisible bridge across the gap so the hover doesn't drop mid-travel */
-.settings-sub__flyout::after{content:"";position:absolute;top:0;right:-9px;width:9px;height:100%;}
-.settings-sub:hover .settings-sub__flyout,
-.settings-sub:focus-within .settings-sub__flyout{display:block;animation:pop-in .16s cubic-bezier(.2,1.1,.4,1);}
-.settings-sub:hover .settings-sub__trigger,
-.settings-sub:focus-within .settings-sub__trigger{color:var(--accent);background:rgba(128,203,196,.07);}
+.dfmt__opt input:hover ~ span{background:var(--sel-fill-hover);color:var(--text);}
+.dfmt__opt input:checked ~ span{color:var(--accent);background:var(--sel-on-fill);box-shadow:var(--sel-on-shadow);}
+.dfmt__opt input:focus-visible ~ span{outline:1px solid var(--accent);outline-offset:2px;}
+/* "No date" is the absence of a sample, not a sample — set apart so it doesn't
+   read as a sixth format. */
+.dfmt__opt--off span{font-style:italic;opacity:.8;}
+
+/* --- Settings → Theme ----------------------------------------------------- */
+/* Picks the chrome layout, not the palette. One variant ships today; the grid
+   is sized for more, so a second is a card rather than a rebuild. Each card
+   carries a wireframe because a layout is the one setting you can't name your
+   way out of — you have to see the shape. */
+.thm{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;padding:4px 0 2px;}
+.thm__card{position:relative;display:block;cursor:pointer;}
+.thm__card input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;}
+.thm__body{
+  display:block;padding:9px;border-radius:var(--r-md);
+  background:var(--sel-fill);box-shadow:var(--sel-shadow);
+  transition:background .15s var(--ease),box-shadow .15s var(--ease);
+}
+.thm__card input:hover ~ .thm__body{background:var(--sel-fill-hover);}
+.thm__card input:checked ~ .thm__body{background:var(--sel-on-fill);box-shadow:var(--sel-on-shadow);}
+.thm__card input:focus-visible ~ .thm__body{outline:1px solid var(--accent);outline-offset:2px;}
+.thm__hd{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:8px;}
+.thm__nm{font-size:1.25rem;color:var(--title);}
+.thm__card input:checked ~ .thm__body .thm__nm{color:var(--accent);}
+.thm__st{font-size:1rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim);}
+.thm__card input:checked ~ .thm__body .thm__st{color:var(--accent-dim);}
+.thm__ds{display:block;margin-top:2px;font-size:1.05rem;color:var(--text-dim);}
+/* The wireframe: bar across the top, rail down the left, rows in the body —
+   the layout said as a picture, in the palette's own colours. */
+.thm__wire{
+  display:block;height:96px;border-radius:var(--r-sm);overflow:hidden;
+  background:var(--bg);box-shadow:inset 0 0 0 1px var(--hairline);
+  padding:5px;
+}
+.thm__wire i{display:block;border-radius:2px;background:var(--text-dim);opacity:.5;}
+.thm__wire .w-bar{height:6px;margin-bottom:5px;background:var(--accent);opacity:.55;}
+.thm__wire .w-body{display:flex;gap:5px;height:74px;}
+.thm__wire .w-rail{width:9px;flex:none;height:100%;}
+.thm__wire .w-rows{flex:1;display:flex;flex-direction:column;gap:4px;}
+.thm__wire .w-rows i{height:14px;opacity:.32;}
 
 /* button rows / slider / location share the label's 12px left inset so the
    controls line up under their section labels instead of sitting looser-left. */
-.clk-row{display:flex;flex-wrap:wrap;gap:6px;padding:2px 12px 6px;}
+.clk-row{display:flex;flex-wrap:wrap;gap:6px;padding:2px 0 6px;}
 .clk-btn{
   font-family:inherit;cursor:pointer;
-  padding:5px 13px;border:1px solid transparent;border-radius:999px;
-  background:var(--fill);color:var(--text-dim);font-size:1.1rem;
+  padding:5px 13px;border:0;border-radius:var(--r-full);
+  background:var(--sel-fill);box-shadow:var(--sel-shadow);
+  color:var(--text-dim);font-size:1.1rem;
+  transition:background .15s var(--ease),color .15s var(--ease),box-shadow .15s var(--ease);
 }
-.clk-btn:hover{background:var(--fill-hover);}
+.clk-btn:hover{background:var(--sel-fill-hover);color:var(--text);}
 .clk-btn:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
-.clk-btn.is-on{color:var(--accent);background:var(--tint);}
-.clk-btn:disabled{opacity:.45;cursor:not-allowed;background:var(--fill);}
+.clk-btn.is-on{color:var(--accent);background:var(--sel-on-fill);box-shadow:var(--sel-on-shadow);}
+.clk-btn:disabled{opacity:.45;cursor:not-allowed;background:var(--sel-fill);box-shadow:none;}
 
 /* Display switches: the setting named on the left, its state as a pill on the
-   right. Same .clk-btn idiom as the rest of the panel; the On/Off word is what
+   right. Same .clk-btn idiom as the rest of the dialog; the On/Off word is what
    makes the state readable without knowing what the highlight means. */
-.wx-switches{display:flex;flex-direction:column;gap:5px;padding:2px 12px 6px;}
+.wx-switches{display:flex;flex-direction:column;gap:5px;padding:2px 0 6px;}
 .wx-switch{display:flex;align-items:center;justify-content:space-between;gap:12px;}
 .wx-switch>span{font-size:1.1rem;color:var(--text);}
 .wx-switch .clk-btn{min-width:54px;text-align:center;}
 
 /* Weather location: a search field + a geocoding-results list + the geolocation
    button. The text field is allowed here (it's a search box, not a select). */
-.wx-loc{display:flex;flex-direction:column;gap:6px;padding:2px 12px 4px;}
+.wx-loc{display:flex;flex-direction:column;gap:6px;padding:2px 0 4px;}
 .wx-loc__input{
   font-family:inherit;font-size:1.1rem;
-  padding:6px 11px;border:1px solid var(--hairline);border-radius:999px;
+  padding:6px 11px;border:1px solid var(--hairline);border-radius:var(--r-full);
   background:var(--bg);color:var(--text);
 }
 .wx-loc__input::placeholder{color:var(--text-dim);}
@@ -309,7 +477,7 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 .wx-loc__results{display:flex;flex-direction:column;gap:2px;max-height:148px;overflow-y:auto;}
 .wx-loc__opt{
   text-align:left;font-family:inherit;cursor:pointer;font-size:1.1rem;
-  padding:5px 11px;border:1px solid transparent;border-radius:8px;
+  padding:5px 11px;border:1px solid transparent;border-radius:var(--r-sm);
   background:none;color:var(--text-dim);
 }
 .wx-loc__opt:hover,.wx-loc__opt:focus-visible{
@@ -322,11 +490,11 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 
 /* Data-source credit at the foot of the Weather flyout. Set quiet: it is a
    licence obligation, not a call to action. */
-.wx-credit{margin:2px 0 0;padding:6px 12px 2px;font-size:1rem;color:var(--text-dim);line-height:1.4;}
+.wx-credit{margin:2px 0 0;padding:6px 0 2px;font-size:1rem;color:var(--text-dim);line-height:1.4;}
 .wx-credit a{color:var(--accent-dim);text-decoration:none;}
 .wx-credit a:hover{color:var(--accent);text-decoration:underline;}
 
-.clk-slider{display:flex;flex-direction:column;gap:9px;padding:5px 12px 2px;}
+.clk-slider{display:flex;flex-direction:column;gap:9px;padding:5px 0 2px;}
 .clk-slider__preview{
   font-size:1.2rem;color:var(--accent);text-align:center;min-height:1.4em;
   font-variant-numeric:tabular-nums;
@@ -348,7 +516,7 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 /* scroll-margin clears the sticky bar when the skip link jumps here, so the
    first line of content doesn't land underneath it. */
 .content{
-  max-width:var(--content-w);margin:0 auto;padding:28px 30px 80px;
+  max-width:var(--page-w);margin:0 auto;padding:28px 30px 80px;
   scroll-margin-top:calc(var(--topbar-h) + 12px);
 }
 .content:focus{outline:none;}
@@ -357,19 +525,21 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
    each gives equal shares that grow to fill the row, so 3 / 4 / 5+ tiles each
    stretch edge-to-edge (matching the pane below). min-width lets them wrap to a
    new line on narrow screens instead of crushing. */
-.stats-row{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:24px;}
+.stats-row{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:20px;}
 .tile{
   flex:1 1 0;min-width:140px;
   border:1px solid transparent;
   background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0) 62%), var(--pane);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.04), 0 1px 2px rgba(0,0,0,.22);
-  padding:11px 12px;border-radius:14px;text-align:center;
+  padding:8px 12px;border-radius:14px;text-align:center;
 }
-.tile .num{font-size:2.4rem;font-weight:600;color:var(--accent);text-shadow:0 0 8px rgba(128,203,196,.25);}
-.tile .num--high{color:var(--score-high);text-shadow:0 0 8px rgba(195,232,141,.28);}
-.tile .label{font-size:1.1rem;letter-spacing:.05em;text-transform:uppercase;color:var(--text-dim);margin-top:2px;}
+/* A summary of the feed, not the headline of the page: the numbers were set
+   large enough to read before the articles did. */
+.tile .num{font-size:2rem;font-weight:600;color:var(--accent);text-shadow:0 0 7px rgba(128,203,196,.22);}
+.tile .num--high{color:var(--score-high);text-shadow:0 0 7px rgba(195,232,141,.25);}
+.tile .label{font-size:1.05rem;letter-spacing:.05em;text-transform:uppercase;color:var(--text-dim);margin-top:1px;}
 .tile.placeholder{border:1px dashed var(--text-dim);background:transparent;color:var(--text-dim);}
-.tile.placeholder .num{color:var(--text-dim);font-size:1.7rem;}
+.tile.placeholder .num{color:var(--text-dim);font-size:1.45rem;}
 .blink{animation:blink 1.1s steps(1) infinite;}
 @media (prefers-reduced-motion: reduce){ .blink{animation:none;opacity:.6;} }
 @keyframes blink{50%{opacity:0;}}
@@ -586,11 +756,6 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 .popmenu--search .popmenu__val{margin-left:7px;}
 .popmenu--search .popmenu__val:empty{display:none;}
 .search__ic{flex:none;width:14px;height:14px;opacity:.85;}
-/* Both are laid out with display, which outranks the browser's own [hidden]
-   rule (same specificity, author sheet last), so their hidden state has to be
-   spelled out here — otherwise the ✕ sits in the field with nothing to clear
-   and the completion list holds its gap while empty. */
-.search__clear[hidden],.search__sugg[hidden]{display:none;}
 .popmenu__panel--search{min-width:max(100%,24rem);gap:9px;}
 /* The field, on the Sources search box's recipe at the bar's pill radius. The
    clear button sits inside its right end, so the padding leaves room for it. */
@@ -940,7 +1105,9 @@ body.nav-open .topbar__nav{font-size:1.22rem;}
 .note-cancel:hover{color:var(--accent);}
 
 @media (max-width: 720px){
-  header.topbar{padding:14px 18px;}
+  /* Matched to .content below: the bar sharing the page's left edge is the
+     whole point of .topbar__in, and that holds at every width. */
+  .topbar__in{padding:0 16px;}
   .content{padding:20px 16px 60px;}
   .pane__body{padding:16px 16px 4px;}
   .pane__nav{flex-wrap:wrap;gap:8px;}
@@ -968,13 +1135,15 @@ html.modal-open body{overflow:hidden;}
   position:absolute;inset:0;background:rgba(0,0,0,.5);
   -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
 }
+/* e3, the top of the elevation scale: nearly opaque and heavily shadowed, so a
+   dialog reads as sitting above the drawer rather than beside it. */
 .modal__frame{
   position:relative;width:min(760px,94vw);max-height:84vh;display:flex;flex-direction:column;
-  background:rgba(35,47,52,.88);border:1px solid var(--hairline-strong);border-radius:16px;
-  -webkit-backdrop-filter:blur(24px) saturate(1.5);
-  backdrop-filter:blur(24px) saturate(1.5);
-  box-shadow:0 24px 64px rgba(0,0,0,.6);overflow:hidden;
-  animation:pop-in .18s cubic-bezier(.2,1.1,.4,1);
+  background:var(--e3-fill);border:1px solid var(--e3-line);border-radius:var(--r-lg);
+  -webkit-backdrop-filter:var(--e3-blur);
+  backdrop-filter:var(--e3-blur);
+  box-shadow:var(--e3-shadow);overflow:hidden;
+  animation:pop-in .18s var(--spring);
 }
 /* Focused as a container on open — the controls inside carry their own ring. */
 .modal__frame:focus{outline:none;}
@@ -1012,45 +1181,143 @@ pre.yml code{font-family:inherit;}
    the topbar and sits under the modal, tab + hot zone just beneath it.
    Inside, two tiers that never read as one list: the pages sit at the top as
    prompt lines, the config pair at the very floor as typed commands. */
-:root{ --topbar-h:58px; }
+:root{ --topbar-h:58px; --nav-w:262px; }
 header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
 .nav-hot{position:fixed;left:0;top:var(--topbar-h);bottom:0;width:12px;z-index:var(--z-nav-hot);}
 .navrail{
-  position:fixed;left:0;top:var(--topbar-h);bottom:0;z-index:var(--z-navrail);width:262px;
+  /* The menu runs the whole height of the viewport and lies over everything,
+     the topbar included — and it is made of the bar's own glass, so what passes
+     under it shows through blurred rather than being covered. That is what
+     makes the two read as one material instead of two panels meeting: there is
+     no join to disguise, only the same glass overlapping itself, which is
+     visibly darker where it doubles.
+
+     Same fill and same blur as the topbar, deliberately. Anything else and the
+     overlap would show as a colour change rather than as depth.
+
+     Its content still starts below the bar: the identity band is exactly
+     --topbar-h tall and stands in for the padding that used to hold that space,
+     so the pages and the config commands sit where they always have — only the
+     surface goes up, and now the band, not the type below it. */
+  position:fixed;left:0;top:0;bottom:0;
+  z-index:var(--z-navrail);width:var(--nav-w);
   overflow-y:auto;
-  display:flex;flex-direction:column;gap:2px;padding:22px 12px 14px;
-  background:var(--overlay);
-  border-right:1px solid var(--hairline-strong);
-  -webkit-backdrop-filter:blur(22px) saturate(1.6);
-  backdrop-filter:blur(22px) saturate(1.6);
-  box-shadow:12px 0 28px rgba(0,0,0,.35), 28px 0 64px rgba(0,0,0,.22);
+  display:flex;flex-direction:column;gap:2px;
+  padding:0 12px 14px;
+  scrollbar-width:thin;
+  scrollbar-color:var(--line) transparent;
+  /* The column runs to the top of the viewport but does not end there: both its
+     fill and its right-hand edge ramp to nothing above the bar's line, so it
+     reads as beginning at the bar and melting away over it rather than as an
+     empty box sitting above it.
+
+     Both are background layers rather than a fill plus a border, because that
+     is the only way the edge can fade on the same curve as the surface. A mask
+     would fade the blur with them, but it also clips box-shadow away entirely
+     — and the dissolve does not want a shadow anyway: a hard edge to the right
+     of a surface that is disappearing is a contradiction. The glass and the
+     fading hairline carry the separation instead. */
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0), var(--e1-line) var(--topbar-h))
+      right top / 1px 100% no-repeat,
+    linear-gradient(180deg, rgba(26,35,39,0), var(--e1-fill) var(--topbar-h))
+      left top / 100% 100% no-repeat;
+  /* The one thing that cannot be ramped. Above the bar's line it blurs an area
+     that is already the bar's own glass, so there is nothing there to smear. */
+  -webkit-backdrop-filter:var(--e1-blur);
+  backdrop-filter:var(--e1-blur);
   transform:translateX(-100%);
-  transition:transform .22s cubic-bezier(.2,.9,.3,1.05);
+  transition:transform .22s var(--ease);
 }
 .navrail.open{transform:none;}
+
+/* Kept open is the default and the attribute only ever says otherwise — but
+   only above the width where the menu clears the page instead of lying on top
+   of it. The page never moves for the menu, so that width is arithmetic: the
+   content column is --content-w centred with 30px of its own padding, leaving
+   (100vw - 1180)/2 + 30 to the left of the first card, and the menu needs
+   --nav-w of it. That comes out just under 1650px; 1680 leaves a gap rather
+   than an exact touch. Below it the menu is summoned however it is set, and the
+   setting is waiting again when the window grows. */
+@media (min-width:1680px){
+  :root:not([data-rail="off"]) .navrail{transform:none;}
+  /* Nothing to summon when it is already there. */
+  :root:not([data-rail="off"]) .nav-hot,
+  :root:not([data-rail="off"]) .navtab{display:none;}
+}
+
+/* The identity band: the strip of the menu that lies across the topbar, which
+   was empty glass. Exactly the bar's height, and it carries the bar's own rule
+   along its foot so the two line up into one unbroken line across the frame —
+   the machine named on the left at the same height as the product on the right.
+   Suggests a prompt rather than printing one: an arrow, the host, and the
+   command set small underneath. */
+.navrail__id{
+  flex:none;height:var(--topbar-h);
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  /* Left inset lands the prompt on the ❯ column of the pages below, so the
+     prompt and what follows it share one margin, like a transcript. The uneven
+     top and bottom insets sit the row low in the band: the top of it dissolves
+     into the topbar, and type in a dissolve reads as a mistake.
+     The margin below is the breath before the pages. Shorter than the control
+     row that used to sit in it, longer than nothing — the prompt and what was
+     typed at it belong together, but not on the same line. */
+  margin:0 -12px 18px;padding:16px 14px 8px 24px;
+  border-bottom:1px solid var(--e1-line);
+}
+.navrail__ps1{
+  font-size:1.25rem;line-height:1;color:var(--text-dim);letter-spacing:.03em;
+}
+.navrail__ctls{display:flex;align-items:center;gap:2px;}
+
+/* Both controls are quiet: they are settings for the furniture, not entries in
+   the menu. */
+.navrail__ctl{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:24px;height:24px;padding:0;border:0;border-radius:var(--r-sm);
+  background:none;color:var(--text-dim);cursor:pointer;
+  font-family:inherit;font-size:1.6rem;line-height:1;
+  transition:background .14s var(--ease),color .14s var(--ease),transform .22s var(--ease);
+}
+.navrail__ctl:hover{background:var(--fill-hover);color:var(--accent);}
+.navrail__ctl:focus-visible{outline:1px solid var(--accent);outline-offset:-1px;}
+/* Kept open it points left and puts the menu away; summoned it points right and
+   keeps it out. Only offered at the width where keeping it out is possible. */
+.navrail__pin{display:none;}
+@media (min-width:1680px){ .navrail__pin{display:inline-flex;} }
+:root[data-rail="off"] .navrail__pin{transform:rotate(180deg);}
+/* The switch wears a cursor of its own — not a .blink, or the rule that hides
+   them would take away the control you press to bring them back. It never
+   blinks: a switch for turning motion off has no business moving. Dimmed while
+   the cursors are hidden, so it still reads as off. */
+.navrail__cursor i{font-style:normal;}
+:root[data-blink="off"] .navrail__cursor i{opacity:.45;}
 .navrail__item{
   position:relative;display:flex;align-items:center;white-space:nowrap;cursor:pointer;
   background:none;border:0;font-family:inherit;color:var(--text);text-align:left;
-  border-radius:10px;
+  border-radius:var(--r-sm);
 }
 
 /* Tier 1 — destinations, read as the shell prompt: a ❯ that only the current
    page keeps lit, a name at nearly twice the config rows' size, and an accent
    wash that fades out to the right instead of filling the row. */
 .navrail__item--page{
-  gap:11px;padding:11px 12px;
+  gap:11px;padding:9px 12px;
   transition:background .16s ease;
 }
 .navrail__item--page:hover{background:var(--fill-hover);}
 .navrail__mk{
-  flex:none;width:13px;font-size:1.6rem;line-height:1;color:var(--text-dim);
+  flex:none;width:12px;font-size:1.35rem;line-height:1;color:var(--text-dim);
   opacity:0;transform:translateX(-5px);
   transition:opacity .16s ease,transform .16s ease,color .16s ease;
 }
 .navrail__item--page:hover .navrail__mk{opacity:.6;transform:none;}
 .navrail__txt{min-width:0;}
+/* Tier 1 leads the rail, but it was set larger than the wordmark itself — the
+   loudest type in the whole chrome, for a menu. Down to a size that still reads
+   as a tier above the config commands without competing with the brand. */
 .navrail__nm{
-  display:block;font-size:1.9rem;line-height:1.15;color:var(--title);
+  display:block;font-size:1.5rem;line-height:1.2;color:var(--title);
   transition:color .16s ease;
 }
 .navrail__ds{display:block;margin-top:1px;font-size:1.15rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;}
@@ -1072,22 +1339,31 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
   content:"";position:absolute;left:0;top:9px;bottom:9px;width:2px;
   border-radius:2px;background:var(--accent);box-shadow:0 0 10px rgba(128,203,196,.65);
 }
-/* Terminal cursor parked after the current page's name. */
+/* Terminal cursor parked after the current page's name — an underscore rather
+   than a block. Both are cursors a shell will give you; this is the quiet one,
+   and a full block sitting beside the lit page name was carrying more weight
+   than a cursor should. */
 .navrail__cur{display:none;}
 .navrail__item--on .navrail__cur{
-  display:inline-block;width:8px;height:1.5rem;margin-left:7px;
-  vertical-align:-2px;background:var(--accent);
-  box-shadow:0 0 10px rgba(128,203,196,.6);
+  display:inline-block;width:8px;height:2px;margin-left:5px;
+  vertical-align:3px;background:var(--accent);border-radius:1px;
+  box-shadow:0 0 8px rgba(128,203,196,.55);
   animation:nav-cursor 1.15s steps(1) infinite;
 }
 @keyframes nav-cursor{0%,45%{opacity:1;}46%,100%{opacity:0;}}
+/* Cursors off (the switch at the head of the side menu): gone, not merely
+   still — a cursor that has stopped blinking is still a mark in the corner of
+   the eye, which is the thing being turned off. */
+:root[data-blink="off"] .blink,
+:root[data-blink="off"] .navrail__item--on .navrail__cur{display:none;}
 
-/* Tier 2 — the config pair, tucked under the pages rather than pushed away
-   from them. The size and colour split already says these are a different kind
-   of thing, so the gap only has to separate the groups, not carry the
-   hierarchy; a long one just makes the eye travel to find them.
+/* Tier 2 — the config commands, anchored to the floor. The size and colour
+   split already says these are a different kind of thing, so the gap above them
+   isn't carrying the hierarchy — it's carrying the anchoring. Floored, they sit
+   at the same height whatever the page list does above them, which is what
+   makes them findable without reading.
    One dim line each, the subline demoted to a shell comment. */
-.navrail__foot{margin-top:18px;}
+.navrail__foot{margin-top:auto;}
 .navrail__sec{display:flex;align-items:center;gap:9px;padding:0 12px;margin-bottom:5px;}
 .navrail__sec span{font-size:1rem;letter-spacing:.14em;color:var(--text-dim);text-transform:uppercase;}
 .navrail__sec::after{content:"";flex:1;height:1px;background:var(--hairline);}
@@ -1097,7 +1373,13 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
 }
 .navrail__item--cmd:hover{background:var(--fill-hover);}
 .navrail__sig{flex:none;color:var(--accent-dim);}
-.navrail__cmd{position:relative;flex:none;color:var(--text);transition:color .13s ease;}
+/* A fixed column for the command so the trailing # comments start at the same
+   x on every row, the way you'd align them in a file. Sized in ch off the mono
+   face: the longest command here is "settings". */
+.navrail__cmd{
+  position:relative;flex:none;min-width:8ch;
+  color:var(--text);transition:color .13s ease;
+}
 .navrail__item--cmd:hover .navrail__cmd{color:var(--accent);}
 .navrail__item--on.navrail__item--cmd{background:var(--tint);}
 .navrail__item--on.navrail__item--cmd .navrail__cmd{color:var(--accent);}
@@ -1126,6 +1408,7 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
 .navrail__item:focus-visible{outline:1px solid var(--accent);outline-offset:-1px;}
 @media (prefers-reduced-motion: reduce){
   .navrail__item--on .navrail__cur{animation:none;}
+  .navrail,.navrail__pin,body{transition:none;}
 }
 
 /* The 3-line tab that summons the menu — mid-height at the very edge. It
@@ -1135,7 +1418,7 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
   position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:var(--z-nav-hot);
   display:flex;flex-direction:column;gap:4px;padding:14px 8px 14px 7px;
   background:var(--fill);border:1px solid var(--hairline);border-left:0;
-  border-radius:0 8px 8px 0;cursor:pointer;
+  border-radius:0 var(--r-sm) var(--r-sm) 0;cursor:pointer;
   transition:background .15s ease,opacity .18s ease;
 }
 .navtab span{width:14px;height:1.5px;background:var(--text-dim);border-radius:2px;transition:background .15s ease;}
@@ -1161,9 +1444,9 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    blocks the page, and the first click anywhere retires it for good. */
 .navhint{
   position:fixed;left:34px;top:50%;transform:translateY(-50%) translateX(-6px);z-index:var(--z-navrail);
-  background:var(--overlay);border:1px solid var(--hairline-strong);border-radius:12px;
-  -webkit-backdrop-filter:blur(22px) saturate(1.6);
-  backdrop-filter:blur(22px) saturate(1.6);
+  background:var(--e2-fill);border:1px solid var(--e2-line);border-radius:var(--r-md);
+  -webkit-backdrop-filter:var(--e2-blur);
+  backdrop-filter:var(--e2-blur);
   box-shadow:0 1px 2px rgba(0,0,0,.30), 0 12px 28px rgba(0,0,0,.38);
   padding:11px 34px 11px 14px;max-width:24rem;
   opacity:0;pointer-events:none;transition:opacity .22s ease,transform .22s ease;
@@ -1172,8 +1455,8 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 /* Caret pointing back at the tab, drawn from the card's own border colours. */
 .navhint::before{
   content:'';position:absolute;left:-6px;top:50%;margin-top:-6px;
-  width:10px;height:10px;background:var(--overlay);
-  border-left:1px solid var(--hairline-strong);border-bottom:1px solid var(--hairline-strong);
+  width:10px;height:10px;background:var(--e2-fill);
+  border-left:1px solid var(--e2-line);border-bottom:1px solid var(--e2-line);
   transform:rotate(45deg);
 }
 .navhint__hd{font-size:1.3rem;color:var(--caution);white-space:nowrap;}
@@ -1197,7 +1480,7 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    healthy renders hidden. Updated out-of-band by ingest poll responses. */
 .ing-chip{
   display:inline-flex;align-items:center;gap:6px;font-size:1.1rem;
-  padding:4px 10px;border-radius:6px;background:var(--fill);
+  padding:4px 10px;border-radius:var(--r-xs);background:var(--fill);
   cursor:pointer;white-space:nowrap;user-select:none;
 }
 .ing-chip i{width:7px;height:7px;border-radius:50%;flex:none;}
@@ -1232,22 +1515,26 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    on a short window. */
 .modal__frame--sources{width:min(1100px,96vw);max-height:88vh;}
 .modal__foot--sources{text-align:right;}
-/* Peek at the running config before triggering — swaps the modal to the
-   read-only config viewer (close it and reopen ingest from the bar). Styled
-   as a proper pill button so it doesn't hide in the footer text. */
-.modal__foot--ingest{display:flex;align-items:center;justify-content:flex-end;gap:10px;}
-.ing__cfg{
+/* A footer of actions rather than a caption: the runner reaches the config and
+   the feed list from here, and the settings dialog reaches the same two plus
+   the source. Pills, so they don't hide in the footer text. Both dialogs share
+   the row and the button — one shape for "what else you can open from here". */
+.modal__foot--acts{display:flex;align-items:center;justify-content:flex-end;gap:10px;}
+.modal__act{
   flex:none;
-  padding:4px 12px;border-radius:999px;
+  padding:4px 12px;border-radius:var(--r-full);
   background:var(--fill);color:var(--text);
   box-shadow:inset 0 0 0 1px var(--hairline-strong);
   cursor:pointer;
-  transition:color .15s ease,background .15s ease,box-shadow .15s ease;
+  transition:color .15s var(--ease),background .15s var(--ease),box-shadow .15s var(--ease);
 }
-.ing__cfg:hover{
+.modal__act:hover{
   color:var(--accent);background:var(--tint);
   box-shadow:inset 0 0 0 1px rgba(128,203,196,.35);
 }
+.modal__act:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
+/* The one that leaves the app says so. */
+.modal__foot--acts .modal__act--ext{margin-right:auto;}
 .ing{padding:16px 22px 20px;min-height:0;overflow-y:auto;overscroll-behavior:contain;}
 .ing__runline{display:flex;align-items:center;gap:9px;font-size:1.45rem;flex-wrap:wrap;}
 .ing__st{font-weight:500;}
@@ -1445,7 +1732,6 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
   padding:7px 12px;border-top:1px solid var(--hairline);font-size:1.15rem;
 }
 .src__pgnav{display:flex;align-items:center;gap:10px;}
-.src__pgnav[hidden]{display:none;}
 .src__pg{
   font-family:inherit;font-size:1.4rem;line-height:1;background:none;border:0;cursor:pointer;
   color:var(--accent);padding:2px 11px;border-radius:999px;
@@ -1474,8 +1760,26 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 /* One feed. The whole left side is the pick target; the switch is its own.
    A set height, so a page of N rows is always the same N rows tall and the
    dialog can reserve exactly that much without measuring anything. */
-.srow{display:flex;align-items:center;gap:10px;padding:0 14px 0 16px;height:var(--src-row-h);}
+.srow{
+  position:relative;display:flex;align-items:center;gap:10px;
+  padding:0 14px 0 16px;height:var(--src-row-h);
+  transition:background .14s var(--ease);
+}
 .srow--filtered{display:none;}
+/* The feed the pane beside the list is editing. The list is a column of near
+   identical rows and the form has no title of its own, so without this there is
+   nothing on screen saying which one you are changing. A wash that decays to the
+   right and a lit bar on the left edge — the same shape the side menu uses for
+   the page you are on, so "this is the current one" reads the same way twice. */
+.srow--on{background:linear-gradient(90deg, rgba(128,203,196,.13), rgba(128,203,196,0) 88%);}
+.srow--on::before{
+  content:"";position:absolute;left:0;top:4px;bottom:4px;width:2px;
+  border-radius:0 2px 2px 0;background:var(--accent);
+  box-shadow:0 0 8px rgba(128,203,196,.55);
+}
+/* Scoped past the state colours below: a parked or deleted feed keeps the
+   colour that says so, and the bar and wash carry the selection instead. */
+.srow--on:not(.srow--off):not(.srow--gone) .srow__nm{color:var(--accent);}
 .srow--off .srow__nm{color:var(--text-dim);}
 .srow--gone{opacity:.55;}
 .srow--gone .srow__nm{text-decoration:line-through;}
@@ -1868,9 +2172,6 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
   padding:8px;
   transform-origin:top left;animation:pop-in .16s cubic-bezier(.2,1.1,.4,1);
 }
-/* display:flex above would otherwise beat [hidden]'s default display:none, so
-   the empty popover would render as a stray rounded blob — keep it hidden. */
-.tagput__suggest[hidden]{display:none;}
 .tagput__sug{
   background:var(--card);
   border:1px solid var(--tag-border,var(--line));color:var(--tag-color,var(--text-dim));
@@ -1972,7 +2273,8 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    rail fills one slot and the opposite slot stays empty (reserved), ready for a
    second side widget later. The container widens by both slots' footprint so the
    board keeps its no-rail width. Stacks on narrow screens (media query below). --- */
-.content:has(.maze[data-wx-mode^="rail"]){max-width:calc(var(--content-w) + 2 * (var(--rail-w) + var(--rail-gap)));}
+/* Widened on the root so the topbar widens with it, not just the content. */
+:root:has(.maze[data-wx-mode^="rail"]){--page-w:calc(var(--content-w) + 2 * (var(--rail-w) + var(--rail-gap)));}
 .maze{position:relative;}
 .maze[data-wx-mode^="rail"] .maze-grid{
   display:grid;gap:var(--rail-gap);align-items:start;
@@ -2019,7 +2321,7 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    to one column so the rail stacks above the board (it's first in the DOM) at
    full width, and drop the container back to its normal centred cap. */
 @media (max-width:1220px){
-  .content:has(.maze[data-wx-mode^="rail"]){max-width:var(--content-w);}
+  :root:has(.maze[data-wx-mode^="rail"]){--page-w:var(--content-w);}
   .maze[data-wx-mode^="rail"] .maze-grid{grid-template-columns:1fr;}
   .maze[data-wx-mode^="rail"] .maze-rail,
   .maze[data-wx-mode^="rail"] .maze-main{grid-column:1;grid-row:auto;}
@@ -2171,9 +2473,6 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 @media (prefers-reduced-motion: reduce){
   .note,.idea__edit-btn,.idea__swatch,.maze-tab{transition:none;}
   /* kill the pop-in entrances + the segmented-control thumb slide */
-  .settings-panel:not([hidden]),
-  .settings-sub:hover .settings-sub__flyout,
-  .settings-sub:focus-within .settings-sub__flyout,
   .popmenu__panel,
   .tagput__suggest,
   .modal__frame{animation:none;}
@@ -2257,14 +2556,20 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    the live preview (rendered in its own family via .ff-*), the dot strip
    tracks the position in the cycle. Sliders reuse the clk-slider idiom; their
    preview lines render in the chosen face at the live size. */
-.font-step,.wx-layout-step{display:flex;align-items:center;gap:8px;padding:3px 12px 7px;}
-.font-step__arrow{
-  flex:none;width:26px;height:26px;border-radius:999px;border:1px solid transparent;
-  display:inline-flex;align-items:center;justify-content:center;padding:0;
-  background:var(--fill);color:var(--text-dim);cursor:pointer;
-  font-family:inherit;font-size:1.5rem;line-height:1;
+/* Capped, so the two arrows sit either side of the name instead of at opposite
+   ends of the pane. Left-aligned on the same inset as every label above them. */
+.font-step,.wx-layout-step{
+  display:flex;align-items:center;gap:10px;padding:3px 0 7px;
 }
-.font-step__arrow:hover{background:var(--tint);color:var(--accent);}
+.font-step__arrow{
+  flex:none;width:26px;height:26px;border-radius:var(--r-full);border:0;
+  display:inline-flex;align-items:center;justify-content:center;padding:0;
+  background:var(--sel-fill);box-shadow:var(--sel-shadow);
+  color:var(--text-dim);cursor:pointer;
+  font-family:inherit;font-size:1.5rem;line-height:1;
+  transition:background .15s var(--ease),color .15s var(--ease),box-shadow .15s var(--ease);
+}
+.font-step__arrow:hover{background:var(--sel-on-fill);box-shadow:var(--sel-on-shadow);color:var(--accent);}
 .font-step__arrow:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
 .font-step__face{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px;}
 .font-step__name{font-size:1.35rem;color:var(--title);white-space:nowrap;}
@@ -2320,13 +2625,12 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 /* The element that issued the request dims and stops taking clicks while it is
    waiting. htmx puts .htmx-request on it for us. */
 .htmx-request.navrail__item,
-.htmx-request.settings-panel__item,
 .htmx-request.feed-empty__go,
 .htmx-request.feed-empty__alt,
 .htmx-request.src__act,
 .htmx-request.sdet__btn,
 .htmx-request.srow__pick,
-.htmx-request.ing__cfg{
+.htmx-request.modal__act{
   opacity:.55;pointer-events:none;
 }
 
@@ -2361,3 +2665,15 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 .toast__x:hover{color:var(--accent);}
 .toast__x:focus-visible{outline:1px solid var(--accent);outline-offset:2px;border-radius:4px;}
 @media (prefers-reduced-motion: reduce){ .toast{transition:none;} }
+
+/* ══════════════ layout layer (settings → Theme) ═════════════════════════════
+   The chrome layout, picked in Settings → Theme and reflected by theme.js as
+   data-theme on <html>. "default" is the layout above and the unset value, so
+   it has no block here — everything up to this point IS the default.
+
+   A second layout belongs here as one :root[data-theme="…"] block redefining
+   the chrome it changes, in the same shape as the type layer above. It is a
+   layer over this file, not a fork of it: the palette, the elevation ladder and
+   the radius scale are shared, and only the shapes that actually differ get
+   restated. Add the matching card to the Theme section in layout.html and the
+   value to theme.js. */

@@ -7,11 +7,11 @@
       <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
     </div>
     {{template "ingestBody" .Body}}
-    <div class="modal__foot modal__foot--ingest">
+    <div class="modal__foot modal__foot--acts">
       {{/* Both stack over the runner instead of replacing it; Esc drops back
            here, with the run still streaming underneath. */}}
-      <a class="ing__cfg" href="#" hx-get="/config" hx-target="#modalTop" hx-swap="innerHTML">⚙ view config</a>
-      <a class="ing__cfg" href="#" hx-get="/sources" hx-target="#modalTop" hx-swap="innerHTML">▤ edit sources</a>
+      <a class="modal__act" href="#" hx-get="/config" hx-target="#modalTop" hx-swap="innerHTML">⚙ view config</a>
+      <a class="modal__act" href="#" hx-get="/sources" hx-target="#modalTop" hx-swap="innerHTML">▤ edit sources</a>
     </div>
   </div>
 </div>

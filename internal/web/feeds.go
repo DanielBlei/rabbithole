@@ -46,6 +46,10 @@ type feedRowData struct {
 	// client-side search matches against alongside the name and URL.
 	TagsAttr string
 
+	// Selected marks the feed whose settings the pane beside the list is
+	// showing, so the row you are editing is visible as the one you are editing.
+	Selected bool
+
 	// Health, aggregated from the feed's fetch history.
 	State      string
 	Detail     string // error message, or the item-count phrase

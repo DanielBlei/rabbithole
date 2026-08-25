@@ -423,6 +423,7 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 	data.Rows = make([]feedRowData, 0, len(resolved)+len(deleted))
 	for _, f := range resolved {
 		row := toFeedRow(f, health[f.ID], now)
+		row.Selected = f.ID == selected
 		if f.Enabled {
 			data.Counts.Enabled++
 		}
@@ -443,6 +444,7 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 		}
 		for _, f := range gone {
 			row := toFeedRow(f, health[f.ID], now)
+			row.Selected = f.ID == selected
 			row.Deleted, row.State, row.Detail = true, feedStateOff, "deleted"
 			data.Rows = append(data.Rows, row)
 		}

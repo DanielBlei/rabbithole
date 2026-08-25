@@ -1,16 +1,42 @@
-// The modal layers: #modal holds the base dialog, #modalTop one stacked over it
-// (the ingest runner opens config/feeds there). htmx swaps a fragment into a
-// layer; this owns dismissal, the page scroll lock, and keeping focus inside
-// the topmost open frame.
+// The modal layers, bottom to top: the settings dialog, then #modal for the
+// base htmx dialog, then #modalTop for one stacked over it (the runner and
+// settings both open config/feeds there). This owns dismissal, the page scroll
+// lock, and keeping focus inside the topmost open frame.
+//
+// The two htmx layers are containers htmx swaps a fragment into, so they are
+// open when they have a child and close by being emptied. Settings is rendered
+// with the page and only hides — its controls are bound once at load by
+// clock.js/weather.js/fonts.js and must survive. Hence isOpen/close per layer
+// rather than one hardcoded test.
 (function(){
-  var layers = ['modal', 'modalTop'].map(function(id){
-    return {el: document.getElementById(id), opener: null, open: false};
-  }).filter(function(layer){ return layer.el; });
+  function htmxLayer(id){
+    var el = document.getElementById(id);
+    if (!el) return null;
+    return {
+      el: el, opener: null, open: false, watch: {childList: true},
+      isOpen: function(){ return !!el.firstElementChild; },
+      close:  function(){ el.innerHTML = ''; }
+    };
+  }
+  function staticLayer(id){
+    var el = document.getElementById(id);
+    if (!el) return null;
+    return {
+      el: el, opener: null, open: false, watch: {attributes: true, attributeFilter: ['hidden']},
+      isOpen: function(){ return !el.hidden; },
+      close:  function(){ el.hidden = true; }
+    };
+  }
+  var layers = [
+    staticLayer('settingsModal'),
+    htmxLayer('modal'),
+    htmxLayer('modalTop')
+  ].filter(Boolean);
 
-  // The layer the user is actually looking at: the highest one with content.
+  // The layer the user is actually looking at: the highest one that is open.
   function top(){
     for (var i = layers.length - 1; i >= 0; i--){
-      if (layers[i].el.firstElementChild) return layers[i];
+      if (layers[i].isOpen()) return layers[i];
     }
     return null;
   }
@@ -34,7 +60,7 @@
   // lands on the runner link that launched it.
   layers.forEach(function(layer){
     new MutationObserver(function(){
-      var open = !!layer.el.firstElementChild;
+      var open = layer.isOpen();
       document.documentElement.classList.toggle('modal-open', !!top());
       if (open){
         // One modal swapping to another within a layer keeps the original opener.
@@ -54,7 +80,7 @@
         layer.opener = null;
       }
       layer.open = open;
-    }).observe(layer.el, {childList: true});
+    }).observe(layer.el, layer.watch);
   });
 
   // Closes one layer at a time, so the runner survives its own child dialog.
@@ -62,7 +88,7 @@
     var layer = top();
     if (!layer) return;
     var hadIngest = !!layer.el.querySelector('#ingestBody');
-    layer.el.innerHTML = '';
+    layer.close();
     // Closing the runner also closes its update channel (the body poll), so
     // ask for a fresh set of OOB chrome fragments — the chip/tab/drawer
     // reflect the run's latest state without a page reload.
