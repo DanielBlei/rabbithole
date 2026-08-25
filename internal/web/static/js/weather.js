@@ -74,6 +74,38 @@
       .catch(function(){});
   }
 
+  // The browser hands back coordinates, and "My location" is a poor name for a
+  // place — the settings field and the rail heading both want a city. This is
+  // the one call to a second provider: BigDataCloud's client endpoint is
+  // keyless and CORS-open. A failure leaves the generic label and nothing else;
+  // no reading of the weather depends on it.
+  function reverseGeocode(lat, lon){
+    fetch('https://api.bigdatacloud.net/data/reverse-geocode-client?localityLanguage=en&latitude='+lat+'&longitude='+lon)
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var name = d && (d.city || d.locality || d.principalSubdivision);
+        if (!name) return;
+        // Qualified the same way a searched place is, minus the country: this
+        // is where you are, so naming your own country adds nothing.
+        var region = d.principalSubdivision;
+        wxSet('label', name);
+        wxSet('place', region && region !== name ? name + ' · ' + region : name);
+        syncLocField();
+        locNoteSay('');
+        renderWeather();
+        // Same courtesy the typed search does: match the unit to the country
+        // until the user picks one by hand.
+        if (wxGet('unitSet','0') !== '1'){
+          var unit = d.countryCode === 'US' ? 'F' : 'C';
+          if (wxGet('unit','C') !== unit){
+            wxSet('unit', unit); wxSet('fetchedAt','0');
+            syncWxControls(); fetchWeather(lat, lon);
+          }
+        }
+      })
+      .catch(function(){});
+  }
+
   // Records why we have no location ('off' = declined or unsupported) so the
   // placements can say so instead of rendering an unexplained blank. Any
   // location, granted or typed, clears it.
@@ -84,10 +116,17 @@
       wxSet('lat', p.coords.latitude);
       wxSet('lon', p.coords.longitude);
       wxSet('label', 'My location');
+      wxSet('place', 'My location');   // until the reverse lookup names it
       wxSet('fetchedAt', '0');
+      locBtnDone();
+      syncLocField();
+      locNoteSay('Found you. Naming the place…');
       fetchWeather(p.coords.latitude, p.coords.longitude);
+      reverseGeocode(p.coords.latitude, p.coords.longitude);
     }, function(){
       wxSet('geo','off');
+      locBtnDone();
+      locNoteSay('The browser would not share your location — search for a city instead.');
       renderWeather();
     });
   }
@@ -271,6 +310,7 @@
     if (layoutName) layoutName.textContent = MODE_NAMES[MODES[mi]];
     var layoutDots = document.querySelectorAll('[data-wx-layout-dots] i');
     layoutDots.forEach(function(dot, j){ dot.classList.toggle('is-on', j === mi); });
+    syncLocField();
   }
 
   document.addEventListener('click', function(e){
@@ -296,52 +336,242 @@
     syncWxControls();
   });
 
-  var wxLocBtn = document.getElementById('wxLocBtn');
-  if (wxLocBtn){
-    wxLocBtn.addEventListener('click', function(){
-      wxSet('fetchedAt','0');
-      requestLocation();
+  // --- Location: a combobox over Open-Meteo's geocoding API (free, no key) ---
+  // The field carries the place that is set rather than sitting empty, the list
+  // walks with the arrow keys, and every state — searching, no matches, offline
+  // — says so. Silence was the old failure: a request that returned nothing
+  // looked exactly like one that was never sent.
+  var locSearch  = document.getElementById('wxLocSearch');
+  var locResults = document.getElementById('wxLocResults');
+  var locNote    = document.getElementById('wxLocNote');
+  var wxLocBtn   = document.getElementById('wxLocBtn');
+  var locHits = [], locActive = -1, locTimer = null, locReq = null, locEditing = false;
+  // Set while the last key was a delete, so the field does not re-complete the
+  // very text that was just backspaced away.
+  var locErasing = false;
+
+  function locBtnDone(){
+    if (!wxLocBtn) return;
+    wxLocBtn.disabled = false;
+    wxLocBtn.textContent = 'Use my location';
+  }
+
+  // Two names for one place: 'label' is the bare city, short enough to head the
+  // weather rail, and 'place' is the qualified one the settings field shows.
+  // "Limerick" is the ambiguous half — the row says which Limerick, and the
+  // field has room to keep saying it.
+  function locPlaceOf(p){
+    var where = [p.admin1, p.country].filter(Boolean).join(', ');
+    return where ? p.name + ' · ' + where : p.name;
+  }
+
+  // Shows the place that is set. Skipped mid-edit so it never overwrites what
+  // is being typed — syncWxControls calls this on every state change.
+  function syncLocField(){
+    if (!locSearch || locEditing) return;
+    locSearch.value = wxGet('place', wxGet('label',''));
+  }
+
+  // The city part of whatever is in the field: the qualifier is ours, not
+  // something the geocoder will match on, so it never goes into the query.
+  function locTyped(){
+    return locSearch.value.split(' · ')[0].trim();
+  }
+
+  function locNoteSay(msg){
+    if (!locNote) return;
+    locNote.textContent = msg || '';
+    locNote.hidden = !msg;
+  }
+
+  function locClose(){
+    locHits = []; locActive = -1;
+    if (locReq){ locReq.abort(); locReq = null; }
+    clearTimeout(locTimer);
+    if (!locSearch || !locResults) return;
+    locResults.innerHTML = '';
+    locResults.hidden = true;
+    locSearch.setAttribute('aria-expanded','false');
+    locSearch.removeAttribute('aria-activedescendant');
+    locNoteSay('');
+  }
+
+  function locDraw(){
+    if (!locSearch || !locResults) return;
+    locResults.innerHTML = '';
+    locHits.forEach(function(p, i){
+      var where = [p.admin1, p.country].filter(Boolean).join(', ');
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.id = 'wxLocOpt' + i;
+      b.className = 'wx-loc__opt' + (i === locActive ? ' is-active' : '') +
+        (p.name === wxGet('label','') ? ' is-cur' : '');
+      b.setAttribute('role','option');
+      b.setAttribute('aria-selected', i === locActive ? 'true' : 'false');
+      b.innerHTML = '<span class="wx-loc__nm"><b></b><i></i></span>' +
+        '<span class="wx-loc__cc"></span>';
+      // Place names are third-party text, so they go in as text, not markup.
+      b.querySelector('b').textContent = p.name;
+      b.querySelector('i').textContent = where ? ' · ' + where : '';
+      b.querySelector('.wx-loc__cc').textContent = p.country_code || '';
+      b.addEventListener('click', function(){ locPick(i); });
+      locResults.appendChild(b);
+    });
+    locResults.hidden = !locHits.length;
+    locSearch.setAttribute('aria-expanded', locHits.length ? 'true' : 'false');
+    if (locActive >= 0){
+      locSearch.setAttribute('aria-activedescendant', 'wxLocOpt' + locActive);
+      var el = locResults.children[locActive];
+      if (el && el.scrollIntoView) el.scrollIntoView({block:'nearest'});
+    } else {
+      locSearch.removeAttribute('aria-activedescendant');
+    }
+  }
+
+  // Walking the list carries the name up into the field: the row highlight and
+  // the box say the same thing, so Enter is never a guess about which one wins.
+  function locMove(step){
+    if (!locHits.length) return;
+    locActive = (locActive + step + locHits.length) % locHits.length;
+    locDraw();
+    locSearch.value = locPlaceOf(locHits[locActive]);
+  }
+
+  // Inline completion, the way an address bar does it: the rest of the best
+  // match is written in and left selected, so typing on replaces it and Enter
+  // takes it. Only when the match actually starts with what was typed —
+  // otherwise the field would contradict the letters under the cursor.
+  function locComplete(typed){
+    if (locErasing || locActive < 0) return;
+    var place = locPlaceOf(locHits[locActive]);
+    if (place.length <= typed.length) return;
+    if (place.slice(0, typed.length).toLowerCase() !== typed.toLowerCase()) return;
+    locSearch.value = typed + place.slice(typed.length);
+    locSearch.setSelectionRange(typed.length, place.length);
+  }
+
+  function locPick(i){
+    var p = locHits[i];
+    if (!p) return;
+    wxSet('lat', p.latitude); wxSet('lon', p.longitude);
+    wxSet('label', p.name); wxSet('place', locPlaceOf(p));
+    wxSet('geo','ok');
+    if (wxGet('unitSet','0') !== '1') wxSet('unit', p.country_code === 'US' ? 'F' : 'C');
+    wxSet('fetchedAt','0');
+    locEditing = false;
+    locClose();
+    // Written here rather than left to the sync pass: picking a place is the
+    // one moment the field must visibly become that place.
+    locSearch.value = locPlaceOf(p);
+    locSearch.classList.add('is-set');
+    setTimeout(function(){ locSearch.classList.remove('is-set'); }, 900);
+    syncWxControls();
+    fetchWeather(p.latitude, p.longitude);
+  }
+
+  // Open-Meteo returns the same town more than once when several records share
+  // a name, which reads as a broken list; one row per name-and-region.
+  function locDedupe(list){
+    var seen = {}, out = [];
+    list.forEach(function(p){
+      var key = [p.name, p.admin1, p.country_code].join('|').toLowerCase();
+      if (seen[key]) return;
+      seen[key] = 1; out.push(p);
+    });
+    return out;
+  }
+
+  function locSearchNow(q){
+    if (locReq) locReq.abort();
+    locReq = new AbortController();
+    locNoteSay('Searching…');
+    fetch('https://geocoding-api.open-meteo.com/v1/search?count=8&language=en&format=json&name=' +
+          encodeURIComponent(q), {signal: locReq.signal})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        locReq = null;
+        locHits = locDedupe((d && d.results) || []).slice(0, 6);
+        locActive = locHits.length ? 0 : -1;
+        locNoteSay(locHits.length ? '' : 'No place matches “' + q + '”.');
+        locDraw();
+        locComplete(q);
+      })
+      .catch(function(err){
+        if (err && err.name === 'AbortError') return;   // superseded, not failed
+        locReq = null;
+        locHits = []; locActive = -1;
+        locDraw();
+        locNoteSay('Could not reach the place search.');
+      });
+  }
+
+  if (locSearch && locResults){
+    // Pressing inside the list — an option or its scrollbar — must not blur the
+    // field, or the blur handler closes the list out from under the click.
+    locResults.addEventListener('mousedown', function(e){ e.preventDefault(); });
+
+    locSearch.addEventListener('input', function(){
+      var q = locTyped();
+      locEditing = true;
+      clearTimeout(locTimer);
+      if (locReq){ locReq.abort(); locReq = null; }
+      if (q.length < 2){
+        locHits = []; locActive = -1; locDraw();
+        locNoteSay(q.length ? 'Keep typing…' : '');
+        return;
+      }
+      locTimer = setTimeout(function(){ locSearchNow(q); }, 180);
+    });
+
+    // Typing over the current place is the common case, so it comes
+    // pre-selected rather than needing to be cleared first.
+    locSearch.addEventListener('focus', function(){ locSearch.select(); });
+
+    locSearch.addEventListener('keydown', function(e){
+      locErasing = e.key === 'Backspace' || e.key === 'Delete';
+      if (e.key === 'ArrowDown'){ e.preventDefault(); locMove(1); return; }
+      if (e.key === 'ArrowUp'){ e.preventDefault(); locMove(-1); return; }
+      if (e.key === 'Enter'){
+        e.preventDefault();
+        if (locActive >= 0){ locPick(locActive); return; }
+        // Enter before the debounce has fired is impatience, not a mistake.
+        var typed = locTyped();
+        if (typed.length >= 2){ clearTimeout(locTimer); locSearchNow(typed); }
+        return;
+      }
+      if (e.key === 'Escape'){
+        // Only when there is a list to take back: otherwise Escape belongs to
+        // the dialog, which is what the user means by it the rest of the time.
+        if (locHits.length || locSearch.value !== wxGet('place', wxGet('label',''))){
+          e.preventDefault(); e.stopPropagation();
+          locEditing = false; locClose(); syncLocField();
+        }
+      }
+    });
+
+    locSearch.addEventListener('blur', function(){
+      locEditing = false;
+      locClose();
+      syncLocField();
+    });
+
+    // A click anywhere else is a decision not to pick one.
+    document.addEventListener('click', function(e){
+      if (locResults.hidden) return;
+      if (e.target.closest && e.target.closest('.wx-loc')) return;
+      locEditing = false; locClose(); syncLocField();
     });
   }
 
-  // Typed place search → Open-Meteo geocoding (free, no key). Picking a result
-  // stores its lat/lon/label and, unless the user has set the unit by hand,
-  // defaults °F for the US and °C elsewhere.
-  var locSearch  = document.getElementById('wxLocSearch');
-  var locResults = document.getElementById('wxLocResults');
-  if (locSearch && locResults){
-    var timer = null;
-    function clearResults(){ locResults.innerHTML = ''; locResults.hidden = true; }
-    locSearch.addEventListener('input', function(){
-      var q = locSearch.value.trim();
-      clearTimeout(timer);
-      if (q.length < 2){ clearResults(); return; }
-      timer = setTimeout(function(){
-        fetch('https://geocoding-api.open-meteo.com/v1/search?count=5&language=en&format=json&name='+encodeURIComponent(q))
-          .then(function(r){ return r.json(); })
-          .then(function(d){
-            var list = (d && d.results) || [];
-            if (!list.length){ clearResults(); return; }
-            locResults.innerHTML = '';
-            list.forEach(function(p){
-              var place = [p.admin1, p.country].filter(Boolean).join(', ');
-              var b = document.createElement('button');
-              b.type = 'button'; b.className = 'wx-loc__opt';
-              b.innerHTML = '<b>'+p.name+'</b>'+(place ? ' · '+place : '');
-              b.addEventListener('click', function(){
-                wxSet('lat', p.latitude); wxSet('lon', p.longitude); wxSet('label', p.name);
-                if (wxGet('unitSet','0') !== '1') wxSet('unit', p.country_code === 'US' ? 'F' : 'C');
-                wxSet('fetchedAt','0');
-                locSearch.value = ''; clearResults();
-                syncWxControls();
-                fetchWeather(p.latitude, p.longitude);
-              });
-              locResults.appendChild(b);
-            });
-            locResults.hidden = false;
-          })
-          .catch(clearResults);
-      }, 300);
+  if (wxLocBtn){
+    wxLocBtn.addEventListener('click', function(){
+      // A permission prompt can sit unanswered for a while, and the browser's
+      // own dialog does not say which button opened it.
+      wxLocBtn.disabled = true;
+      wxLocBtn.textContent = 'Locating…';
+      locEditing = false; locClose();
+      wxSet('fetchedAt','0');
+      requestLocation();
     });
   }
 

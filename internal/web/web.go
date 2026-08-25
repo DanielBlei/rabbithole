@@ -5,6 +5,8 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"html/template"
 	"io/fs"
@@ -147,8 +149,64 @@ func (s *Web) Routes() http.Handler {
 	}
 	// Assets are quiet: one line per file on every cold load, none of it signal.
 	mux.Handle("GET /static/", httplog.QuietHandler(
-		http.StripPrefix("/static/", http.FileServer(http.FS(static)))))
+		http.StripPrefix("/static/", cacheable(static, http.FileServer(http.FS(static))))))
 	return mux
+}
+
+// staticMaxAge is how long a browser may reuse an asset without asking. Short,
+// because a rebuild changes the assets and nothing in their URLs says which
+// build they came from: this is the window in which a reload can still show the
+// previous CSS. The ETag below closes it — past this the browser asks, and gets
+// a 304 costing headers rather than the file.
+const staticMaxAge = "public, max-age=300"
+
+// cacheable stamps each embedded asset with a content ETag so a browser can
+// revalidate instead of re-downloading.
+//
+// It exists because embed.FS reports a zero modification time for every file.
+// http.FileServer turns that into no Last-Modified header at all, which leaves
+// a conditional request nothing to ask about — so every reload re-fetched all
+// of the fonts, the stylesheet and the scripts in full.
+//
+// The tag is set before the FileServer runs on purpose: net/http checks
+// If-None-Match against whatever is already on the header, so setting it here
+// is enough for the 304 to be handled for us, ranges and all.
+func cacheable(files fs.FS, next http.Handler) http.Handler {
+	tags := contentTags(files)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if tag, ok := tags[strings.TrimPrefix(r.URL.Path, "/")]; ok {
+			w.Header().Set("ETag", tag)
+			w.Header().Set("Cache-Control", staticMaxAge)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// contentTags hashes every embedded asset once, at startup. The whole tree is
+// under a megabyte, and doing it here means no hashing on the request path and
+// no cache to invalidate — the files cannot change while the process runs.
+func contentTags(files fs.FS) map[string]string {
+	tags := make(map[string]string)
+	err := fs.WalkDir(files, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		body, err := fs.ReadFile(files, path)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(body)
+		// Quoted and unprefixed: a strong validator, which is what allows the
+		// byte-range requests a font or an image may make.
+		tags[path] = `"` + hex.EncodeToString(sum[:16]) + `"`
+		return nil
+	})
+	if err != nil {
+		// Embedded and read-only, so this cannot fail in a built binary. Losing
+		// the tags costs caching, not correctness.
+		log.Warn().Err(err).Msg("hashing static assets for cache validators")
+	}
+	return tags
 }
 
 // pageData is the top-level template model passed to layout.html.

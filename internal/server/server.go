@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package server is the HTTP composition root for the serve command: it builds
-// the root mux, wraps it in the access log, and mounts the route sets that live
+// the root mux, wraps it in compression and the access log, and mounts the
+// route sets that live
 // in their own packages — the JSON API (internal/api) under /api/, and the HTML
 // web UI (internal/web, serving its own /static/ assets) at /. The health
 // endpoints are its own, since serving lifecycle is not a web or API concern.
@@ -16,6 +17,7 @@ import (
 
 	"github.com/DanielBlei/rabbithole/internal/api"
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/httpgzip"
 	"github.com/DanielBlei/rabbithole/internal/httplog"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/store"
@@ -57,5 +59,7 @@ func (s *Server) Routes() http.Handler {
 	// The web mux owns "/" (digest page) and "/static/" (embedded assets);
 	// the more specific patterns above still win for their own requests.
 	root.Handle("/", web.New(s.db, s.cfg, s.addr, s.cfgPath, s.ing).Routes())
-	return httplog.Middleware(s.log)(root)
+	// Compression sits inside the access log, so the bytes a request reports
+	// are the bytes that went on the wire rather than the ones a handler wrote.
+	return httplog.Middleware(s.log)(httpgzip.Middleware(root))
 }

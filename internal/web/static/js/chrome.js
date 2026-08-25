@@ -88,13 +88,17 @@
   function isDocked(){ return wide.matches && !root.hasAttribute('data-rail'); }
 
   var closeT = null, openT = null;
-  function open(){
+  function stopTimers(){
     clearTimeout(closeT); clearTimeout(openT);
+    closeT = null; openT = null;
+  }
+  function open(){
+    stopTimers();
     rail.classList.add('open');
     document.body.classList.add('nav-open');
   }
   function closeNow(){
-    clearTimeout(closeT); clearTimeout(openT);
+    stopTimers();
     rail.classList.remove('open');
     document.body.classList.remove('nav-open');
   }
@@ -103,14 +107,18 @@
     clearTimeout(closeT);
     closeT = setTimeout(closeNow, 240);
   }
-  // The hot zone is a 12px strip, so opening the instant it is touched means
-  // the menu flies out at anything crossing the left edge on its way past. A
-  // short dwell asks for intent. The tab and the open rail stay immediate.
+  // The hot zone spans the empty gutter beside the content, so opening the
+  // instant it is touched means the menu flies out at anything crossing the
+  // left of the window on its way past. A short dwell asks for intent. The tab
+  // and the open rail stay immediate.
+  // Arms once and stays armed: the tab's hover comes in on mouseover, which
+  // re-fires on every move inside it, and re-arming each time would mean the
+  // dwell never elapsed and the menu never came out.
   function openSoon(){
-    if (isDocked()) return;
-    clearTimeout(openT);
+    if (isDocked() || openT) return;
     openT = setTimeout(open, 110);
   }
+  function cancelOpen(){ clearTimeout(openT); openT = null; }
 
   function setDocked(docked){
     if (docked){ root.removeAttribute('data-rail'); localStorage.removeItem('rail'); }
@@ -126,7 +134,28 @@
   }
 
   hot.addEventListener('mouseenter', openSoon);
-  hot.addEventListener('mouseleave', function(){ clearTimeout(openT); });
+  hot.addEventListener('mouseleave', cancelOpen);
+  // The tab stands above the hot zone — it has to, or the zone would cover it
+  // and swallow its clicks — so hovering it no longer reaches the zone
+  // underneath and has to summon the menu itself. Delegated, because ingest
+  // responses re-render the tab out-of-band and a bound listener would go with
+  // the old element. relatedTarget filters the moves between its own lines,
+  // which are leaving the <span>, not the tab.
+  // mouseover on document means every element the pointer crosses anywhere on
+  // the page, so both handlers drop out on the coordinate first: the tab is
+  // ~30px of the left edge and nothing past that can be it.
+  var TAB_REACH = 48;
+  document.addEventListener('mouseover', function(e){
+    if (e.clientX > TAB_REACH) return;
+    if (e.target.closest('#navTab')) openSoon();
+  });
+  document.addEventListener('mouseout', function(e){
+    if (e.clientX > TAB_REACH) return;
+    if (!e.target.closest('#navTab')) return;
+    var to = e.relatedTarget;
+    if (to && to.closest && to.closest('#navTab')) return;
+    cancelOpen();
+  });
   rail.addEventListener('mouseenter', function(){ if (!isDocked()) open(); });
   rail.addEventListener('mouseleave', closeSoon);
   rail.addEventListener('click', function(e){
@@ -146,4 +175,9 @@
   // temporary reveal must not survive the crossing.
   wide.addEventListener('change', function(){ closeNow(); syncPin(); });
   syncPin();
+
+  // Whether the menu is part of the frame right now, for anything that has to
+  // agree with it. static/js/feed.js asks before putting up the first-run hint,
+  // which points at a tab that docking takes away.
+  window.navrail = { docked: isDocked };
 })();

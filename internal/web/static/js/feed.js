@@ -484,6 +484,11 @@ var feedPager = (function(){
   // first interaction of any kind.
   var hint = document.getElementById('navHint');
   if (!hint) return;
+  // Docked, there is nothing to point at: the tab is gone and the menu is
+  // already open, with `$ ingest` sitting in it amber and dotted — the same
+  // news, in the menu's own voice. Leave without touching the flag, so the
+  // hint is still waiting on a narrower window where the menu does hide.
+  if (window.navrail && window.navrail.docked()){ hint.remove(); return; }
   var KEY = 'rh.tour.ingest';
   var tab = document.getElementById('navTab');
 
