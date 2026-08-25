@@ -114,6 +114,10 @@
      layout widens the column, and a bar pinned to --content-w would come adrift
      of it on that page alone. */
   --page-w:var(--content-w);
+  /* The column's own side padding. Named because the menu's hot zone measures
+     itself against the first card's left edge, and that edge is this plus
+     whatever margin is left over. */
+  --content-pad:30px;
 
   /* Shell stacking order in one place, so the layers can't drift apart as
      pieces move. Panels sit inside the bar, the drawer rides over it, dialogs
@@ -122,10 +126,12 @@
   --z-panel:10;
   /* The side menu runs the full height and lies OVER the bar, as the same glass
      the bar is made of — what is under the menu shows through it, the topbar
-     included. Hot zone just under the menu so the menu wins the pointer where
-     the two overlap. */
+     included. Hot zone at the floor of the three: the menu wins the pointer
+     where they overlap, and so does the tab, which the zone is wide enough to
+     cover completely. */
   --z-topbar:40;
-  --z-nav-hot:44;
+  --z-nav-hot:43;
+  --z-nav-tab:44;
   --z-navrail:45;
   --z-modal:50;
   --z-modal-top:60;
@@ -222,7 +228,7 @@ header.topbar{
    while the page below sat in a centred --content-w column, so on a wide screen
    the wordmark and the first tile never shared a left edge. */
 .topbar__in{
-  flex:1;min-width:0;max-width:var(--page-w);margin:0 auto;padding:0 30px;
+  flex:1;min-width:0;max-width:var(--page-w);margin:0 auto;padding:0 var(--content-pad);
   display:flex;align-items:center;justify-content:space-between;gap:16px;
 }
 /* Terminal mascot: a tiny ASCII bunny centred over the bar. Absolutely placed so
@@ -464,26 +470,60 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .wx-switch>span{font-size:1.1rem;color:var(--text);}
 .wx-switch .clk-btn{min-width:54px;text-align:center;}
 
-/* Weather location: a search field + a geocoding-results list + the geolocation
-   button. The text field is allowed here (it's a search box, not a select). */
+/* Weather location: a combobox — the field holds the place that is set, and
+   typing over it drops a list of matches below. The text field is allowed here
+   (it's a search box, not a select). */
 .wx-loc{display:flex;flex-direction:column;gap:6px;padding:2px 0 4px;}
+/* Set brighter and heavier than body chrome: this field holds an answer, not a
+   label, and at mono 400 in --text it read as placeholder either way. */
 .wx-loc__input{
-  font-family:inherit;font-size:1.1rem;
-  padding:6px 11px;border:1px solid var(--hairline);border-radius:var(--r-full);
-  background:var(--bg);color:var(--text);
+  font-family:inherit;font-size:1.1rem;font-weight:500;
+  padding:6px 13px;border:1px solid var(--hairline);border-radius:var(--r-full);
+  background:var(--sel-fill);box-shadow:var(--sel-shadow);color:var(--title);
+  transition:border-color .15s var(--ease),background .15s var(--ease);
 }
-.wx-loc__input::placeholder{color:var(--text-dim);}
-.wx-loc__input:focus{outline:none;border-color:var(--accent-dim);}
-.wx-loc__results{display:flex;flex-direction:column;gap:2px;max-height:148px;overflow-y:auto;}
+.wx-loc__input::placeholder{color:var(--text-dim);font-weight:400;}
+.wx-loc__input:hover{background:var(--sel-fill-hover);}
+.wx-loc__input:focus{outline:none;border-color:var(--accent-dim);background:var(--sel-on-fill);}
+/* A beat of accent on the field the moment a place is picked — the list closing
+   is the only other sign it landed, and that reads as a dismissal. */
+.wx-loc__input.is-set{
+  color:var(--accent);border-color:var(--accent);
+  transition:color .5s var(--ease),border-color .5s var(--ease);
+}
+/* Held to the field by a shared border radius rather than floated over it: the
+   pane scrolls, and an absolutely positioned menu would be clipped by it. */
+.wx-loc__results{
+  display:flex;flex-direction:column;gap:1px;max-height:172px;overflow-y:auto;
+  padding:4px;border:1px solid var(--e2-line);border-radius:var(--r-md);
+  background:var(--e2-fill);
+}
 .wx-loc__opt{
+  display:flex;align-items:baseline;justify-content:space-between;gap:10px;
   text-align:left;font-family:inherit;cursor:pointer;font-size:1.1rem;
-  padding:5px 11px;border:1px solid transparent;border-radius:var(--r-sm);
+  padding:5px 10px;border:0;border-radius:var(--r-sm);
   background:none;color:var(--text-dim);
 }
-.wx-loc__opt:hover,.wx-loc__opt:focus-visible{
-  color:var(--accent);background:rgba(128,203,196,.08);outline:none;
+.wx-loc__opt:hover,.wx-loc__opt.is-active{
+  color:var(--accent);background:rgba(128,203,196,.10);outline:none;
 }
-.wx-loc__opt b{color:var(--text);font-weight:500;}
+.wx-loc__opt:focus-visible{outline:1px solid var(--accent);outline-offset:-1px;}
+.wx-loc__nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.wx-loc__nm b{color:var(--text);font-weight:500;}
+.wx-loc__nm i{font-style:normal;}
+.wx-loc__opt:hover .wx-loc__nm b,.wx-loc__opt.is-active .wx-loc__nm b{color:var(--accent);}
+/* The country code, set as a code chip: two letters place a same-named town
+   without spending a line on the full country. */
+.wx-loc__cc{
+  flex:none;font-size:.95rem;letter-spacing:.08em;color:var(--text-dim);
+  padding:1px 5px;border-radius:var(--r-xs);background:rgba(0,0,0,.22);
+}
+/* The place that is already set, marked in the list rather than only in the
+   field — it is the answer to "is this the one I picked last time". */
+.wx-loc__opt.is-cur .wx-loc__cc{color:var(--accent);background:rgba(128,203,196,.14);}
+/* Searching, no matches, location declined. A note, not an error: the search
+   going quiet was the whole complaint, so it always says something. */
+.wx-loc__note{margin:0;padding:1px 4px;font-size:1rem;color:var(--text-dim);line-height:1.45;}
 /* Stands in for the read-out when location was declined and none was typed.
    Dim and unemphasised: it is a note, not an error. */
 .wx-hint{color:var(--text-dim);font-size:1.05rem;line-height:1.4;}
@@ -516,7 +556,7 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 /* scroll-margin clears the sticky bar when the skip link jumps here, so the
    first line of content doesn't land underneath it. */
 .content{
-  max-width:var(--page-w);margin:0 auto;padding:28px 30px 80px;
+  max-width:var(--page-w);margin:0 auto;padding:28px var(--content-pad) 80px;
   scroll-margin-top:calc(var(--topbar-h) + 12px);
 }
 .content:focus{outline:none;}
@@ -978,8 +1018,8 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 
 /* Smooth rounded progress-bar gauge.
    .gauge-bar is the track; the inner .bar is the fill, width from the --score
-   custom property set per-row on .gauge-bar in partials/row.html. Tier color
-   comes from the .bar.high/.mid/.low classes via currentColor. */
+   custom property set per-row on .gauge-bar in partials/row.html. Colour comes
+   from the ramp below, with the .bar.high/.mid/.low classes as the fallback. */
 .gauge-bar{
   position:relative;display:inline-block;width:200px;height:9px;vertical-align:middle;
   background:var(--line);border-radius:999px;cursor:default;
@@ -1004,6 +1044,42 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .gauge .bar.high{color:var(--score-high);}
 .gauge .bar.mid{color:var(--score-mid);}
 .gauge .bar.low{color:var(--score-low);}
+/* Score colour is a ramp rather than three steps. A 6 wore exactly the same
+   amber as a 4 despite being a point off high signal; it now carries a little
+   green, and a 3 carries more red than a 4 does. The palette does not grow —
+   the same three colours are the anchors, at 0, 5 and 10 — so the tiers still
+   read where they always did, with the scores between them saying how close
+   they came.
+
+   Mixed through OKLab, not sRGB: a straight sRGB path from red to green runs
+   through mud in the middle, which is exactly where most scores sit.
+
+   Two mixes stacked, because CSS has no branch. p1 walks red to amber over the
+   first half and pins there; p2 is zero until 5 and reaches green at 7, where
+   the tier does. Below the fold of @supports the three tiers above still stand. */
+@supports (color: color-mix(in oklab, red, blue)){
+  .gauge .bar.high,
+  .gauge .bar.mid,
+  .gauge .bar.low{
+    --t:clamp(0, calc(var(--score, 0) / 10), 1);
+    /* Smootherstep, 6t⁵ − 15t⁴ + 10t³. A straight line spent its range being
+       neither one thing nor the other: a 2 came out orange and an 8 came out
+       yellow, so the scores that most want to be obvious were the vaguest on
+       screen. This flattens both ends and spends the change through the middle,
+       where being between two things is the honest answer. */
+    --ease:calc(var(--t) * var(--t) * var(--t) * (var(--t) * (var(--t) * 6 - 15) + 10));
+    --p1:clamp(0, calc(var(--ease) * 2), 1);
+    /* Green lands on 7 and stays there: that is the high-signal threshold the
+       stats tile counts, and the one boundary in the scale worth being able to
+       see. Straight across the two steps below it, which puts 6 squarely
+       between the two — a colour of its own rather than an amber with a hint,
+       which is the honest reading of a score one short of the mark. */
+    --p2:clamp(0, calc((var(--score, 0) - 5) / 2), 1);
+    color:color-mix(in oklab,
+      var(--score-high) calc(var(--p2) * 100%),
+      color-mix(in oklab, var(--score-mid) calc(var(--p1) * 100%), var(--score-low)));
+  }
+}
 /* why / note share one box via a switcher: each is a "▾ why" / "▾ note" tab
    (the ❯ chevron rotated to point down at its panel). Two hidden radios
    (exclusive by name) decide which of the two shared-position panels shows
@@ -1105,10 +1181,11 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .note-cancel:hover{color:var(--accent);}
 
 @media (max-width: 720px){
-  /* Matched to .content below: the bar sharing the page's left edge is the
-     whole point of .topbar__in, and that holds at every width. */
-  .topbar__in{padding:0 16px;}
-  .content{padding:20px 16px 60px;}
+  /* One number for the bar, the content and the menu's hot zone: the bar
+     sharing the page's left edge is the whole point of .topbar__in, and that
+     holds at every width. */
+  :root{--content-pad:16px;}
+  .content{padding:20px var(--content-pad) 60px;}
   .pane__body{padding:16px 16px 4px;}
   .pane__nav{flex-wrap:wrap;gap:8px;}
   .feed-empty{padding:32px 4px 38px;gap:12px;}
@@ -1183,7 +1260,21 @@ pre.yml code{font-family:inherit;}
    prompt lines, the config pair at the very floor as typed commands. */
 :root{ --topbar-h:58px; --nav-w:262px; }
 header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
-.nav-hot{position:fixed;left:0;top:var(--topbar-h);bottom:0;width:12px;z-index:var(--z-nav-hot);}
+/* The strip that summons the menu. 12px was the width of the border it sits on
+   — reachable only by aiming at it. It takes the gutter instead: the empty
+   margin left of the first card, which is the column's own padding plus
+   whatever the centring leaves over, so a wider zone costs the page nothing.
+   Three terms, and each one is a floor or a ceiling on the same measurement:
+   the padding is what the gutter is worth once the column stops growing, the
+   centring is added only past a 20px allowance for the scrollbar 100vw counts
+   and the layout does not, and 36px is the ceiling — past that a pointer merely
+   travelling down the left of the window starts tripping it. The allowance is
+   what keeps the zone off the cards: it cannot reach the ceiling until the true
+   gutter is already wider than one. */
+.nav-hot{
+  position:fixed;left:0;top:var(--topbar-h);bottom:0;z-index:var(--z-nav-hot);
+  width:clamp(16px, max(0px, (100vw - var(--page-w)) / 2 - 20px) + var(--content-pad), 36px);
+}
 .navrail{
   /* The menu runs the whole height of the viewport and lies over everything,
      the topbar included — and it is made of the bar's own glass, so what passes
@@ -1241,8 +1332,14 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
    setting is waiting again when the window grows. */
 @media (min-width:1680px){
   :root:not([data-rail="off"]) .navrail{transform:none;}
-  /* Nothing to summon when it is already there. */
+  /* Nothing to summon when it is already there — and nothing to point at
+     either: the hint's caret aims at the tab, and the open column would cover
+     the card anyway. The `$ ingest` row inside carries first run instead, amber
+     with a dot, which is the same news in the menu's own voice.
+     static/js/feed.js makes the matching call, so the hint is not marked seen
+     by a boot that never showed it. */
   :root:not([data-rail="off"]) .nav-hot,
+  :root:not([data-rail="off"]) .navhint,
   :root:not([data-rail="off"]) .navtab{display:none;}
 }
 
@@ -1415,7 +1512,7 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
    mirrors the ingest state so trouble shows with the menu closed: red lines
    on failure, pulsing while a run is live. Hidden while the menu is open. */
 .navtab{
-  position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:var(--z-nav-hot);
+  position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:var(--z-nav-tab);
   display:flex;flex-direction:column;gap:4px;padding:14px 8px 14px 7px;
   background:var(--fill);border:1px solid var(--hairline);border-left:0;
   border-radius:0 var(--r-sm) var(--r-sm) 0;cursor:pointer;
@@ -1460,6 +1557,9 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
   transform:rotate(45deg);
 }
 .navhint__hd{font-size:1.3rem;color:var(--caution);white-space:nowrap;}
+/* Set in from the text the way the menu sets its own marker in, so the two
+   line up if the eye goes from one to the other. */
+.navhint__mk{display:inline-block;width:1.1em;opacity:.55;}
 .navhint__sub{margin-top:3px;font-size:1.2rem;color:var(--text-dim);white-space:nowrap;}
 .navhint__x{
   position:absolute;top:6px;right:8px;background:none;border:0;cursor:pointer;
@@ -1471,7 +1571,9 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
   .navtab--hint{animation:none;box-shadow:0 0 10px rgba(255,203,107,.22);}
   .navhint{transition:none;}
 }
-/* The tab it points at is hidden on narrow screens, so the hint goes with it. */
+/* A floating card beside the edge is a lot of page to give up when there is
+   this little of it, and the zero-state's own `run ingest` button is already
+   the shorter route on a narrow screen. */
 @media (max-width: 720px){ .navhint{display:none;} }
 
 /* --- Ingest: ambient topbar chip ---------------------------------------- */

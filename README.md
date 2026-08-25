@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/img/logo.png" alt="The Rabbit Hole" width="480">
+  <img src="docs/img/logo.svg" alt="The Rabbit Hole" width="480">
 </p>
 
 <p align="center">

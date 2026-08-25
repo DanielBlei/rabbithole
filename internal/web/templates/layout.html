@@ -71,16 +71,23 @@
        The tab, the menu's ingest item and the ingWatch poller are standalone
        templates so ingest responses can re-render them out-of-band. -->
   {{template "navTab" .Chrome}}
-  {{/* First-run hint: the drawer is the only route to the ingest runner and
-       nothing on screen advertises it, so before the first run ever the feed
-       points at the tab once. Not a fragment — once a run is recorded the
-       server stops rendering it; until then static/js/feed.js shows it a single
-       time and remembers the dismissal. */}}
+  {{/* First-run hint: while the menu is away the drawer is the only route to
+       the ingest runner and nothing on screen advertises it, so before the
+       first run ever the feed points at the tab once. Not a fragment — once a
+       run is recorded the server stops rendering it; until then
+       static/js/feed.js shows it a single time and remembers the dismissal.
+       Rendered whatever the menu is doing, since the server cannot know: it is
+       the stylesheet and feed.js that drop it when the menu is docked and the
+       `$ ingest` command inside is already saying so. */}}
   {{if and (eq .Active "feed") .Chrome.IngNever}}
   <div class="navhint" id="navHint" role="note" hidden>
     <button class="navhint__x" type="button" aria-label="Dismiss">&times;</button>
-    <div class="navhint__hd">the menu lives here</div>
-    <div class="navhint__sub"><span aria-hidden="true">⟳</span> Ingest is inside</div>
+    {{/* The marker is the one the pages in the menu wear, so the card reads as
+         a line of the thing it is pointing at. Naming the three commands beats
+         naming the container: what is behind the tab is the answer, not that a
+         tab has something behind it. */}}
+    <div class="navhint__hd"><span class="navhint__mk" aria-hidden="true">&#10095;</span>more in here</div>
+    <div class="navhint__sub">ingest &middot; sources &middot; settings</div>
   </div>
   {{end}}
   <div class="nav-hot" id="navHot" aria-hidden="true"></div>
@@ -249,9 +256,14 @@
               <button type="button" class="clk-btn" data-wx-toggle="time24">24-hour</button>
             </div>
             <div class="stg__lbl">Location</div>
+            <!-- A combobox, not a search box: the field shows the place that is
+                 set, and typing over it offers matches to replace it with. -->
             <div class="wx-loc">
-              <input type="text" class="wx-loc__input" id="wxLocSearch" placeholder="Search a city&hellip;" autocomplete="off" spellcheck="false">
-              <div class="wx-loc__results" id="wxLocResults" hidden></div>
+              <input type="text" class="wx-loc__input" id="wxLocSearch" placeholder="Search a city&hellip;"
+                     autocomplete="off" spellcheck="false" aria-label="Location"
+                     role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="wxLocResults">
+              <div class="wx-loc__results" id="wxLocResults" role="listbox" aria-label="Matching places" hidden></div>
+              <p class="wx-loc__note" id="wxLocNote" role="status" hidden></p>
               <button type="button" class="clk-btn" id="wxLocBtn">Use my location</button>
             </div>
             <!-- Open-Meteo's free API is CC BY 4.0, which requires the credit to
@@ -259,7 +271,8 @@
                  placements: reachable from all of them, and it leaves the
                  compact sub-bar and chip uncluttered. -->
             <p class="wx-credit">Weather and pollen data by
-              <a href="https://open-meteo.com" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a>
+              <a href="https://open-meteo.com" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a>,
+              place names by <a href="https://www.bigdatacloud.com" target="_blank" rel="noopener noreferrer">BigDataCloud</a>
             </p>
           </section>
 
