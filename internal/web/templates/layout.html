@@ -132,6 +132,13 @@
         <span class="navrail__ds">day-to-day</span>
       </span>
     </a>
+    {{/* Weather, for the two placements that put it in here rather than on the
+         Maze. Always in the DOM and always empty until static/js/weather.js has
+         a payload; the stylesheet gives it a box only when one of those
+         placements is chosen, and decides which end of the gap it sits at. It
+         draws the same full read-out the Maze rail does, which is why both
+         wear .wx-full. */}}
+    <div class="wx-full navrail__wx" id="wxSide"></div>
     {{/* The gap above this is the hierarchy: configure the sources, then run
          the ingest over them, with the prefs behind the same kind of window —
          all three a drawer's length away from the pages. */}}
@@ -176,7 +183,7 @@
     <div class="modal__backdrop" data-modal-close></div>
     <div class="modal__frame modal__frame--stg" role="dialog" aria-modal="true" aria-label="Settings">
       <div class="modal__bar">
-        <span class="modal__title"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span>:<span class="pane__path">~/settings</span>$&nbsp;<span class="pane__cmd stg__cmd"></span><span class="blink">_</span></span>
+        <span class="modal__title"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~/settings</span><span class="sh">$&nbsp;</span><span class="pane__cmd stg__cmd"></span><span class="blink">_</span></span>
         <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
       </div>
 
@@ -225,18 +232,72 @@
           <section class="stg__sect stg__sect--wx">
             <div class="stg__lbl">Display</div>
             <!-- Named on the left, state on the right: the pill alone did not
-                 say whether it was the current state or the action. Pollen
-                 follows Weather, since it has nowhere to render without it. -->
+                 say whether it was the current state or the action. Four rows
+                 rather than two blocks and two labelled pill rows — units and
+                 hours each have exactly two states and a name, which is the
+                 shape of a switch, and a labelled row of two pills to say the
+                 same thing cost three lines of the pane apiece. Pollen follows
+                 Weather, since it has nowhere to render without it. -->
             <div class="wx-switches">
               <div class="wx-switch">
                 <span>Weather</span>
-                <button type="button" class="clk-btn" data-wx-toggle="show" aria-label="Weather" aria-pressed="true">On</button>
+                <button type="button" class="wx-sw" data-wx-toggle="show" role="switch" aria-checked="false"
+                        aria-label="Weather">
+                  <span class="wx-sw__knob" aria-hidden="true"></span>
+                  <span class="wx-sw__txt">On</span>
+                </button>
               </div>
               <div class="wx-switch">
                 <span>Pollen</span>
-                <button type="button" class="clk-btn" data-wx-toggle="showPollen" aria-label="Pollen" aria-pressed="true">On</button>
+                <button type="button" class="wx-sw" data-wx-toggle="showPollen" role="switch" aria-checked="false"
+                        aria-label="Pollen">
+                  <span class="wx-sw__knob" aria-hidden="true"></span>
+                  <span class="wx-sw__txt">On</span>
+                </button>
+              </div>
+              <div class="wx-switch">
+                <span>Units</span>
+                <button type="button" class="wx-sw wx-sw--ab" data-wx-unit role="switch" aria-checked="false"
+                        aria-label="Temperature units">
+                  <span class="wx-sw__knob" aria-hidden="true"></span>
+                  <span class="wx-sw__txt">&deg;C</span>
+                </button>
+              </div>
+              <div class="wx-switch">
+                <span>Hours</span>
+                <button type="button" class="wx-sw wx-sw--ab" data-wx-toggle="time24" role="switch" aria-checked="false"
+                        aria-label="Hour format">
+                  <span class="wx-sw__knob" aria-hidden="true"></span>
+                  <span class="wx-sw__txt">24-hour</span>
+                </button>
               </div>
             </div>
+            {{/* Where it shows, in the order the answers depend on each other:
+                 which pages, then the shape those pages take, then the side
+                 menu — which is its own answer, because the menu is on every
+                 page and carries its own read-out rather than a page's. */}}
+            <div class="stg__lbl">Pages</div>
+            <div class="wx-switches">
+              <div class="wx-switch">
+                <span>Feed</span>
+                <button type="button" class="wx-sw" data-wx-toggle="feed" role="switch" aria-checked="false"
+                        aria-label="Weather on the Feed">
+                  <span class="wx-sw__knob" aria-hidden="true"></span>
+                  <span class="wx-sw__txt">Off</span>
+                </button>
+              </div>
+              <div class="wx-switch">
+                <span>Maze</span>
+                <button type="button" class="wx-sw" data-wx-toggle="maze" role="switch" aria-checked="false"
+                        aria-label="Weather on the Maze">
+                  <span class="wx-sw__knob" aria-hidden="true"></span>
+                  <span class="wx-sw__txt">On</span>
+                </button>
+              </div>
+            </div>
+            {{/* The shape the two pages take. Reads as unavailable while
+                 neither page is showing it — there is nothing for it to be the
+                 shape of. */}}
             <div class="stg__lbl">Layout</div>
             <div class="wx-layout-step" data-wx-layout-step>
               <button type="button" class="font-step__arrow" data-wx-layout-prev aria-label="Previous weather layout">&#8249;</button>
@@ -246,14 +307,17 @@
               </div>
               <button type="button" class="font-step__arrow" data-wx-layout-next aria-label="Next weather layout">&#8250;</button>
             </div>
-            <div class="stg__lbl">Units</div>
-            <div class="clk-row">
-              <button type="button" class="clk-btn" data-wx-unit="C">&deg;C</button>
-              <button type="button" class="clk-btn" data-wx-unit="F">&deg;F</button>
-            </div>
-            <div class="stg__lbl">Hours</div>
-            <div class="clk-row">
-              <button type="button" class="clk-btn" data-wx-toggle="time24">24-hour</button>
+            {{/* Three positions including off, so it is the same stepper the
+                 layout is rather than a labelled row of pills — and off leads,
+                 because it is where the menu starts. */}}
+            <div class="stg__lbl">Side menu</div>
+            <div class="wx-layout-step" data-wx-side-step>
+              <button type="button" class="font-step__arrow" data-wx-side-prev aria-label="Previous side menu position">&#8249;</button>
+              <div class="font-step__face">
+                <span class="font-step__name" data-wx-side-name></span>
+                <span class="font-step__dots" data-wx-side-dots aria-hidden="true"></span>
+              </div>
+              <button type="button" class="font-step__arrow" data-wx-side-next aria-label="Next side menu position">&#8250;</button>
             </div>
             <div class="stg__lbl">Location</div>
             <!-- A combobox, not a search box: the field shows the place that is
@@ -305,9 +369,11 @@
             </div>
           </section>
 
-          {{/* The chrome layout, not the palette. One variant today; the grid
-               takes more without changing shape, and static/js/theme.js already
-               stores the choice, so a second is a card and a stylesheet layer. */}}
+          {{/* The chrome layout, not the palette. Each card draws its own
+               layout as a wireframe, in the palette's own colours — which is
+               the only way a layout picker reads at a glance. The "active"
+               badge is drawn by the stylesheet on the checked card, so adding
+               a variant stays a copy of this block with a new value. */}}
           <section class="stg__sect stg__sect--theme">
             <div class="stg__lbl">Layout</div>
             <div class="thm" role="radiogroup" aria-label="Chrome layout">
@@ -323,9 +389,26 @@
                   </span>
                   <span class="thm__hd">
                     <span class="thm__nm">Default</span>
-                    <span class="thm__st">active</span>
+                    <span class="thm__st"></span>
                   </span>
                   <span class="thm__ds">terminal chrome, dense feed</span>
+                </span>
+              </label>
+              <label class="thm__card">
+                <input type="radio" name="theme" value="minimal" data-theme-pick>
+                <span class="thm__body">
+                  <span class="thm__wire thm__wire--minimal" aria-hidden="true">
+                    <i class="w-bar"></i>
+                    <span class="w-body">
+                      <i class="w-rail"></i>
+                      <span class="w-rows"><i></i><i></i><i></i></span>
+                    </span>
+                  </span>
+                  <span class="thm__hd">
+                    <span class="thm__nm">Minimal</span>
+                    <span class="thm__st"></span>
+                  </span>
+                  <span class="thm__ds">no shell, hairline chrome</span>
                 </span>
               </label>
             </div>

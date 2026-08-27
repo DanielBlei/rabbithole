@@ -11,7 +11,7 @@
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__frame modal__frame--sources" role="dialog" aria-modal="true" aria-label="Sources">
     <div class="modal__bar">
-      <span class="modal__title"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span>:<span class="modal__path">~/sources</span>$&nbsp;{{template "sourceCounts" .Counts}}<span class="blink">_</span></span>
+      <span class="modal__title"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="modal__path">~/sources</span><span class="sh">$&nbsp;</span>{{template "sourceCounts" .Counts}}<span class="blink">_</span></span>
       <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
     </div>
 

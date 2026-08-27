@@ -1,7 +1,7 @@
 {{define "pane"}}
 <section class="pane" id="pane" data-limit="{{.ListLimit}}" data-available="{{.Stats.Available}}">
   <div class="pane__bar">
-    <span class="pane__prompt">{{.PromptUser}}@rabbithole</span>:<span class="pane__path">~/feed</span>$&nbsp;<span class="pane__cmd">{{.ServeCmd}}</span><span class="blink">_</span>
+    <span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~/feed</span><span class="sh">$&nbsp;</span><span class="pane__cmd">{{.ServeCmd}}</span><span class="blink">_</span>
   </div>
 
   <form class="pane__filters" method="get" action="/feed">

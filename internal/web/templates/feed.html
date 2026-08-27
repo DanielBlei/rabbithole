@@ -1,9 +1,22 @@
 {{define "content"}}
+{{/* Weather, for the two page shapes that take a slot of their own. Above the
+     tiles: it is the top of the column on the Maze too, and the shape is meant
+     to read the same on both pages. Both are always in the DOM and always empty
+     until static/js/weather.js has a payload for the one that is chosen — the
+     stylesheet shows whichever is filled. */}}
+<div class="wx-subbar" id="wxFeedBar"></div>
+<aside class="wx-band wx-full" id="wxFeedBand"></aside>
+
 <div class="stats-row">
   <div class="tile"><div class="num">{{.Stats.Available}}</div><div class="label">total</div></div>
   <div class="tile"><div class="num num--high" id="statHigh" data-high="{{.Stats.HighThreshold}}">{{.Stats.HighSignal}}</div><div class="label">high signal &ge;{{.Stats.HighThreshold}}</div></div>
   <div class="tile"><div class="num" id="statAvg">{{printf "%.1f" .Stats.AvgScore}}</div><div class="label">avg score</div></div>
-  <div class="tile placeholder"><div class="num">&gt;</div><div class="label">more widgets soon<span class="blink">_</span></div></div>
+  {{/* The fourth slot is either the weather wearing a tile (the inline shape)
+       or the prompt that says the row isn't finished. Both are rendered and the
+       stylesheet picks, off an attribute set before the first paint, so the
+       placeholder never flashes before the weather replaces it. */}}
+  <div class="tile tile--wx" id="wxFeedTile"></div>
+  <div class="tile placeholder"><div class="num">&gt;<span class="blink">_</span></div></div>
 </div>
 
 {{template "pane" .}}
