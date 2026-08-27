@@ -8,8 +8,8 @@
 // never opens this tab carries no key and no attribute. fonts-preload.js has
 // already applied it pre-paint; this owns the UI wiring.
 //
-// One layout ships today, which makes the picker a no-op. The plumbing is the
-// point: a second is a card in layout.html and a :root[data-theme] block.
+// Nothing here names the layouts: a card in layout.html carries the value and
+// the stylesheet's layout layer resolves it, so a new one needs no edit here.
 (function(){
   var DEFAULT = 'default';
   var root = document.documentElement;

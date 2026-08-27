@@ -3,7 +3,7 @@
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__frame modal__frame--ingest" role="dialog" aria-modal="true" aria-label="Ingest runner">
     <div class="modal__bar">
-      <span class="modal__title"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span>:<span class="pane__path">~</span>$&nbsp;<span class="pane__cmd">go run . ingest</span><span class="blink">_</span></span>
+      <span class="modal__title"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~</span><span class="sh">$&nbsp;</span><span class="pane__cmd">go run . ingest</span><span class="blink">_</span></span>
       <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
     </div>
     {{template "ingestBody" .Body}}

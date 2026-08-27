@@ -10,8 +10,8 @@
       aria-pressed="{{if .Hidden}}true{{else}}false{{end}}"
       title="{{if .Hidden}}Unhide{{else}}Hide this item{{end}}"><span class="act__icon">&#8856;</span>hide</button>
   </div>
-  <div class="line1"><span class="time">{{.Time}}</span><span class="title"><a href="{{.Link}}">{{.Title}}</a></span></div>
-  <div class="gauge"><span class="gauge-bar" style="--score:{{.Score}};" tabindex="0" aria-label="Score {{.Score}} out of 10" data-tip="score {{.Score}} / 10"><span class="bar {{.Tier}}">{{.GaugeBar}}</span></span><span>{{.Source}} &middot; {{.Date}}</span></div>
+  <div class="line1"><span class="time">{{.Time}}</span><span class="title"><a href="{{.Link}}" target="_blank" rel="noopener noreferrer">{{.Title}}</a></span></div>
+  <div class="gauge"><span class="gauge-bar" style="--score:{{.Score}};" data-score="{{.Score}}" tabindex="0" aria-label="Score {{.Score}} out of 10" data-tip="score {{.Score}} / 10"><span class="bar {{.Tier}}">{{.GaugeBar}}</span></span><span class="gauge__meta">{{.Source}} &middot; {{.Date}}</span></div>
   <div class="toggles">
     <input type="radio" name="tg{{.ID}}" id="tg-why-{{.ID}}" class="tg-radio tg-radio-why">
     <input type="radio" name="tg{{.ID}}" id="tg-note-{{.ID}}" class="tg-radio tg-radio-note">

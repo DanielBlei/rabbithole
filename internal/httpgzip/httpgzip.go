@@ -176,7 +176,7 @@ func (cw *compressWriter) settle(useGzip bool) {
 	}
 	cw.settled, cw.gzipped = true, useGzip
 	if useGzip {
-		header := cw.ResponseWriter.Header()
+		header := cw.Header()
 		header.Set("Content-Encoding", "gzip")
 		// The handler's length describes the uncompressed body, and the
 		// compressed one is not known until the stream closes.

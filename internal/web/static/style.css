@@ -105,14 +105,15 @@
   --fs-title:1.4rem;       /* ONE size for article + todo titles — never split */
   --fs-body:1.35rem;
 
-  /* The centred column every page sits in. One variable because the Maze's
-     rail layout widens from it — two copies would drift. Sized so the feed's
-     filter bar holds all six controls plus the reset on one line. */
+  /* The centred column every page sits in. Sized so the feed's filter bar
+     holds all six controls plus the reset on one line. */
   --content-w:1180px;
-  /* What the CURRENT page's column actually measures. The topbar reads this
-     too, so the bar and the content below it stay on one edge — the Maze's rail
-     layout widens the column, and a bar pinned to --content-w would come adrift
-     of it on that page alone. */
+  /* What the CURRENT page's column actually measures. The topbar and the
+     menu's hot zone read this rather than --content-w, so a page that ever
+     needs a column of its own can say so in one place and have the bar and the
+     edge follow it. Nothing widens it today: the weather rails that used to
+     were the reason it exists, and a band across the board replaced them
+     precisely so the page would stop moving. */
   --page-w:var(--content-w);
   /* The column's own side padding. Named because the menu's hot zone measures
      itself against the first card's left edge, and that edge is this plus
@@ -337,10 +338,14 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 /* One height for every section, so switching never resizes the dialog under
    the pointer — Weather is the tallest and the rest carry the slack. Set as a
    height with flex-shrink live, the same trick the sources columns use: this
-   tall, but give way when 84vh says otherwise. */
+   tall, but give way when 84vh says otherwise.
+   Sized to the tallest section's content rather than to a round number: at 428
+   Weather ran past the bottom and the location field — the one control in there
+   you have to reach for rather than glance at — was below the fold on a window
+   with room to spare. */
 .stg{
   display:grid;grid-template-columns:180px minmax(0,1fr);
-  height:428px;min-height:0;flex:1 1 auto;
+  height:512px;min-height:0;flex:1 1 auto;
 }
 .stg__rail{
   display:flex;flex-direction:column;gap:2px;min-width:0;min-height:0;
@@ -350,12 +355,16 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .stg__legend{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
 .stg__tab{position:relative;display:block;cursor:pointer;}
 .stg__tab input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;}
+/* The four names are the way into the dialog, so they are set to be read
+   rather than to be quiet — the tab you are on is told by the accent and the
+   tint behind it, which leaves the other three no reason to be dimmed as well.
+   Hover is the fill alone for the same reason: there is no brighter to go. */
 .stg__tab span{
   display:block;padding:8px 12px;border-radius:var(--r-sm);
-  font-size:1.3rem;color:var(--text-dim);
+  font-size:1.3rem;color:var(--title);
   transition:color .14s var(--ease),background .14s var(--ease);
 }
-.stg__tab input:hover ~ span{background:var(--fill-hover);color:var(--text);}
+.stg__tab input:hover ~ span{background:var(--fill-hover);}
 .stg__tab input:checked ~ span{color:var(--accent);background:var(--tint);}
 .stg__tab input:focus-visible ~ span{outline:1px solid var(--accent);outline-offset:-2px;}
 /* Weather is the one section tall enough to scroll on a short window, and a
@@ -372,10 +381,13 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .stg:has(#stgWx:checked)    .stg__sect--wx   {display:block;}
 .stg:has(#stgFonts:checked) .stg__sect--fonts{display:block;}
 .stg:has(#stgTheme:checked) .stg__sect--theme{display:block;}
-/* The section label, at the same 12px inset every control row below it uses. */
+/* The section label, at the same 12px inset every control row below it uses.
+   Set in the brightest text there is: it is the only thing in the pane that
+   names what the controls under it are, so it heads the block rather than
+   sitting quieter than the rows it introduces. */
 .stg__lbl{
   padding:6px 0 5px;font-size:1.05rem;letter-spacing:.12em;
-  text-transform:uppercase;color:var(--accent-dim);
+  text-transform:uppercase;color:var(--title);
 }
 /* The title bar wears the open section as the command it just ran, the way the
    sources dialog wears its counts. */
@@ -416,7 +428,10 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
    is sized for more, so a second is a card rather than a rebuild. Each card
    carries a wireframe because a layout is the one setting you can't name your
    way out of — you have to see the shape. */
-.thm{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;padding:4px 0 2px;}
+/* Two across in the settings column. 150px used to be the floor, but two of
+   those plus the gap overflow --stg-col by ten pixels, so auto-fill dropped to
+   one card per row the moment a second layout existed. */
+.thm{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px;padding:4px 0 2px;}
 .thm__card{position:relative;display:block;cursor:pointer;}
 .thm__card input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;}
 .thm__body{
@@ -430,8 +445,10 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .thm__hd{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:8px;}
 .thm__nm{font-size:1.25rem;color:var(--title);}
 .thm__card input:checked ~ .thm__body .thm__nm{color:var(--accent);}
-.thm__st{font-size:1rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim);}
-.thm__card input:checked ~ .thm__body .thm__st{color:var(--accent-dim);}
+/* The badge is written by the stylesheet rather than the markup: two cards
+   both carrying the word "active" in their HTML would need JS to stay honest. */
+.thm__st{font-size:1rem;letter-spacing:.1em;text-transform:uppercase;color:var(--accent-dim);}
+.thm__card input:checked ~ .thm__body .thm__st::after{content:"active";}
 .thm__ds{display:block;margin-top:2px;font-size:1.05rem;color:var(--text-dim);}
 /* The wireframe: bar across the top, rail down the left, rows in the body —
    the layout said as a picture, in the palette's own colours. */
@@ -446,6 +463,19 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .thm__wire .w-rail{width:9px;flex:none;height:100%;}
 .thm__wire .w-rows{flex:1;display:flex;flex-direction:column;gap:4px;}
 .thm__wire .w-rows i{height:14px;opacity:.32;}
+/* The Minimal card draws Minimal: the bar loses its accent and the rows lose
+   their fills for hairline rules with a score tick out on the right. */
+.thm__wire--minimal .w-bar{background:var(--text-dim);opacity:.32;}
+.thm__wire--minimal .w-body{gap:7px;}
+.thm__wire--minimal .w-rows{gap:0;padding-right:14px;}
+.thm__wire--minimal .w-rows i{
+  position:relative;height:23px;border-radius:0;background:none;opacity:1;
+  border-top:1px solid var(--hairline-strong);
+}
+.thm__wire--minimal .w-rows i::after{
+  content:"";position:absolute;right:-10px;top:9px;width:7px;height:2px;
+  border-radius:1px;background:var(--text-dim);opacity:.45;
+}
 
 /* button rows / slider / location share the label's 12px left inset so the
    controls line up under their section labels instead of sitting looser-left. */
@@ -468,7 +498,62 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .wx-switches{display:flex;flex-direction:column;gap:5px;padding:2px 0 6px;}
 .wx-switch{display:flex;align-items:center;justify-content:space-between;gap:12px;}
 .wx-switch>span{font-size:1.1rem;color:var(--text);}
-.wx-switch .clk-btn{min-width:54px;text-align:center;}
+/* The state, as a switch rather than a word you press. Same material as the
+   one on a source row — a pill, a knob, a tint — because it answers the same
+   kind of question and there is no reason for the app to own two of these.
+   What is different is that the knob travels: a source is on or off, but units
+   and hours are a choice between two named things, and a knob that only
+   changes colour cannot say which of the two you are looking at. The label
+   inside always names the state, so the knob's position is confirmation and
+   never the only way to read it.
+
+   One width for every switch in the section, sized so the longest label
+   ("24-hour") sits on one line clear of both knob positions — the six of them
+   line up down the right edge instead of stepping in and out with their words,
+   and none of them grows a second line and stands taller than its neighbours. */
+.wx-sw{
+  --sw-w:9.6rem;
+  position:relative;flex:0 0 auto;
+  display:inline-flex;align-items:center;justify-content:center;
+  width:var(--sw-w);height:2.4rem;padding:0 1.8rem;white-space:nowrap;
+  border:0;border-radius:var(--r-full);
+  background:var(--fill);color:var(--text-dim);
+  font:inherit;font-size:1.1rem;line-height:1;cursor:pointer;
+  transition:background .14s var(--ease),color .14s var(--ease);
+}
+.wx-sw:hover{background:var(--fill-hover);}
+.wx-sw:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
+.wx-sw:disabled{cursor:default;opacity:.45;}
+.wx-sw:disabled:hover{background:var(--fill);}
+.wx-sw__knob{
+  position:absolute;left:.5rem;top:50%;
+  width:.9rem;height:.9rem;margin-top:-.45rem;border-radius:50%;
+  background:var(--text-dim);
+  transition:transform .18s var(--ease),background .14s var(--ease),box-shadow .14s var(--ease);
+}
+/* The travel is the track less both insets and the knob itself, which is why
+   the width is a variable: the two numbers cannot be allowed to drift apart. */
+.wx-sw.is-on .wx-sw__knob{
+  transform:translateX(calc(var(--sw-w) - 1.9rem));
+  background:var(--accent);box-shadow:0 0 5px rgba(128,203,196,.5);
+}
+/* On and off: the pill lights with it, the way a source row's does. */
+.wx-sw.is-on{background:var(--tint);color:var(--accent);}
+/* Either and or: lit on both sides. An on/off switch goes dark when it is off
+   because off is a real state — the dark is saying nothing is happening. There
+   is no such state here: °C is not less of an answer than °F, and neither of
+   them is the switch being off, so neither has any business looking it. The
+   knob's side and the word inside say which one; the colour only says the
+   switch has an answer, which it always does. */
+.wx-sw--ab,
+.wx-sw--ab.is-on{background:var(--tint);color:var(--accent);}
+.wx-sw--ab:hover,
+.wx-sw--ab.is-on:hover{background:rgba(128,203,196,.22);}
+.wx-sw--ab .wx-sw__knob,
+.wx-sw--ab.is-on .wx-sw__knob{
+  background:var(--accent);box-shadow:0 0 5px rgba(128,203,196,.5);
+}
+@media (prefers-reduced-motion: reduce){ .wx-sw__knob{transition:none;} }
 
 /* Weather location: a combobox — the field holds the place that is set, and
    typing over it drops a list of matches below. The text field is allowed here
@@ -578,8 +663,18 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .tile .num{font-size:2rem;font-weight:600;color:var(--accent);text-shadow:0 0 7px rgba(128,203,196,.22);}
 .tile .num--high{color:var(--score-high);text-shadow:0 0 7px rgba(195,232,141,.25);}
 .tile .label{font-size:1.05rem;letter-spacing:.05em;text-transform:uppercase;color:var(--text-dim);margin-top:1px;}
-.tile.placeholder{border:1px dashed var(--text-dim);background:transparent;color:var(--text-dim);}
-.tile.placeholder .num{color:var(--text-dim);font-size:1.45rem;}
+/* The fourth slot with nothing in it. It used to announce that more was
+   coming, which is a promise the row cannot keep on its own; a prompt and a
+   cursor say the same thing and say it as a detail. One line, centred in a box
+   sized by the tiles beside it. */
+.tile.placeholder{
+  display:flex;align-items:center;justify-content:center;
+  border:1px dashed var(--text-dim);background:transparent;color:var(--text-dim);
+}
+.tile.placeholder .num{
+  display:flex;align-items:baseline;gap:5px;
+  color:var(--text-dim);font-size:1.45rem;text-shadow:none;
+}
 .blink{animation:blink 1.1s steps(1) infinite;}
 @media (prefers-reduced-motion: reduce){ .blink{animation:none;opacity:.6;} }
 @keyframes blink{50%{opacity:0;}}
@@ -1058,17 +1153,19 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
    first half and pins there; p2 is zero until 5 and reaches green at 7, where
    the tier does. Below the fold of @supports the three tiers above still stand. */
 @supports (color: color-mix(in oklab, red, blue)){
-  .gauge .bar.high,
-  .gauge .bar.mid,
-  .gauge .bar.low{
+  /* Set on the track, not the fill: the fill already paints itself with
+     currentColor, so it lands in the same place — and the numeral Minimal draws
+     in place of the bar can then inherit the same colour instead of restating
+     the whole ramp. --score lives here too, which is what the ramp reads. */
+  .gauge-bar{
     --t:clamp(0, calc(var(--score, 0) / 10), 1);
     /* Smootherstep, 6t⁵ − 15t⁴ + 10t³. A straight line spent its range being
        neither one thing nor the other: a 2 came out orange and an 8 came out
        yellow, so the scores that most want to be obvious were the vaguest on
        screen. This flattens both ends and spends the change through the middle,
        where being between two things is the honest answer. */
-    --ease:calc(var(--t) * var(--t) * var(--t) * (var(--t) * (var(--t) * 6 - 15) + 10));
-    --p1:clamp(0, calc(var(--ease) * 2), 1);
+    --ramp:calc(var(--t) * var(--t) * var(--t) * (var(--t) * (var(--t) * 6 - 15) + 10));
+    --p1:clamp(0, calc(var(--ramp) * 2), 1);
     /* Green lands on 7 and stays there: that is the high-signal threshold the
        stats tile counts, and the one boundary in the scale worth being able to
        see. Straight across the two steps below it, which puts 6 squarely
@@ -1079,6 +1176,11 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
       var(--score-high) calc(var(--p2) * 100%),
       color-mix(in oklab, var(--score-mid) calc(var(--p1) * 100%), var(--score-low)));
   }
+  /* The tier classes are the fallback for browsers without color-mix; where it
+     works they stand aside and let the ramp through. */
+  .gauge .bar.high,
+  .gauge .bar.mid,
+  .gauge .bar.low{color:inherit;}
 }
 /* why / note share one box via a switcher: each is a "▾ why" / "▾ note" tab
    (the ❯ chevron rotated to point down at its panel). Two hidden radios
@@ -1258,7 +1360,7 @@ pre.yml code{font-family:inherit;}
    the topbar and sits under the modal, tab + hot zone just beneath it.
    Inside, two tiers that never read as one list: the pages sit at the top as
    prompt lines, the config pair at the very floor as typed commands. */
-:root{ --topbar-h:58px; --nav-w:262px; }
+:root{ --topbar-h:58px; --nav-w:232px; }
 header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
 /* The strip that summons the menu. 12px was the width of the border it sits on
    — reachable only by aiming at it. It takes the gutter instead: the empty
@@ -1327,9 +1429,10 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
    of it. The page never moves for the menu, so that width is arithmetic: the
    content column is --content-w centred with 30px of its own padding, leaving
    (100vw - 1180)/2 + 30 to the left of the first card, and the menu needs
-   --nav-w of it. That comes out just under 1650px; 1680 leaves a gap rather
-   than an exact touch. Below it the menu is summoned however it is set, and the
-   setting is waiting again when the window grows. */
+   --nav-w of it. At today's 232px that comes out just under 1590px, and 1680
+   is kept anyway: the arithmetic says where the menu stops overlapping the
+   cards, not where it stops crowding them. Below it the menu is summoned
+   however it is set, and the setting is waiting again when the window grows. */
 @media (min-width:1680px){
   :root:not([data-rail="off"]) .navrail{transform:none;}
   /* Nothing to summon when it is already there — and nothing to point at
@@ -1465,23 +1568,44 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
 .navrail__sec span{font-size:1rem;letter-spacing:.14em;color:var(--text-dim);text-transform:uppercase;}
 .navrail__sec::after{content:"";flex:1;height:1px;background:var(--hairline);}
 .navrail__item--cmd{
-  gap:7px;padding:6px 12px;width:100%;font-size:1.25rem;
+  gap:5px;padding:6px 12px;width:100%;font-size:1.25rem;
   transition:background .13s ease;
 }
 .navrail__item--cmd:hover{background:var(--fill-hover);}
-.navrail__sig{flex:none;color:var(--accent-dim);}
+/* The $ hangs in the row's own left inset instead of standing in the line. In
+   the line it indented everything after it — the command, and the comment
+   trailing the command — so the config block started a character to the right
+   of the CONFIG rule above it and ran that character closer to the far edge.
+   Hung, it reads the same and costs the row nothing: the commands start on the
+   label's column, and the whole block sits where the same block sits in the
+   other layout, which is the point of there being two layouts and not two
+   apps.
+
+   Scoped to the command rows on purpose: the prompt in the band at the top of
+   the menu wears the same sigil, and it is the last thing on its line rather
+   than the first, so it has nothing to indent and no inset to hang in. */
+.navrail__sig{color:var(--accent-dim);}
+.navrail__item--cmd > .navrail__sig{
+  position:absolute;left:0;top:50%;transform:translateY(-50%);
+}
 /* A fixed column for the command so the trailing # comments start at the same
    x on every row, the way you'd align them in a file. Sized in ch off the mono
-   face: the longest command here is "settings". */
+   face, and off the longest command that actually has a comment to align —
+   "sources". "settings" is a character wider and simply takes the room; with
+   nothing after it there is nothing for it to line up with, and holding the
+   column open to its width only costs the comments beside the other two. */
 .navrail__cmd{
-  position:relative;flex:none;min-width:8ch;
+  position:relative;flex:none;min-width:7ch;
   color:var(--text);transition:color .13s ease;
 }
 .navrail__item--cmd:hover .navrail__cmd{color:var(--accent);}
 .navrail__item--on.navrail__item--cmd{background:var(--tint);}
 .navrail__item--on.navrail__item--cmd .navrail__cmd{color:var(--accent);}
+/* The comment gets whatever the column has left, which at 232px is enough for
+   the longest of them and no more — hence the smaller size here than the
+   command it trails. */
 .navrail__note{
-  min-width:0;font-size:1.1rem;color:var(--text-dim);
+  min-width:0;font-size:1.05rem;color:var(--text-dim);
   overflow:hidden;text-overflow:ellipsis;
 }
 .navrail__note::before{content:"# ";}
@@ -2323,12 +2447,13 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 }
 
 /* ============================ Maze: weather widget ======================= */
-/* Four placements, all populated client-side (Open-Meteo + geolocation +
-   localStorage) by the weather IIFE in layout.html and chosen via the Settings
-   → Weather "Layout" pills. The active mode is reflected as data-wx-mode on
-   .maze; the CSS below shows the one matching container and (for rail modes)
-   lays the board column out beside it. Containers stay empty/hidden on Feed. */
-:root{ --rail-w:236px; --rail-gap:18px; }
+/* All of it populated client-side (Open-Meteo + geolocation + localStorage) by
+   static/js/weather.js and chosen in Settings → Weather. Two axes, four
+   attributes, all on <html>: data-wx-shape says which of the three shapes the
+   pages take, data-wx-feed / data-wx-maze say which pages take it, and
+   data-wx-place puts the full read-out in the side menu at one end or the
+   other. The rules below are the crossings of those. Every container not named
+   by one is left empty by the script and hidden here. */
 
 /* --- shared weather atoms (reused by every mode) --- */
 .wx-icon{font-size:1.5rem;line-height:1;}
@@ -2347,13 +2472,27 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 .pollen--high {color:#e07830;border-color:#6b3d18;}
 .pollen--vhigh{color:var(--warn);border-color:#5a1a1a;}
 
-/* --- mode gating: hide every container, then reveal the active one --- */
-.wx-subbar,.wx-chip,.maze-rail{display:none;}
-.maze[data-wx-mode="subbar"] .wx-subbar{
+/* --- gating: hide every container, then reveal the one the settings chose ---
+   Six containers, at most two of them live at a time — a page placement and
+   the side menu. Every rule below is (shape × page), because the shape is
+   shared and the page toggles are what decide whether it lands here.
+
+   An empty container is a hidden one, which is what makes a placement switching
+   off a matter of clearing it rather than of a second rule somewhere saying so.
+   The exception is the tile: it stands in the stats row in place of something
+   the server rendered, so the row's shape depends on the attribute and not on
+   the content, and it has to be settled before the first paint. */
+.wx-subbar,.wx-chip,.wx-band,.navrail__wx{display:none;}
+:root[data-wx-shape="subbar"][data-wx-maze] #wxMazeBar,
+:root[data-wx-shape="subbar"][data-wx-feed] #wxFeedBar{
   display:flex;align-items:center;gap:1.4rem;flex-wrap:wrap;
   margin:0 0 14px;padding:0 2px 12px;font-size:1.25rem;color:var(--text-dim);
-  border-bottom:1px solid var(--line);
+  border-bottom:1px solid var(--hairline);
 }
+/* On the feed it is the first thing in the column with the tiles under it, so
+   it carries the gap the tiles would otherwise sit tight against. */
+:root[data-wx-shape="subbar"][data-wx-feed] #wxFeedBar{margin-bottom:18px;}
+.wx-subbar:empty{display:none !important;}
 /* Matches .pollen-pill's height. .wx-main is always present, so the bar keeps
    its height when the pollen strip is empty and nothing below it moves. */
 .wx-subbar .wx-main{display:flex;align-items:center;gap:8px;min-height:2rem;}
@@ -2362,72 +2501,292 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    draws the row's gap. Drop it from layout so the bar doesn't shift. */
 .pollen-strip:empty{display:none;}
 
-.maze[data-wx-mode="inline"] .wx-chip{
+:root[data-wx-shape="inline"][data-wx-maze] #wxChip{
   display:inline-flex;align-items:center;gap:8px;margin-left:auto;
   font-size:1.2rem;color:var(--text-dim);
 }
 .wx-chip .wx-icon{font-size:1.4rem;}
 .wx-chip .wx-div{width:1px;height:15px;background:var(--line);}
 
-/* --- rail modes: .maze-grid becomes a SYMMETRIC three-column grid — a reserved
-   rail-width slot on each side of the centred board. The board is always the
-   middle column, so it stays centred no matter which side the rail is on; the
-   rail fills one slot and the opposite slot stays empty (reserved), ready for a
-   second side widget later. The container widens by both slots' footprint so the
-   board keeps its no-rail width. Stacks on narrow screens (media query below). --- */
-/* Widened on the root so the topbar widens with it, not just the content. */
-:root:has(.maze[data-wx-mode^="rail"]){--page-w:calc(var(--content-w) + 2 * (var(--rail-w) + var(--rail-gap)));}
-.maze{position:relative;}
-.maze[data-wx-mode^="rail"] .maze-grid{
-  display:grid;gap:var(--rail-gap);align-items:start;
-  grid-template-columns:var(--rail-w) minmax(0,1fr) var(--rail-w);
+/* --- inline on the feed: the reading wearing a stats tile -------------------
+   The fourth slot in the stats row was a dashed placeholder saying more was
+   coming. Inline gives it to the weather, and the two swap by attribute rather
+   than by JavaScript so the row is never briefly one and then the other. With
+   the weather in it the placeholder has said its piece, so what is left of it
+   is a prompt and a cursor — the row is unfinished either way, and that reads
+   as a detail rather than an announcement. */
+/* Hidden by saying when it is NOT wanted, rather than hidden always and
+   revealed with a display of its own. A tile's display is the layout's to
+   decide — Minimal makes the whole stats row one inline sentence — and a
+   reveal rule that names one would drop the weather out of that sentence and
+   onto a line by itself. */
+:root:not([data-wx-shape="inline"]) .tile--wx,
+:root:not([data-wx-feed]) .tile--wx{display:none;}
+:root[data-wx-shape="inline"][data-wx-feed] .tile.placeholder{display:none;}
+.tile--wx .num{
+  display:flex;align-items:center;justify-content:center;gap:7px;
+  color:var(--title);text-shadow:none;
 }
-/* board is always the centre column; min-width:0 lets it shrink instead of
-   overflowing when the viewport can't hold its full width. */
-.maze[data-wx-mode^="rail"] .maze-main{grid-column:2;grid-row:1;min-width:0;}
-.maze[data-wx-mode^="rail"] .maze-rail{
-  display:block;grid-row:1;width:auto;
-  border:1px solid var(--hairline);border-radius:10px;background:var(--pane);
-  padding:15px 16px;font-size:1.3rem;color:var(--text);
+.tile--wx .num .wx-icon{font-size:1.7rem;}
+/* One fact and its name, like the counts beside it — so the label takes the
+   condition and takes it on one line, however long the condition is. */
+.tile--wx .label{
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-.maze[data-wx-mode="rail-left"]  .maze-rail{grid-column:1;}
-.maze[data-wx-mode="rail-right"] .maze-rail{grid-column:3;}
 
-.maze-rail .wx-rail-lbl{font-size:1.05rem;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-dim);margin-bottom:10px;}
-.maze-rail .wx-rail-now{display:flex;align-items:center;gap:10px;}
-.maze-rail .wx-rail-now .wx-icon{font-size:2.6rem;}
-.maze-rail .wx-rail-now .wx-temp{font-size:2.6rem;font-weight:600;line-height:1;color:var(--title);}
-.maze-rail .wx-rail-cond{font-size:1.25rem;color:var(--text);}
-.maze-rail .wx-rail-meta{margin-top:7px;font-size:1.2rem;color:var(--text);}
-/* compact hourly strip — tighter cells so more hours fit */
-.maze-rail .wx-rail-hours{display:flex;justify-content:space-between;gap:2px;margin-top:14px;border-top:1px solid var(--line);padding-top:12px;}
-.maze-rail .wx-rail-hours .h{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:1.1rem;color:var(--text);}
-.maze-rail .wx-rail-hours .h .e{font-size:1.5rem;}
-.maze-rail .wx-rail-hours .h .d{color:var(--title);font-weight:500;}
-.maze-rail .wx-rail-days,.maze-rail .wx-rail-pollen{
-  display:flex;flex-direction:column;gap:6px;margin-top:14px;border-top:1px solid var(--line);padding-top:12px;
+/* --- the compact shapes open ----------------------------------------------
+   Each of the three says one thing and stops, and the thing you want next —
+   when the rain starts, what tomorrow looks like — is never the thing it says.
+   So the reading is a <summary> and the full read-out hangs under it.
+
+   Built as a .popmenu because that is what every other disclosure on the page
+   is: static/js/chrome.js already closes those on a click elsewhere and on
+   Escape, a <summary> is focusable and opens on Enter with no help, and the
+   panel is made of the glass the feed's filters are made of. Only the trigger
+   is drawn here — the panel below inherits all of that and changes its width
+   and which corner it hangs from. */
+/* One source for the panel's width: the stylesheet lays it out, and the script
+   that places it under the pointer reads the same number rather than carrying
+   a copy that could drift from this one. */
+.wx-pop{position:relative;--wx-pop-w:26rem;}
+.wx-pop__btn{
+  display:flex;align-items:center;gap:inherit;list-style:none;cursor:pointer;
+  border-radius:var(--r-sm);
+  transition:color .14s var(--ease),background .14s var(--ease);
 }
-.maze-rail .pr{display:flex;justify-content:space-between;gap:8px;font-size:1.2rem;}
-.maze-rail .wx-rail-days .pr{color:var(--text);}
-.maze-rail .wx-rail-days .pr b{color:var(--title);font-weight:600;}
+.wx-pop__btn::-webkit-details-marker{display:none;}
+.wx-pop__btn:hover{color:var(--text);}
+.wx-pop__btn:focus-visible{outline:1px solid var(--accent);outline-offset:3px;}
+/* The mark that says it opens. Set in the same ▾ the pollen list uses to show
+   the rest of itself, and turned over when it is open, so the one gesture in
+   the widget looks the same wherever it appears. */
+.wx-pop__mk{
+  flex:none;margin-left:2px;font-size:1.05rem;line-height:1;color:var(--text-dim);
+  transition:transform .18s var(--ease),color .14s var(--ease);
+}
+.wx-pop__btn:hover .wx-pop__mk{color:var(--accent);}
+.wx-pop[open] .wx-pop__mk{transform:rotate(180deg);color:var(--accent);}
+
+/* The panel: the side menu's read-out, at the width it is drawn for there. The
+   popmenu default is at least as wide as its trigger, which for the sub-bar
+   would be the whole column — a full-width sheet for a column of readings that
+   wants three hundred pixels. */
+.wx-pop__panel{
+  min-width:0;width:var(--wx-pop-w);padding:15px 16px;gap:0;
+  font-size:1.25rem;color:var(--text);text-align:left;
+  cursor:default;
+  /* Both set by the pointer, and both with a fallback for the open that had no
+     pointer: a keyboard press on the summary. --wx-ox puts the animation's
+     origin on the point pressed, so the panel grows out of where you clicked
+     rather than out of a corner. */
+  transform-origin:var(--wx-ox, 50%) top;
+}
+/* Where it hangs when nothing has been pressed — the corner nearest the
+   reading. The sub-bar's is at its left end; the chip and the tile both sit at
+   the right end of their row, where a panel hanging left would leave the page. */
+.wx-pop--bar .wx-pop__panel{left:var(--wx-x, 0);right:auto;}
+.wx-pop--chip .wx-pop__panel,
+.wx-pop--tile .wx-pop__panel{left:var(--wx-x, auto);right:0;}
+/* Inside the panel the read-out stacks, which is the same arrangement the side
+   menu gives it — the groups divided by rules across the column. */
+.wx-pop__panel .wx-rail-hours,
+.wx-pop__panel .wx-rail-days,
+.wx-pop__panel .wx-rail-pollen{
+  margin-top:14px;padding-top:12px;border-top:1px solid var(--hairline);
+}
+.wx-pop__panel .wx-rail-hours{justify-content:space-between;gap:2px;}
+.wx-pop__panel .wx-rail-lbl{margin-bottom:10px;}
+.wx-pop__panel .wx-rail-meta{margin-top:6px;}
+
+/* The sub-bar's trigger is the bar: both ends of it open the same panel, which
+   is what makes the pollen pills at the far right a target and not just a
+   read-out. It keeps the bar's own spacing, so nothing about the row moves. */
+.wx-subbar .wx-pop{flex:1;min-width:0;}
+.wx-subbar .wx-pop__btn{gap:1.4rem;width:100%;}
+.wx-subbar .wx-pop__btn .pollen-strip{margin-left:auto;}
+.wx-subbar .wx-pop__mk{margin-left:0;}
+/* The chip keeps its inline row. */
+.wx-chip .wx-pop__btn{gap:8px;}
+/* The tile has no room for a mark beside a reading that is already centred, so
+   the whole face is the target and the hover says so — the same lift the other
+   tiles would have if they did anything.
+   The summary stays a plain block: the tile is a reading over its name, and
+   that is two lines stacking, not a flex row to be re-laid. Sizing it to fill
+   the tile is what broke it — height:100% against a padded border box left a
+   25px content box for a 26px reading, and the name under it shrank to nothing
+   rather than overflow. The lift goes on the tile instead, which is the thing
+   that is actually the size of the target. */
+.tile--wx .wx-pop__btn{display:block;}
+.tile--wx:has(.wx-pop__btn:hover),
+.tile--wx:has(.wx-pop[open]){
+  background:linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.015) 62%), var(--card);
+}
+.tile--wx .wx-pop__mk{display:none;}
+
+/* --- the full band: the read-out laid along the column it is already in -----
+   This replaced the two rails that used to stand beside the board. A rail
+   needed width the page did not have, so turning one on widened the whole
+   frame — the bar with it — and every card on the page moved. A band spends
+   the column it is already in: what is under it keeps every pixel it had.
+
+   The same band on both pages, at the top of the column on both: above the
+   board on the Maze, above the stats row on the Feed. It is one shape and it
+   should be in one place, or "the same on both pages" is only true of the
+   drawing and not of the page.
+
+   Inside, the four groups run along one line — where and when, the next six
+   hours, the next three days, what is in the air — divided by hairlines rather
+   than boxed one by one, because it is a single instrument and not four cards
+   that happen to be adjacent. */
+:root[data-wx-shape="full"][data-wx-maze] #wxMazeBand,
+:root[data-wx-shape="full"][data-wx-feed] #wxFeedBand{
+  display:flex;align-items:stretch;flex-wrap:wrap;
+  justify-content:space-between;gap:18px 30px;
+  padding:15px 22px;
+  border:1px solid var(--hairline);border-radius:var(--r-lg);
+  /* Sits in its own tray rather than flat on the page: a lit top edge, a fill
+     that falls away down the box, and just enough shadow to lift it off the
+     board. The same recipe the settings surfaces use, which is what keeps it
+     from reading as a fifth kind of panel. */
+  background:linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.012) 62%), var(--pane);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 0 1px 2px rgba(0,0,0,.20);
+  font-size:1.3rem;color:var(--text);
+}
+/* Every group is its own natural width and the band spreads them across the
+   column, rather than one group stretching to take the slack. Stretch it and
+   the hours end up a hundred pixels apart — six readings so far from each other
+   they stop being a strip and become six separate facts. The free space belongs
+   between the groups, which is what it is there to separate. */
+.wx-band .wx-head,
+.wx-band .wx-rail-hours,
+.wx-band .wx-rail-days,
+.wx-band .wx-rail-pollen{flex:0 0 auto;}
+.wx-band .wx-rail-hours{gap:26px;align-items:center;}
+.wx-band .wx-rail-days,
+.wx-band .wx-rail-pollen{min-width:104px;}
+.wx-band .wx-rail-days,
+.wx-band .wx-rail-pollen{justify-content:center;}
+.wx-band .wx-head{display:flex;flex-direction:column;justify-content:center;}
+/* The dividers are the gap made visible — set on the group rather than drawn
+   between, so a group that has nothing to say (pollen switched off) takes its
+   rule with it instead of leaving a line against nothing. */
+.wx-band .wx-rail-hours,
+.wx-band .wx-rail-days,
+.wx-band .wx-rail-pollen{border-left:1px solid var(--hairline);padding-left:30px;}
+.wx-band .wx-rail-now{margin-top:2px;}
+.wx-band .wx-rail-meta{margin-top:4px;}
+/* Nothing rendered yet — an empty tray the width of the column is worse than
+   no band, and there is always a moment of it while the payload is in flight.
+   It is also how a page that has been switched off stops drawing one. */
+.wx-band:empty{display:none !important;}
+/* The gap under it. A margin rather than the column's gap, because on the feed
+   the band's neighbour is the stats row and on the Maze it is the tab line. */
+.wx-band{margin-bottom:22px;}
+/* Wrapped, the rules would run down the start of a line rather than between
+   two groups, which is a line drawn against the edge of the box. The gap does
+   the dividing on its own from here down. */
+@media (max-width:1080px){
+  .wx-band{gap:16px 24px;}
+  .wx-band .wx-rail-hours,
+  .wx-band .wx-rail-days,
+  .wx-band .wx-rail-pollen{border-left:0;padding-left:0;}
+}
+
+/* --- the read-out itself --------------------------------------------------
+   Type and colour only, no box of its own: it is drawn identically in the band
+   and in the side menu, and everything that differs between the two is the
+   direction it runs and what divides it. Those live with the placements. */
+.wx-full .wx-rail-lbl{font-size:1.05rem;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-dim);}
+.wx-full .wx-rail-now{display:flex;align-items:center;gap:10px;}
+.wx-full .wx-rail-now .wx-icon{font-size:2.4rem;}
+.wx-full .wx-rail-now .wx-temp{font-size:2.4rem;font-weight:600;line-height:1;color:var(--title);}
+.wx-full .wx-rail-cond{font-size:1.25rem;color:var(--text);}
+.wx-full .wx-rail-meta{font-size:1.2rem;color:var(--text);}
+/* The strip is a flex row in both placements; how much air is between the
+   cells is not the same question in a 208px column as in a 1136px one, so the
+   gap is left to whichever one is drawing it. */
+.wx-full .wx-rail-hours{display:flex;}
+.wx-full .wx-rail-hours .h{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:1.1rem;color:var(--text);}
+.wx-full .wx-rail-hours .h .e{font-size:1.5rem;}
+.wx-full .wx-rail-hours .h .d{color:var(--title);font-weight:500;}
+.wx-full .wx-rail-days,
+.wx-full .wx-rail-pollen{display:flex;flex-direction:column;gap:6px;}
+.wx-full .pr{display:flex;justify-content:space-between;gap:14px;font-size:1.2rem;}
+.wx-full .wx-rail-days .pr{color:var(--text);}
+.wx-full .wx-rail-days .pr b{color:var(--title);font-weight:600;}
 /* pollen: top 3 visible; the checkbox + arrow label reveal the rest (no JS) */
 .wx-pollen-chk{position:absolute;opacity:0;pointer-events:none;}
 .wx-rail-pollen.has-more .pr:nth-of-type(n+4){display:none;}
 .wx-rail-pollen.has-more .wx-pollen-chk:checked ~ .pr{display:flex;}
-.wx-pollen-more{cursor:pointer;color:var(--accent);font-size:1.1rem;align-self:flex-start;}
+.wx-pollen-more{
+  cursor:pointer;color:var(--accent);font-size:1.1rem;align-self:flex-start;
+  transition:color .14s var(--ease);
+}
+.wx-pollen-more:hover{color:var(--title);}
 .wx-pollen-more .less{display:none;}
 .wx-pollen-chk:checked ~ .wx-pollen-more .more{display:none;}
 .wx-pollen-chk:checked ~ .wx-pollen-more .less{display:inline;}
 
-/* Too narrow to hold the centred board between two reserved side slots: collapse
-   to one column so the rail stacks above the board (it's first in the DOM) at
-   full width, and drop the container back to its normal centred cap. */
-@media (max-width:1220px){
-  :root:has(.maze[data-wx-mode^="rail"]){--page-w:var(--content-w);}
-  .maze[data-wx-mode^="rail"] .maze-grid{grid-template-columns:1fr;}
-  .maze[data-wx-mode^="rail"] .maze-rail,
-  .maze[data-wx-mode^="rail"] .maze-main{grid-column:1;grid-row:auto;}
+/* --- sidebar placements: the read-out as a section of the side menu --------
+   The menu already owns a column of the frame on every page, so putting the
+   widget in it costs the content nothing — no reserved slot, no widened page,
+   and it follows the menu when the menu is put away. It is also the only
+   placement the Feed can show.
+
+   It reads as a section of the menu rather than a panel dropped into one. It
+   used to bleed to the column's edges over a dark fill, which made it the one
+   thing in the menu with a floor of its own and put its type twelve pixels
+   left of every other line in there. Now it takes the menu's own inset, and
+   its heading is the CONFIG heading — small caps, dim, a hairline running out
+   to the right — so the menu reads as two labelled sections and a list of
+   pages instead of two sections and a guest. Nothing here sets a face or a
+   size in absolute terms, so it changes voice with the layout the same way the
+   headings above and below it do.
+
+   Two positions and off, answered by this axis alone rather than as two more
+   entries in the list of page shapes: the menu is on every page, so "in the
+   menu" was never the same kind of answer as "on the Maze".
+
+   The menu is a flex column with the config
+   block floored by margin-top:auto, so the space between the pages and the
+   config block is the free space, and an auto margin is how the widget lays
+   claim to it: without one it sits under the pages, with one it falls to the
+   floor. Auto margins share the space, though, so the menu's own has to stand
+   down when the widget takes one, or the two would halve it between them. */
+:root[data-wx-place] .navrail__wx{
+  display:block;flex:none;
+  margin:20px 0 0;padding:0 12px;
+  font-size:1.25rem;color:var(--text);
 }
+:root[data-wx-place="down"] .navrail__wx{margin-top:auto;margin-bottom:22px;}
+:root[data-wx-place="down"] .navrail__foot{margin-top:0;}
+/* The heading, in the menu's own hand — .navrail__sec's recipe, down to the
+   rule it trails, so the two labels in the column are the same object. */
+.navrail__wx .wx-rail-lbl{
+  display:flex;align-items:center;gap:9px;
+  margin-bottom:12px;
+  font-size:1rem;letter-spacing:.14em;color:var(--text-dim);
+}
+.navrail__wx .wx-rail-lbl::after{content:"";flex:1;height:1px;background:var(--hairline);}
+/* The reading is the loudest thing in the menu and shouldn't be: a column of
+   navigation whose largest type is the temperature has its priorities the
+   wrong way round. Down to a size that still leads its own section. */
+.navrail__wx .wx-rail-now .wx-icon,
+.navrail__wx .wx-rail-now .wx-temp{font-size:2.1rem;}
+.navrail__wx .wx-rail-meta{margin-top:6px;}
+/* Six readings across 184px: the cells take what they need and the space
+   between them is whatever is left. */
+.navrail__wx .wx-rail-hours{justify-content:space-between;gap:2px;}
+/* Stacked, the groups are divided by rules across the column — the menu's own
+   hairline, not the heavier line the boxed version used. */
+.navrail__wx .wx-rail-hours,
+.navrail__wx .wx-rail-days,
+.navrail__wx .wx-rail-pollen{
+  margin-top:14px;padding-top:12px;border-top:1px solid var(--hairline);
+}
+/* Nothing rendered yet — an empty section in the menu is worse than no
+   section. */
+:root[data-wx-place] .navrail__wx:empty{display:none;}
 
 /* ============================ Maze: board switch ========================== */
 /* Top-level Todos | Ideas tabs — a segmented control whose active state is a
@@ -2603,11 +2962,11 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    code re-pins mono below. Mono chrome is what sits AROUND the cards: topbar,
    prompt/filter/nav bars, board tabs, tiles, settings, YAML. Two chrome
    exceptions read like content and follow the Text face — the side menu and
-   the weather/pollen widget (all four placements) — face only: their sizes
+   the weather/pollen widget (every placement) — face only: their sizes
    stay pinned, page zoom is the size knob for chrome. .md and textarea are
    kept as a safety net for note surfaces outside a card. */
 .row,.todo,.todo-add,.todo-empty,.note,.md,textarea,
-.navrail,.wx-subbar,.wx-chip,.maze-rail{font-family:var(--font-body);}
+.navrail,.wx-subbar,.wx-chip,.wx-band{font-family:var(--font-body);}
 /* text layer, sizes — the calc offsets preserve the hierarchy (reading text
    1.35, sticky bodies / placeholders / title input 1.4, edit inputs 1.2–1.3)
    at every size step */
@@ -2672,6 +3031,13 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
   transition:background .15s var(--ease),color .15s var(--ease),box-shadow .15s var(--ease);
 }
 .font-step__arrow:hover{background:var(--sel-on-fill);box-shadow:var(--sel-on-shadow);color:var(--accent);}
+/* A shape is a shape of something. With neither page showing the widget the
+   stepper still has an answer, and it is still the answer it will use when a
+   page comes back — so it stays legible and stops taking input, rather than
+   disappearing and taking its setting with it. */
+.wx-layout-step.is-off{opacity:.4;}
+.font-step__arrow:disabled{cursor:default;background:var(--fill);box-shadow:none;color:var(--text-dim);}
+.font-step__arrow:disabled:hover{background:var(--fill);box-shadow:none;color:var(--text-dim);}
 .font-step__arrow:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
 .font-step__face{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px;}
 .font-step__name{font-size:1.35rem;color:var(--title);white-space:nowrap;}
@@ -2773,9 +3139,319 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    data-theme on <html>. "default" is the layout above and the unset value, so
    it has no block here — everything up to this point IS the default.
 
-   A second layout belongs here as one :root[data-theme="…"] block redefining
-   the chrome it changes, in the same shape as the type layer above. It is a
-   layer over this file, not a fork of it: the palette, the elevation ladder and
-   the radius scale are shared, and only the shapes that actually differ get
-   restated. Add the matching card to the Theme section in layout.html and the
-   value to theme.js. */
+   Each layout below is one :root[data-theme="…"] block redefining the chrome it
+   changes, in the same shape as the type layer above. A layer over this file,
+   not a fork of it: the palette, the elevation ladder and the radius scale are
+   shared, and only the shapes that actually differ get restated. A new one is
+   a block here plus a card in layout.html's Theme section — theme.js stores
+   whatever value the card carries and needs no edit. */
+
+/* ── minimal ──────────────────────────────────────────────────────────────
+   The terminal framing goes: no prompt line, no $, no blinking cursor. The
+   mascot stays — it is the mark, not the framing. What is left is a reading
+   column on a bare page, with the chrome pulled back to hairlines so the
+   writing is the only lit thing on screen.
+
+   Palette, elevation ladder, radius scale and every control's behaviour are
+   the ones above — this restates shapes, not systems. The reader's own font
+   and size choices carry over untouched; Minimal only changes what they default
+   to, and only for someone who never picked. */
+
+/* --- tokens ---------------------------------------------------------------
+   The page column is Default's: the same --content-w, so the feed and the Maze
+   measure the same in both and switching layout never moves the page's edges.
+   The menu is Default's too — the narrower column was Minimal's, and it turned
+   out to be the better one for both, so it moved up to :root rather than
+   staying a difference. Only the bar's height changes, because the type in it
+   is proportional now rather than mono. */
+:root[data-theme="minimal"]{
+  --topbar-h:62px;
+  /* Flatter ground. The default's radial lift reads as a spotlight on the
+     first card; with no cards to light it just makes the top of the page
+     brighter than the bottom for no reason. */
+  --page-field:linear-gradient(180deg, #1D272C 0%, var(--bg-2) 100%);
+}
+/* Minimal's default reading faces — but only where the reader has expressed no
+   preference. The Fonts tab writes data-ft/data-fb, and a face chosen there
+   outranks these and survives the switch, which is the promise the Theme tab
+   makes. */
+:root[data-theme="minimal"]:not([data-ft]){--font-title:var(--ff-grotesk);--fw-title:500;--ls-title:-.008em;}
+:root[data-theme="minimal"]:not([data-fb]){--font-body:var(--ff-plex);}
+/* The chrome's own face. Mono is the shell's voice; without a shell it is just
+   a hard face to read small type in. */
+:root[data-theme="minimal"] body{font-family:var(--ff-plex);}
+
+/* --- the shell voice, everywhere it appears -------------------------------
+   Four class names carry the whole conceit — the green user@host, the
+   punctuation between the segments, the cursor, and the ❯ markers. Retiring
+   them in one place is what keeps Minimal a layer rather than a fork. */
+:root[data-theme="minimal"] .pane__prompt,
+:root[data-theme="minimal"] .sh,
+:root[data-theme="minimal"] .blink,
+:root[data-theme="minimal"] .navrail__ps1,
+:root[data-theme="minimal"] .navrail__sig,
+:root[data-theme="minimal"] .navrail__mk,
+:root[data-theme="minimal"] .navrail__cursor,
+:root[data-theme="minimal"] .navrail__item--on .navrail__cur,
+:root[data-theme="minimal"] .feed-empty__sh{display:none;}
+/* The mascot is not shell furniture, it is the mark — it stays in both
+   layouts. It is drawn out of box-drawing characters, though, so it has to
+   keep the mono face when everything around it stops being mono. */
+:root[data-theme="minimal"] .topbar__bunny,
+:root[data-theme="minimal"] .feed-empty__bunny{font-family:var(--font-mono);}
+:root[data-theme="minimal"] .navrail__note::before{content:none;}
+
+/* --- topbar ---------------------------------------------------------------
+   Same three clusters, none of them wearing chrome. The pill nav becomes a
+   set of plain links under a rule, which is what a two-page site's nav is. */
+:root[data-theme="minimal"] .topbar__left .breaker{display:none;}
+:root[data-theme="minimal"] .topbar__left .wordmark b{
+  font-weight:600;font-size:1.5rem;letter-spacing:.005em;text-transform:none;
+}
+:root[data-theme="minimal"] .topbar__left{gap:20px;}
+:root[data-theme="minimal"] .topbar__nav{
+  background:none;padding:0;gap:2px;
+  font-size:1.25rem;letter-spacing:0;text-transform:none;
+}
+:root[data-theme="minimal"] .topbar__nav a{
+  position:relative;padding:7px 12px;border-radius:var(--r-sm);
+}
+:root[data-theme="minimal"] .topbar__nav a:hover{color:var(--text);background:var(--fill);}
+:root[data-theme="minimal"] .topbar__nav a.active{
+  color:var(--title);background:none;box-shadow:none;
+}
+/* The lit page is marked under the word rather than around it — a rule the
+   width of the label, sitting on the bar's own bottom edge. */
+:root[data-theme="minimal"] .topbar__nav a.active::after{
+  content:"";position:absolute;left:12px;right:12px;bottom:-1px;height:1.5px;
+  border-radius:1px;background:var(--accent);
+}
+/* The status well was a recess to group two things that float loose here
+   anyway; without the surrounding chrome there is nothing to group them
+   against. */
+:root[data-theme="minimal"] .topbar__amb{background:none;box-shadow:none;padding:0;gap:10px;}
+:root[data-theme="minimal"] .clock__time{color:var(--text);font-weight:400;letter-spacing:0;}
+
+/* --- side menu ------------------------------------------------------------
+   The rail keeps every behaviour it has — the dock switch, the edge summon,
+   the ingest status colouring. What changes is that it stops being glass: it
+   is a column of the page with a hairline down its right edge, which is what
+   a permanent frame looks like. Paint only — the box is Default's, down to the
+   padding, so the two menus measure the same and everything in them starts at
+   the same inset and sits at the same height. */
+/* The edge is an inset shadow rather than a border because the column's width
+   is fixed: a real border would be taken out of the 232px and leave every row
+   in this layout a pixel narrower than the same row in Default. */
+:root[data-theme="minimal"] .navrail{
+  background:none;box-shadow:inset -1px 0 0 var(--hairline);
+  -webkit-backdrop-filter:none;backdrop-filter:none;
+}
+/* The identity band held the prompt; with the prompt gone it is the strip that
+   keeps the menu's contents clear of the bar, and the dock switch lives in it.
+   The negative margin is the column's own padding, exactly — it is how the band
+   reaches the edges the menu draws, and it has to be read off the padding
+   rather than picked, or the band sits inside them or hangs past them. */
+:root[data-theme="minimal"] .navrail__id{
+  margin:0 -12px 14px;padding:0 12px 0 20px;
+  justify-content:flex-end;border-bottom:1px solid var(--hairline);
+}
+:root[data-theme="minimal"] .navrail__item--page{
+  gap:0;padding:10px 12px;border-radius:var(--r-sm);
+}
+:root[data-theme="minimal"] .navrail__nm{font-size:1.4rem;font-weight:500;}
+/* The lit page keeps Default's whole treatment — the decaying wash, the accent
+   rule down the left edge, the bloom on the name. Which page you are on is the
+   one thing the menu has to say without being read, and there is no ❯ here to
+   help say it. The blinking cursor is the only part left out, with the rest of
+   the motion: it is hidden with the shell voice above. */
+/* Without the `#` the note has no sigil to separate it from the command, so
+   the split has to be carried by weight of colour alone — which means the
+   command keeps Default's brightness rather than sinking to the note's. */
+:root[data-theme="minimal"] .navrail__cmd{color:var(--text);}
+/* The weather section in the menu needs nothing here: it has no fill of its
+   own to retire, and its heading and rules are the menu's, which this layout
+   has already restated above. It changes with the layout by inheriting it. */
+
+/* --- the page frame -------------------------------------------------------
+   The pane was a card holding the feed. Minimal has no card: the filters sit
+   under a rule and the rows run straight down the page. */
+:root[data-theme="minimal"] .pane{
+  background:none;border:0;border-radius:0;box-shadow:none;
+}
+:root[data-theme="minimal"] .pane__bar{display:none;}
+:root[data-theme="minimal"] .pane__filters{
+  padding:0 0 16px;border-bottom:1px solid var(--hairline);gap:14px;
+}
+:root[data-theme="minimal"] .filter__key{text-transform:none;letter-spacing:.02em;font-size:1.15rem;}
+:root[data-theme="minimal"] .pane__body{padding:0;}
+:root[data-theme="minimal"] .pane__nav{padding:16px 0 18px;border-bottom:0;}
+:root[data-theme="minimal"] .nav-btn{background:none;opacity:.7;padding:5px 12px;border-radius:var(--r-full);}
+:root[data-theme="minimal"] .nav-btn:hover:not(:disabled){opacity:1;}
+:root[data-theme="minimal"] .pagenav{padding:22px 0 2px;}
+
+/* The stats tiles become the page's opening line. Same three numbers, read as
+   a sentence instead of as a dashboard — which is the only thing a summary of
+   four figures is worth on a page whose subject is the list below it. */
+:root[data-theme="minimal"] .stats-row{gap:0;align-items:baseline;margin-bottom:26px;}
+:root[data-theme="minimal"] .tile{
+  flex:0 0 auto;min-width:0;padding:0;text-align:left;
+  background:none;border:0;box-shadow:none;
+  display:flex;align-items:baseline;gap:7px;
+}
+:root[data-theme="minimal"] .tile + .tile::before{
+  content:"\00b7";margin:0 13px;color:var(--text-dim);
+}
+:root[data-theme="minimal"] .tile .num{
+  font-size:1.5rem;font-weight:600;color:var(--title);text-shadow:none;
+  font-variant-numeric:tabular-nums;
+}
+:root[data-theme="minimal"] .tile .num--high{color:var(--score-high);text-shadow:none;}
+:root[data-theme="minimal"] .tile .label{
+  font-size:1.25rem;text-transform:none;letter-spacing:0;margin-top:0;
+}
+:root[data-theme="minimal"] .tile.placeholder{display:none;}
+
+/* --- feed rows ------------------------------------------------------------
+   The one real restructure. A row stops being a card and becomes a record in a
+   list: three columns — the time, the reading, the score — separated from its
+   neighbours by a hairline and a lot of air.
+
+   .line1 and .gauge go display:contents so their children become items of the
+   row's own grid. That is what lets the score leave the line under the title
+   and take a column of its own without the template being rebuilt around it. */
+:root[data-theme="minimal"] .row{
+  display:grid;grid-template-columns:auto minmax(0,1fr) 52px;
+  padding:22px 0;margin:0;
+  background:none;border:0;border-radius:0;box-shadow:none;
+  border-top:1px solid var(--hairline);
+  transition:opacity .12s;
+}
+:root[data-theme="minimal"] .pane__body > .row:first-child{border-top:0;padding-top:8px;}
+:root[data-theme="minimal"] .row:hover{transform:none;box-shadow:none;}
+:root[data-theme="minimal"] .line1,
+:root[data-theme="minimal"] .gauge{display:contents;}
+:root[data-theme="minimal"] .row .line1{padding-right:0;}
+:root[data-theme="minimal"] .row .title{grid-column:1 / 3;grid-row:1;min-width:0;}
+:root[data-theme="minimal"] .row .title a{
+  font-size:calc(var(--fs-title) + .35rem);line-height:1.32;text-wrap:balance;
+  transition:color .18s var(--ease);
+}
+:root[data-theme="minimal"] .row .title a:hover{color:var(--accent);text-decoration:none;}
+/* Row two carries everything that is about the item rather than in it: when,
+   where from, and the triage pair pushed to the far end of the measure. */
+:root[data-theme="minimal"] .row .time{grid-column:1;grid-row:2;margin-top:9px;font-size:1.15rem;}
+:root[data-theme="minimal"] .gauge__meta{
+  grid-column:2;grid-row:2;margin-top:9px;align-self:center;
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  padding-right:140px;
+}
+:root[data-theme="minimal"] .row__actions{
+  position:static;grid-column:2;grid-row:2;
+  justify-self:end;align-self:center;margin-top:9px;
+}
+:root[data-theme="minimal"] .toggles{grid-column:1 / 3;grid-row:3;margin-top:10px;}
+
+/* The score keeps every part of how it works — the same --score fill, the same
+   ramp colour, the same hover tip and the same focus ring. It only stops being
+   a 200px bar under the title and becomes a numeral over a short rule in its
+   own column, which is the whole of what "sleeker" asks for here. */
+:root[data-theme="minimal"] .gauge-bar{
+  grid-column:3;grid-row:1 / 3;align-self:start;justify-self:end;
+  width:22px;height:2px;margin:31px 0 0 26px;
+  border-radius:1px;background:var(--hairline-strong);
+}
+:root[data-theme="minimal"] .gauge-bar::before{
+  content:attr(data-score);
+  position:absolute;right:0;bottom:11px;
+  font-family:var(--font-title);font-weight:500;font-size:2rem;line-height:1;
+  font-variant-numeric:tabular-nums;color:currentColor;
+}
+/* Right-anchored: at the page's right edge a tip growing rightwards would run
+   off it. */
+:root[data-theme="minimal"] .gauge-bar::after{left:auto;right:0;}
+/* An unscored item has no numeral to show and no fill to draw, so it shows the
+   empty rule alone rather than a zero it did not earn. */
+:root[data-theme="minimal"] .row:not([data-score]) .gauge-bar::before{content:none;}
+
+/* The dog-ear was folded into a card corner that no longer exists. Same gold,
+   same states, drawn as the flag the gesture actually means and parked under
+   the score. */
+:root[data-theme="minimal"] .bookmark{
+  position:static;grid-column:3;grid-row:2;
+  justify-self:end;align-self:center;
+  width:13px;height:17px;margin:9px 0 0 26px;
+  border-radius:0;border-bottom-right-radius:0;
+  clip-path:polygon(0 0,100% 0,100% 100%,50% 72%,0 100%);
+}
+:root[data-theme="minimal"] .bookmark::before{display:none;}
+
+/* --- windows --------------------------------------------------------------
+   The dialogs' contents are already portable; only their title bars spoke
+   shell. Each names itself instead, and what the prompt used to carry as a
+   path or a command trails it as a dim subtitle. */
+:root[data-theme="minimal"] .modal__bar{background:none;border-bottom:1px solid var(--hairline);padding:12px 16px;}
+:root[data-theme="minimal"] .modal__title{
+  display:flex;align-items:baseline;gap:9px;
+  font-size:1.35rem;color:var(--title);letter-spacing:0;
+}
+:root[data-theme="minimal"] .modal__title .pane__cmd,
+:root[data-theme="minimal"] .modal__title .modal__path,
+:root[data-theme="minimal"] .modal__title .pane__path{
+  font-size:1.2rem;font-weight:400;color:var(--text-dim);
+}
+:root[data-theme="minimal"] .modal__frame--stg .modal__title::before{content:"Settings";}
+:root[data-theme="minimal"] .modal__frame--ingest .modal__title::before{content:"Ingest";}
+:root[data-theme="minimal"] .modal__frame--sources .modal__title::before{content:"Sources";}
+/* Their paths were the title; now the ::before is, and "~" or "~/sources" said
+   twice is just noise. */
+:root[data-theme="minimal"] .modal__frame--stg .modal__title .pane__path,
+:root[data-theme="minimal"] .modal__frame--ingest .modal__title .pane__path,
+:root[data-theme="minimal"] .modal__frame--ingest .modal__title .pane__cmd,
+:root[data-theme="minimal"] .modal__frame--sources .modal__title .modal__path{display:none;}
+
+/* --- maze -----------------------------------------------------------------
+   The boards follow the feed: the segmented control flattens to underlined
+   tabs, and a task stops being a card for the same reason a row did. */
+:root[data-theme="minimal"] .maze-tabline{
+  border-bottom:1px solid var(--hairline);margin-bottom:22px;
+}
+:root[data-theme="minimal"] .maze-tabs{
+  background:none;border:0;border-radius:0;padding:3px 3px 0;margin-bottom:-1px;
+}
+:root[data-theme="minimal"] .maze-tab{border-radius:0;font-size:1.35rem;}
+/* The weather band gives up its tray with every other tray in this layout, and
+   is separated by a rule along the side facing what it sits above — the same
+   hairline that separates a task from the task above it. */
+:root[data-theme="minimal"] .wx-band{
+  background:none;border:0;border-radius:0;box-shadow:none;
+  padding:0 0 20px;border-bottom:1px solid var(--hairline);
+}
+/* The tile in the stats row is a .tile, and the rule above has already made
+   every tile in this layout a clause of one sentence — the weather is simply
+   the last clause. What it does need is the summary that opens it laid out the
+   way the tile itself is: the reading and its name sit side by side here and
+   stacked in the other layout, and the summary now stands exactly where the
+   two of them used to, so it has to answer that question in both places. */
+:root[data-theme="minimal"] .tile--wx .wx-pop__btn{
+  display:flex;align-items:baseline;gap:7px;
+}
+:root[data-theme="minimal"] .maze-tabs::before{
+  top:auto;bottom:0;height:2px;border-radius:1px;
+  background:var(--accent);box-shadow:none;
+}
+:root[data-theme="minimal"] .todo-tabs{padding:0 0 12px;border-bottom:1px solid var(--hairline);}
+:root[data-theme="minimal"] .todo-panel{padding:16px 0 6px;}
+:root[data-theme="minimal"] .todo{
+  padding:13px 0;margin:0;
+  background:none;border:0;border-radius:0;box-shadow:none;
+  border-top:1px solid var(--hairline);
+}
+:root[data-theme="minimal"] .todo:first-child{border-top:0;}
+/* The composer was a card in a pane; with the pane gone it was the only filled
+   thing on the board. A hairline box says "type here" on its own. */
+:root[data-theme="minimal"] .todo-add{
+  padding:12px 14px;margin-bottom:6px;
+  background:none;border:1px solid var(--hairline);border-radius:var(--r-md);
+  box-shadow:none;
+}
+:root[data-theme="minimal"] .ideaboard{padding:16px 0 6px;}
