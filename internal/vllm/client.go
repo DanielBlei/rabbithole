@@ -44,26 +44,29 @@ type modelsResponse struct {
 
 // Client scores items via /v1/chat/completions in JSON mode.
 type Client struct {
-	host      string
-	model     string
-	think     bool
-	tuning    rank.ModelTuning
-	hc        *http.Client
-	validator *retry.Validator
+	host         string
+	model        string
+	think        bool
+	tuning       rank.ModelTuning
+	systemPrompt string // empty sends no system message at all
+	hc           *http.Client
+	validator    *retry.Validator
 }
 
 // New connects to host using the given model. apiKey is optional (Bearer).
 // think enables the model's reasoning mode (on by default for scoring).
 // tuning carries the decoding limits; its zero value uses rank's defaults.
-func New(host, model, apiKey string, think bool, tuning rank.ModelTuning) (*Client, error) {
+// systemPrompt is sent as the request's system message; empty omits it entirely.
+func New(host, model, apiKey string, think bool, tuning rank.ModelTuning, systemPrompt string) (*Client, error) {
 	if _, err := url.Parse(host); err != nil {
 		return nil, fmt.Errorf("invalid host %q: %w", host, err)
 	}
 	return &Client{
-		host:   strings.TrimRight(host, "/"),
-		model:  model,
-		think:  think,
-		tuning: tuning.Normalize(),
+		host:         strings.TrimRight(host, "/"),
+		model:        model,
+		think:        think,
+		tuning:       tuning.Normalize(),
+		systemPrompt: systemPrompt,
 		hc: &http.Client{
 			Transport: &httpclient.BearerTransport{Token: apiKey, Base: http.DefaultTransport},
 		},
@@ -142,14 +145,20 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 
 	userPrompt := rank.BuildUserPrompt(profile, items)
 	budget := c.tuning.Budget(len(items), c.think)
+
+	var messages []chatMessage
+	// Omitted rather than sent empty: a served model's own default system prompt only kicks
+	// in when no system message is present at all.
+	if c.systemPrompt != "" {
+		messages = append(messages, chatMessage{Role: "system", Content: c.systemPrompt})
+	}
+	messages = append(messages, chatMessage{Role: "user", Content: userPrompt})
+
 	reqBody := chatRequest{
 		Model:     c.model,
 		Stream:    false,
 		MaxTokens: budget,
-		Messages: []chatMessage{
-			{Role: "system", Content: rank.SystemPrompt},
-			{Role: "user", Content: userPrompt},
-		},
+		Messages:  messages,
 		ResponseFormat: responseFormat{
 			Type: "json_schema",
 			JSONSchema: &jsonSchema{

@@ -1,12 +1,16 @@
 # Configuration
 
-Three files under `configs/`:
+Files under `configs/`:
 
 | File | Contents |
 |---|---|
 | `config.yaml` | How to run — model, scoring, storage, paths |
 | `feeds.yaml` | Feeds to seed the store with on first run — see [Feeds](#feeds) |
-| `profile.md` | The interest profile used for ranking |
+| `prompts/profile.md` | The interest profile used for ranking |
+| `prompts/system.md` | Optional [system prompt](#system-prompt) override; omit to use the built-in default |
+
+`profile.md` and `system.md` live in `configs/prompts/`, since both are text handed to the
+model rather than run configuration.
 
 ## Getting started
 
@@ -18,12 +22,12 @@ The templates ship pointing at the example profile and feed list so a fresh chec
 without further edits. Once you have your own, update `configs/config.yaml` accordingly:
 
 ```yaml
-profile: ./configs/profile.md
+profile: ./configs/prompts/profile.md
 ingest:
   feeds: ./configs/feeds.yaml
 ```
 
-> **Note:** until those paths are changed, edits to `configs/profile.md` and
+> **Note:** until those paths are changed, edits to `configs/prompts/profile.md` and
 > `configs/feeds.yaml` have no effect — the application reads the example files.
 
 `config.yaml` and `profile.md` are read once at startup; changes made while the server is
@@ -44,6 +48,7 @@ All fields are optional unless marked required.
 | `inference.model` | Model name | `qwen3.5:4b`                      |
 | `inference.api_key` | Bearer token, where the endpoint requires one | none                              |
 | `inference.think` | Allow model reasoning before scoring, with fallback | `true`                            |
+| `inference.system_prompt` | Path to a system-prompt override, or `false` to send none — see below | built-in                          |
 | `inference.batch_size` | Articles per scoring request | `1`                               |
 | `inference.max_parallel` | Scoring requests in flight | `1`                               |
 | `inference.model_tuning.*` | Decoding limits — see below | see below                         |
@@ -246,7 +251,7 @@ https://medium.com/feed/@<username>
 
 ## Interest profile
 
-Free-form markdown describing the subject matter of interest; `configs/profile.example.md`
+Free-form markdown describing the subject matter of interest; `configs/prompts/profile.example.md`
 is a starting point. It is passed to the model verbatim with every batch of articles and is
 the primary influence on how items are scored.
 
@@ -257,6 +262,35 @@ yourself can be kept in the file without being read as interests.
 > operators, KubeVirt, Go internals — not funding rounds or product launches" ranks
 > considerably better than "AI and infrastructure". When results are consistently
 > off-target, revise this file before changing the model.
+
+## System prompt
+
+Where `profile.md` describes what the reader wants, `inference.system_prompt` controls how the
+model is instructed to score and respond — the scale it uses, and the JSON shape it must reply
+in. Unlike `profile`, it's optional: leave it unset and a built-in default is used.
+
+`inference.system_prompt` takes one of three forms:
+
+```yaml
+inference:
+  # system_prompt: ./configs/prompts/system.md   # override: this file's contents
+  # system_prompt: false                         # send no system message at all
+```
+
+- **Unset** (the default) — the built-in prompt is used.
+- **A path** — that file's contents are used instead, verbatim. HTML comments (`<!-- ... -->`)
+  are stripped first, same as `profile.md`. `configs/prompts/system.example.md` carries the
+  built-in prompt's exact text as a starting point to copy from — prompt files live in their own
+  `configs/prompts/` folder rather than directly under `configs/`.
+- **`false`** — no system message is sent at all. Useful for a model whose own Modelfile or chat
+  template already bakes one in: any system message the app sends — the built-in default or an
+  override — takes precedence over a model's own, so `false` is how you defer to it instead.
+  (Ollama documents this directly for `/api/generate`'s `system` field as overriding what the
+  Modelfile sets; `/api/chat` runs through the same templating.)
+
+The built-in prompt already tells the model that article titles/summaries are data, not
+instructions — worth keeping if you write your own override. See
+[SECURITY.md](../SECURITY.md#untrusted-content) for why that matters.
 
 ## The Maze weather widget
 

@@ -43,19 +43,21 @@ var (
 
 // Client scores items using an Ollama chat model in JSON mode.
 type Client struct {
-	api       *api.Client
-	model     string
-	think     bool
-	tuning    rank.ModelTuning
-	validator *retry.Validator
-	thinkOnce sync.Once // gates the one-time think-support probe in Validate
+	api          *api.Client
+	model        string
+	think        bool
+	tuning       rank.ModelTuning
+	systemPrompt string // empty sends no system message at all
+	validator    *retry.Validator
+	thinkOnce    sync.Once // gates the one-time think-support probe in Validate
 }
 
 // New connects to host using the given chat model. apiKey is optional (Bearer).
 // The model must carry an explicit tag to avoid pulling the wrong image.
 // think enables the model's reasoning mode, which is on by default for scoring.
 // tuning carries the decoding limits; its zero value uses rank's defaults.
-func New(host, model, apiKey string, think bool, tuning rank.ModelTuning) (*Client, error) {
+// systemPrompt is sent as the chat request's system message; empty omits it entirely.
+func New(host, model, apiKey string, think bool, tuning rank.ModelTuning, systemPrompt string) (*Client, error) {
 	u, err := url.Parse(host)
 	if err != nil {
 		return nil, fmt.Errorf("invalid host %q: %w", host, err)
@@ -68,11 +70,12 @@ func New(host, model, apiKey string, think bool, tuning rank.ModelTuning) (*Clie
 		Transport: &httpclient.BearerTransport{Token: apiKey, Base: http.DefaultTransport},
 	}
 	return &Client{
-		api:       api.NewClient(u, hc),
-		model:     model,
-		think:     think,
-		tuning:    tuning.Normalize(),
-		validator: retry.NewValidator("ollama", validateAttempts, validateBackoff),
+		api:          api.NewClient(u, hc),
+		model:        model,
+		think:        think,
+		tuning:       tuning.Normalize(),
+		systemPrompt: systemPrompt,
+		validator:    retry.NewValidator("ollama", validateAttempts, validateBackoff),
 	}, nil
 }
 
@@ -163,16 +166,21 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 	if c.tuning.NumCtx > 0 {
 		opts["num_ctx"] = c.tuning.NumCtx
 	}
+	var messages []api.Message
+	// Omitted rather than sent empty: a model's own Modelfile system prompt only kicks in
+	// when no system message is present at all.
+	if c.systemPrompt != "" {
+		messages = append(messages, api.Message{Role: "system", Content: c.systemPrompt})
+	}
+	messages = append(messages, api.Message{Role: "user", Content: userPrompt})
+
 	req := &api.ChatRequest{
 		Model:  c.model,
 		Stream: &stream,
 		// A schema rather than bare "json": Ollama compiles it to a grammar and samples only conforming tokens
-		Format:  json.RawMessage(c.tuning.Schema()),
-		Options: opts,
-		Messages: []api.Message{
-			{Role: "system", Content: rank.SystemPrompt},
-			{Role: "user", Content: userPrompt},
-		},
+		Format:   json.RawMessage(c.tuning.Schema()),
+		Options:  opts,
+		Messages: messages,
 	}
 
 	// Set the model's reasoning mode explicitly. Ignored by models without a

@@ -117,7 +117,11 @@ func Run(
 		if resolved {
 			return scorer, nil
 		}
-		s, err := inference.Resolve(ctx, cfg.Inference, opts.Think)
+		systemPrompt, err := cfg.Inference.LoadSystemPrompt()
+		if err != nil {
+			return nil, err
+		}
+		s, err := inference.Resolve(ctx, cfg.Inference, opts.Think, systemPrompt)
 		if err != nil {
 			return nil, err
 		}

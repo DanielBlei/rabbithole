@@ -46,7 +46,7 @@ func TestValidate(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{})
+			c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{}, "")
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -93,7 +93,7 @@ func TestValidateThinkProbe(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3:latest", "", true, rank.ModelTuning{})
+			c, err := New(srv.URL, "llama3:latest", "", true, rank.ModelTuning{}, "")
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -138,7 +138,7 @@ func TestListModelNames(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{})
+			c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{}, "")
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -195,7 +195,7 @@ func TestScoreSurfacesDoneReasonOnParseFailure(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{})
+			c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{}, "")
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -221,7 +221,7 @@ func TestScoreSalvagesTruncatedResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{})
+	c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{}, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -257,7 +257,7 @@ func TestScoreRequestConstrainsOutput(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{})
+	c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{}, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -270,5 +270,55 @@ func TestScoreRequestConstrainsOutput(t *testing.T) {
 	}
 	if want := (rank.ModelTuning{}).Budget(len(items), false); got.Options.NumPredict != want {
 		t.Errorf("num_predict = %d, want %d", got.Options.NumPredict, want)
+	}
+}
+
+// TestScoreOmitsSystemMessageWhenPromptEmpty pins the behavior a disabled system_prompt
+// depends on: an empty systemPrompt must drop the message entirely, not send it empty, since
+// only an absent system message lets a model's own Modelfile default apply.
+func TestScoreOmitsSystemMessageWhenPromptEmpty(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		systemPrompt string
+		wantRoles    []string
+	}{
+		{"empty prompt sends no system message", "", []string{"user"}},
+		{"set prompt sends it first", "be nice", []string{"system", "user"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got struct {
+				Messages []struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"messages"`
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&got)
+				w.Header().Set("Content-Type", "application/x-ndjson")
+				_, _ = w.Write([]byte(
+					`{"message":{"role":"assistant","content":"{\"scores\":[{\"index\":1,\"score\":9,\"reason\":\"x\"}]}"},"done":true,"done_reason":"stop","eval_count":9}
+`,
+				))
+			}))
+			defer srv.Close()
+
+			c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{}, tc.systemPrompt)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			if _, err := c.Score(t.Context(), "profile", []feeds.Item{{ID: "a", Title: "A"}}); err != nil {
+				t.Fatalf("Score() error = %v", err)
+			}
+			var roles []string
+			for _, m := range got.Messages {
+				roles = append(roles, m.Role)
+			}
+			if !slices.Equal(roles, tc.wantRoles) {
+				t.Fatalf("message roles = %v, want %v", roles, tc.wantRoles)
+			}
+			if tc.systemPrompt != "" && got.Messages[0].Content != tc.systemPrompt {
+				t.Errorf("system message content = %q, want %q", got.Messages[0].Content, tc.systemPrompt)
+			}
+		})
 	}
 }

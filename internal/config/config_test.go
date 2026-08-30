@@ -8,6 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/DanielBlei/rabbithole/internal/rank"
 )
 
 func TestParseDuration(t *testing.T) {
@@ -153,4 +157,132 @@ func TestLoadProfileRejectsAnEmptyProfile(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSystemPromptSettingUnmarshalYAML(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		yaml    string
+		want    SystemPromptSetting
+		wantErr bool
+	}{
+		{"path", "system_prompt: ./configs/prompts/system.md", SystemPromptSetting{Path: "./configs/prompts/system.md"}, false},
+		{"false disables", "system_prompt: false", SystemPromptSetting{Disabled: true}, false},
+		{"true is rejected", "system_prompt: true", SystemPromptSetting{}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var cfg struct {
+				SystemPrompt SystemPromptSetting `yaml:"system_prompt"`
+			}
+			err := yaml.Unmarshal([]byte(tc.yaml), &cfg)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("Unmarshal(%q) = %+v, want an error", tc.yaml, cfg.SystemPrompt)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Unmarshal(%q) error = %v", tc.yaml, err)
+			}
+			if cfg.SystemPrompt != tc.want {
+				t.Fatalf("Unmarshal(%q) = %+v, want %+v", tc.yaml, cfg.SystemPrompt, tc.want)
+			}
+		})
+	}
+}
+
+func TestSystemPromptSettingLoadOverride(t *testing.T) {
+	t.Run("unset path returns empty", func(t *testing.T) {
+		got, err := (&SystemPromptSetting{}).LoadOverride()
+		if err != nil {
+			t.Fatalf("LoadOverride() error = %v", err)
+		}
+		if got != "" {
+			t.Fatalf("LoadOverride() = %q, want empty", got)
+		}
+	})
+
+	for _, tc := range []struct {
+		name    string
+		content string
+		wantErr bool
+		want    string
+	}{
+		{"real override", "Score everything a 10.", false, "Score everything a 10."},
+		{"empty file", "", true, ""},
+		{"comment only", "<!-- edit me -->\n", true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "system.md")
+			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := (&SystemPromptSetting{Path: path}).LoadOverride()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("LoadOverride() = %q, want an error", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadOverride() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("LoadOverride() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestInferenceConfigLoadSystemPrompt(t *testing.T) {
+	t.Run("heuristic provider ignores a broken override path", func(t *testing.T) {
+		cfg := InferenceConfig{
+			Provider:     "heuristic",
+			SystemPrompt: SystemPromptSetting{Path: filepath.Join(t.TempDir(), "missing.md")},
+		}
+		got, err := cfg.LoadSystemPrompt()
+		if err != nil {
+			t.Fatalf("LoadSystemPrompt() error = %v, want nil (heuristic never reads the path)", err)
+		}
+		if got != "" {
+			t.Fatalf("LoadSystemPrompt() = %q, want empty", got)
+		}
+	})
+
+	t.Run("disabled returns empty", func(t *testing.T) {
+		cfg := InferenceConfig{Provider: "ollama", SystemPrompt: SystemPromptSetting{Disabled: true}}
+		got, err := cfg.LoadSystemPrompt()
+		if err != nil {
+			t.Fatalf("LoadSystemPrompt() error = %v", err)
+		}
+		if got != "" {
+			t.Fatalf("LoadSystemPrompt() = %q, want empty", got)
+		}
+	})
+
+	t.Run("unset returns the built-in default", func(t *testing.T) {
+		cfg := InferenceConfig{Provider: "ollama"}
+		got, err := cfg.LoadSystemPrompt()
+		if err != nil {
+			t.Fatalf("LoadSystemPrompt() error = %v", err)
+		}
+		if got != rank.DefaultSystemPrompt {
+			t.Fatalf("LoadSystemPrompt() = %q, want the built-in default", got)
+		}
+	})
+
+	t.Run("path overrides the default", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "system.md")
+		if err := os.WriteFile(path, []byte("Score everything a 10."), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg := InferenceConfig{Provider: "ollama", SystemPrompt: SystemPromptSetting{Path: path}}
+		got, err := cfg.LoadSystemPrompt()
+		if err != nil {
+			t.Fatalf("LoadSystemPrompt() error = %v", err)
+		}
+		if got != "Score everything a 10." {
+			t.Fatalf("LoadSystemPrompt() = %q, want the override", got)
+		}
+	})
 }

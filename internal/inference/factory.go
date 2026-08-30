@@ -17,16 +17,17 @@ import (
 // Resolve constructs and validates the Scorer for the configured provider.
 // think is passed separately from cfg because a single run can override the
 // configured default (e.g. via --no-think) without editing the config.
-func Resolve(ctx context.Context, cfg config.InferenceConfig, think bool) (rank.Scorer, error) {
+// systemPrompt is the resolved value from cfg.LoadSystemPrompt(); heuristic ignores it.
+func Resolve(ctx context.Context, cfg config.InferenceConfig, think bool, systemPrompt string) (rank.Scorer, error) {
 	var (
 		s   rank.Scorer
 		err error
 	)
 	switch cfg.Provider {
 	case "ollama":
-		s, err = ollama.New(cfg.Host, cfg.Model, cfg.APIKey, think, cfg.ModelTuning)
+		s, err = ollama.New(cfg.Host, cfg.Model, cfg.APIKey, think, cfg.ModelTuning, systemPrompt)
 	case "vllm":
-		s, err = vllm.New(cfg.Host, cfg.Model, cfg.APIKey, think, cfg.ModelTuning)
+		s, err = vllm.New(cfg.Host, cfg.Model, cfg.APIKey, think, cfg.ModelTuning, systemPrompt)
 	case "heuristic":
 		s = rank.NewHeuristic()
 	default:

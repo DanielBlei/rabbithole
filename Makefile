@@ -32,7 +32,7 @@ config-hint:
 	  printf '\033[33m▌\033[0m\n'; \
 	  printf '\033[33m▌\033[0m   1. \033[36mmake setup\033[0m            your own config, feeds and profile\n'; \
 	  printf '\033[33m▌\033[0m   2. \033[36mconfigs/feeds.yaml\033[0m    the RSS feeds to pull from\n'; \
-	  printf '\033[33m▌\033[0m   3. \033[36mconfigs/profile.md\033[0m    what you care about, in your words\n'; \
+	  printf '\033[33m▌\033[0m   3. \033[36mconfigs/prompts/profile.md\033[0m    what you care about, in your words\n'; \
 	  printf '\033[33m▌\033[0m\n'; \
 	  printf '\033[33m▌\033[0m Then: \033[36mCONFIG=./configs/config.yaml make serve\033[0m (or edit CONFIG in the Makefile)\n'; \
 	  printf '\033[33m▌\033[0m\n'; \
@@ -46,9 +46,9 @@ setup: ## Create config.yaml, feeds.yaml, profile.md and golden.yaml from the ex
 	  sed -e 's|profile.example.md|profile.md|' -e 's|feeds.example.yaml|feeds.yaml|' \
 	      configs/config.example.yaml > configs/config.yaml && \
 	  echo "created configs/config.yaml (pointing at your profile.md and feeds.yaml)" )
-	@test -f configs/feeds.yaml   || (cp configs/feeds.example.yaml   configs/feeds.yaml   && echo "created configs/feeds.yaml")
-	@test -f configs/profile.md   || (cp configs/profile.example.md   configs/profile.md   && echo "created configs/profile.md")
-	@test -f configs/golden.yaml  || (cp configs/golden.example.yaml  configs/golden.yaml  && echo "created configs/golden.yaml")
+	@test -f configs/feeds.yaml           || (cp configs/feeds.example.yaml           configs/feeds.yaml           && echo "created configs/feeds.yaml")
+	@test -f configs/prompts/profile.md   || (cp configs/prompts/profile.example.md   configs/prompts/profile.md   && echo "created configs/prompts/profile.md")
+	@test -f configs/golden.yaml          || (cp configs/golden.example.yaml          configs/golden.yaml          && echo "created configs/golden.yaml")
 
 ##@ Build
 

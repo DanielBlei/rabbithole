@@ -253,7 +253,11 @@ func runBenchmark(cmd *cobra.Command, args []string) error {
 		Str("benchmark_hash", ds.Hash).
 		Msg("benchmark inputs")
 
-	scorer, err := inference.Resolve(ctx, cfg.Inference, opts.Think)
+	systemPrompt, err := cfg.Inference.LoadSystemPrompt()
+	if err != nil {
+		return err
+	}
+	scorer, err := inference.Resolve(ctx, cfg.Inference, opts.Think, systemPrompt)
 	if err != nil {
 		return err
 	}
@@ -268,6 +272,7 @@ func runBenchmark(cmd *cobra.Command, args []string) error {
 	res, err := eval.Run(ctx, eval.RunConfig{
 		Dataset:        ds,
 		Profile:        profile,
+		Prompt:         systemPrompt,
 		Scorer:         scorer,
 		BatchSize:      cfg.Inference.BatchSize,
 		MaxParallel:    cfg.Inference.MaxParallel,

@@ -1,8 +1,8 @@
 # The Rabbit Hole configuration. Copy to configs/config.yaml and edit.
 # Every field and its default: docs/configuration.md
 
-# user:                                 # web UI shell prompt; unset uses your OS login name
-profile: ./configs/profile.example.md   # what you're interested in, driving the ranking
+# user:                                         # web UI shell prompt; unset uses your OS login name
+profile: ./configs/prompts/profile.example.md   # what you're interested in, driving the ranking
 
 inference:
   provider: ollama              # ollama | vllm | heuristic (keywords, no model)
@@ -10,6 +10,9 @@ inference:
   model: qwen3.5:4b             # gemma4:26b | qwen3.6:35b | etc
   think: false                  # model reasoning before scoring; default true
   # api_key: ""                 # bearer token, if your endpoint needs one
+
+  # system_prompt: ./configs/prompts/system.example.md   # model instructions; omit to use the built-in default
+  # system_prompt: false                                 # send no system message (e.g. an Ollama Modelfile already sets one)
 
   batch_size: 1                 # articles per scoring request (lower helps smaller models focus)
   max_parallel: 1               # requests in flight; keep at 1 for Ollama, it queues anyway
