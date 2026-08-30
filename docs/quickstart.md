@@ -16,7 +16,7 @@ make setup
 |---|---|---|
 | `configs/config.yaml` | How to run: model, scoring, storage, paths | The model, if you don't want the default `qwen3.5:4b` |
 | `configs/feeds.yaml` | The feeds to pull from | Add your own. A name and a URL is the minimum |
-| `configs/profile.md` | Your interests, which is what drives the ranking | Write what you care about, in your own words |
+| `configs/prompts/profile.md` | Your interests, which is what drives the ranking | Write what you care about, in your own words |
 
 They start as working examples, so you can run first and edit later. `profile.md` is the one
 that matters most. The model is handed it verbatim on every scoring call, so it decides what

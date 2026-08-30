@@ -102,7 +102,7 @@ func fetchOne(ctx context.Context, parser *gofeed.Parser, src Source) ([]Item, e
 		items = append(items, Item{
 			ID:        makeID(it.GUID, it.Link),
 			Source:    src.Name,
-			Title:     strings.TrimSpace(it.Title),
+			Title:     collapseWhitespace(it.Title),
 			Link:      it.Link,
 			Summary:   cleanSummary(summary),
 			Published: published,
@@ -114,12 +114,18 @@ func fetchOne(ctx context.Context, parser *gofeed.Parser, src Source) ([]Item, e
 
 var tagRE = regexp.MustCompile(`<[^>]*>`)
 
+// collapseWhitespace turns any run of whitespace, including newlines, into a single space, so
+// a title or summary can't sneak in an extra line that looks like part of the prompt's structure.
+func collapseWhitespace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // cleanSummary strips HTML tags, unescapes entities, collapses whitespace,
 // and truncates to summaryLimit so scoring prompts stay small.
 func cleanSummary(s string) string {
 	s = tagRE.ReplaceAllString(s, " ")
 	s = html.UnescapeString(s)
-	s = strings.Join(strings.Fields(s), " ")
+	s = collapseWhitespace(s)
 	if len(s) > summaryLimit {
 		s = s[:summaryLimit] + "…"
 	}

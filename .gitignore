@@ -32,7 +32,8 @@ CLAUDE.md
 # Personal config: the real files, never the tracked *.example.* templates.
 /configs/config.yaml
 /configs/feeds.yaml
-/configs/profile.md
+/configs/prompts/profile.md
+/configs/prompts/system.md
 /configs/golden.yaml
 
 # Claude

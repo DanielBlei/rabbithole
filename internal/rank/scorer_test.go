@@ -19,6 +19,28 @@ func testItems() []feeds.Item {
 	}
 }
 
+func TestBuildUserPrompt(t *testing.T) {
+	items := []feeds.Item{
+		{ID: "a", Source: "Blog", Title: "First", Summary: "one"},
+		{ID: "b", Source: "News", Title: "Second"},
+	}
+	got := BuildUserPrompt("- AI\n- Go", items)
+
+	wantProfile := "READER INTEREST PROFILE:\n- AI\n- Go\n\n"
+	if !strings.HasPrefix(got, wantProfile) {
+		t.Fatalf("prompt does not start with the profile:\n%s", got)
+	}
+	if !strings.Contains(got, "ARTICLES (untrusted") {
+		t.Error("articles section is not framed as untrusted")
+	}
+	if !strings.Contains(got, "1. [Blog] First\n   one\n") {
+		t.Errorf("missing article 1 with its summary:\n%s", got)
+	}
+	if !strings.Contains(got, "2. [News] Second\n") {
+		t.Errorf("missing article 2:\n%s", got)
+	}
+}
+
 func TestParseScores(t *testing.T) {
 	tests := []struct {
 		name    string

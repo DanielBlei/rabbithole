@@ -107,6 +107,9 @@ type InferenceConfig struct {
 	APIKey   string `yaml:"api_key"`  // optional bearer token
 	Think    *bool  `yaml:"think"`    // model reasoning during scoring; defaults true when not set in the config
 
+	// SystemPrompt: unset takes inference's built-in default, a path overrides it, false sends none.
+	SystemPrompt SystemPromptSetting `yaml:"system_prompt"`
+
 	// How items are batched through the model. BatchSize also sizes the token
 	// budget: ModelTuning.Budget multiplies TokensPerItem by it.
 	BatchSize   int `yaml:"batch_size"`   // items per scoring request
@@ -115,6 +118,29 @@ type InferenceConfig struct {
 	// ModelTuning carries the decoding limits.
 	// Omit the block, or any field in it, to take rank's defaults.
 	ModelTuning rank.ModelTuning `yaml:"model_tuning"`
+}
+
+// SystemPromptSetting is the inference.system_prompt config value: a path, false (disabled),
+// or unset (the built-in default).
+type SystemPromptSetting struct {
+	Path     string
+	Disabled bool
+}
+
+// UnmarshalYAML accepts a path string or the literal false; true is rejected.
+func (s *SystemPromptSetting) UnmarshalYAML(value *yaml.Node) error {
+	if value.Tag == "!!bool" {
+		var b bool
+		if err := value.Decode(&b); err != nil {
+			return err
+		}
+		if b {
+			return fmt.Errorf("system_prompt: true has no meaning; use a path, false, or omit it")
+		}
+		s.Disabled = true
+		return nil
+	}
+	return value.Decode(&s.Path)
 }
 
 // IngestConfig governs the fetch/score run.
@@ -207,13 +233,22 @@ func stripHTMLComments(md string) string {
 	return strings.TrimSpace(htmlComment.ReplaceAllString(md, ""))
 }
 
+// loadTrimmedFile reads path and strips HTML comments, so notes to yourself
+// (in a profile or a system prompt override) never reach the model.
+func loadTrimmedFile(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return stripHTMLComments(string(raw)), nil
+}
+
 // LoadProfile reads the interest-profile markdown referenced by the config.
 func (c *Config) LoadProfile() (string, error) {
-	raw, err := os.ReadFile(c.Profile)
+	profile, err := loadTrimmedFile(c.Profile)
 	if err != nil {
 		return "", fmt.Errorf("read profile %q: %w", c.Profile, err)
 	}
-	profile := stripHTMLComments(string(raw))
 	// The shipped template is mostly an HTML comment, so a file that looks
 	// filled in can strip to nothing. Without it every score is arbitrary while
 	// the run still looks like it worked.
@@ -224,4 +259,37 @@ func (c *Config) LoadProfile() (string, error) {
 		)
 	}
 	return profile, nil
+}
+
+// LoadOverride reads Path, if set, stripping HTML comments like LoadProfile. Unset returns
+// ("", nil); the caller decides what that means.
+func (s *SystemPromptSetting) LoadOverride() (string, error) {
+	if s.Path == "" {
+		return "", nil
+	}
+	prompt, err := loadTrimmedFile(s.Path)
+	if err != nil {
+		return "", fmt.Errorf("read system prompt %q: %w", s.Path, err)
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return "", fmt.Errorf("system prompt %q is empty", s.Path)
+	}
+	return prompt, nil
+}
+
+// LoadSystemPrompt resolves the effective inference.system_prompt: disabled returns "", a path
+// returns that file's contents, and unset returns the built-in default. The heuristic provider
+// never looks at a system prompt, so it always gets "" without touching SystemPrompt at all —
+// a bad or missing override path must not block a heuristic run.
+func (c *InferenceConfig) LoadSystemPrompt() (string, error) {
+	if c.Provider == "heuristic" {
+		return "", nil
+	}
+	if c.SystemPrompt.Disabled {
+		return "", nil
+	}
+	if c.SystemPrompt.Path != "" {
+		return c.SystemPrompt.LoadOverride()
+	}
+	return rank.DefaultSystemPrompt, nil
 }

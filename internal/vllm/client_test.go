@@ -45,7 +45,7 @@ func TestValidate(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{})
+			c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, "")
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -91,7 +91,7 @@ func TestListModelNames(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{})
+			c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, "")
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -140,7 +140,7 @@ func TestScoreSurfacesFinishReasonOnParseFailure(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{})
+			c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, "")
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -165,7 +165,7 @@ func TestScoreSalvagesTruncatedResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{})
+	c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -195,7 +195,7 @@ func TestScoreRequestConstrainsOutput(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{})
+	c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -211,5 +211,49 @@ func TestScoreRequestConstrainsOutput(t *testing.T) {
 	}
 	if want := (rank.ModelTuning{}).Budget(len(items), false); got.MaxTokens != want {
 		t.Errorf("max_tokens = %d, want %d", got.MaxTokens, want)
+	}
+}
+
+// TestScoreOmitsSystemMessageWhenPromptEmpty pins the behavior a disabled system_prompt
+// depends on: an empty systemPrompt must drop the message entirely, not send it empty, since
+// only an absent system message lets a served model's own default chat-template prompt apply.
+func TestScoreOmitsSystemMessageWhenPromptEmpty(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		systemPrompt string
+		wantRoles    []string
+	}{
+		{"empty prompt sends no system message", "", []string{"user"}},
+		{"set prompt sends it first", "be nice", []string{"system", "user"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got chatRequest
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&got)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(
+					`{"choices":[{"message":{"content":"{\"scores\":[{\"index\":1,\"score\":9,\"reason\":\"x\"}]}"},"finish_reason":"stop"}],"usage":{"completion_tokens":9}}`,
+				))
+			}))
+			defer srv.Close()
+
+			c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, tc.systemPrompt)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			if _, err := c.Score(t.Context(), "profile", []feeds.Item{{ID: "a", Title: "A"}}); err != nil {
+				t.Fatalf("Score() error = %v", err)
+			}
+			var roles []string
+			for _, m := range got.Messages {
+				roles = append(roles, m.Role)
+			}
+			if !slices.Equal(roles, tc.wantRoles) {
+				t.Fatalf("message roles = %v, want %v", roles, tc.wantRoles)
+			}
+			if tc.systemPrompt != "" && got.Messages[0].Content != tc.systemPrompt {
+				t.Errorf("system message content = %q, want %q", got.Messages[0].Content, tc.systemPrompt)
+			}
+		})
 	}
 }

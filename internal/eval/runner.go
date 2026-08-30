@@ -21,7 +21,9 @@ type RunConfig struct {
 	Dataset *Dataset
 	// Profile is the interest profile under test, passed to the scorer verbatim.
 	Profile string
-	Scorer  rank.Scorer
+	// Prompt is the effective system prompt under test, empty when disabled.
+	Prompt string
+	Scorer rank.Scorer
 
 	// BatchSize and MaxParallel come from the main config rather than being
 	// forced to 1. A batched model sees the other articles in its context and
@@ -129,7 +131,7 @@ func Run(ctx context.Context, cfg RunConfig) (*Results, error) {
 			MaxParallel:    cfg.MaxParallel,
 			Repeats:        repeats,
 			ProfileHash:    hash(cfg.Profile),
-			PromptHash:     hash(rank.SystemPrompt),
+			PromptHash:     hash(cfg.Prompt),
 			DatasetHash:    cfg.Dataset.Hash,
 			DatasetSamples: datasetSamples,
 			Limit:          cfg.Limit,
