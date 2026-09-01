@@ -4,13 +4,13 @@ go 1.26.0
 
 require (
 	github.com/microcosm-cc/bluemonday v1.0.27
-	github.com/mmcdole/gofeed v1.4.0
-	github.com/ollama/ollama v0.32.6
+	github.com/mmcdole/gofeed v1.4.2
+	github.com/ollama/ollama v0.33.2
 	github.com/rs/zerolog v1.35.1
 	github.com/spf13/cobra v1.10.2
 	github.com/yuin/goldmark v1.8.5
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.56.0
+	modernc.org/sqlite v1.57.0
 )
 
 require (
