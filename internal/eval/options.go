@@ -83,6 +83,14 @@ type BenchmarkOptions struct {
 	Provider string
 	Host     string
 	Model    string
+
+	// BatchSize and MaxParallel override the configured values. Zero keeps the
+	// config's, which is the default because a benchmark that batched
+	// differently from ingest would measure something the live pipeline never
+	// does. Overriding is for a backend ingest never uses, where matching it
+	// buys nothing and a bigger batch is faster and cheaper.
+	BatchSize   int
+	MaxParallel int
 	// Think mirrors the resolved inference.think for this run.
 	Think bool
 

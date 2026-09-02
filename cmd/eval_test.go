@@ -4,10 +4,14 @@
 package cmd
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/eval"
+	"github.com/DanielBlei/rabbithole/internal/inference"
 )
 
 // resetBenchmarkFlags puts the package-level flag vars back to the defaults
@@ -295,5 +299,73 @@ func TestParseFormat(t *testing.T) {
 				t.Errorf("ParseFormat(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestApplyBackendOverrideBatching(t *testing.T) {
+	cases := []struct {
+		name         string
+		opts         eval.BenchmarkOptions
+		wantBatch    int
+		wantParallel int
+	}{
+		// One `claude -p` is a whole Claude Code process against a single
+		// shared allowance, so the benchmark serialises them by default.
+		{"claude is forced serial", eval.BenchmarkOptions{Provider: "claude"}, 2, 1},
+		{"other providers keep their config", eval.BenchmarkOptions{Provider: "ollama"}, 2, 4},
+		{
+			"an explicit parallel lifts the claude default",
+			eval.BenchmarkOptions{Provider: "claude", MaxParallel: 3},
+			2, 3,
+		},
+		{
+			"batch size overrides the config",
+			eval.BenchmarkOptions{Provider: "claude", BatchSize: 10},
+			10, 1,
+		},
+		{"unset keeps the config", eval.BenchmarkOptions{}, 2, 4},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{
+				Inference: config.InferenceConfig{
+					Provider: "ollama", BatchSize: 2, MaxParallel: 4,
+				},
+			}
+			applyBackendOverride(cfg, tc.opts)
+
+			if cfg.Inference.BatchSize != tc.wantBatch {
+				t.Errorf("BatchSize = %d, want %d", cfg.Inference.BatchSize, tc.wantBatch)
+			}
+			if cfg.Inference.MaxParallel != tc.wantParallel {
+				t.Errorf("MaxParallel = %d, want %d", cfg.Inference.MaxParallel, tc.wantParallel)
+			}
+		})
+	}
+}
+
+// A Claude run spends subscription allowance, so a config that would produce an
+// incomparable report is refused rather than warned about.
+func TestResolveJudgeScorerRefusesDisabledPrompt(t *testing.T) {
+	_, err := resolveJudgeScorer(context.Background(),
+		config.InferenceConfig{Provider: "claude"}, false, "")
+	if err == nil {
+		t.Fatal("resolveJudgeScorer accepted an empty system prompt, want it refused")
+	}
+	if !strings.Contains(err.Error(), "system_prompt") {
+		t.Errorf("error = %v, want it to name system_prompt", err)
+	}
+}
+
+// The judge backend must stay out of the ingest path: inference.Resolve, which
+// ingest calls, does not know it exists.
+func TestResolveJudgeScorerGate(t *testing.T) {
+	_, err := inference.Resolve(context.Background(),
+		config.InferenceConfig{Provider: "claude"}, false, "")
+	if err == nil {
+		t.Fatal("inference.Resolve accepted claude, want it rejected")
+	}
+	if !strings.Contains(err.Error(), "unknown provider") {
+		t.Errorf("error = %v, want an unknown-provider error", err)
 	}
 }

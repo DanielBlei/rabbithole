@@ -209,6 +209,8 @@ func (c *Config) applyDefaults() {
 }
 
 func (c *Config) validate() error {
+	// "claude" is deliberately absent: it is an eval-only reference scorer,
+	// reachable through `eval benchmark --provider claude` and nowhere else.
 	switch c.Inference.Provider {
 	case "ollama", "vllm", "heuristic":
 	default:

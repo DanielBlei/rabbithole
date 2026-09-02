@@ -77,10 +77,12 @@ rabbithole eval benchmark [file] [--model M] [--provider P] [--host URL] [--no-t
 | Flag | What it does |
 |---|---|
 | `--model`, `--provider`, `--host` | Use a different backend than your config, e.g. to try a bigger model than you ingest with |
+| `--provider claude` | Score the set with Claude as a reference ceiling, to find out whether a bigger model would help. See below |
 | `--no-think` | Turn off model reasoning for this run |
 | `--repeats` | Score everything N times and report how much the answers wobbled |
 | `--limit` | Score only the first N articles, in file order, for a quick pass |
 | `--show-why` | Print the model's reasoning and your note beside each article |
+| `--batch-size`, `--max-parallel` | Override the config for this run. Changes what is measured, so use the same values on every run you compare |
 | `--format` | `text` (default), `markdown` or `json` |
 | `--output-path` | Write to a file instead of the screen |
 
@@ -106,10 +108,127 @@ rabbithole eval benchmark --format json --output-path before.json
 rabbithole eval benchmark --limit 10 --show-why
 ```
 
-Batch size and parallelism come from your config, not flags: a batched model marks each
-article relative to the others beside it, so batching differently from `ingest` would measure
-something your feed never does. Progress goes to the error stream and the report to the
-normal one, so `--format json > before.json` stays clean.
+Batch size and parallelism default to your config rather than to a flag, because a batched model
+marks each article relative to the others beside it: batching differently from `ingest` would
+measure something your feed never does. `--batch-size` and `--max-parallel` override them anyway,
+for the case where that reasoning does not apply, such as a backend `ingest` never uses. Both are
+recorded in the report's `BACKEND` line, so a run that used them says so. Progress goes to the
+error stream and the report to the normal one, so `--format json > before.json` stays clean.
+
+## Claude as a reference ceiling
+
+A benchmark tells you the gap between your model and your marks, but not why the gap is there.
+A high MAE can mean the model is too small, or that `profile.md` is ambiguous, or that one of
+your marks is wrong. Those want opposite fixes, and the report cannot tell them apart.
+
+`--provider claude` scores the same set with the Claude Code CLI, on your existing subscription,
+and produces an ordinary report you can put beside the usual one:
+
+```sh
+rabbithole eval benchmark --format json --output-path ollama.json
+rabbithole eval benchmark --provider claude --model sonnet --format json --output-path claude.json
+```
+
+Both reports carry the same `profile_hash`, `prompt_hash` and `dataset_hash`, which is what
+proves the two runs differed only in the backend. Then compare `mae` and `qwk`. A large gap means
+a bigger model would help. A small gap means it would not, and the thing to fix is your profile,
+your prompt, or one of your marks.
+
+**Claude is not the answer key.** Your marks are, and Claude is scored against them exactly like
+any other backend. It only ever sees `profile.md` and the system prompt, so it does not know your
+taste any better than your own model does. Read it as a ceiling, not a verdict, and never copy its
+scores into `golden.yaml`: the set would stop measuring whether the model agrees with you and start
+measuring whether it agrees with Claude, and nothing in the report would say so.
+
+### What you are actually tuning
+
+Three things decide a score, and the report's `INPUTS` line fingerprints all three so you can tell
+which one you changed:
+
+| | Fingerprint | What it is |
+|---|---|---|
+| `profile.md` | `profile_hash` | what you like. The main lever, and where most edits belong |
+| the system prompt | `prompt_hash` | how a preference becomes a 0-10. Shared by every backend |
+| `golden.yaml` | `benchmark_hash` | your marks, the answer key. Change it least |
+
+Most of the work is the profile: it is the only one describing you, and a mark you cannot justify
+from it usually means a line is missing rather than that the mark is wrong. The system prompt
+carries the scale, not the taste, so it needs tuning less often, but it does need it sometimes:
+if the model is ordering articles sensibly and still landing a band too low, that is the prompt's
+job to fix, not the profile's. The report separates the two, since a run that discriminates well
+but scores low shows up in `AT OTHER MARKS` rather than in `MAE`.
+
+Change one at a time. Two runs whose `INPUTS` differ in two places cannot tell you which edit did
+the work.
+
+**`system_prompt: false` is refused with `--provider claude`.** For a local model, sending no
+system message is a reasonable thing to try (an Ollama Modelfile may already carry one), and it
+costs nothing to find out. For Claude it would mean scoring your set with Claude Code's own agent
+persona instead of your scoring prompt, producing a report that looks normal but shares no
+`prompt_hash` with anything else, at the cost of real allowance. Omit the setting to take the
+built-in default, or point it at a file.
+
+Before you use it:
+
+- **It needs the `claude` CLI, logged in** (`claude auth login`). Runs go through your
+  subscription's rolling allowance, the same one your interactive sessions draw on. Roughly
+  $0.006 per article at list estimate, so a 50-article set is about $0.30-equivalent per run.
+  Setting `ANTHROPIC_API_KEY` makes the same command bill the API instead.
+- **A failed batch costs more than you expect.** A batch that comes back unparseable is retried
+  article by article, up to three times each, so one bad response on a ten-article batch can cost
+  thirty CLI calls. Runs are serialised by default for the same reason; `--max-parallel` lifts
+  that if you want the wall clock back and can spare the allowance.
+- **Raise `--batch-size` here.** Every call repeats the same fixed cost whatever it carries, so
+  one call scoring ten articles is far cheaper than ten calls scoring one. See below.
+- **Your profile and your articles leave the machine.** If you run a local model to keep them
+  local, this is the one command that does not.
+- **It cannot reach `ingest`.** `provider: claude` in your config is rejected, and
+  `ingest --provider claude` fails. It exists only on this command, per run, because scoring live
+  feeds with it would put a frontier model in front of unattended, untrusted, internet-sourced
+  text on every run. Here the set is small, yours, and you are reading the output.
+
+The run is confined: every tool is switched off, settings files and MCP servers are ignored, and
+the process works from an empty scratch directory. It reads text and writes a score.
+
+### What a batch costs
+
+Batching works the same way for every backend, but it is with Claude that it shows up on a bill.
+Each batch is one fresh, stateless call. Nothing is carried between them:
+
+```
+system:  <the system prompt>                    the scoring scale
+user:    READER INTEREST PROFILE:
+         <profile.md>                           your taste
+         ARTICLES (untrusted feed content...):
+         1. [Source] Title
+            summary
+         2. ...                                 batch_size of them
+```
+
+The next batch sends the whole thing again: same system prompt, same profile, next articles.
+Article numbering restarts at 1 in every call, which is how scores are mapped back.
+
+So the system prompt, your profile and the CLI's own scaffolding are paid once per **call**, not
+once per run, and `--batch-size` is the divisor on that. Measured at roughly 2.5k input tokens of
+fixed cost per call, a 35-article set works out at:
+
+| | Calls | Fixed cost paid |
+|---|---|---|
+| `--batch-size 1` (default) | 35 | 35x |
+| `--batch-size 10` | 4 | 4x |
+
+Prompt caching does not rescue you: two sequential calls carrying an identical system prompt were
+both billed as fresh input, with nothing read from cache. Measured on one shape of run rather than
+guaranteed, but do not plan around caching making the repetition free.
+
+On a 10-article slice, `--batch-size 10` ran 5.6x faster than the default (54s to 14.6s), and the
+token saving is steeper than the clock saving.
+
+**The catch is that it changes the answer, not just the price.** A batched model marks each
+article against the others beside it rather than judging it alone, which is a different task. The
+same 10 articles, same profile, same prompt, scored MAE 0.70 at `--batch-size 1` and 1.00 at
+`--batch-size 10`. So pass the same `--batch-size` to both sides of any comparison, or you will
+read batching as model quality. The `BACKEND` line records what each run used.
 
 ## Reading the report
 

@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,9 +13,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/DanielBlei/rabbithole/internal/claude"
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/eval"
 	"github.com/DanielBlei/rabbithole/internal/inference"
+	"github.com/DanielBlei/rabbithole/internal/rank"
 )
 
 // defaultBenchmarkPath sits beside the other configs, matching how the config
@@ -24,6 +27,11 @@ const defaultBenchmarkPath = "./configs/golden.yaml"
 // heuristicProvider is the model-free scorer, useful for exercising a benchmark
 // run without a backend.
 const heuristicProvider = "heuristic"
+
+// claudeProvider is the eval-only reference scorer. It is deliberately absent
+// from config's provider whitelist and from inference.Resolve, so it is
+// reachable only through --provider on this command, never from ingest.
+const claudeProvider = "claude"
 
 var evalCmd = &cobra.Command{
 	Use:   "eval",
@@ -40,6 +48,8 @@ var (
 	benchProvider string
 	benchHost     string
 	benchModel    string
+	benchBatch    int
+	benchParallel int
 	benchNoThink  bool
 	benchShowWhy  bool
 	benchFormat   string
@@ -85,6 +95,10 @@ func init() {
 	benchmarkCmd.Flags().StringVar(&benchHost, "host", "", "override the configured backend host")
 	benchmarkCmd.Flags().
 		StringVar(&benchModel, "model", "", "override the configured model, e.g. to benchmark a bigger one than you ingest with")
+	benchmarkCmd.Flags().
+		IntVar(&benchBatch, "batch-size", 0, "override the configured articles-per-request; changes what is measured, so use the same value on every run you compare (default: your config's)")
+	benchmarkCmd.Flags().
+		IntVar(&benchParallel, "max-parallel", 0, "override the configured requests in flight; for claude this also lifts the forced serial run (default: your config's, or 1 for claude)")
 	benchmarkCmd.Flags().
 		BoolVar(&benchNoThink, "no-think", false, "override config to disable model reasoning/thinking for this run")
 	benchmarkCmd.Flags().
@@ -141,13 +155,15 @@ func resolveOutput(format, path string) (eval.Output, error) {
 // needs the config to know what it is overriding.
 func resolveBenchmarkOptions(args []string, limitSet bool) (eval.BenchmarkOptions, error) {
 	opts := eval.BenchmarkOptions{
-		Path:     defaultBenchmarkPath,
-		Repeats:  benchRepeats,
-		Limit:    benchLimit,
-		Provider: benchProvider,
-		Host:     benchHost,
-		Model:    benchModel,
-		ShowWhy:  benchShowWhy,
+		Path:        defaultBenchmarkPath,
+		Repeats:     benchRepeats,
+		Limit:       benchLimit,
+		Provider:    benchProvider,
+		Host:        benchHost,
+		Model:       benchModel,
+		BatchSize:   benchBatch,
+		MaxParallel: benchParallel,
+		ShowWhy:     benchShowWhy,
 	}
 	if len(args) == 1 {
 		opts.Path = args[0]
@@ -157,6 +173,12 @@ func resolveBenchmarkOptions(args []string, limitSet bool) (eval.BenchmarkOption
 	}
 	if limitSet && opts.Limit < 1 {
 		return eval.BenchmarkOptions{}, fmt.Errorf("--limit must be at least 1, got %d", opts.Limit)
+	}
+	if opts.BatchSize < 0 {
+		return eval.BenchmarkOptions{}, fmt.Errorf("--batch-size must be at least 1, got %d", opts.BatchSize)
+	}
+	if opts.MaxParallel < 0 {
+		return eval.BenchmarkOptions{}, fmt.Errorf("--max-parallel must be at least 1, got %d", opts.MaxParallel)
 	}
 	out, err := resolveOutput(benchFormat, benchOutput)
 	if err != nil {
@@ -257,7 +279,7 @@ func runBenchmark(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	scorer, err := inference.Resolve(ctx, cfg.Inference, opts.Think, systemPrompt)
+	scorer, err := resolveJudgeScorer(ctx, cfg.Inference, opts.Think, systemPrompt)
 	if err != nil {
 		return err
 	}
@@ -285,6 +307,13 @@ func runBenchmark(cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		return err
+	}
+	// An alias like "sonnet" resolves to a dated model. Record what ran, so two
+	// reports months apart are not both labelled "sonnet".
+	if rm, ok := scorer.(interface{ ResolvedModel() string }); ok {
+		if m := rm.ResolvedModel(); m != "" {
+			res.Info.Model = m
+		}
 	}
 	rep := eval.Summarize(res, ds)
 	return writeReport(rep, opts.Output, eval.RenderOptions{
@@ -369,6 +398,44 @@ func applyBackendOverride(cfg *config.Config, opts eval.BenchmarkOptions) {
 	if opts.Model != "" {
 		cfg.Inference.Model = opts.Model
 	}
+	if opts.BatchSize > 0 {
+		cfg.Inference.BatchSize = opts.BatchSize
+	}
+	// One `claude -p` is a whole Claude Code process against a single shared
+	// allowance, so the benchmark serialises them unless asked otherwise.
+	switch {
+	case opts.MaxParallel > 0:
+		cfg.Inference.MaxParallel = opts.MaxParallel
+	case cfg.Inference.Provider == claudeProvider:
+		cfg.Inference.MaxParallel = 1
+	}
+}
+
+// resolveJudgeScorer adds the eval-only Claude backend to the live set. It
+// lives here rather than in internal/inference so the ingest path, which
+// imports that package, has no route to it.
+func resolveJudgeScorer(
+	ctx context.Context, cfg config.InferenceConfig, think bool, systemPrompt string,
+) (rank.Scorer, error) {
+	if cfg.Provider != claudeProvider {
+		return inference.Resolve(ctx, cfg, think, systemPrompt)
+	}
+	// --system-prompt replaces Claude Code's own prompt. With none, its agent
+	// persona would score the fixture and the report would not be comparable.
+	// Refused rather than warned: the run costs subscription allowance.
+	if systemPrompt == "" {
+		return nil, errors.New("system_prompt: false cannot be used with --provider claude; " +
+			"without a scoring prompt Claude scores with its own agent persona and the run is " +
+			"not comparable. Omit system_prompt to take the built-in default, or give it a path")
+	}
+	c, err := claude.New(cfg.Model, systemPrompt, cfg.ModelTuning)
+	if err != nil {
+		return nil, fmt.Errorf("backend init: %w", err)
+	}
+	if err := c.Validate(ctx); err != nil {
+		return nil, fmt.Errorf("backend validation: %w", err)
+	}
+	return c, nil
 }
 
 // errNotImplemented marks a subcommand whose flags are wired but whose body is
