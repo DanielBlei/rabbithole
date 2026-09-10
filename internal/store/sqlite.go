@@ -49,9 +49,10 @@ CREATE INDEX IF NOT EXISTS idx_items_bookmarked ON items(bookmarked);
 `
 
 // schemaVersion stamps the database via PRAGMA user_version. Version 2 moved
-// the configured feeds out of feeds.yaml and into the feeds table; there is no
-// migration path, so an older database is rejected and has to be recreated.
-const schemaVersion = 2
+// the configured feeds out of feeds.yaml and into the feeds table; version 3
+// added the feeds.type column. There is no migration path, so an older
+// database is rejected and has to be recreated.
+const schemaVersion = 3
 
 // allSchemas is every table's DDL, applied in order to a new database.
 var allSchemas = []string{

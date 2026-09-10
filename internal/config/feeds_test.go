@@ -182,6 +182,41 @@ func TestResolveFeedOutermostFallbacks(t *testing.T) {
 	}
 }
 
+// A feed with no type set resolves to RSS, so every feed file written before
+// types existed keeps behaving exactly as it does today.
+func TestResolveFeedTypeDefaultsToRSS(t *testing.T) {
+	const feedsBody = `
+feeds:
+  - name: Untyped
+    url: http://a.test/feed
+  - name: Typed
+    url: http://b.test/feed
+    type: blog
+`
+	resolved := resolveFeedsBody(t, feedsBody)
+	if got := feedByName(t, resolved, "Untyped").Type; got != FeedTypeRSS {
+		t.Errorf("Type = %q, want %q", got, FeedTypeRSS)
+	}
+	if got := feedByName(t, resolved, "Typed").Type; got != FeedTypeBlog {
+		t.Errorf("Type = %q, want %q", got, FeedTypeBlog)
+	}
+}
+
+// An unrecognized type is a config error, same as a missing name or url.
+func TestResolveFeedsRejectsUnknownType(t *testing.T) {
+	feedsBody := "feeds:\n  - name: A\n    url: http://a.test/feed\n    type: podcast\n"
+	cfgPath := writeConfigWithFeeds(t, baseConfig, feedsBody)
+	path, _ := (&Config{}).FeedsFilePath(cfgPath)
+	doc, _, err := ReadFeedsFile(path)
+	if err != nil {
+		t.Fatalf("ReadFeedsFile: %v", err)
+	}
+	_, err = ResolveFeeds(*doc, 10*24*time.Hour)
+	if err == nil || !strings.Contains(err.Error(), "not a recognized feed type") {
+		t.Fatalf("err = %v, want one naming the bad type", err)
+	}
+}
+
 func TestEnabledFeeds(t *testing.T) {
 	const feedsBody = `
 defaults:

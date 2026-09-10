@@ -4,6 +4,9 @@
 # on every startup, anything here the store has never seen is added, and everything else is ignored.
 # Nothing writes back to this file — use the Sources page's export to get the live set out.
 #
+# Every feed below is RSS, today's only implemented source kind — that's the
+# default when `type` is omitted, so nothing here needs to name it.
+#
 # Inheritance, feed identity, health: docs/configuration.md
 
 # Applied to any feed that doesn't set the knob itself.

@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS feeds (
 	id         TEXT PRIMARY KEY,
 	name       TEXT NOT NULL,
 	url        TEXT NOT NULL,
+	type       TEXT,
 	enabled    BOOLEAN,
 	since      TEXT,
 	max_items  INTEGER,
@@ -69,23 +70,23 @@ var (
 )
 
 const (
-	feedColumns = "id, name, url, enabled, since, max_items, tags"
+	feedColumns = "id, name, url, type, enabled, since, max_items, tags"
 
 	sqlLiveFeeds    = `SELECT ` + feedColumns + ` FROM feeds WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE`
 	sqlDeletedFeeds = `SELECT ` + feedColumns + ` FROM feeds WHERE deleted_at IS NOT NULL ORDER BY name COLLATE NOCASE`
 	sqlFeedByID     = `SELECT ` + feedColumns + ` FROM feeds WHERE id = ?`
 
-	sqlInsertFeed = `INSERT INTO feeds (id, name, url, enabled, since, max_items, tags, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	sqlInsertFeed = `INSERT INTO feeds (id, name, url, type, enabled, since, max_items, tags, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	// A restore doubles as an update: re-adding a feed you deleted should land
 	// on the values you just typed, not the ones it had when it was parked.
 	sqlRestoreFeed = `UPDATE feeds
-		SET name = ?, url = ?, enabled = ?, since = ?, max_items = ?, tags = ?, updated_at = ?, deleted_at = NULL
+		SET name = ?, url = ?, type = ?, enabled = ?, since = ?, max_items = ?, tags = ?, updated_at = ?, deleted_at = NULL
 		WHERE id = ?`
 
 	sqlUpdateFeed = `UPDATE feeds
-		SET name = ?, url = ?, enabled = ?, since = ?, max_items = ?, tags = ?, updated_at = ?
+		SET name = ?, url = ?, type = ?, enabled = ?, since = ?, max_items = ?, tags = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL`
 
 	sqlSetFeedEnabled = `UPDATE feeds SET enabled = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`
@@ -228,12 +229,12 @@ func (s *Store) AddFeed(ctx context.Context, f config.Feed) (string, error) {
 		// The ID is the URL's digest, so a feed added, hard-purged and added
 		// again would collide on the primary key. Nothing hard-deletes today,
 		// but leaving it as a constraint error would be an unhelpful surprise.
-		if _, err := tx.ExecContext(ctx, sqlInsertFeed, id, f.Name, f.URL,
+		if _, err := tx.ExecContext(ctx, sqlInsertFeed, id, f.Name, f.URL, nullFeedType(f.Type),
 			nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
 			now, now); err != nil {
 			return "", fmt.Errorf("insert feed %q: %w", f.Name, err)
 		}
-	} else if _, err := tx.ExecContext(ctx, sqlRestoreFeed, f.Name, f.URL,
+	} else if _, err := tx.ExecContext(ctx, sqlRestoreFeed, f.Name, f.URL, nullFeedType(f.Type),
 		nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
 		now, id); err != nil {
 		return "", fmt.Errorf("restore feed %q: %w", f.Name, err)
@@ -264,7 +265,7 @@ func (s *Store) UpdateFeed(ctx context.Context, id string, f config.Feed) error 
 		return err
 	}
 
-	res, err := tx.ExecContext(ctx, sqlUpdateFeed, f.Name, f.URL,
+	res, err := tx.ExecContext(ctx, sqlUpdateFeed, f.Name, f.URL, nullFeedType(f.Type),
 		nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
 		sqlTime(time.Now()), id)
 	if err != nil {
@@ -363,7 +364,7 @@ func (s *Store) SeedFeeds(ctx context.Context, doc config.FeedsDoc) (SeedResult,
 			continue
 		}
 		id := config.FeedID(f.URL)
-		if _, err := tx.ExecContext(ctx, sqlInsertFeed, id, f.Name, f.URL,
+		if _, err := tx.ExecContext(ctx, sqlInsertFeed, id, f.Name, f.URL, nullFeedType(f.Type),
 			nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
 			now, now); err != nil {
 			return result, fmt.Errorf("seed feed %q: %w", f.Name, err)
@@ -439,16 +440,20 @@ func feedURLKey(url string) string   { return "url:" + url }
 func scanFeed(row rowScanner) (config.Feed, error) {
 	var (
 		f        config.Feed
+		feedType sql.NullString
 		enabled  sql.NullBool
 		since    sql.NullString
 		maxItems sql.NullInt64
 		tags     sql.NullString
 	)
-	if err := row.Scan(&f.ID, &f.Name, &f.URL, &enabled, &since, &maxItems, &tags); err != nil {
+	if err := row.Scan(&f.ID, &f.Name, &f.URL, &feedType, &enabled, &since, &maxItems, &tags); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return f, err
 		}
 		return f, fmt.Errorf("scan feed: %w", err)
+	}
+	if feedType.Valid {
+		f.Type = config.FeedType(feedType.String)
 	}
 	if enabled.Valid {
 		f.Enabled = &enabled.Bool
@@ -569,6 +574,16 @@ func nullDuration(d *config.Duration) any {
 		return nil
 	}
 	return d.Short()
+}
+
+// nullFeedType stores an unset type as NULL rather than the literal "rss", so
+// a feed added before types existed reads back as unset (and the export still
+// omits it) rather than being stamped with today's default forever.
+func nullFeedType(t config.FeedType) any {
+	if t == "" {
+		return nil
+	}
+	return string(t)
 }
 
 // nullTags joins tags the way items.tags stores them, with no tags as NULL

@@ -169,6 +169,7 @@ feeds:
 |---|---|---|
 | `name` | Display name; also the source items are stored under | **required, unique** |
 | `url` | RSS or Atom URL; a missing scheme becomes `https://` | **required, unique** |
+| `type` | Source kind: `rss`, `blog`, `news` or `academic`. Only `rss` is implemented today | `rss` |
 | `enabled` | `false` retains the feed but never fetches it | `true` |
 | `since` | Lookback window for this feed | defaults, then `ingest.since` |
 | `max_items` | Maximum items contributed per run; `0` is uncapped | defaults, then uncapped |
