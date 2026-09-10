@@ -451,6 +451,51 @@ func TestRunAppendsToFeedHistory(t *testing.T) {
 	}
 }
 
+// A feed of an unimplemented type is skipped, not fetched — its URL is never
+// even called — while an RSS feed alongside it still ingests normally.
+func TestRunSkipsUnimplementedFeedTypes(t *testing.T) {
+	ctx := context.Background()
+	var blogHits int32
+	blog := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&blogHits, 1)
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(feedRSS("Blog item", "https://x.test/blog")))
+	}))
+	defer blog.Close()
+
+	cfg := testConfigWith(t, config.FeedsDoc{Feeds: []config.Feed{
+		{Name: "Rss", URL: serveRSS(t, feedRSS("vLLM inference notes", "https://x.test/rss"))},
+		{Name: "Blog", URL: blog.URL, Type: config.FeedTypeBlog},
+	}})
+	db := openStore(t, cfg)
+
+	out, err := Run(ctx, cfg, "vllm inference", db, time.Now(), Options{Record: true})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if n := atomic.LoadInt32(&blogHits); n != 0 {
+		t.Errorf("blog feed was fetched %d times, want 0 (unimplemented type is skipped)", n)
+	}
+	if len(out.Unseen) != 1 || out.Unseen[0].Source != "Rss" {
+		t.Errorf("Unseen = %+v, want only the RSS feed's item", out.Unseen)
+	}
+
+	// The skip is recorded as a failing fetch, not a silent success — a feed
+	// stuck at zero items should read as needing attention on the Sources page,
+	// not as a healthy feed that just never publishes.
+	health, err := db.FeedHealthByID(ctx, 10)
+	if err != nil {
+		t.Fatalf("FeedHealthByID: %v", err)
+	}
+	blogHealth, ok := health[config.FeedID(blog.URL)]
+	if !ok || blogHealth.OK() || blogHealth.Items != 0 {
+		t.Errorf("Blog health = %+v, want a recorded error entry with 0 items", blogHealth)
+	}
+	if !strings.Contains(blogHealth.Error, "not implemented") {
+		t.Errorf("Blog health error = %q, want it to explain the type isn't implemented", blogHealth.Error)
+	}
+}
+
 func TestCapNewest(t *testing.T) {
 	now := time.Now()
 	mk := func(title string, age time.Duration) feeds.Item {

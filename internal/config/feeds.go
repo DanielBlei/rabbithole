@@ -25,12 +25,44 @@ const defaultFeedsFileName = "feeds.yaml"
 // list statistically impossible while staying readable in a log line.
 const feedIDLen = 12
 
-// Feed is one RSS/Atom source as declared, before the defaults cascade runs.
-// Feeds live in the store; this is the shape they take in the seed file and in
-// the exported YAML, and the shape the store hands back. Every knob past
-// name/url is a pointer so an unset field is distinguishable from a zero value
-// and can fall through to the defaults — see resolveFeed for the cascade. The
-// store spells the same distinction as a NULL column.
+// FeedType names the kind of source a feed is, which decides how ingest fetches
+// and processes it. It is not part of the defaults cascade — unlike since/
+// max_items/enabled, there is no set-wide fallback for "what kind of source is
+// this"; an unset feed simply means RSS, today's only implemented kind.
+type FeedType string
+
+const (
+	// FeedTypeRSS is an RSS/Atom feed, fetched and parsed as today. The zero
+	// value of FeedType resolves to this — see resolveFeed — so every feed file
+	// written before FeedType existed keeps working unchanged.
+	FeedTypeRSS FeedType = "rss"
+	// FeedTypeBlog, FeedTypeNews and FeedTypeAcademic are declared but not yet
+	// implemented: ingest logs and skips feeds of these types rather than
+	// fetching them. They exist now so feed files can name a future source kind
+	// ahead of its ingest support landing.
+	FeedTypeBlog     FeedType = "blog"
+	FeedTypeNews     FeedType = "news"
+	FeedTypeAcademic FeedType = "academic"
+)
+
+// Valid reports whether t is a recognized feed type. The zero value ("") is
+// not itself valid here — callers check for it separately, since it means
+// "unset" rather than naming a type.
+func (t FeedType) Valid() bool {
+	switch t {
+	case FeedTypeRSS, FeedTypeBlog, FeedTypeNews, FeedTypeAcademic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Feed is one source as declared, before the defaults cascade runs. Feeds live
+// in the store; this is the shape they take in the seed file and in the
+// exported YAML, and the shape the store hands back. Every knob past name/url
+// is a pointer so an unset field is distinguishable from a zero value and can
+// fall through to the defaults — see resolveFeed for the cascade. The store
+// spells the same distinction as a NULL column.
 type Feed struct {
 	// ID is empty in the seed file and in the export — it is not something you
 	// declare. The store fills it in on the way out so callers can address a
@@ -38,6 +70,9 @@ type Feed struct {
 	ID   string `yaml:"-"`
 	Name string `yaml:"name"`
 	URL  string `yaml:"url"`
+	// Type is omitted from the file whenever it's RSS, so today's feed files —
+	// written before source types existed — round-trip unchanged.
+	Type FeedType `yaml:"type,omitempty"`
 	// omitempty on every optional knob: an unset one has to come back out of the
 	// export as an absent key, not as `enabled: null`. Absent is what "inherit"
 	// looks like in a hand-written file, and it is what re-importing reads back.
@@ -91,6 +126,7 @@ type ResolvedFeed struct {
 	ID       string
 	Name     string
 	URL      string
+	Type     FeedType // never empty: an unset Feed.Type resolves to FeedTypeRSS
 	Enabled  bool
 	Since    time.Duration
 	MaxItems int // 0 means uncapped
@@ -232,7 +268,10 @@ func resolveFeed(f Feed, d FeedDefaults, globalSince time.Duration) ResolvedFeed
 	if id == "" {
 		id = FeedID(f.URL)
 	}
-	r := ResolvedFeed{ID: id, Name: f.Name, URL: f.URL, Tags: mergeTags(d.Tags, f.Tags)}
+	r := ResolvedFeed{ID: id, Name: f.Name, URL: f.URL, Type: f.Type, Tags: mergeTags(d.Tags, f.Tags)}
+	if r.Type == "" {
+		r.Type = FeedTypeRSS
+	}
 
 	switch {
 	case f.Enabled != nil:
@@ -268,6 +307,9 @@ func resolveFeed(f Feed, d FeedDefaults, globalSince time.Duration) ResolvedFeed
 // Validate checks one feed's tuning knobs. A zero since would drop everything
 // and a negative cap is meaningless; both are more likely typos than intent.
 func (f Feed) Validate() error {
+	if f.Type != "" && !f.Type.Valid() {
+		return fmt.Errorf("type %q is not a recognized feed type", f.Type)
+	}
 	if f.Since != nil && f.Since.Std() <= 0 {
 		return fmt.Errorf("since must be positive, got %s", f.Since)
 	}

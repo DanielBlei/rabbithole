@@ -78,6 +78,51 @@ func TestFeedRoundTripsUnsetKnobs(t *testing.T) {
 	}
 }
 
+// A feed's type round-trips, and one that never set it comes back unset —
+// not stamped with "rss" — so the export keeps omitting it for feeds written
+// before types existed.
+func TestFeedRoundTripsType(t *testing.T) {
+	db := openTestStore(t)
+	typed := config.Feed{Name: "Typed", URL: "https://typed.test/feed", Type: config.FeedTypeBlog}
+	untyped := config.Feed{Name: "Untyped", URL: "https://untyped.test/feed"}
+	for _, f := range []config.Feed{typed, untyped} {
+		if _, err := db.AddFeed(t.Context(), f); err != nil {
+			t.Fatalf("AddFeed(%s): %v", f.Name, err)
+		}
+	}
+
+	if got := feedNamed(t, liveFeeds(t, db), "Typed").Type; got != config.FeedTypeBlog {
+		t.Errorf("Type = %q, want %q", got, config.FeedTypeBlog)
+	}
+	if got := feedNamed(t, liveFeeds(t, db), "Untyped").Type; got != "" {
+		t.Errorf("Type = %q, want unset", got)
+	}
+
+	// UpdateFeed can set the type on an existing feed, and clear it back.
+	id := feedNamed(t, liveFeeds(t, db), "Untyped").ID
+	news := untyped
+	news.ID = id
+	news.Type = config.FeedTypeNews
+	if err := db.UpdateFeed(t.Context(), id, news); err != nil {
+		t.Fatalf("UpdateFeed: %v", err)
+	}
+	if got := feedNamed(t, liveFeeds(t, db), "Untyped").Type; got != config.FeedTypeNews {
+		t.Errorf("Type after update = %q, want %q", got, config.FeedTypeNews)
+	}
+}
+
+// An unrecognized type is rejected before it reaches the database, the same
+// way a bad URL is.
+func TestAddFeedRejectsUnknownType(t *testing.T) {
+	db := openTestStore(t)
+	_, err := db.AddFeed(t.Context(), config.Feed{
+		Name: "Bad", URL: "https://bad.test/feed", Type: "podcast",
+	})
+	if !errors.Is(err, ErrFeedInvalid) {
+		t.Fatalf("AddFeed with unknown type: err = %v, want %v", err, ErrFeedInvalid)
+	}
+}
+
 // Name and URL are both unique: one feed per name, one per link.
 func TestAddFeedRejectsDuplicates(t *testing.T) {
 	db := openTestStore(t)

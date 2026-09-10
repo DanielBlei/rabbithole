@@ -66,28 +66,26 @@ func Run(
 	// Only enabled feeds are fetched; a disabled one is parked, not deleted,
 	// so it stays in the store (and on the Sources page) without costing a request.
 	active := config.EnabledFeeds(configured)
-	sources := make([]feeds.Source, len(active))
-	for i, f := range active {
-		sources[i] = feeds.Source{Name: f.Name, URL: f.URL, Tags: f.Tags}
-		logger.Debug().Str("feed", f.Name).Str("url", f.URL).
+	for _, f := range active {
+		logger.Debug().Str("feed", f.Name).Str("url", f.URL).Str("type", string(f.Type)).
 			Str("since", f.Since.String()).Int("max_items", f.MaxItems).Msg("configured feed")
 	}
 	if disabled := len(configured) - len(active); disabled > 0 {
 		logger.Info().Int("disabled", disabled).Msg("skipping disabled feeds")
 	}
-	if len(sources) == 0 {
+	if len(active) == 0 {
 		// Not an early return: the cycle still runs to completion (over nothing)
 		// so a successful run always ends with the "ingest complete" line the
 		// run manager and its log tail rely on.
 		logger.Warn().Msg("no enabled feeds; nothing to ingest")
 	}
-	logger.Info().Int("feeds", len(sources)).Msg("ingesting feeds")
+	logger.Info().Int("feeds", len(active)).Msg("ingesting feeds")
 
 	fetchStart := time.Now()
-	// FetchAll returns one Result per source, positionally — results[i] is
+	// dispatchFetch returns one Result per feed, positionally — results[i] is
 	// active[i]'s outcome. That pairing is used directly below rather than
 	// flattening the items and regrouping them by feed name.
-	results := feeds.FetchAll(ctx, sources)
+	results := dispatchFetch(ctx, active)
 	fetched, failed := tallyFetches(results)
 	logger.Info().Int("items", fetched).Int("failed_feeds", failed).
 		Str("elapsed", time.Since(fetchStart).Round(100*time.Millisecond).String()).Msg("fetched items")
