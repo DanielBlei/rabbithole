@@ -286,3 +286,94 @@ func TestInferenceConfigLoadSystemPrompt(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadSummaryRequiresModel(t *testing.T) {
+	t.Run("a field set without model is rejected", func(t *testing.T) {
+		_, err := Load(writeConfig(t, baseFeeds+"inference:\n  summary:\n    host: http://other:8000\n"))
+		if err == nil {
+			t.Fatal("expected error for summary block missing model")
+		}
+	})
+
+	t.Run("model alone is enough", func(t *testing.T) {
+		cfg, err := Load(writeConfig(t, baseFeeds+"inference:\n  summary:\n    model: small:1b\n"))
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if cfg.Inference.Summary.Model != "small:1b" {
+			t.Errorf("Summary.Model = %q, want small:1b", cfg.Inference.Summary.Model)
+		}
+	})
+
+	t.Run("unset summary is fine", func(t *testing.T) {
+		if _, err := Load(writeConfig(t, baseFeeds)); err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+	})
+}
+
+func TestResolveSummary(t *testing.T) {
+	think := true
+	base := InferenceConfig{
+		Provider: "ollama",
+		Host:     "http://localhost:11434",
+		Model:    "big:8b",
+		APIKey:   "base-key",
+		Think:    &think,
+	}
+
+	t.Run("unset summary resolves to the parent unchanged", func(t *testing.T) {
+		got := base.ResolveSummary()
+		if got != base {
+			t.Errorf("ResolveSummary() = %+v, want %+v", got, base)
+		}
+	})
+
+	t.Run("model alone overrides only Model", func(t *testing.T) {
+		cfg := base
+		cfg.Summary = SummaryConfig{Model: "small:1b"}
+		got := cfg.ResolveSummary()
+		if got.Model != "small:1b" {
+			t.Errorf("Model = %q, want small:1b", got.Model)
+		}
+		if got.Provider != base.Provider || got.Host != base.Host || got.APIKey != base.APIKey || got.Think != base.Think {
+			t.Errorf("ResolveSummary() changed an unset field: %+v", got)
+		}
+	})
+
+	t.Run("host and model override both, provider/api_key/think stay inherited", func(t *testing.T) {
+		cfg := base
+		cfg.Summary = SummaryConfig{Host: "http://other:8000", Model: "small:1b"}
+		got := cfg.ResolveSummary()
+		if got.Host != "http://other:8000" || got.Model != "small:1b" {
+			t.Errorf("ResolveSummary() = %+v, want overridden host/model", got)
+		}
+		if got.Provider != base.Provider || got.APIKey != base.APIKey || got.Think != base.Think {
+			t.Errorf("ResolveSummary() changed an unset field: %+v", got)
+		}
+	})
+
+	t.Run("full override replaces every field", func(t *testing.T) {
+		otherThink := false
+		cfg := base
+		cfg.Summary = SummaryConfig{
+			Provider: "vllm",
+			Host:     "http://other:8000",
+			Model:    "small:1b",
+			APIKey:   "other-key",
+			Think:    &otherThink,
+		}
+		got := cfg.ResolveSummary()
+		want := InferenceConfig{
+			Provider: "vllm",
+			Host:     "http://other:8000",
+			Model:    "small:1b",
+			APIKey:   "other-key",
+			Think:    &otherThink,
+		}
+		if got.Provider != want.Provider || got.Host != want.Host || got.Model != want.Model ||
+			got.APIKey != want.APIKey || got.Think != want.Think {
+			t.Errorf("ResolveSummary() = %+v, want %+v", got, want)
+		}
+	})
+}

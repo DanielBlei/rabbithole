@@ -118,6 +118,27 @@ type InferenceConfig struct {
 	// ModelTuning carries the decoding limits.
 	// Omit the block, or any field in it, to take rank's defaults.
 	ModelTuning rank.ModelTuning `yaml:"model_tuning"`
+
+	// Summary is a placeholder for a separate summarization backend;
+	// nothing routes to it yet.
+	Summary SummaryConfig `yaml:"summary"`
+}
+
+// SummaryConfig overrides the model backend used for summarization tasks.
+// Unset fields fall back to the parent InferenceConfig; if any field here
+// is set, Model must be too, since a summary block that only tweaks the
+// endpoint without naming a model has no meaning.
+//
+// ModelTuning and SystemPrompt are not overridable here yet — they always
+// come from the parent InferenceConfig. Summarization will likely want its
+// own SystemPrompt eventually (a different task than profile scoring), but
+// that's for whoever wires up actual usage.
+type SummaryConfig struct {
+	Provider string `yaml:"provider"`
+	Host     string `yaml:"host"`
+	Model    string `yaml:"model"`
+	APIKey   string `yaml:"api_key"`
+	Think    *bool  `yaml:"think"`
 }
 
 // SystemPromptSetting is the inference.system_prompt config value: a path, false (disabled),
@@ -216,6 +237,9 @@ func (c *Config) validate() error {
 	default:
 		return fmt.Errorf("invalid provider %q, must be ollama, vllm or heuristic", c.Inference.Provider)
 	}
+	if c.Inference.Summary != (SummaryConfig{}) && c.Inference.Summary.Model == "" {
+		return fmt.Errorf("inference.summary.model is required when other inference.summary fields are set")
+	}
 	if c.Profile == "" {
 		return fmt.Errorf("profile path is required")
 	}
@@ -294,4 +318,27 @@ func (c *InferenceConfig) LoadSystemPrompt() (string, error) {
 		return c.SystemPrompt.LoadOverride()
 	}
 	return rank.DefaultSystemPrompt, nil
+}
+
+// ResolveSummary returns the effective InferenceConfig for summarization
+// tasks: c with Provider/Host/Model/APIKey/Think overridden by any set
+// Summary fields. ModelTuning and SystemPrompt always come from c.
+func (c InferenceConfig) ResolveSummary() InferenceConfig {
+	resolved := c
+	if c.Summary.Provider != "" {
+		resolved.Provider = c.Summary.Provider
+	}
+	if c.Summary.Host != "" {
+		resolved.Host = c.Summary.Host
+	}
+	if c.Summary.Model != "" {
+		resolved.Model = c.Summary.Model
+	}
+	if c.Summary.APIKey != "" {
+		resolved.APIKey = c.Summary.APIKey
+	}
+	if c.Summary.Think != nil {
+		resolved.Think = c.Summary.Think
+	}
+	return resolved
 }

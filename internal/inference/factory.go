@@ -18,7 +18,29 @@ import (
 // think is passed separately from cfg because a single run can override the
 // configured default (e.g. via --no-think) without editing the config.
 // systemPrompt is the resolved value from cfg.LoadSystemPrompt(); heuristic ignores it.
+//
+// When cfg.Summary is set, its resolved backend is also validated (but its
+// Scorer discarded) so a broken placeholder summary model is caught here
+// too, even though nothing routes to it yet.
+//
+// Once something actually routes to the summary model, Resolve will likely
+// need to return both Scorers (falling back to returning the same one
+// twice when Summary is unset) instead of discarding the second one.
 func Resolve(ctx context.Context, cfg config.InferenceConfig, think bool, systemPrompt string) (rank.Scorer, error) {
+	s, err := build(ctx, cfg, think, systemPrompt)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Summary != (config.SummaryConfig{}) {
+		if _, err := build(ctx, cfg.ResolveSummary(), think, systemPrompt); err != nil {
+			return nil, fmt.Errorf("summary model: %w", err)
+		}
+	}
+	return s, nil
+}
+
+// build constructs and validates the Scorer described by cfg.
+func build(ctx context.Context, cfg config.InferenceConfig, think bool, systemPrompt string) (rank.Scorer, error) {
 	var (
 		s   rank.Scorer
 		err error

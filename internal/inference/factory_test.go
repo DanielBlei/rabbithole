@@ -76,4 +76,35 @@ func TestResolve(t *testing.T) {
 			t.Fatalf("Resolve() error = %v, want it to mention backend init", err)
 		}
 	})
+
+	t.Run("a configured summary model is validated on the same host", func(t *testing.T) {
+		host := serveJSON(t, `{"models":[{"model":"llama3:latest"},{"model":"small:1b"}]}`)
+		cfg := config.InferenceConfig{
+			Provider: "ollama",
+			Host:     host,
+			Model:    "llama3:latest",
+			Summary:  config.SummaryConfig{Model: "small:1b"},
+		}
+		s, err := Resolve(t.Context(), cfg, false, "be nice")
+		if err != nil {
+			t.Fatalf("Resolve() error = %v", err)
+		}
+		if s == nil {
+			t.Fatal("Resolve() scorer = nil, want a scorer")
+		}
+	})
+
+	t.Run("an unreachable summary model fails Resolve", func(t *testing.T) {
+		host := serveJSON(t, `{"models":[{"model":"llama3:latest"}]}`)
+		cfg := config.InferenceConfig{
+			Provider: "ollama",
+			Host:     host,
+			Model:    "llama3:latest",
+			Summary:  config.SummaryConfig{Model: "no-tag"},
+		}
+		_, err := Resolve(t.Context(), cfg, false, "be nice")
+		if err == nil || !strings.Contains(err.Error(), "summary model") {
+			t.Fatalf("Resolve() error = %v, want it to mention summary model", err)
+		}
+	})
 }
