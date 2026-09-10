@@ -336,7 +336,8 @@ func TestResolveSummary(t *testing.T) {
 		if got.Model != "small:1b" {
 			t.Errorf("Model = %q, want small:1b", got.Model)
 		}
-		if got.Provider != base.Provider || got.Host != base.Host || got.APIKey != base.APIKey || got.Think != base.Think {
+		if got.Provider != base.Provider || got.Host != base.Host || got.APIKey != base.APIKey ||
+			got.Think != base.Think {
 			t.Errorf("ResolveSummary() changed an unset field: %+v", got)
 		}
 	})
