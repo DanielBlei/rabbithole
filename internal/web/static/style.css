@@ -3465,7 +3465,16 @@ button.modal__act{border:0;font:inherit;}
    past reading, so the card reads as a lock on this app rather than a separate
    site. The card itself is a login session: fields are prompt lines rather
    than boxes, and one solid button is the only lit control on the page. */
-.gate-page{overflow-x:hidden;}
+/* The background holds still while the card is up. It keys on data-ghost,
+   the layout the page opened in (fonts-preload.js), never on data-theme, which
+   the first-run look picker changes live; it has its own copies of the few
+   topbar styles it draws, so no layout rule reaches it; and nothing in it
+   animates. The page field is pinned the same way. */
+.gate-page{
+  overflow-x:hidden;
+  --page-field:radial-gradient(120% 80% at 50% -10%, #233139 0%, var(--bg) 45%, var(--bg-2) 100%);
+}
+:root[data-ghost="minimal"] .gate-page{--page-field:linear-gradient(180deg, #1D272C 0%, var(--bg-2) 100%);}
 .gate__ghost{
   position:fixed;inset:0;z-index:0;overflow:hidden;
   pointer-events:none;user-select:none;
@@ -3474,7 +3483,25 @@ button.modal__act{border:0;font:inherit;}
      past the viewport. */
   transform:scale(1.04);
 }
-.gate__ghost .topbar{position:static;}
+.gate__ghost *{animation:none;transition:none;}
+.ghost__top{
+  position:relative;display:flex;align-items:center;padding:16px 0;
+  border-bottom:1px solid var(--e1-line);background:var(--e1-fill);box-shadow:var(--e1-shadow);
+}
+.ghost__in{
+  flex:1;min-width:0;max-width:var(--page-w);margin:0 auto;padding:0 var(--content-pad);
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+}
+.ghost__bunny{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);margin:0;
+  font:1.1rem/1.05 var(--font-mono);letter-spacing:1px;text-align:center;color:var(--text-dim);
+}
+.ghost__bunny .bunny__ears{color:var(--accent);}
+.ghost__wm{
+  font-family:'Archivo',sans-serif;color:var(--title);font-weight:700;
+  font-size:1.6rem;letter-spacing:.04em;text-transform:uppercase;
+}
+:root[data-ghost="minimal"] .ghost__wm{font-weight:600;font-size:1.5rem;letter-spacing:.005em;text-transform:none;}
 .ghost__chips{display:flex;gap:10px;}
 .ghost__chips i{display:block;width:92px;height:26px;border-radius:var(--r-full);background:var(--fill);}
 .ghost__chips i:last-child{width:26px;}
@@ -3519,10 +3546,14 @@ button.modal__act{border:0;font:inherit;}
   display:grid;place-items:center;
   padding-block:32px;padding-inline:16px;
 }
+/* Each card has one size in both layouts: its fields, button and prompt bar
+   are fixed heights, and Minimal hands the bar's height back as top padding,
+   so switching the look restyles a card without moving anything. */
 .gate__card{
+  --gate-bar:3.8rem;
   width:min(46rem,100%);overflow:hidden;
   font-family:var(--font-mono);color:var(--text);
-  background:rgba(20,28,32,.94);border:1px solid rgba(255,255,255,.1);border-radius:var(--r-md);
+  background:rgba(20,28,32,.94);border:1px solid rgba(255,255,255,.1);border-radius:var(--r-sm);
   -webkit-backdrop-filter:var(--e3-blur);
   backdrop-filter:var(--e3-blur);
   box-shadow:0 0 0 1px rgba(0,0,0,.4), 0 30px 80px rgba(0,0,0,.6), 0 0 60px rgba(128,203,196,.06);
@@ -3543,13 +3574,16 @@ button.modal__act{border:0;font:inherit;}
   .gate__card{background:var(--bg);-webkit-backdrop-filter:none;backdrop-filter:none;}
 }
 .gate__bar{
-  padding:10px 16px;border-bottom:1px solid var(--hairline);background:rgba(255,255,255,.02);
+  height:var(--gate-bar);padding:0 16px;line-height:calc(var(--gate-bar) - 1px);
+  border-bottom:1px solid var(--hairline);background:rgba(255,255,255,.02);
   font-size:1.2rem;letter-spacing:.02em;color:var(--text-dim);white-space:nowrap;overflow:hidden;
 }
 .gate__body{display:flex;flex-direction:column;gap:18px;padding:22px 26px 24px;}
 .gate code{font-family:var(--font-mono);color:var(--accent);}
 
-.gate__top{display:flex;align-items:center;gap:18px;}
+/* A little more room under the header than between the other parts, so the
+   mark reads as the card's title and the fields as what follows it. */
+.gate__top{display:flex;align-items:center;gap:18px;margin-bottom:6px;}
 .gate__who{display:flex;flex-direction:column;gap:2px;min-width:0;}
 /* The topbar's wordmark, at the size of a heading. */
 .gate__wm{
@@ -3586,7 +3620,7 @@ button.modal__act{border:0;font:inherit;}
    typing starts in one column. */
 .gate__form{display:flex;flex-direction:column;gap:4px;}
 .gate__line{
-  display:flex;align-items:center;gap:12px;padding:10px 2px;
+  display:flex;align-items:center;gap:12px;height:5.2rem;padding:0 2px;
   border-bottom:1px solid var(--hairline-strong);transition:border-color .15s var(--ease);
 }
 .gate__line:focus-within{border-color:var(--accent);}
@@ -3630,8 +3664,8 @@ button.modal__act{border:0;font:inherit;}
 /* Solid: the page's one primary action, so the one lit thing on it. */
 .gate__go{
   display:flex;align-items:center;justify-content:center;gap:10px;
-  width:100%;margin-top:18px;padding:11px 16px;
-  border:0;border-radius:var(--r-sm);cursor:pointer;
+  width:100%;height:4.4rem;margin-top:18px;padding:0 16px;
+  border:0;border-radius:var(--r-xs);cursor:pointer;
   font-family:var(--font-mono);font-size:1.4rem;font-weight:600;letter-spacing:.02em;
   color:#10201E;background:linear-gradient(180deg,#95D6D0,#7AC3BC);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.35), 0 1px 2px rgba(0,0,0,.35), 0 8px 22px rgba(128,203,196,.18);
@@ -3647,7 +3681,7 @@ button.modal__act{border:0;font:inherit;}
 }
 .gate__link{
   padding:3px 0;border-radius:6px;cursor:pointer;
-  font-size:1.25rem;color:var(--text-dim);transition:color .15s var(--ease);
+  font-size:1.25rem;line-height:1.8rem;color:var(--text-dim);transition:color .15s var(--ease);
 }
 .gate__link:hover{color:var(--accent);}
 .gate__link:focus-visible{outline:1px solid var(--accent);outline-offset:3px;}
@@ -3685,7 +3719,7 @@ button.modal__act{border:0;font:inherit;}
   .gate__body{padding:18px 18px 20px;}
   .gate__top{gap:14px;}
   .gate__lbl,.gate__card--setup .gate__lbl{width:auto;}
-  .gate__line{flex-wrap:wrap;}
+  .gate__line{flex-wrap:wrap;height:auto;padding-block:10px;}
 }
 
 /* Minimal: no shell. The prompt bar goes, the prompt lines become labelled
@@ -3694,18 +3728,156 @@ button.modal__act{border:0;font:inherit;}
 :root[data-theme="minimal"] .gate__bar,
 :root[data-theme="minimal"] .gate__term{display:none;}
 :root[data-theme="minimal"] .gate__plain{display:inline;}
-:root[data-theme="minimal"] .gate__card{font-family:var(--ff-plex);background:rgba(26,35,39,.94);}
+/* Minimal is the same card without the shell: soft corners, a lit surface, a
+   pill button. The bar's height comes back as top padding (see .gate__card). */
+:root[data-theme="minimal"] .gate__card{
+  font-family:var(--ff-plex);border-radius:var(--r-lg);border-color:rgba(255,255,255,.13);
+  background:linear-gradient(180deg,rgba(44,57,63,.94),rgba(29,39,44,.96));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07), 0 30px 80px rgba(0,0,0,.55), 0 0 90px rgba(128,203,196,.07);
+}
+/* A little of the bar's height goes under the header instead, so the header
+   sits a touch closer to the top and a touch further from the fields. */
+:root[data-theme="minimal"] .gate__body{padding-top:calc(22px + var(--gate-bar) - 8px);}
+:root[data-theme="minimal"] .gate__top{margin-bottom:14px;}
+:root[data-theme="minimal"] .gate__go{border-radius:var(--r-full);font-weight:500;}
+:root[data-theme="minimal"] .gate__go kbd{display:none;}
+:root[data-theme="minimal"] .gate__first{border-radius:var(--r-md);}
 :root[data-theme="minimal"] .gate__first-lbl{letter-spacing:.06em;}
-:root[data-theme="minimal"] .gate__wm{font-weight:600;font-size:1.9rem;letter-spacing:.005em;text-transform:none;}
-:root[data-theme="minimal"] .gate__line{flex-direction:column;align-items:stretch;gap:4px;}
+:root[data-theme="minimal"] .gate__wm{line-height:1.15;font-weight:600;font-size:1.9rem;letter-spacing:.005em;text-transform:none;}
+:root[data-theme="minimal"] .gate__line{flex-direction:column;align-items:stretch;justify-content:flex-end;gap:2px;padding-bottom:7px;}
+:root[data-theme="minimal"] .gate__line:focus-within .gate__lbl{color:var(--accent);}
 :root[data-theme="minimal"] .gate__lbl{width:auto;font-family:var(--ff-plex);font-size:1.2rem;font-weight:500;color:var(--text-dim);}
 :root[data-theme="minimal"] .gate__input,
 :root[data-theme="minimal"] .gate__go{font-family:var(--ff-plex);letter-spacing:0;}
 :root[data-theme="minimal"] .gate__input:-webkit-autofill{-webkit-box-shadow:0 0 0 100px rgb(26,35,39) inset;}
-:root[data-theme="minimal"] .ghost__tiles{display:none;}
-:root[data-theme="minimal"] .ghost__pane{background:none;}
-:root[data-theme="minimal"] .ghost__bar{border-color:var(--hairline);}
-:root[data-theme="minimal"] .ghost__row{margin:0 14px;background:none;border-radius:0;border-top:1px solid var(--hairline);}
+:root[data-ghost="minimal"] .ghost__tiles{display:none;}
+:root[data-ghost="minimal"] .ghost__pane{background:none;}
+:root[data-ghost="minimal"] .ghost__bar{border-color:var(--hairline);}
+:root[data-ghost="minimal"] .ghost__row{margin:0 14px;background:none;border-radius:0;border-top:1px solid var(--hairline);}
+
+/* --- First run: the look picker -------------------------------------------
+   The first setup card is the login card widened: the form keeps its column
+   on the right and the picker takes the left. It opens at the login's width
+   and grows, with the picker fading in once there is room, so it reads as the
+   same card making space rather than a new page. Every part of the picker has
+   a fixed height, so both looks draw it at one size. */
+.gate__split{display:block;}
+.gate__card--first{width:min(96rem,100%);}
+.gate__card--first .gate__split{display:grid;grid-template-columns:1fr minmax(0,46rem);}
+@media (prefers-reduced-motion: no-preference){
+  .gate__card--first:not(.gate--err){animation:gate-widen .55s var(--spring);}
+  .gate__card--first:not(.gate--err) .gate__pick{animation:gate-pick-in .35s .4s var(--ease) both;}
+}
+@keyframes gate-widen{from{width:46rem;}}
+@keyframes gate-pick-in{from{opacity:0;transform:translateX(-6px);}}
+
+/* The picker's header lines up with the form's bunny row: the same top
+   padding, the same height (the bunny's two lines), centred the same way. */
+.gate__pick{
+  display:flex;flex-direction:column;gap:16px;min-width:0;padding:22px 26px 24px;
+  background:var(--bg-2);border-right:1px solid var(--hairline);
+}
+.gate__pick-hd{display:flex;flex-direction:column;justify-content:center;gap:2px;height:4.2rem;}
+.gate__pick-cmd{font-size:1.25rem;color:var(--text-dim);}
+.gate__pick-t{font-size:1.5rem;font-weight:600;color:var(--title);}
+.gate__pick-sub{font-size:1.3rem;color:var(--text-dim);}
+.gate__pick-note{margin:auto 0 0;font-size:1.2rem;color:var(--text-dim);}
+
+/* One example feed, drawn in each look. Both drawings share a cell and
+   crossfade, so a pick reads as the same feed redrawn. */
+.gate__pv{display:grid;flex:none;height:20.4rem;}
+.gate__pv > *{grid-area:1/1;min-width:0;overflow:hidden;transition:opacity .35s var(--ease),transform .35s var(--ease);}
+.gate__pvm{opacity:0;transform:translateY(4px);}
+.gate__sc--high{--c:var(--score-high);}
+.gate__sc--mid{--c:var(--score-mid);}
+
+.gate__pvt{display:flex;flex-direction:column;border-radius:var(--r-xs);background:var(--bg);box-shadow:inset 0 0 0 1px var(--line);font-family:var(--font-mono);}
+.gate__pvt-top{display:flex;flex:none;align-items:center;gap:8px;height:2.6rem;padding:0 9px;background:#212C31;border-bottom:1px solid var(--line);}
+.gate__pvt-wm{font:700 .85rem 'Archivo',sans-serif;letter-spacing:.08em;color:var(--title);}
+.gate__pvt-nav{display:flex;gap:3px;margin-left:4px;}
+.gate__pvt-nav span{padding:1px 6px;border-radius:var(--r-full);font-size:.8rem;color:var(--text-dim);background:var(--fill);}
+.gate__pvt-nav span:first-child{color:var(--accent);background:var(--tint);}
+.gate__pvt-clk{margin-left:auto;font-size:.85rem;color:var(--text);}
+.gate__pvt-pane{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden;margin:7px;border-radius:var(--r-xs);background:var(--pane);}
+.gate__pvt-pane > *{flex:none;}
+.gate__pvt-ps{padding:5px 8px;border-bottom:1px solid var(--line);font-size:.85rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;}
+.gate__pvt-ps b{font-weight:400;color:var(--title);}
+.gate__pvt-fl{display:flex;gap:4px;padding:6px 8px 2px;}
+.gate__pvt-fl span{padding:1px 6px;border-radius:var(--r-full);font-size:.75rem;color:var(--text-dim);box-shadow:inset 0 0 0 1px var(--hairline-strong);}
+.gate__pvt-fl span:first-child{color:var(--accent);box-shadow:inset 0 0 0 1px rgba(128,203,196,.4);}
+.gate__pvt-row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:2px 10px;margin:5px 8px 0;padding:6px 8px;border-radius:5px;background:var(--card);}
+.gate__pvt-row b{font-size:.9rem;font-weight:500;color:var(--title);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.gate__pvt-row small{grid-column:1;font-size:.75rem;color:var(--text-dim);}
+.gate__pvt-g{display:flex;grid-row:1/3;grid-column:2;align-items:center;gap:5px;font-size:.8rem;color:var(--c);font-variant-numeric:tabular-nums;}
+.gate__pvt-g i{display:block;width:3.4rem;height:4px;border-radius:2px;background:linear-gradient(90deg,var(--c) var(--s),rgba(255,255,255,.08) var(--s));}
+
+.gate__pvm{display:flex;flex-direction:column;padding:12px 18px;border-radius:var(--r-md);background:linear-gradient(180deg,#223036,#1B252A);box-shadow:inset 0 0 0 1px var(--hairline-strong);font-family:var(--ff-plex);}
+.gate__pvm-top{display:flex;align-items:baseline;gap:14px;padding-bottom:9px;border-bottom:1px solid var(--hairline-strong);}
+.gate__pvm-wm{font-size:1.15rem;font-weight:600;color:var(--title);}
+.gate__pvm-nav{display:flex;gap:12px;font-size:.9rem;color:var(--text-dim);}
+.gate__pvm-nav span:first-child{color:var(--title);box-shadow:0 1.5px 0 var(--accent);}
+.gate__pvm-clk{margin-left:auto;font-size:.9rem;color:var(--text-dim);}
+.gate__pvm-day{margin:10px 0 2px;font-size:.8rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--text-dim);}
+.gate__pvm-row{display:grid;grid-template-columns:1fr auto;align-items:baseline;gap:1px 14px;padding:7px 0;border-bottom:1px solid var(--hairline);}
+.gate__pvm-row:last-child{border-bottom:0;}
+.gate__pvm-row b{font-size:1.05rem;font-weight:500;color:var(--title);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.gate__pvm-row small{grid-column:1;font-size:.85rem;color:var(--text-dim);}
+.gate__pvm-s{grid-row:1;grid-column:2;font-size:1rem;font-weight:600;color:var(--c);font-variant-numeric:tabular-nums;}
+
+/* The two looks sit side by side in both layouts, in the same place; only
+   their shape changes: a terminal radio in Default, a soft card with a dot in
+   Minimal. They are Settings → Theme's radios, so theme.js drives them. */
+.gate__opts{display:grid;flex:none;grid-template-columns:1fr 1fr;gap:10px;height:5.6rem;}
+.gate__opt{position:relative;display:block;min-width:0;cursor:pointer;}
+.gate__opt input{position:absolute;inset:0;margin:0;opacity:0;cursor:pointer;}
+.gate__opt-body{
+  position:relative;display:flex;flex-direction:column;justify-content:center;gap:2px;height:100%;padding:0 12px;
+  border-radius:var(--r-xs);background:var(--fill);box-shadow:inset 0 0 0 1px var(--hairline);
+  transition:background .15s var(--ease),box-shadow .15s var(--ease);
+}
+.gate__opt-hd{display:flex;align-items:baseline;gap:8px;}
+.gate__opt-mk{flex:none;font:500 1.3rem var(--font-mono);color:var(--text-dim);}
+.gate__opt-mk::before{content:"( )";}
+.gate__opt-nm{font-size:1.35rem;font-weight:500;color:var(--title);text-transform:lowercase;}
+.gate__opt-ds{font-size:1.15rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.gate__opt input:hover ~ .gate__opt-body{background:var(--fill-hover);}
+.gate__opt input:checked ~ .gate__opt-body{background:var(--tint);box-shadow:inset 0 0 0 1px rgba(128,203,196,.4);}
+.gate__opt input:checked ~ .gate__opt-body .gate__opt-nm,
+.gate__opt input:checked ~ .gate__opt-body .gate__opt-mk{color:var(--accent);}
+.gate__opt input:checked ~ .gate__opt-body .gate__opt-mk::before{content:"(\2022)";}
+.gate__opt input:focus-visible ~ .gate__opt-body{outline:1px solid var(--accent);outline-offset:2px;}
+
+/* Minimal moves the header up with the form's bunny row and gives the same 8px
+   back under it, so the options stay exactly where they were when a pick
+   restyles the card under the pointer. */
+:root[data-theme="minimal"] .gate__pick-hd{margin-bottom:8px;}
+:root[data-theme="minimal"] .gate__pick{
+  padding-top:calc(22px + var(--gate-bar) - 8px);
+  background:radial-gradient(100% 70% at 20% 0%, rgba(128,203,196,.10), transparent 70%);
+}
+:root[data-theme="minimal"] .gate__pick-t{font-size:1.9rem;line-height:1.15;letter-spacing:-.005em;}
+:root[data-theme="minimal"] .gate__pvt{opacity:0;transform:translateY(-4px);}
+:root[data-theme="minimal"] .gate__pvm{opacity:1;transform:none;}
+:root[data-theme="minimal"] .gate__opt-body{padding:0 36px 0 16px;border-radius:var(--r-md);}
+:root[data-theme="minimal"] .gate__opt-mk{
+  position:absolute;top:50%;right:14px;width:14px;height:14px;margin-top:-7px;
+  border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--hairline-strong);
+}
+:root[data-theme="minimal"] .gate__opt-mk::before,
+:root[data-theme="minimal"] .gate__opt input:checked ~ .gate__opt-body .gate__opt-mk::before{content:none;}
+:root[data-theme="minimal"] .gate__opt input:checked ~ .gate__opt-body .gate__opt-mk{box-shadow:inset 0 0 0 4px var(--accent);}
+:root[data-theme="minimal"] .gate__opt-nm{font-size:1.45rem;font-weight:600;text-transform:none;}
+
+@media (prefers-reduced-motion: reduce){
+  .gate__pv > *,.gate__opt-body{transition:none;}
+}
+/* Narrower than the two columns need: the picker stacks under the form. */
+@media (max-width: 1000px){
+  .gate__card--first{width:min(46rem,100%);}
+  .gate__card--first .gate__split{display:flex;flex-direction:column-reverse;}
+  .gate__pick{border-right:0;border-top:1px solid var(--hairline);}
+  :root[data-theme="minimal"] .gate__pick{padding-top:20px;}
+}
 
 /* --- Settings → Account --------------------------------------------------
    Who is signed in, at the top of the column as a card of its own, the one

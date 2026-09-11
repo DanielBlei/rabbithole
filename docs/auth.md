@@ -17,6 +17,11 @@ in with it lands on a setup page that asks for one of two things:
 
 The choice is stored in the database, so it survives restarts and config edits.
 
+The same setup card also picks the look: **Default** (terminal chrome, dense feed) or
+**Minimal** (no shell, hairline chrome), with an example feed drawn in each. Picking one
+restyles the page on the spot. It is saved in the browser, like every other display setting,
+and Settings → Theme changes it later. Later logins show the plain login card in that look.
+
 ## Sessions
 
 Logging in gives the browser a session cookie. Sessions live in the server's memory only, so:
@@ -80,8 +85,10 @@ hand. The login page's **forgot password?** says so.
 
 ## Reaching it from another machine
 
-Over plain HTTP the password crosses the network readable, so `serve` refuses to listen
-anywhere but loopback unless it is serving HTTPS:
+Over plain HTTP the password and the session cookie cross the network readable, so by default
+`serve` refuses plain HTTP anywhere but loopback. For another machine, serve HTTPS, or put a
+TLS-terminating proxy you trust in front and pass `--insecure-http` (see below). Serving HTTPS
+itself:
 
 ```
 rabbithole serve --addr :8443 --tls-cert cert.pem --tls-key key.pem
@@ -89,9 +96,10 @@ rabbithole serve --addr :8443 --tls-cert cert.pem --tls-key key.pem
 
 `serve` accepts TLS 1.2 and up, and looks at the two files every 30 seconds: a renewed
 certificate is picked up without a restart (which would log everyone out), and one that fails
-to load leaves the previous one serving. When it serves HTTPS itself under a real host name,
-it also sends `Strict-Transport-Security`; it does not for `localhost` or an IP address, so a
-test certificate there cannot lock plain HTTP out of the same name.
+to load leaves the previous one serving. When a request comes over HTTPS under a real host
+name, served here or through a trusted proxy (below), the response also carries
+`Strict-Transport-Security`; it does not for `localhost` or an IP address, so a test
+certificate there cannot lock plain HTTP out of the same name.
 
 A reverse proxy that handles HTTPS works too. When it runs on the same machine, leave `serve`
 on `127.0.0.1` and nothing else is needed. With [Caddy](https://caddyserver.com):
@@ -105,7 +113,7 @@ rabbithole.example.lan {
 or with [Tailscale](https://tailscale.com/kb/1312/serve), `tailscale serve --bg 8080`.
 
 The proxy's `X-Forwarded-For` and `X-Forwarded-Proto` headers are what let the login tell
-clients apart for the lockout and mark the cookie `Secure`. They are believed only from
+clients apart for the lockout, mark the cookie `Secure` and send `Strict-Transport-Security`. They are believed only from
 `--trusted-proxies`, loopback by default, and ignored from anyone else, since any client can
 send them.
 

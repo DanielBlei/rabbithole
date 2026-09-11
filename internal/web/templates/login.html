@@ -2,7 +2,9 @@
      chrome to show before a session, and nothing here may carry real data,
      since anyone who can reach the address gets this page. The app behind the
      card is a ghost, a skeleton of the feed's shapes, blurred past reading.
-     No JS: the in-card toggles are checkboxes read by :has(). */}}
+     No JS: the in-card toggles are checkboxes read by :has(). The one
+     exception is the first-run setup, which loads theme.js for its look
+     picker, the same script Settings → Theme runs. */}}
 {{define "gate"}}
 <!doctype html>
 <html lang="en">
@@ -15,17 +17,18 @@
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="/static/favicon.ico" sizes="16x16 32x32 48x48">
 <link rel="stylesheet" href="/static/style.css">
+{{if and (eq .Step "setup") .Initial}}<script src="/static/js/theme.js" defer></script>{{end}}
 </head>
 <body class="gate-page">
   <div class="gate__ghost" aria-hidden="true" inert>
-    <header class="topbar">
-      <pre class="topbar__bunny"><span class="bunny__ears">(\_/)</span>
-(<i class="bunny__eye">&bull;</i>_<i class="bunny__eye">&bull;</i>)</pre>
-      <div class="topbar__in">
-        <div class="topbar__left"><span class="wordmark"><b>The Rabbit Hole</b></span></div>
+    <div class="ghost__top">
+      <pre class="ghost__bunny"><span class="bunny__ears">(\_/)</span>
+(&bull;_&bull;)</pre>
+      <div class="ghost__in">
+        <b class="ghost__wm">The Rabbit Hole</b>
         <div class="ghost__chips"><i></i><i></i></div>
       </div>
-    </header>
+    </div>
     <div class="ghost__content">
       <div class="ghost__tiles"><i></i><i></i><i></i><i></i></div>
       <div class="ghost__pane">
@@ -69,7 +72,7 @@
     {{if .Initial}}
     <div class="gate__first" role="note">
       <span class="gate__first-lbl"><span class="gate__term">first run</span><span class="gate__plain">First run</span></span>
-      <p class="gate__first-msg">Log in with <code>admin</code> / <code>admin</code>, then set a password of your own.</p>
+      <p class="gate__first-msg">Log in with <code>admin</code> / <code>admin</code>, then set your own.</p>
     </div>
     {{end}}
     <div class="gate__swap">
@@ -87,7 +90,7 @@
                autocomplete="current-password" maxlength="256" required{{if .Error}} autofocus{{end}}>
       </label>
       {{if .Plain}}<p class="gate__warn">This connection isn't encrypted, so the password crosses the network readable.</p>{{end}}
-      <button class="gate__go" type="submit">log in <kbd aria-hidden="true">&crarr;</kbd></button>
+      <button class="gate__go" type="submit"><span class="gate__term">log in</span><span class="gate__plain">Log in</span> <kbd aria-hidden="true">&crarr;</kbd></button>
       {{if not .Initial}}<div class="gate__foot"><label class="gate__link" for="gateForgot">forgot password?</label></div>{{end}}
     </form>
     {{if not .Initial}}
@@ -103,10 +106,16 @@
 </div>
 {{end}}
 
+{{/* On the first run the setup card widens: the form keeps its column on the
+     right and the look picker takes the left, so the password and the look are
+     chosen on one card. Later setups (an open instance locking itself) are the
+     plain card. */}}
 {{define "gateSetup"}}
-<div class="gate__card gate__card--setup{{if .Error}} gate--err{{end}}">
+<div class="gate__card gate__card--setup{{if .Initial}} gate__card--first{{end}}{{if .Error}} gate--err{{end}}">
   {{if .Initial}}<input class="gate__chk" type="checkbox" id="gateOpen" aria-controls="gateOpenPanel">{{end}}
   <div class="gate__bar"><span class="pane__prompt">{{.Username}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~</span><span class="sh">$&nbsp;</span><span class="pane__cmd">passwd</span><span class="blink">_</span></div>
+  <div class="gate__split">
+  {{if .Initial}}{{template "gatePick"}}{{end}}
   <div class="gate__body">
     <div class="gate__top">
       {{template "gateBunny"}}
@@ -133,7 +142,7 @@
                autocomplete="new-password" minlength="8" maxlength="256" required>
       </label>
       {{if .Plain}}<p class="gate__warn">This connection isn't encrypted, so the password crosses the network readable.</p>{{end}}
-      <button class="gate__go" type="submit">set password <kbd aria-hidden="true">&crarr;</kbd></button>
+      <button class="gate__go" type="submit"><span class="gate__term">set password</span><span class="gate__plain">Set password</span> <kbd aria-hidden="true">&crarr;</kbd></button>
       <div class="gate__foot">
         {{if .Initial}}<label class="gate__link" for="gateOpen">continue without a password</label>{{else}}<a class="gate__link" href="/">&larr; back</a>{{end}}
       </div>
@@ -142,11 +151,53 @@
     <form class="gate__panel" id="gateOpenPanel" method="post" action="/setup">
       <input type="hidden" name="action" value="open">
       <p class="gate__lead gate__lead--warn">Anyone who can reach this address can read and edit everything. You can set a password later in Settings.</p>
-      <button class="gate__go gate__go--warn" type="submit">keep it open</button>
+      <button class="gate__go gate__go--warn" type="submit"><span class="gate__term">keep it open</span><span class="gate__plain">Keep it open</span></button>
       <div class="gate__foot"><label class="gate__link" for="gateOpen">&larr; back</label></div>
     </form>
     {{end}}
     </div>
   </div>
+  </div>
 </div>
+{{end}}
+
+{{/* The first-run look picker. The radios are Settings → Theme's own
+     (data-theme-pick, driven by theme.js), so a pick restyles this page on the
+     spot and is the browser's choice from then on. The preview draws one
+     example feed in each look; the layout layer shows the one picked. The
+     stories are examples, not anyone's data. */}}
+{{define "gatePick"}}
+<aside class="gate__pick" aria-label="Pick a look">
+  <div class="gate__pick-hd">
+    <span class="gate__pick-cmd gate__term"><span class="pane__path">~/settings</span><span class="sh">$&nbsp;</span>theme --first-login</span>
+    <b class="gate__pick-t"><span class="gate__term">Pick a look</span><span class="gate__plain">Choose your look</span></b>
+    <span class="gate__pick-sub gate__plain">The same feed, drawn two ways.</span>
+  </div>
+  <div class="gate__pv" aria-hidden="true">
+    <div class="gate__pvt">
+      <div class="gate__pvt-top"><span class="gate__pvt-wm">THE RABBIT HOLE</span><span class="gate__pvt-nav"><span>feed</span><span>maze</span></span><span class="gate__pvt-clk">09:41</span></div>
+      <div class="gate__pvt-pane">
+        <div class="gate__pvt-ps"><span class="pane__prompt">you@rabbithole</span><span class="sh">:</span><span class="pane__path">~/feed</span><span class="sh">$&nbsp;</span><b>digest --today</b></div>
+        <div class="gate__pvt-fl"><span>unread 12</span><span>seen</span><span>saved</span></div>
+        <div class="gate__pvt-row"><b>vLLM adds prefix caching for multi-turn chat</b><small>github.com/vllm-project &middot; 2h</small><span class="gate__pvt-g gate__sc--high" style="--s:91%"><i></i>0.91</span></div>
+        <div class="gate__pvt-row"><b>Postgres 18 brings async I/O to sequential scans</b><small>lwn.net &middot; 5h</small><span class="gate__pvt-g gate__sc--high" style="--s:78%"><i></i>0.78</span></div>
+        <div class="gate__pvt-row"><b>Running Ollama behind a reverse proxy</b><small>blog.ollama.com &middot; 1d</small><span class="gate__pvt-g gate__sc--mid" style="--s:56%"><i></i>0.56</span></div>
+      </div>
+    </div>
+    <div class="gate__pvm">
+      <div class="gate__pvm-top"><span class="gate__pvm-wm">The Rabbit Hole</span><span class="gate__pvm-nav"><span>Feed</span><span>Maze</span></span><span class="gate__pvm-clk">09:41</span></div>
+      <div class="gate__pvm-day">Today</div>
+      <div class="gate__pvm-row"><b>vLLM adds prefix caching for multi-turn chat</b><small>github.com/vllm-project &middot; 2 hours ago</small><span class="gate__pvm-s gate__sc--high">91</span></div>
+      <div class="gate__pvm-row"><b>Postgres 18 brings async I/O to sequential scans</b><small>lwn.net &middot; 5 hours ago</small><span class="gate__pvm-s gate__sc--high">78</span></div>
+      <div class="gate__pvm-row"><b>Running Ollama behind a reverse proxy</b><small>blog.ollama.com &middot; yesterday</small><span class="gate__pvm-s gate__sc--mid">56</span></div>
+    </div>
+  </div>
+  <div class="gate__opts" role="radiogroup" aria-label="Look">
+    <label class="gate__opt"><input type="radio" name="theme" value="default" id="gateLookDefault" data-theme-pick checked>
+      <span class="gate__opt-body"><span class="gate__opt-hd"><span class="gate__opt-mk" aria-hidden="true"></span><span class="gate__opt-nm">Default</span></span><span class="gate__opt-ds">terminal chrome, dense feed</span></span></label>
+    <label class="gate__opt"><input type="radio" name="theme" value="minimal" id="gateLookMinimal" data-theme-pick>
+      <span class="gate__opt-body"><span class="gate__opt-hd"><span class="gate__opt-mk" aria-hidden="true"></span><span class="gate__opt-nm">Minimal</span></span><span class="gate__opt-ds">no shell, hairline chrome</span></span></label>
+  </div>
+  <p class="gate__pick-note">Saved in this browser. Change it in Settings.</p>
+</aside>
 {{end}}

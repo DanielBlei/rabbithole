@@ -90,23 +90,23 @@ func (s *Web) setRememberCookie(w http.ResponseWriter, r *http.Request, key []by
 // restore picks a session back up from a "stay signed in" cookie. The session
 // dates from the cookie's login, so it ends when the cookie would have. A
 // cookie that no longer verifies is cleared.
-func (s *Web) restore(w http.ResponseWriter, r *http.Request, st store.AuthState) (string, bool) {
+func (s *Web) restore(w http.ResponseWriter, r *http.Request, st store.AuthState) (string, time.Time, bool) {
 	c, err := r.Cookie(rememberCookie)
 	if err != nil || c.Value == "" {
-		return "", false
+		return "", time.Time{}, false
 	}
 	issued, ok := readRemember(st.SigningKey, st.Gen, c.Value, s.sessions.now())
 	if !ok || st.Mode != store.AuthEnabled {
 		s.clearCookie(w, r, rememberCookie)
-		return "", false
+		return "", time.Time{}, false
 	}
-	token, err := s.sessions.createSince(st.Gen, issued)
+	token, since, err := s.sessions.createSince(st.Gen, issued)
 	if err != nil {
 		log.Error().Err(err).Msg("restoring a remembered session")
-		return "", false
+		return "", time.Time{}, false
 	}
 	s.setSessionCookie(w, r, token)
-	return token, true
+	return token, since, true
 }
 
 // remembered reports whether this browser holds a "stay signed in" cookie that
@@ -223,7 +223,7 @@ func (s *Web) handleEverywhere(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.sessions.clear()
-	token, err := s.sessions.createSince(gen, info.Since)
+	token, _, err := s.sessions.createSince(gen, info.Since)
 	if err != nil {
 		log.Error().Err(err).Msg("creating session")
 		http.Error(w, "internal error", http.StatusInternalServerError)

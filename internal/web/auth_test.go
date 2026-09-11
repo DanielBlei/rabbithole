@@ -153,7 +153,36 @@ func TestDefaultLoginIsHeldOnSetup(t *testing.T) {
 	if rec.Code != http.StatusNoContent || rec.Header().Get("HX-Redirect") != "/setup" {
 		t.Errorf("htmx during setup = %d %q", rec.Code, rec.Header().Get("HX-Redirect"))
 	}
-	wantStatus(t, b.get("/setup"), http.StatusOK)
+	setup := b.get("/setup")
+	wantStatus(t, setup, http.StatusOK)
+	// The first run also picks the look, with Settings → Theme's own radios.
+	for _, want := range []string{`data-theme-pick`, `theme --first-login`, `/static/js/theme.js`} {
+		if !strings.Contains(setup.Body.String(), want) {
+			t.Errorf("first-run setup lacks %q", want)
+		}
+	}
+}
+
+func TestOpenInstanceSetupHasNoLookPicker(t *testing.T) {
+	w := newTestWeb(t)
+	if err := w.db.DisableAuth(context.Background()); err != nil {
+		t.Fatalf("DisableAuth: %v", err)
+	}
+	b := newBrowser(t, w)
+	setup := b.get("/setup")
+	wantStatus(t, setup, http.StatusOK)
+	for _, unwanted := range []string{`data-theme-pick`, `/static/js/theme.js`} {
+		if strings.Contains(setup.Body.String(), unwanted) {
+			t.Errorf("setup on an open instance has %q", unwanted)
+		}
+	}
+	// The login page carries no script beyond the pre-paint one.
+	if err := w.db.SetPassword(context.Background(), "alice", "correct horse"); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+	if login := b.get("/login").Body.String(); strings.Contains(login, "theme.js") {
+		t.Error("the login page loads theme.js")
+	}
 }
 
 func TestSetupPasswordEndsEveryOtherSession(t *testing.T) {
@@ -519,7 +548,7 @@ func TestSessionStoreStaysBounded(t *testing.T) {
 	if n := len(ss.byID); n > maxSessions {
 		t.Errorf("%d sessions held, want at most %d", n, maxSessions)
 	}
-	if ok, _ := ss.check(first, "g"); ok {
+	if _, ok, _ := ss.check(first, "g"); ok {
 		t.Error("the session seen longest ago survived the bound")
 	}
 }
@@ -533,12 +562,12 @@ func TestSessionsEndAtTheAbsoluteLimit(t *testing.T) {
 	// Used every six days: never idle long enough to lapse, until the cap.
 	for range 4 {
 		now = now.Add(6 * 24 * time.Hour)
-		if ok, _ := ss.check(token, "g"); !ok {
+		if _, ok, _ := ss.check(token, "g"); !ok {
 			t.Fatalf("an active session ended %v in", now.Sub(start))
 		}
 	}
 	now = start.Add(sessionMax + time.Minute)
-	if ok, _ := ss.check(token, "g"); ok {
+	if _, ok, _ := ss.check(token, "g"); ok {
 		t.Error("a session outlived its absolute limit")
 	}
 }
@@ -586,6 +615,40 @@ func TestGateHeaders(t *testing.T) {
 	}
 	if get("/login", "rabbithole.lan", false).Header().Get("Strict-Transport-Security") != "" {
 		t.Error("HSTS sent over plain HTTP")
+	}
+
+	// Behind a TLS-terminating proxy: HSTS when a trusted proxy says the
+	// browser used HTTPS, not when anyone else claims it.
+	proxied := func(remote string) string {
+		req := httptest.NewRequest(http.MethodGet, "/login", nil)
+		req.Host, req.RemoteAddr = "rabbithole.lan", remote
+		req.Header.Set("X-Forwarded-Proto", "https")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Header().Get("Strict-Transport-Security")
+	}
+	if proxied("127.0.0.1:40000") == "" {
+		t.Error("no HSTS behind a trusted proxy serving HTTPS")
+	}
+	if proxied("203.0.113.9:40000") != "" {
+		t.Error("an untrusted client's X-Forwarded-Proto earned HSTS")
+	}
+}
+
+func TestSessionCheckReportsTheLogin(t *testing.T) {
+	ss := newSessionStore()
+	login := time.Now().Add(-3 * time.Hour)
+	token, recorded, err := ss.createSince("g", login)
+	if err != nil {
+		t.Fatalf("createSince: %v", err)
+	}
+	since, ok, _ := ss.check(token, "g")
+	if !ok || !since.Equal(login) || !recorded.Equal(login) {
+		t.Errorf("check = %v %v, recorded %v; want the login at %v", since, ok, recorded, login)
+	}
+	ss.delete(token)
+	if since, ok, _ := ss.check(token, "g"); ok || !since.IsZero() {
+		t.Errorf("a deleted session checked as %v %v", since, ok)
 	}
 }
 
