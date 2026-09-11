@@ -274,6 +274,27 @@ Note the inconsistency: todos delete hard, ideas delete soft. That is deliberate
 sticky note is cheap to restore and easy to knock off a board by accident — but it is worth
 knowing before either table grows features.
 
+## auth
+
+The web UI's login, in one row at most (`id` is pinned to 1): `username`, `pass_hash` (an
+argon2id string in the PHC format, which records its own parameters), `mode` (`enabled` or
+`disabled`), `gen`, `signing_key` and `updated_at`. No row at all means a fresh install, where the default
+`admin` / `admin` login works until a password is set. Written by the web UI's setup page and
+by `rabbithole auth reset|disable`.
+
+`gen` is 128 random bits rewritten on every write. Sessions are not stored here: they live in
+the server's memory, so a restart ends them, and each records the `gen` it was issued under,
+so it stops matching once the row changes. That is how a CLI reset ends the sessions of a
+server running in another process. The setup page's writes are conditional on the state it
+read (`ON CONFLICT DO NOTHING` over no row, `WHERE gen = ?` over one), so two of them racing
+cannot undo each other; the loser gets `ErrAuthChanged` and writes nothing.
+
+`signing_key` is 256 random bits for the HMAC that signs "stay signed in" cookies, which carry
+a session through a restart. Those cookies hold the `gen` too, so `RetireSessionsIf` (log out
+everywhere: a new `gen`, nothing else) voids them along with every in-memory session; a new
+password also brings a new key. It is conditional on the `gen` the caller's session was checked
+against, so a password reset that lands first wins and the retire gets `ErrAuthChanged`.
+
 ## An ingest run, end to end
 
 ```mermaid
@@ -368,6 +389,10 @@ returns `ErrSchemaVersion` on a mismatch, naming the file rather than touching i
 
 Changing the schema therefore means editing the `CREATE TABLE` block and raising
 `schemaVersion`. Existing databases are then refused until they are replaced.
+
+A new table that nothing older depends on is the exception. It goes in `additiveSchemas`
+instead, whose `CREATE TABLE IF NOT EXISTS` runs on every open, so existing databases gain it
+without a version bump. `auth` was the first.
 
 That used to be cheap: everything could be rebuilt from `feeds.yaml`. It is less so now that
 the feed set lives here. A feed added, retuned or deleted on the Sources section exists nowhere

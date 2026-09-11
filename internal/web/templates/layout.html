@@ -194,6 +194,7 @@
           <label class="stg__tab"><input type="radio" name="stgSect" id="stgWx"><span>Weather</span></label>
           <label class="stg__tab"><input type="radio" name="stgSect" id="stgFonts"><span>Fonts</span></label>
           <label class="stg__tab"><input type="radio" name="stgSect" id="stgTheme"><span>Theme</span></label>
+          {{if .Chrome.Account.Mode}}<label class="stg__tab stg__tab--acct"><input type="radio" name="stgSect" id="stgAccount"><span>Account</span></label>{{end}}
         </fieldset>
 
         <div class="stg__pane">
@@ -413,6 +414,9 @@
               </label>
             </div>
           </section>
+          {{if .Chrome.Account.Mode}}
+          <section class="stg__sect stg__sect--account">{{template "accountSect" .Chrome.Account}}</section>
+          {{end}}
         </div>
       </div>
 
@@ -423,6 +427,10 @@
            target="_blank" rel="noopener noreferrer">&#8599; source code</a>
         <a class="modal__act" href="#" hx-get="/config" hx-target="#modalTop" hx-swap="innerHTML">&#9881; view config</a>
         <a class="modal__act" href="#" hx-get="/sources" hx-target="#modalTop" hx-swap="innerHTML">&#9636; edit sources</a>
+        {{/* The Account tab's log out, one click from any tab. */}}
+        {{if eq .Chrome.Account.Mode "enabled"}}
+        <form class="modal__actform" method="post" action="/logout"><button class="modal__act" type="submit">&#8676; log out</button></form>
+        {{end}}
       </div>
     </div>
   </div>

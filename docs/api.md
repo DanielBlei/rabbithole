@@ -3,6 +3,11 @@
 `rabbithole serve` exposes the same data and operations as the `items` CLI (see
 [docs/cli.md](cli.md)) over JSON.
 
+The API sits behind the web UI's login ([docs/auth.md](auth.md)). A request needs the
+session cookie a browser gets from logging in; without one it gets `401 unauthorized` (with
+`WWW-Authenticate: Cookie realm="rabbithole"`), unless the login has been switched off. There
+is no API token yet.
+
 ## GET /api/items
 
 Query params (all optional):

@@ -104,17 +104,24 @@ type ingestModalData struct {
 // that ingest responses re-render out-of-band so the chrome never goes stale.
 type chromeData struct {
 	Chip     ingestChipData
-	IngDot   string // ingest status dot: err | warn | run | "" (healthy — no dot)
-	IngSub   string // ingest subline shown inside the open side menu
-	IngNever bool   // no run has ever been recorded — gates the first-run hint
-	Running  bool   // a run is live — the ingWatch fragment polls while true
-	OOB      bool   // render the fragments with hx-swap-oob
+	IngDot   string      // ingest status dot: err | warn | run | "" (healthy — no dot)
+	IngSub   string      // ingest subline shown inside the open side menu
+	IngNever bool        // no run has ever been recorded — gates the first-run hint
+	Running  bool        // a run is live — the ingWatch fragment polls while true
+	OOB      bool        // render the fragments with hx-swap-oob
+	Account  accountData // Settings → Account; empty Mode when no gate ran
 }
 
-// chrome assembles the layout's shared state for a full page render. A history
-// read failure only degrades the chrome (renders as never-ran) — it never
-// blocks the page.
+// chrome assembles the layout's shared state for a full page render.
 func (s *Web) chrome(ctx context.Context) chromeData {
+	c := s.ingestChrome(ctx)
+	c.Account = accountView(authFrom(ctx), "")
+	return c
+}
+
+// ingestChrome is the ingest half of the chrome. A history read failure only
+// degrades it (renders as never-ran); it never blocks the page.
+func (s *Web) ingestChrome(ctx context.Context) chromeData {
 	st := s.ing.Status()
 	if st.Running {
 		// A live run pulses the topbar chip, the side menu's dot and the edge tab.

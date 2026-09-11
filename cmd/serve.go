@@ -5,10 +5,15 @@ package cmd
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/netip"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -19,7 +24,13 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
-var serveAddr string
+var (
+	serveAddr         string
+	serveTLSCert      string
+	serveTLSKey       string
+	serveInsecureHTTP bool
+	serveProxies      []string
+)
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -29,6 +40,13 @@ var serveCmd = &cobra.Command{
 
 func init() {
 	serveCmd.Flags().StringVar(&serveAddr, "addr", "127.0.0.1:8080", "address to listen on")
+	serveCmd.Flags().
+		StringVar(&serveTLSCert, "tls-cert", "", "certificate file (PEM) to serve HTTPS with, alongside --tls-key")
+	serveCmd.Flags().StringVar(&serveTLSKey, "tls-key", "", "private key file (PEM) for --tls-cert")
+	serveCmd.Flags().BoolVar(&serveInsecureHTTP, "insecure-http", false,
+		"allow plain HTTP on an address other machines can reach, for when a TLS proxy sits in front")
+	serveCmd.Flags().StringSliceVar(&serveProxies, "trusted-proxies", []string{"127.0.0.0/8", "::1/128"},
+		"networks whose X-Forwarded-For and X-Forwarded-Proto are believed; empty trusts none")
 	rootCmd.AddCommand(serveCmd)
 }
 
@@ -51,8 +69,176 @@ func browsableAddr(addr string) string {
 	return addr
 }
 
+// checkListen refuses plain HTTP on an address other machines can reach, where
+// the login would cross the network readable. HTTPS, an explicit opt-out for a
+// TLS proxy in front, or a loopback address all pass.
+func checkListen(addr, cert, key string, insecureHTTP bool) error {
+	if (cert == "") != (key == "") {
+		return errors.New("--tls-cert and --tls-key must be given together")
+	}
+	if cert != "" || insecureHTTP {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("--addr %q: %w", addr, err)
+	}
+	if isLoopback(host) {
+		return nil
+	}
+	return fmt.Errorf("refusing plain HTTP on %s, which other machines can reach: the login would cross "+
+		"the network unencrypted. Serve HTTPS with --tls-cert and --tls-key, put a TLS proxy in front and "+
+		"pass --insecure-http, or listen on 127.0.0.1", addr)
+}
+
+// isLoopback reports a host only this machine can reach. An empty host (":8080")
+// is every interface, so it is not.
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// parseProxies reads --trusted-proxies: CIDR networks or bare addresses.
+func parseProxies(list []string) ([]netip.Prefix, error) {
+	nets := make([]netip.Prefix, 0, len(list))
+	for _, entry := range list {
+		if entry = strings.TrimSpace(entry); entry == "" {
+			continue
+		}
+		if p, err := netip.ParsePrefix(entry); err == nil {
+			nets = append(nets, p.Masked())
+			continue
+		}
+		a, err := netip.ParseAddr(entry)
+		if err != nil {
+			return nil, fmt.Errorf("--trusted-proxies: %q is neither a network nor an address", entry)
+		}
+		nets = append(nets, netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen()))
+	}
+	return nets, nil
+}
+
+// loadTLSConfig reads the certificate pair serve presents, or returns nil for
+// plain HTTP. It runs before anything else starts, so a bad file fails the
+// command rather than a goroutine.
+func loadTLSConfig(cert, key string) (*tls.Config, error) {
+	if cert == "" {
+		return nil, nil
+	}
+	r, err := newCertReloader(cert, key)
+	if err != nil {
+		return nil, err
+	}
+	return &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: r.getCertificate}, nil
+}
+
+// certCheckEvery is how often the certificate files are looked at for a renewal.
+const certCheckEvery = 30 * time.Second
+
+// certReloader serves the certificate pair from disk and picks up a renewed one
+// when either file changes, so a renewal needs no restart and logs no one out.
+// A pair that fails to load leaves the last good one in service.
+type certReloader struct {
+	certFile, keyFile string
+	now               func() time.Time
+
+	mu      sync.Mutex
+	cert    *tls.Certificate
+	mod     time.Time // the newer of the two files' modification times, as loaded
+	checked time.Time
+}
+
+func newCertReloader(certFile, keyFile string) (*certReloader, error) {
+	r := &certReloader{certFile: certFile, keyFile: keyFile, now: time.Now}
+	if err := r.load(); err != nil {
+		return nil, err
+	}
+	r.checked = r.now()
+	return r, nil
+}
+
+func (r *certReloader) load() error {
+	mod, err := r.modTime()
+	if err != nil {
+		return fmt.Errorf("loading TLS certificate: %w", err)
+	}
+	pair, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
+	if err != nil {
+		return fmt.Errorf("loading TLS certificate: %w", err)
+	}
+	r.cert, r.mod = &pair, mod
+	return nil
+}
+
+func (r *certReloader) modTime() (time.Time, error) {
+	var newest time.Time
+	for _, f := range []string{r.certFile, r.keyFile} {
+		info, err := os.Stat(f)
+		if err != nil {
+			return time.Time{}, err
+		}
+		if info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+	}
+	return newest, nil
+}
+
+func (r *certReloader) getCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if now := r.now(); now.Sub(r.checked) >= certCheckEvery {
+		r.checked = now
+		if mod, err := r.modTime(); err == nil && !mod.Equal(r.mod) {
+			if err := r.load(); err != nil {
+				log.Warn().Err(err).Msg("TLS certificate changed but did not load; still serving the previous one")
+			} else {
+				log.Info().Msg("TLS certificate reloaded")
+			}
+		}
+	}
+	return r.cert, nil
+}
+
+// newHTTPServer is the server serve runs: h behind the connection time limits,
+// over TLS when tlsConfig is set.
+func newHTTPServer(addr string, h http.Handler, tlsConfig *tls.Config) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+		TLSConfig:         tlsConfig,
+	}
+}
+
+// serveOn serves srv on ln, over TLS when srv carries a TLS config.
+func serveOn(srv *http.Server, ln net.Listener) error {
+	if srv.TLSConfig != nil {
+		return srv.ServeTLS(ln, "", "")
+	}
+	return srv.Serve(ln)
+}
+
 func runServe(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
+
+	if err := checkListen(serveAddr, serveTLSCert, serveTLSKey, serveInsecureHTTP); err != nil {
+		return err
+	}
+	tlsConfig, err := loadTLSConfig(serveTLSCert, serveTLSKey)
+	if err != nil {
+		return err
+	}
+	proxies, err := parseProxies(serveProxies)
+	if err != nil {
+		return err
+	}
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -97,19 +283,24 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	srv := server.New(db, cfg, serveAddr, configPath, mgr, log)
-	httpSrv := &http.Server{
-		Addr:              serveAddr,
-		Handler:           srv.Routes(),
-		ReadHeaderTimeout: readHeaderTimeout,
-		ReadTimeout:       readTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       idleTimeout,
+	srv.TrustProxies(proxies)
+	httpSrv := newHTTPServer(serveAddr, srv.Routes(), tlsConfig)
+	// Bound here rather than in the goroutine, so a taken port fails the command.
+	ln, err := net.Listen("tcp", serveAddr)
+	if err != nil {
+		return err
 	}
 
+	scheme := "http"
+	if tlsConfig != nil {
+		scheme = "https"
+	} else if host, _, _ := net.SplitHostPort(serveAddr); !isLoopback(host) {
+		log.Warn().Msg("serving plain HTTP on a reachable address: logins stay private only if a TLS proxy is in front")
+	}
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info().Msg("serving at http://" + browsableAddr(serveAddr))
-		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Info().Msg("serving at " + scheme + "://" + browsableAddr(serveAddr))
+		if err := serveOn(httpSrv, ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 			return
 		}

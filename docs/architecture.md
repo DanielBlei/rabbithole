@@ -20,6 +20,12 @@ trigger the same cycle in the background (see [docs/api.md](api.md)). State (see
 scores, digest history, user status/notes) lives in a local SQLite file, so re-runs only
 score genuinely new items.
 
+Everything `serve` exposes, the JSON API included, sits behind one login (see
+[auth.md](auth.md)). The credentials live in the store's `auth` table; sessions live only in
+the server's memory, and a browser that opts to stay signed in carries its own through a
+restart in a cookie the server signs. The `auth` command changes the login from the CLI, writing the store
+directly the way `items` does.
+
 ## Scoring flow
 
 ```mermaid
@@ -67,7 +73,7 @@ a two-line teaser, and a site with no feed can't be read at all. Both are on the
 ## Layout
 
 ```
-cmd/                  cobra CLI (root, ingest, items, serve)
+cmd/                  cobra CLI (root, ingest, serve, auth, items, eval)
 internal/config       YAML config, feed list and profile loading
 internal/ingest       fetch -> score -> record cycle, plus the background run manager
 internal/feeds        concurrent RSS/Atom fetch + normalization (gofeed)
@@ -79,9 +85,9 @@ internal/httpclient   shared HTTP transport (bearer auth injection)
 internal/retry        exponential backoff for a still-starting-up inference server
 internal/digest       markdown renderer
 internal/store        SQLite (seen dedup, digest history, user status/notes)
-internal/server       composition root for serve: mounts api + web, health endpoints
+internal/server       composition root for serve: mounts api + web behind the login gate, health endpoints
 internal/api          JSON API route set (/api/*)
-internal/web          server-rendered htmx UI, templates and static assets
+internal/web          server-rendered htmx UI, the login gate and sessions, templates and static assets
 internal/httplog      HTTP access-log middleware
 internal/logger       zerolog setup for --debug/--trace
 ```

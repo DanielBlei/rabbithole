@@ -1,0 +1,51 @@
+{{/* Settings → Account: who is signed in, and what this browser's login does.
+     The section's own actions swap this whole fragment back (#acct), the way a
+     Maze widget swaps itself. Logging out is a full navigation, since the page
+     it leaves is behind the login. Unindented <pre>: leading spaces would show. */}}
+{{define "accountSect"}}
+<div class="acct" id="acct">
+  <div class="acct__card">
+<pre class="acct__bunny" aria-hidden="true"><span class="bunny__ears">(\_/)</span>
+(<i class="bunny__eye">&bull;</i>_<i class="bunny__eye">&bull;</i>)</pre>
+    {{if eq .Mode "enabled"}}
+    <b class="acct__name">{{.Username}}</b>
+    <span class="acct__meta">{{.Since}}{{if .Remembered}}<span class="acct__tag">stays signed in</span>{{end}}</span>
+    {{else}}
+    <b class="acct__name">Open instance</b>
+    <span class="acct__meta">No login: anyone who can reach this address can use it.</span>
+    {{end}}
+  </div>
+  {{if .Note}}<p class="acct__note" role="status">{{.Note}}</p>{{end}}
+
+  {{if eq .Mode "enabled"}}
+  <div class="stg__lbl">Session</div>
+  <div class="wx-switches">
+    <form class="wx-switch" hx-post="/account/remember" hx-target="#acct" hx-swap="outerHTML">
+      <span>Stay signed in<small class="acct__hint">this browser, through restarts</small></span>
+      <input type="hidden" name="on" value="{{if .Remembered}}0{{else}}1{{end}}">
+      <button type="submit" class="wx-sw{{if .Remembered}} is-on{{end}}" role="switch"
+              aria-checked="{{.Remembered}}" aria-label="Stay signed in after a restart">
+        <span class="wx-sw__knob" aria-hidden="true"></span>
+        <span class="wx-sw__txt">{{if .Remembered}}On{{else}}Off{{end}}</span>
+      </button>
+    </form>
+    <form class="wx-switch" hx-post="/account/everywhere" hx-target="#acct" hx-swap="outerHTML">
+      <span>Other browsers</span>
+      <button type="submit" class="clk-btn">log out everywhere</button>
+    </form>
+  </div>
+
+  <div class="stg__lbl">Password</div>
+  <details class="acct__forgot">
+    <summary>Forgot password?</summary>
+    <p>CLI only. On the server, run <code>rabbithole auth reset</code>.</p>
+  </details>
+
+  <form class="acct__out" method="post" action="/logout">
+    <button class="acct__go" type="submit">&#8676; log out</button>
+  </form>
+  {{else}}
+  <a class="acct__go" href="/setup">&#10033; set a password</a>
+  {{end}}
+</div>
+{{end}}

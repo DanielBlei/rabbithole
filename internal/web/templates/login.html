@@ -1,0 +1,152 @@
+{{/* The login and setup screens. They stand outside the layout: there is no
+     chrome to show before a session, and nothing here may carry real data,
+     since anyone who can reach the address gets this page. The app behind the
+     card is a ghost, a skeleton of the feed's shapes, blurred past reading.
+     No JS: the in-card toggles are checkboxes read by :has(). */}}
+{{define "gate"}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>{{if eq .Step "setup"}}Set a password{{else}}Log in{{end}} · The Rabbit Hole</title>
+<script src="/static/js/fonts-preload.js"></script>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="/static/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="gate-page">
+  <div class="gate__ghost" aria-hidden="true" inert>
+    <header class="topbar">
+      <pre class="topbar__bunny"><span class="bunny__ears">(\_/)</span>
+(<i class="bunny__eye">&bull;</i>_<i class="bunny__eye">&bull;</i>)</pre>
+      <div class="topbar__in">
+        <div class="topbar__left"><span class="wordmark"><b>The Rabbit Hole</b></span></div>
+        <div class="ghost__chips"><i></i><i></i></div>
+      </div>
+    </header>
+    <div class="ghost__content">
+      <div class="ghost__tiles"><i></i><i></i><i></i><i></i></div>
+      <div class="ghost__pane">
+        <div class="ghost__bar"></div>
+        <div class="ghost__filters"><i></i><i></i><i></i><i></i></div>
+        <div class="ghost__row"><i></i><i></i><i></i></div>
+        <div class="ghost__row"><i></i><i></i><i></i></div>
+        <div class="ghost__row"><i></i><i></i><i></i></div>
+        <div class="ghost__row"><i></i><i></i><i></i></div>
+        <div class="ghost__row"><i></i><i></i><i></i></div>
+        <div class="ghost__row"><i></i><i></i><i></i></div>
+      </div>
+    </div>
+  </div>
+  <div class="gate__scrim" aria-hidden="true"></div>
+
+  <main class="gate" id="main">
+    {{if eq .Step "setup"}}{{template "gateSetup" .}}{{else}}{{template "gateLogin" .}}{{end}}
+  </main>
+</body>
+</html>
+{{end}}
+
+{{/* Unindented on purpose: a <pre>, so leading spaces would show. One face per
+     state, chosen in CSS: resting, looking away while a password is typed,
+     wincing after a miss, puzzled over the reset instructions. */}}
+{{define "gateBunny"}}<pre class="gate__bunny" aria-hidden="true"><span class="bunny__ears">(\_/)</span>
+<span class="gate__face gate__face--rest">(<i class="bunny__eye">&bull;</i>_<i class="bunny__eye">&bull;</i>)</span><span class="gate__face gate__face--shy">(-_-)</span><span class="gate__face gate__face--err">(&gt;_&lt;)</span><span class="gate__face gate__face--huh">(o_o)</span></pre>{{end}}
+
+{{/* The terminal says it one way and Minimal another: each wording is a
+     gate__term / gate__plain pair, and the layout layer shows one. */}}
+{{define "gateLogin"}}
+<div class="gate__card{{if .Error}} gate--err{{end}}">
+  {{if not .Initial}}<input class="gate__chk" type="checkbox" id="gateForgot" aria-controls="gateForgotPanel">{{end}}
+  <div class="gate__bar"><span class="pane__prompt">guest@rabbithole</span><span class="sh">:</span><span class="pane__path">~</span><span class="sh">$&nbsp;</span><span class="pane__cmd"><span class="gate__cmd">login</span><span class="gate__cmd gate__cmd--forgot">man reset</span></span><span class="blink">_</span></div>
+  <div class="gate__body">
+    <div class="gate__top">
+      {{template "gateBunny"}}
+      <div class="gate__who"><b class="gate__wm">The Rabbit Hole</b></div>
+    </div>
+    {{if .Initial}}
+    <div class="gate__first" role="note">
+      <span class="gate__first-lbl"><span class="gate__term">first run</span><span class="gate__plain">First run</span></span>
+      <p class="gate__first-msg">Log in with <code>admin</code> / <code>admin</code>, then set a password of your own.</p>
+    </div>
+    {{end}}
+    <div class="gate__swap">
+    <form class="gate__form" method="post" action="/login">
+      <input type="hidden" name="next" value="{{.Next}}">
+      {{if .Error}}<p class="gate__err" role="alert">{{if .BadLogin}}<span class="gate__term">Login incorrect</span><span class="gate__plain">Wrong username or password.</span>{{else}}{{.Error}}{{end}}</p>{{end}}
+      <label class="gate__line" for="gateUser">
+        <span class="gate__lbl"><span class="gate__term">login:</span><span class="gate__plain">Username</span></span>
+        <input class="gate__input" id="gateUser" name="username" type="text" value="{{.Username}}"
+               autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="64" required{{if not .Error}} autofocus{{end}}>
+      </label>
+      <label class="gate__line" for="gatePw">
+        <span class="gate__lbl"><span class="gate__term">password:</span><span class="gate__plain">Password</span></span>
+        <input class="gate__input gate__pw" id="gatePw" name="password" type="password"
+               autocomplete="current-password" maxlength="256" required{{if .Error}} autofocus{{end}}>
+      </label>
+      {{if .Plain}}<p class="gate__warn">This connection isn't encrypted, so the password crosses the network readable.</p>{{end}}
+      <button class="gate__go" type="submit">log in <kbd aria-hidden="true">&crarr;</kbd></button>
+      {{if not .Initial}}<div class="gate__foot"><label class="gate__link" for="gateForgot">forgot password?</label></div>{{end}}
+    </form>
+    {{if not .Initial}}
+    <div class="gate__panel" id="gateForgotPanel">
+      <p class="gate__lead">Only someone with shell access to the server can reset the login. On the server, run:</p>
+      <pre class="gate__sh"><code>rabbithole auth reset</code></pre>
+      <p class="gate__note">Add the same <code>--config</code> you start serve with. It asks for the new password, then logs every browser out.</p>
+      <div class="gate__foot"><label class="gate__link" for="gateForgot">&larr; back to login</label></div>
+    </div>
+    {{end}}
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "gateSetup"}}
+<div class="gate__card gate__card--setup{{if .Error}} gate--err{{end}}">
+  {{if .Initial}}<input class="gate__chk" type="checkbox" id="gateOpen" aria-controls="gateOpenPanel">{{end}}
+  <div class="gate__bar"><span class="pane__prompt">{{.Username}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~</span><span class="sh">$&nbsp;</span><span class="pane__cmd">passwd</span><span class="blink">_</span></div>
+  <div class="gate__body">
+    <div class="gate__top">
+      {{template "gateBunny"}}
+      <div class="gate__who"><b class="gate__wm">The Rabbit Hole</b><span class="gate__sub">{{if .Initial}}You're in with the default login.{{else}}Open to anyone who can reach it.{{end}}</span></div>
+    </div>
+    <div class="gate__swap">
+    <form class="gate__form" method="post" action="/setup">
+      <input type="hidden" name="action" value="password">
+      <p class="gate__lead">{{if .Initial}}Set your own password, or keep this instance open.{{else}}Set a password to lock this instance.{{end}}</p>
+      {{if .Error}}<p class="gate__err" role="alert">{{.Error}}</p>{{end}}
+      <label class="gate__line" for="gateUser">
+        <span class="gate__lbl"><span class="gate__term">username:</span><span class="gate__plain">Username</span></span>
+        <input class="gate__input" id="gateUser" name="username" type="text" value="{{.Username}}"
+               autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="64" required>
+      </label>
+      <label class="gate__line" for="gatePw">
+        <span class="gate__lbl"><span class="gate__term">new password:</span><span class="gate__plain">New password</span></span>
+        <input class="gate__input gate__pw" id="gatePw" name="password" type="password"
+               autocomplete="new-password" minlength="8" maxlength="256" required autofocus>
+      </label>
+      <label class="gate__line" for="gateConfirm">
+        <span class="gate__lbl"><span class="gate__term">confirm:</span><span class="gate__plain">Confirm password</span></span>
+        <input class="gate__input gate__pw" id="gateConfirm" name="confirm" type="password"
+               autocomplete="new-password" minlength="8" maxlength="256" required>
+      </label>
+      {{if .Plain}}<p class="gate__warn">This connection isn't encrypted, so the password crosses the network readable.</p>{{end}}
+      <button class="gate__go" type="submit">set password <kbd aria-hidden="true">&crarr;</kbd></button>
+      <div class="gate__foot">
+        {{if .Initial}}<label class="gate__link" for="gateOpen">continue without a password</label>{{else}}<a class="gate__link" href="/">&larr; back</a>{{end}}
+      </div>
+    </form>
+    {{if .Initial}}
+    <form class="gate__panel" id="gateOpenPanel" method="post" action="/setup">
+      <input type="hidden" name="action" value="open">
+      <p class="gate__lead gate__lead--warn">Anyone who can reach this address can read and edit everything. You can set a password later in Settings.</p>
+      <button class="gate__go gate__go--warn" type="submit">keep it open</button>
+      <div class="gate__foot"><label class="gate__link" for="gateOpen">&larr; back</label></div>
+    </form>
+    {{end}}
+    </div>
+  </div>
+</div>
+{{end}}

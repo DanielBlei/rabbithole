@@ -1,11 +1,23 @@
 # CLI reference
 
 The web UI is the primary interface (see the [README](../README.md)). The CLI covers
-scripted runs, direct access to the item store, and inspection of what the model received.
+scripted runs, direct access to the item store, the web UI's login, and inspection of what the
+model received.
 
 ```
 rabbithole [--config PATH] [--debug] [--trace] <command>
 ```
+
+| Command | What it does |
+|---|---|
+| [`ingest`](#ingest) | Fetch the feeds, score what is new, record it, and optionally write a markdown digest |
+| [`serve`](#serve) | Serve the web UI and the JSON API, behind the login |
+| [`auth`](#auth) | Show, reset or switch off the web UI's login |
+| [`items`](#items) | Browse the stored items and record your own read, skip, rating and notes |
+| `eval` | Measure how well scoring matches your profile; see [evals.md](evals.md) |
+
+Commands that touch the database take the same `--config` as `serve`, so they work on the same
+store.
 
 | Flag | Description | Default |
 |---|---|---|
@@ -32,13 +44,76 @@ them in the store.
 ## serve
 
 ```
-rabbithole serve [--addr ADDR]
+rabbithole serve [--addr ADDR] [--tls-cert FILE --tls-key FILE] [--insecure-http]
+                 [--trusted-proxies NETS]
 ```
 
-Serves the web UI and the JSON API (see [docs/api.md](api.md)). `--addr` defaults to
-`127.0.0.1:8080`, which is loopback-only; set it explicitly to listen on other interfaces.
-SIGINT and SIGTERM trigger a graceful shutdown, allowing up to 5 seconds for in-flight
-requests and for any running ingest to finish.
+Serves the web UI and the JSON API (see [docs/api.md](api.md)), both behind the login
+described in [docs/auth.md](auth.md). `--addr` defaults to `127.0.0.1:8080`, which is
+loopback-only; set it explicitly to listen on other interfaces. SIGINT and SIGTERM trigger a
+graceful shutdown, allowing up to 5 seconds for in-flight requests and for any running ingest
+to finish.
+
+| Flag | Meaning |
+|---|---|
+| `--tls-cert`, `--tls-key` | Serve HTTPS with this PEM certificate and key; give both or neither |
+| `--insecure-http` | Allow plain HTTP on an address other than loopback, for a TLS proxy on another host |
+| `--trusted-proxies` | Comma-separated networks or addresses whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed; default `127.0.0.0/8,::1/128`, empty trusts none |
+
+Without either, an `--addr` that other machines can reach (`:8080`, `0.0.0.0`, a LAN address)
+is refused, since the login would cross the network unencrypted.
+
+## auth
+
+```
+rabbithole auth status
+rabbithole auth reset [--username NAME] [--password-stdin]
+rabbithole auth disable
+```
+
+The web UI's login, managed from the machine the database lives on. How the login itself
+works (first run, sessions, HTTPS) is in [auth.md](auth.md). These commands are the only way to
+switch a login off or replace a forgotten password: nothing in the web UI or the config file
+can, so reaching the port is never enough to unlock the app.
+
+**`status`** says whether the login is on, and for which user:
+
+```
+$ rabbithole auth status
+login: on, user daniel
+```
+
+The other two answers are `login: default (admin / admin), no password set yet` on a fresh
+install, and `login: off, the web UI is open to anyone who can reach it`.
+
+**`reset`** sets a new password: the way back in after forgetting one, and the way to change
+it. It asks twice, without echoing, and keeps the username unless `--username` changes it:
+
+```
+$ rabbithole auth reset
+New password:
+Retype new password:
+password set for daniel; every browser has been logged out
+```
+
+| Flag | Meaning |
+|---|---|
+| `--username NAME` | Change the username as well |
+| `--password-stdin` | Read the password from the first line of stdin instead of prompting, for scripts |
+
+```
+printf '%s\n' "$NEW_PASSWORD" | rabbithole auth reset --password-stdin
+```
+
+The password needs at least 8 characters. A reset never goes back to `admin` / `admin`, so
+there is no moment when someone else could log in with the default and claim the instance.
+
+**`disable`** switches the login off, leaving the web UI and the API open to anyone who can
+reach the port. Settings → Account in the web UI then offers **set a password** to lock it
+again.
+
+`reset` and `disable` both log every browser out, including those of a `serve` that is
+running at the time.
 
 ## items
 
