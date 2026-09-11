@@ -75,16 +75,18 @@ func (s *session) expired(now time.Time) bool {
 
 // create starts a session under gen and returns its token.
 func (ss *sessionStore) create(gen string) (string, error) {
-	return ss.createSince(gen, time.Time{})
+	token, _, err := ss.createSince(gen, time.Time{})
+	return token, err
 }
 
 // createSince starts a session carrying on a login made at since, which a
-// restored "stay signed in" cookie dates from; zero means now. At the bound,
-// the session seen longest ago makes room.
-func (ss *sessionStore) createSince(gen string, since time.Time) (string, error) {
+// restored "stay signed in" cookie dates from; zero means now. It returns the
+// token and the login time it recorded. At the bound, the session seen longest
+// ago makes room.
+func (ss *sessionStore) createSince(gen string, since time.Time) (string, time.Time, error) {
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw[:])
 	ss.mu.Lock()
@@ -108,40 +110,33 @@ func (ss *sessionStore) createSince(gen string, since time.Time) (string, error)
 		created = since
 	}
 	ss.byID[sha256.Sum256([]byte(token))] = &session{gen: gen, created: created, lastSeen: now, sentAt: now}
-	return token, nil
+	return token, created, nil
 }
 
-// since reports when token's login happened.
-func (ss *sessionStore) since(token string) (time.Time, bool) {
-	ss.mu.Lock()
-	defer ss.mu.Unlock()
-	if s, ok := ss.byID[sha256.Sum256([]byte(token))]; ok {
-		return s.created, true
-	}
-	return time.Time{}, false
-}
-
-// check reports whether token is a live session issued under gen, and whether
-// its cookie is due to be re-sent. A stale or superseded session is dropped.
-func (ss *sessionStore) check(token, gen string) (ok, resend bool) {
+// check reports whether token is a live session issued under gen, when its
+// login happened, and whether its cookie is due to be re-sent. All three come
+// from one look under the lock, so a session evicted a moment later can't
+// leave the caller with half an answer. A stale or superseded session is
+// dropped.
+func (ss *sessionStore) check(token, gen string) (since time.Time, ok, resend bool) {
 	key := sha256.Sum256([]byte(token))
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 	s, found := ss.byID[key]
 	if !found {
-		return false, false
+		return time.Time{}, false, false
 	}
 	now := ss.now()
 	if s.gen != gen || s.expired(now) {
 		delete(ss.byID, key)
-		return false, false
+		return time.Time{}, false, false
 	}
 	s.lastSeen = now
 	if now.Sub(s.sentAt) >= cookieResend {
 		s.sentAt = now
 		resend = true
 	}
-	return true, resend
+	return s.created, true, resend
 }
 
 func (ss *sessionStore) delete(token string) {
@@ -355,9 +350,10 @@ func gatePublic(path string) bool {
 	return path == "/login" || path == "/logout" || strings.HasPrefix(path, "/static/")
 }
 
-// hstsYear pins HTTPS for a year. Sent only when serving TLS directly, and never
-// for localhost or an IP address, where it would outlive a test certificate and
-// break plain HTTP on the same name.
+// hstsYear pins HTTPS for a year. Sent when the request came over HTTPS, served
+// directly or through a trusted proxy that says so, and never for localhost or
+// an IP address, where it would outlive a test certificate and break plain HTTP
+// on the same name.
 const hstsYear = "max-age=31536000"
 
 func hstsHost(host string) bool {
@@ -379,7 +375,7 @@ func hstsHost(host string) bool {
 func (s *Web) Gate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")
-		if r.TLS != nil && hstsHost(r.Host) {
+		if s.isHTTPS(r) && hstsHost(r.Host) {
 			w.Header().Set("Strict-Transport-Security", hstsYear)
 		}
 		if gatePublic(r.URL.Path) {
@@ -400,7 +396,7 @@ func (s *Web) Gate(next http.Handler) http.Handler {
 		// Nothing behind a login is cached, so the back button after a logout
 		// shows the login rather than the last page.
 		w.Header().Set("Cache-Control", "private, no-store")
-		token, ok := s.hasSession(w, r, st)
+		token, since, ok := s.hasSession(w, r, st)
 		if !ok {
 			deny(w, r)
 			return
@@ -411,23 +407,23 @@ func (s *Web) Gate(next http.Handler) http.Handler {
 		}
 		info := authInfo{
 			Mode: st.Mode, Username: st.Username, Gen: st.Gen,
-			Token: token, Remembered: s.remembered(r, st),
+			Token: token, Since: since, Remembered: s.remembered(r, st),
 		}
-		info.Since, _ = s.sessions.since(token)
 		next.ServeHTTP(w, r.WithContext(withAuth(r.Context(), info)))
 	})
 }
 
-// hasSession finds this browser's session and returns its token: a live one
-// from the session cookie, re-sent when its sliding Max-Age is due, or one
-// picked back up from a "stay signed in" cookie after a restart.
-func (s *Web) hasSession(w http.ResponseWriter, r *http.Request, st store.AuthState) (string, bool) {
+// hasSession finds this browser's session and returns its token and when its
+// login happened: a live one from the session cookie, re-sent when its sliding
+// Max-Age is due, or one picked back up from a "stay signed in" cookie after a
+// restart.
+func (s *Web) hasSession(w http.ResponseWriter, r *http.Request, st store.AuthState) (string, time.Time, bool) {
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
-		if ok, resend := s.sessions.check(c.Value, st.Gen); ok {
+		if since, ok, resend := s.sessions.check(c.Value, st.Gen); ok {
 			if resend {
 				s.setSessionCookie(w, r, c.Value)
 			}
-			return c.Value, true
+			return c.Value, since, true
 		}
 	}
 	return s.restore(w, r, st)
@@ -596,7 +592,7 @@ func (s *Web) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	if _, ok := s.hasSession(w, r, st); ok {
+	if _, _, ok := s.hasSession(w, r, st); ok {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}

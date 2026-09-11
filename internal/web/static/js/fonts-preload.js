@@ -14,6 +14,10 @@
   // after the first paint and everything jumps sideways.
   var t=localStorage.getItem('theme');
   if (t) document.documentElement.setAttribute('data-theme', t);
+  // The layout the page opened in, which nothing changes afterwards. The
+  // login's blurred background keys on it, so a pick on the first-run card
+  // restyles the card while what sits behind it holds still.
+  if (t) document.documentElement.setAttribute('data-ghost', t);
   if (localStorage.getItem('rail')==='off') document.documentElement.setAttribute('data-rail','off');
   if (localStorage.getItem('blink')==='off') document.documentElement.setAttribute('data-blink','off');
   // Where the weather shows, reproduced from the same keys weather.js writes.
