@@ -59,6 +59,12 @@ var allSchemas = []string{
 	schema, todoSchema, ideaSchema, ingestSchema, ingestLogSchema, feedFetchSchema, feedConfigSchema,
 }
 
+// additiveSchemas are tables added since schemaVersion was last bumped. Each is
+// created if missing on every open, so an existing database gains it without
+// being recreated. Only new tables that nothing older depends on belong here;
+// changing an existing table still means a schemaVersion bump.
+var additiveSchemas = []string{authSchema}
+
 // Status values for the items.status column. llm_score/llm_score_reason are
 // the model's verdict, written by the daily run; status/user_score/user_note
 // are yours, written via UpdateUserState.
@@ -166,6 +172,7 @@ func Open(path string) (*Store, error) {
 
 // initSchema creates every table on a new database and stamps it with schemaVersion.
 // An existing database is checked against that version and rejected on a mismatch.
+// Either way, additiveSchemas are then created if missing.
 func initSchema(db *sql.DB, path string) error {
 	var tables int
 	if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").Scan(&tables); err != nil {
@@ -180,16 +187,21 @@ func initSchema(db *sql.DB, path string) error {
 			return fmt.Errorf("%w: %s is version %d, this build expects %d — delete it and run ingest again",
 				ErrSchemaVersion, path, version, schemaVersion)
 		}
-		return nil
-	}
-	for _, stmt := range allSchemas {
-		if _, err := db.Exec(stmt); err != nil {
-			return fmt.Errorf("create schema: %w", err)
+	} else {
+		for _, stmt := range allSchemas {
+			if _, err := db.Exec(stmt); err != nil {
+				return fmt.Errorf("create schema: %w", err)
+			}
+		}
+		// PRAGMA takes no bound parameters; schemaVersion is a compile-time constant.
+		if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+			return fmt.Errorf("stamp schema version: %w", err)
 		}
 	}
-	// PRAGMA takes no bound parameters; schemaVersion is a compile-time constant.
-	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
-		return fmt.Errorf("stamp schema version: %w", err)
+	for _, stmt := range additiveSchemas {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("create additive schema: %w", err)
+		}
 	}
 	return nil
 }

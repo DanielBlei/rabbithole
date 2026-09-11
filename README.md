@@ -58,15 +58,17 @@ which takes a while on a local model; after that the page fills in.
 That ranks against an example profile. For a feed ranked against your own interests, see the
 full guide: **[docs/quickstart.md](docs/quickstart.md)**.
 
-`make serve` binds to loopback only and has no authentication: it assumes it is running on
-your own machine. Read [SECURITY.md](SECURITY.md) before exposing it to anything else.
+The first visit asks for the default login, `admin` / `admin`, then for a password of your own
+(or to leave it open). `make serve` binds to loopback only; read [docs/auth.md](docs/auth.md)
+and [SECURITY.md](SECURITY.md) before exposing it to anything else.
 
 ## Documentation
 
 - [docs/quickstart.md](docs/quickstart.md): the same steps with the details filled in
 - [docs/configuration.md](docs/configuration.md): every field in the three config files
-- [docs/cli.md](docs/cli.md): the `ingest`, `items` and `serve` commands
+- [docs/cli.md](docs/cli.md): the `ingest`, `items`, `serve` and `auth` commands
 - [docs/api.md](docs/api.md): the HTTP API
+- [docs/auth.md](docs/auth.md): the login, sessions, HTTPS, and resetting a forgotten password
 - [docs/architecture.md](docs/architecture.md): how the pieces fit together, and what is
   planned next
 - [docs/evals.md](docs/evals.md): checking whether the model actually agrees with your profile

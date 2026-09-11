@@ -41,11 +41,22 @@ CONFIG=./configs/config.yaml make serve
 a generic profile rather than yours. Set `CONFIG` at the top of the `Makefile` to stop passing
 it each time.
 
-## 4. Run an ingest
+## 4. Log in
+
+Open <http://localhost:8080>. The first visit asks for the default login, `admin` / `admin`,
+and then asks you to either set a password of your own or keep the instance open with no
+login. The choice is kept across restarts. Sessions are not, so after restarting the server
+you log in again, unless you turn on **Stay signed in** under Settings → Account for that
+browser.
+
+Forgot the password? On the machine running it, `rabbithole auth reset` sets a new one; see
+[auth.md](auth.md) for that and for reaching the app from another device.
+
+## 5. Run an ingest
 
 > Already ingested on the example config? Run `make clean-feeds` first to remove them.
 
-Open <http://localhost:8080> and hit ingest. Nothing is fetched until you do. This is the step
+Hit ingest in the web UI. Nothing is fetched until you do. This is the step
 that pulls your feeds and scores them.
 
 The first run has to score every item and takes a while on a local model. After that the
@@ -58,9 +69,9 @@ Config changes are read at startup, so restart the server after editing any of t
 ## Next
 
 - [configuration.md](configuration.md): every config field, other providers, model tuning
-- [cli.md](cli.md): running ingest from the terminal, and the `items` command
+- [cli.md](cli.md): running ingest from the terminal, the `items` command, and `auth` for the login
 - [api.md](api.md): the JSON API
-- [SECURITY.md](../SECURITY.md): `serve` is loopback-only and unauthenticated, so read this
-  before exposing it to anything else
+- [auth.md](auth.md): the first-run login (`admin` / `admin`), sessions, and HTTPS
+- [SECURITY.md](../SECURITY.md): read this before exposing `serve` to anything but loopback
 
 `make help` lists every target.

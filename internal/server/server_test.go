@@ -5,21 +5,26 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
-// newServer builds a Server over an empty store, logging to logger.
+// newServer builds a Server over an empty store, logging to logger. The login
+// gate starts switched off, so the routing tests see the routes themselves;
+// the gate's own tests switch it back on.
 func newServer(t *testing.T, logger zerolog.Logger) (*Server, *store.Store) {
 	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
@@ -27,6 +32,9 @@ func newServer(t *testing.T, logger zerolog.Logger) (*Server, *store.Store) {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	if err := db.DisableAuth(context.Background()); err != nil {
+		t.Fatalf("DisableAuth: %v", err)
+	}
 
 	think := false
 	cfg := &config.Config{}
@@ -178,4 +186,98 @@ func lastEvent(t *testing.T, buf *bytes.Buffer) map[string]any {
 		t.Fatalf("last line is %q, want the access line", last)
 	}
 	return event
+}
+
+// The gate wraps the API as well as the pages, and leaves only the health
+// checks and the assets the login is drawn with open.
+func TestGateCoversEverythingButHealthAndAssets(t *testing.T) {
+	srv, db := newTestServer(t)
+	if err := db.SetPassword(context.Background(), "alice", "correct horse"); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+	tests := []struct {
+		method, path string
+		wantStatus   int
+		wantLocation string
+	}{
+		{http.MethodGet, "/feed", http.StatusSeeOther, "/login?next=%2Ffeed"},
+		{http.MethodGet, "/", http.StatusSeeOther, "/login"},
+		{http.MethodGet, "/api/items", http.StatusUnauthorized, ""},
+		{http.MethodPost, "/api/items/1/seen", http.StatusUnauthorized, ""},
+		{http.MethodPost, "/todos", http.StatusUnauthorized, ""},
+		{http.MethodGet, "/healthz", http.StatusOK, ""},
+		{http.MethodGet, "/readyz", http.StatusOK, ""},
+		{http.MethodGet, "/static/style.css", http.StatusOK, ""},
+		{http.MethodGet, "/login", http.StatusOK, ""},
+	}
+	routes := srv.Routes()
+	for _, tt := range tests {
+		rec := httptest.NewRecorder()
+		routes.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, nil))
+		if rec.Code != tt.wantStatus {
+			t.Errorf("%s %s = %d, want %d", tt.method, tt.path, rec.Code, tt.wantStatus)
+		}
+		if got := rec.Header().Get("Location"); got != tt.wantLocation {
+			t.Errorf("%s %s Location = %q, want %q", tt.method, tt.path, got, tt.wantLocation)
+		}
+	}
+}
+
+// A state-changing request another site's page makes is refused before any
+// handler sees it, the login included.
+func TestCrossOriginPostsAreRefused(t *testing.T) {
+	srv, _ := newTestServer(t)
+	routes := srv.Routes()
+	for _, path := range []string{"/todos", "/login", "/logout"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("title=x"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		rec := httptest.NewRecorder()
+		routes.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("cross-site POST %s = %d, want 403", path, rec.Code)
+		}
+	}
+}
+
+// Neither the access log nor the handlers' own logging may carry what a login
+// sends or gets back: the username (where a password lands by mistake), the
+// password, or the session token.
+func TestLoginKeepsSecretsOutOfLogs(t *testing.T) {
+	var appLog bytes.Buffer
+	prev := log.Logger
+	log.Logger = zerolog.New(&appLog)
+	t.Cleanup(func() { log.Logger = prev })
+
+	srv, accessLog := newLoggingServer(t)
+	routes := srv.Routes()
+	ctx := context.Background()
+	db := srv.db
+	if err := db.SetPassword(ctx, "canary-user", "canary-password"); err != nil {
+		t.Fatalf("SetPassword: %v", err)
+	}
+
+	var token string
+	for _, pass := range []string{"canary-wrong", "canary-password"} {
+		form := url.Values{"username": {"canary-user"}, "password": {pass}}
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		routes.ServeHTTP(rec, req)
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == "rh_session" && c.Value != "" {
+				token = c.Value
+			}
+		}
+	}
+	if token == "" {
+		t.Fatal("the right password did not start a session")
+	}
+
+	logged := accessLog.String() + appLog.String()
+	for _, secret := range []string{"canary", token} {
+		if strings.Contains(logged, secret) {
+			t.Errorf("logs contain %q:\n%s", secret, logged)
+		}
+	}
 }

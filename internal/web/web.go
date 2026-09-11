@@ -11,6 +11,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"net/netip"
 	"os/user"
 	"strconv"
 	"strings"
@@ -78,6 +79,11 @@ type Web struct {
 	user    string // shell-prompt name: cfg.User, or the OS user when blank
 	cfgPath string // config file path, read on demand by the config viewer
 	ing     *ingest.Manager
+
+	sessions *sessionStore // logged-in browsers, in memory: a restart logs everyone out
+	limiter  *loginLimiter
+	hashing  chan struct{}  // password-hash slots, hashSlots wide
+	trusted  []netip.Prefix // proxies whose forwarding headers are believed
 }
 
 // New returns a Web backed by db, using cfg for request defaults. addr is the
@@ -85,7 +91,11 @@ type Web struct {
 // cfgPath is the config file the viewer reads and displays read-only. ing owns
 // the in-process ingest runs the UI triggers and watches.
 func New(db *store.Store, cfg *config.Config, addr, cfgPath string, ing *ingest.Manager) *Web {
-	return &Web{db: db, cfg: cfg, addr: addr, user: promptUser(cfg.User), cfgPath: cfgPath, ing: ing}
+	return &Web{
+		db: db, cfg: cfg, addr: addr, user: promptUser(cfg.User), cfgPath: cfgPath, ing: ing,
+		sessions: newSessionStore(), limiter: newLoginLimiter(),
+		hashing: make(chan struct{}, hashSlots), trusted: DefaultTrustedProxies,
+	}
 }
 
 // promptUser picks the shell-prompt name: the configured user, or the OS login
@@ -110,6 +120,13 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /feed", s.handleFeed)
 	mux.HandleFunc("GET /maze", s.handleMaze)
 	mux.HandleFunc("GET /config", s.handleConfig)
+	mux.HandleFunc("GET /login", s.handleLoginPage)
+	mux.HandleFunc("POST /login", s.handleLogin)
+	mux.HandleFunc("POST /logout", s.handleLogout)
+	mux.HandleFunc("GET /setup", s.handleSetupPage)
+	mux.HandleFunc("POST /setup", s.handleSetup)
+	mux.HandleFunc("POST /account/remember", s.handleRemember)
+	mux.HandleFunc("POST /account/everywhere", s.handleEverywhere)
 	mux.HandleFunc("GET /sources", s.handleSources)
 	mux.HandleFunc("GET /sources/new", s.handleSourceNew)
 	mux.HandleFunc("GET /sources/defaults", s.handleSourceDefaults)

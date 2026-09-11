@@ -11,24 +11,40 @@ change data it should not; injection of any kind; path traversal; a dependency v
 reachable from this code.
 
 Out of scope, because they are known and deliberate rather than something anyone missed (see
-[Where things stand](#where-things-stand)): no authentication on a loopback binding, missing
-CSRF tokens, and anything that needs an attacker to already have a shell on the machine.
+[Where things stand](#where-things-stand)): an instance its owner chose to run without a
+password, the default `admin` / `admin` login on a fresh install, and anything that needs an
+attacker to already have a shell on the machine.
 
 ## Where things stand
 
-There is no login. Anyone who can reach the port gets the whole app: your items, the ingest
-runs, the todos and ideas, and the feed set — the Sources page can add, retune and delete
-feeds. That works today because `serve` listens on `127.0.0.1:8080`, so whoever can reach it
-is already on your machine.
+The web UI and the JSON API sit behind one login ([docs/auth.md](docs/auth.md)). Without it,
+anyone who can reach the port gets the whole app: your items, the ingest runs, the todos and
+ideas, and the feed set, which the Sources page can add to, retune and delete. So:
 
-Authentication and CSRF protection are future work, waiting on a question that is still open:
-whether this should be reachable from another device at all.
+- **A fresh install accepts `admin` / `admin`** until its first login sets a password. Its
+  owner can also choose to run with no password at all, which puts the app back in the hands
+  of whoever can reach the port.
+- **The password is stored as an argon2id hash.** Sessions live in the server's memory, so a
+  restart ends them, and last at most 30 days; the cookie is `HttpOnly` and `SameSite=Lax`.
+- **"Stay signed in" is an HMAC-signed cookie**, opted into per browser, that carries a session
+  through restarts for up to 30 days. It is verified rather than looked up, so logging out
+  clears it from the browser but cannot recall a copy; **log out everywhere** or a new
+  password voids every copy.
+  Five misses from one address (an IPv6 /64) start a lockout that doubles up to 15 minutes;
+  each address gets one attempt at a time and at most four passwords are checked at once.
+- **Forwarding headers are believed only from `--trusted-proxies`** (loopback by default), so
+  a client cannot pose as another to dodge the lockout, or as HTTPS.
+- **Cross-origin requests that change state are refused** (Go's `http.CrossOriginProtection`),
+  in place of per-form CSRF tokens.
+- **Only a shell on the machine can switch a login off**, or reset a forgotten one:
+  `rabbithole auth reset` and `rabbithole auth disable` write the database directly. A reset
+  sets the new password at once, never reopening the default login.
 
 Two more things worth knowing:
 
-- **Loopback is the only setup tested.** To reach it from another machine, put it behind a
-  reverse proxy that handles TLS and the login, or use a VPN or an SSH tunnel. Not the open
-  internet.
+- **`serve` refuses plain HTTP on any address but loopback.** To reach it from another
+  machine, give it a certificate (`--tls-cert`, `--tls-key`), put it behind a reverse proxy
+  that handles TLS, or use a VPN or an SSH tunnel. The open internet is still not a target.
 - **`inference.api_key` sits in the config in plain text**, so its file permissions are yours
   to set.
 
