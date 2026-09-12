@@ -405,3 +405,33 @@ func TestToggleUnknownItem(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
 }
+
+// Assets carry an ETag either way; what --dev changes is whether the browser
+// may reuse one without asking, which is the difference between an edited
+// stylesheet showing on the next reload and up to staticMaxAge later.
+func TestStaticCacheControlFollowsDev(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dev  bool
+		want string
+	}{
+		{"default", false, staticMaxAge},
+		{"dev", true, staticDev},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newTestWeb(t)
+			w.SetDev(tc.dev)
+			rec := httptest.NewRecorder()
+			w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/static/style.css", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET /static/style.css = %d, want 200", rec.Code)
+			}
+			if got := rec.Header().Get("Cache-Control"); got != tc.want {
+				t.Errorf("Cache-Control = %q, want %q", got, tc.want)
+			}
+			if rec.Header().Get("ETag") == "" {
+				t.Error("no ETag, so a revalidation costs the whole file")
+			}
+		})
+	}
+}

@@ -58,8 +58,8 @@ which takes a while on a local model; after that the page fills in.
 That ranks against an example profile. For a feed ranked against your own interests, see the
 full guide: **[docs/quickstart.md](docs/quickstart.md)**.
 
-The first visit asks for the default login, `admin` / `admin`, then for a password of your own
-(or to leave it open). `make serve` binds to loopback only; read [docs/auth.md](docs/auth.md)
+The first visit asks who can open it: create an account, or leave it open with no login.
+`make serve` binds to loopback only; read [docs/auth.md](docs/auth.md)
 and [SECURITY.md](SECURITY.md) before exposing it to anything else.
 
 ## Documentation

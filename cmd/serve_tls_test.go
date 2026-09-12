@@ -151,15 +151,21 @@ func TestServeOverTLS(t *testing.T) {
 		t.Fatalf("connection state = %+v, want a verified TLS 1.2+ connection", resp.TLS)
 	}
 
-	// The login gate works over TLS, and its cookie is marked Secure there.
-	form := url.Values{"username": {store.DefaultUsername}, "password": {store.DefaultPassword}}
-	resp, err = client.PostForm("https://"+addr+"/login", form)
+	// Claiming the instance is the first run's one way in, and the session it
+	// hands out is marked Secure over TLS.
+	form := url.Values{
+		"action":   {"password"},
+		"username": {"admin"},
+		"password": {"correct horse"},
+		"confirm":  {"correct horse"},
+	}
+	resp, err = client.PostForm("https://"+addr+"/setup", form)
 	if err != nil {
-		t.Fatalf("POST /login over TLS: %v", err)
+		t.Fatalf("POST /setup over TLS: %v", err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/setup" {
-		t.Fatalf("login = %d to %q, want 303 to /setup", resp.StatusCode, resp.Header.Get("Location"))
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/" {
+		t.Fatalf("setup = %d to %q, want 303 to /", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	var session *http.Cookie
 	for _, c := range resp.Cookies() {
@@ -171,15 +177,15 @@ func TestServeOverTLS(t *testing.T) {
 		t.Fatalf("session cookie = %+v, want Secure and HttpOnly", session)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, "https://"+addr+"/setup", nil)
+	req, _ := http.NewRequest(http.MethodGet, "https://"+addr+"/feed", nil)
 	req.AddCookie(session)
 	resp, err = client.Do(req)
 	if err != nil {
-		t.Fatalf("GET /setup over TLS: %v", err)
+		t.Fatalf("GET /feed over TLS: %v", err)
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /setup with the session = %d, want 200", resp.StatusCode)
+		t.Fatalf("GET /feed with the session = %d, want 200", resp.StatusCode)
 	}
 }
 

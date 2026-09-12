@@ -278,9 +278,10 @@ knowing before either table grows features.
 
 The web UI's login, in one row at most (`id` is pinned to 1): `username`, `pass_hash` (an
 argon2id string in the PHC format, which records its own parameters), `mode` (`enabled` or
-`disabled`), `gen`, `signing_key` and `updated_at`. No row at all means a fresh install, where the default
-`admin` / `admin` login works until a password is set. Written by the web UI's setup page and
-by `rabbithole auth reset|disable`.
+`disabled`), `gen`, `signing_key` and `updated_at`. No row at all means a fresh install, an
+instance nobody has claimed yet, which serves only the setup page until a password is set or
+the gate is switched off. Written by the web UI's setup page and by `rabbithole auth
+reset|disable`.
 
 `gen` is 128 random bits rewritten on every write. Sessions are not stored here: they live in
 the server's memory, so a restart ends them, and each records the `gen` it was issued under,

@@ -1,0 +1,38 @@
+{{/* The look picker, shared by the first-run setup card and Settings → Theme so
+     the two cannot drift: one preview of the same feed drawn in each layout,
+     and the radios that pick between them. The radios are the ones theme.js
+     drives (data-theme-pick), so a pick restyles the page on the spot and is
+     the browser's choice from then on. Both drawings share a cell and
+     crossfade on the layout attribute, so a pick reads as the same feed
+     redrawn rather than a new picture. The stories are examples, not anyone's
+     data. */}}
+{{define "lookPreview"}}
+<div class="look__pv" aria-hidden="true">
+  <div class="look__pvt">
+    <div class="look__pvt-top"><span class="look__pvt-wm">THE RABBIT HOLE</span><span class="look__pvt-nav"><span>feed</span><span>maze</span></span><span class="look__pvt-clk">09:41</span></div>
+    <div class="look__pvt-pane">
+      <div class="look__pvt-ps"><span class="pane__prompt">you@rabbithole</span><span class="sh">:</span><span class="pane__path">~/feed</span><span class="sh">$&nbsp;</span><b>digest --today</b></div>
+      <div class="look__pvt-fl"><span>unread 12</span><span>seen</span><span>saved</span></div>
+      <div class="look__pvt-row"><b>vLLM adds prefix caching for multi-turn chat</b><small>github.com/vllm-project &middot; 2h</small><span class="look__pvt-g look__sc--high" style="--s:91%"><i></i>0.91</span></div>
+      <div class="look__pvt-row"><b>Postgres 18 brings async I/O to sequential scans</b><small>lwn.net &middot; 5h</small><span class="look__pvt-g look__sc--high" style="--s:78%"><i></i>0.78</span></div>
+      <div class="look__pvt-row"><b>Running Ollama behind a reverse proxy</b><small>blog.ollama.com &middot; 1d</small><span class="look__pvt-g look__sc--mid" style="--s:56%"><i></i>0.56</span></div>
+    </div>
+  </div>
+  <div class="look__pvm">
+    <div class="look__pvm-top"><span class="look__pvm-wm">The Rabbit Hole</span><span class="look__pvm-nav"><span>Feed</span><span>Maze</span></span><span class="look__pvm-clk">09:41</span></div>
+    <div class="look__pvm-day">Today</div>
+    <div class="look__pvm-row"><b>vLLM adds prefix caching for multi-turn chat</b><small>github.com/vllm-project &middot; 2 hours ago</small><span class="look__pvm-s look__sc--high">91</span></div>
+    <div class="look__pvm-row"><b>Postgres 18 brings async I/O to sequential scans</b><small>lwn.net &middot; 5 hours ago</small><span class="look__pvm-s look__sc--high">78</span></div>
+    <div class="look__pvm-row"><b>Running Ollama behind a reverse proxy</b><small>blog.ollama.com &middot; yesterday</small><span class="look__pvm-s look__sc--mid">56</span></div>
+  </div>
+</div>
+{{end}}
+
+{{define "lookOptions"}}
+<div class="look__opts" role="radiogroup" aria-label="Look">
+  <label class="look__opt"><input type="radio" name="theme" value="default" id="lookDefault" data-theme-pick checked>
+    <span class="look__opt-body"><span class="look__opt-hd"><span class="look__opt-mk" aria-hidden="true"></span><span class="look__opt-nm">Default</span></span><span class="look__opt-ds">terminal chrome, dense feed</span></span></label>
+  <label class="look__opt"><input type="radio" name="theme" value="minimal" id="lookMinimal" data-theme-pick>
+    <span class="look__opt-body"><span class="look__opt-hd"><span class="look__opt-mk" aria-hidden="true"></span><span class="look__opt-nm">Minimal</span></span><span class="look__opt-ds">no shell, hairline chrome</span></span></label>
+</div>
+{{end}}

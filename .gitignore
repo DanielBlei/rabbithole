@@ -42,3 +42,4 @@ CLAUDE.md
 .claude/
 .agents/
 skills-lock.json
+.playwright-mcp/

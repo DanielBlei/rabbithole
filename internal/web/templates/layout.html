@@ -370,48 +370,16 @@
             </div>
           </section>
 
-          {{/* The chrome layout, not the palette. Each card draws its own
-               layout as a wireframe, in the palette's own colours — which is
-               the only way a layout picker reads at a glance. The "active"
-               badge is drawn by the stylesheet on the checked card, so adding
-               a variant stays a copy of this block with a new value. */}}
+          {{/* The chrome layout, not the palette. The preview and the radios are
+               the first-run setup card's own (partials/look.html), so the two
+               places that pick a look show the same thing. The preview is
+               larger here, where there is room for it. */}}
           <section class="stg__sect stg__sect--theme">
             <div class="stg__lbl">Layout</div>
-            <div class="thm" role="radiogroup" aria-label="Chrome layout">
-              <label class="thm__card">
-                <input type="radio" name="theme" value="default" data-theme-pick checked>
-                <span class="thm__body">
-                  <span class="thm__wire" aria-hidden="true">
-                    <i class="w-bar"></i>
-                    <span class="w-body">
-                      <i class="w-rail"></i>
-                      <span class="w-rows"><i></i><i></i><i></i></span>
-                    </span>
-                  </span>
-                  <span class="thm__hd">
-                    <span class="thm__nm">Default</span>
-                    <span class="thm__st"></span>
-                  </span>
-                  <span class="thm__ds">terminal chrome, dense feed</span>
-                </span>
-              </label>
-              <label class="thm__card">
-                <input type="radio" name="theme" value="minimal" data-theme-pick>
-                <span class="thm__body">
-                  <span class="thm__wire thm__wire--minimal" aria-hidden="true">
-                    <i class="w-bar"></i>
-                    <span class="w-body">
-                      <i class="w-rail"></i>
-                      <span class="w-rows"><i></i><i></i><i></i></span>
-                    </span>
-                  </span>
-                  <span class="thm__hd">
-                    <span class="thm__nm">Minimal</span>
-                    <span class="thm__st"></span>
-                  </span>
-                  <span class="thm__ds">no shell, hairline chrome</span>
-                </span>
-              </label>
+            <div class="look look--stg">
+              {{template "lookPreview"}}
+              {{template "lookOptions"}}
+              <p class="look__note">Saved in this browser.</p>
             </div>
           </section>
           {{if .Chrome.Account.Mode}}

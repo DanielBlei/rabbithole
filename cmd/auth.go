@@ -83,8 +83,7 @@ func authStatus(ctx context.Context, db *store.Store, out io.Writer) error {
 	}
 	switch st.Mode {
 	case store.AuthInitial:
-		_, err = fmt.Fprintf(out, "login: default (%s / %s), no password set yet\n",
-			store.DefaultUsername, store.DefaultPassword)
+		_, err = fmt.Fprintln(out, "login: not set up yet, the web UI serves only the setup page")
 	case store.AuthEnabled:
 		_, err = fmt.Fprintf(out, "login: on, user %s\n", st.Username)
 	default:
@@ -99,10 +98,16 @@ func authStatus(ctx context.Context, db *store.Store, out io.Writer) error {
 func authReset(ctx context.Context, db *store.Store, username string, read func() (string, error),
 	out io.Writer,
 ) error {
+	// Without --username the reset keeps the account's own name, which only
+	// exists once there is an account: an unclaimed instance and an open one
+	// both name nobody, so a reset on either has to be told who it is for.
 	if username = strings.TrimSpace(username); username == "" {
 		st, err := db.AuthState(ctx)
 		if err != nil {
 			return err
+		}
+		if st.Mode != store.AuthEnabled {
+			return errors.New("this instance has no login yet; pass --username to create one")
 		}
 		username = st.Username
 	}

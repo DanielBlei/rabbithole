@@ -45,7 +45,7 @@ them in the store.
 
 ```
 rabbithole serve [--addr ADDR] [--tls-cert FILE --tls-key FILE] [--insecure-http]
-                 [--trusted-proxies NETS]
+                 [--trusted-proxies NETS] [--dev]
 ```
 
 Serves the web UI and the JSON API (see [docs/api.md](api.md)), both behind the login
@@ -59,6 +59,7 @@ to finish.
 | `--tls-cert`, `--tls-key` | Serve HTTPS with this PEM certificate and key; give both or neither |
 | `--insecure-http` | Allow plain HTTP on an address other than loopback, for a TLS proxy on another host |
 | `--trusted-proxies` | Comma-separated networks or addresses whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed; default `127.0.0.0/8,::1/128`, empty trusts none |
+| `--dev` | Serve the CSS, scripts and fonts `no-cache`, so an edit shows on the next reload instead of up to 5 minutes later. For working on them; `DEV=1 make serve` passes it |
 
 Without either, an `--addr` that other machines can reach (`:8080`, `0.0.0.0`, a LAN address)
 is refused, since the login would cross the network unencrypted.
@@ -83,8 +84,8 @@ $ rabbithole auth status
 login: on, user daniel
 ```
 
-The other two answers are `login: default (admin / admin), no password set yet` on a fresh
-install, and `login: off, the web UI is open to anyone who can reach it`.
+The other two answers are `login: not set up yet, the web UI serves only the setup page` on
+a fresh install, and `login: off, the web UI is open to anyone who can reach it`.
 
 **`reset`** sets a new password: the way back in after forgetting one, and the way to change
 it. It asks twice, without echoing, and keeps the username unless `--username` changes it:
@@ -105,8 +106,9 @@ password set for daniel; every browser has been logged out
 printf '%s\n' "$NEW_PASSWORD" | rabbithole auth reset --password-stdin
 ```
 
-The password needs at least 8 characters. A reset never goes back to `admin` / `admin`, so
-there is no moment when someone else could log in with the default and claim the instance.
+Usernames need at least 3 characters and passwords at least 8. A reset never reopens the
+instance, so there is no moment when someone else could claim it. An instance with no login
+yet has no account name to keep, so a reset there needs `--username`.
 
 **`disable`** switches the login off, leaving the web UI and the API open to anyone who can
 reach the port. Settings → Account in the web UI then offers **set a password** to lock it

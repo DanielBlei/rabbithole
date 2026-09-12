@@ -14,27 +14,26 @@ import (
 	"testing"
 )
 
-func TestAuthStartsInitialWithDefaultLogin(t *testing.T) {
+func TestAuthStartsInitialWithNoLogin(t *testing.T) {
 	db, ctx := openTestStore(t), context.Background()
 
 	st, err := db.AuthState(ctx)
 	if err != nil {
 		t.Fatalf("AuthState: %v", err)
 	}
-	if st.Mode != AuthInitial || st.Username != DefaultUsername || st.Gen != "" {
-		t.Fatalf("fresh state = %+v, want initial/%s/no gen", st, DefaultUsername)
+	if st.Mode != AuthInitial || st.Username != "" || st.Gen != "" {
+		t.Fatalf("fresh state = %+v, want initial with no username and no gen", st)
 	}
-	if _, err := db.VerifyLogin(ctx, DefaultUsername, DefaultPassword); err != nil {
-		t.Fatalf("default login rejected: %v", err)
-	}
-	for _, c := range [][2]string{{"admin", "wrong"}, {"root", "admin"}, {"", ""}} {
+	// Nobody has claimed the instance, so there is no login to accept and no
+	// name to guess at: the setup page names nobody until someone types one.
+	for _, c := range [][2]string{{"admin", "admin"}, {"admin", ""}, {"root", "admin"}, {"", ""}} {
 		if _, err := db.VerifyLogin(ctx, c[0], c[1]); !errors.Is(err, ErrBadCredentials) {
 			t.Errorf("VerifyLogin(%q, %q) = %v, want ErrBadCredentials", c[0], c[1], err)
 		}
 	}
 }
 
-func TestSetPasswordReplacesDefaultLogin(t *testing.T) {
+func TestSetPasswordReplacesTheInitialState(t *testing.T) {
 	db, ctx := openTestStore(t), context.Background()
 
 	if err := db.SetPassword(ctx, "  alice  ", "correct horse"); err != nil {
@@ -51,7 +50,7 @@ func TestSetPasswordReplacesDefaultLogin(t *testing.T) {
 		t.Fatalf("new login rejected: %v", err)
 	}
 	for _, c := range [][2]string{
-		{DefaultUsername, DefaultPassword}, {"alice", "wrong horse"}, {"bob", "correct horse"},
+		{"admin", "admin"}, {"alice", "wrong horse"}, {"bob", "correct horse"},
 	} {
 		if _, err := db.VerifyLogin(ctx, c[0], c[1]); !errors.Is(err, ErrBadCredentials) {
 			t.Errorf("VerifyLogin(%q, %q) = %v, want ErrBadCredentials", c[0], c[1], err)
@@ -161,8 +160,8 @@ func TestDisableAuthOnFreshInstall(t *testing.T) {
 		t.Fatalf("DisableAuthIf: %v", err)
 	}
 	st, _ := db.AuthState(ctx)
-	if st.Mode != AuthDisabled || st.Username != DefaultUsername || st.Gen == "" {
-		t.Fatalf("state = %+v, want disabled/%s with a gen", st, DefaultUsername)
+	if st.Mode != AuthDisabled || st.Username != noUsername || st.Gen == "" {
+		t.Fatalf("state = %+v, want disabled/%s with a gen", st, noUsername)
 	}
 }
 
