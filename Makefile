@@ -6,6 +6,8 @@ THINK_FLAG := $(if $(NO_THINK),--no-think,)
 ADDR     ?= 127.0.0.1:8080
 DEBUG    ?=
 DEBUG_FLAG := $(if $(DEBUG),--debug,)
+DEV      ?=
+DEV_FLAG := $(if $(DEV),--dev,)
 GOLDEN   ?= ./configs/golden.example.yaml
 FORMAT   ?= text
 
@@ -119,8 +121,8 @@ eval-smoke: ## Render every report format from the example dataset, model-free
 ##@ Serve
 
 .PHONY: serve
-serve: config-hint ## Serve the web UI and items API over HTTP (uses CONFIG, ADDR; DEBUG=1 for verbose ingest logging)
-	go run . serve --config $(CONFIG) --addr $(ADDR) $(DEBUG_FLAG)
+serve: config-hint ## Serve the web UI and items API over HTTP (uses CONFIG, ADDR; DEBUG=1 for verbose ingest logging, DEV=1 to serve assets no-cache)
+	go run . serve --config $(CONFIG) --addr $(ADDR) $(DEBUG_FLAG) $(DEV_FLAG)
 
 ##@ Test
 

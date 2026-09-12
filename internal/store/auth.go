@@ -22,9 +22,9 @@ import (
 // authSchema holds the web UI's single login. One row at most: the CHECK pins
 // the id, so id 1 is the only row there can be.
 //
-// No row is a state of its own, AuthInitial: a fresh install, where the default
-// login works until a real password is set. pass_hash is NULL once the gate is
-// switched off. gen is a random value rewritten on every write: the web layer
+// No row is a state of its own, AuthInitial: a fresh install, which nobody has
+// claimed yet and which serves only the page that claims it. pass_hash is NULL
+// once the gate is switched off. gen is a random value rewritten on every write: the web layer
 // stamps it on each session, so any credential or mode change retires every
 // session issued before it, even when the write comes from another process.
 // signing_key signs the "stay signed in" cookies that outlive a restart; a new
@@ -47,8 +47,8 @@ CREATE TABLE IF NOT EXISTS auth (
 type AuthMode string
 
 const (
-	// AuthInitial is a fresh install: the gate is on and accepts the default
-	// login, which only leads to the page that replaces it.
+	// AuthInitial is a fresh install: nobody has claimed it yet, so every
+	// request lands on the setup page and no login is accepted.
 	AuthInitial AuthMode = "initial"
 	// AuthEnabled is a gate with a password of the user's own.
 	AuthEnabled AuthMode = "enabled"
@@ -56,16 +56,16 @@ const (
 	AuthDisabled AuthMode = "disabled"
 )
 
-// The login a fresh install accepts. Public by design: it only opens the page
-// that asks for a real password.
-const (
-	DefaultUsername = "admin"
-	DefaultPassword = "admin"
-)
+// What the username column holds on a row with no login to name: a gate that
+// was switched off. The column is NOT NULL and nothing reads it back as a
+// credential, so this is a placeholder rather than an account.
+const noUsername = "-"
 
 // Credential bounds. The password floor is the usual 8; the ceiling only stops
-// someone making every login attempt hash a megabyte.
+// someone making every login attempt hash a megabyte. The username floor keeps
+// a slip of the keyboard from becoming the account name.
 const (
+	MinUsername = 3
 	MaxUsername = 64
 	MinPassword = 8
 	MaxPassword = 256
@@ -104,7 +104,7 @@ const (
 			updated_at = excluded.updated_at`
 
 	// Keeps the username and key already stored; a fresh install gets the
-	// default username and a key of its own.
+	// placeholder username and a key of its own.
 	sqlDisableAuth = `INSERT INTO auth (id, username, pass_hash, mode, gen, signing_key, updated_at)
 		VALUES (1, ?, NULL, 'disabled', ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET pass_hash = NULL,
@@ -122,7 +122,7 @@ const (
 )
 
 // AuthState reads the gate's state. A store with no auth row reports
-// AuthInitial with the default username.
+// AuthInitial, which names nobody: the instance has not been claimed.
 func (s *Store) AuthState(ctx context.Context) (AuthState, error) {
 	st, _, err := s.authRow(ctx)
 	return st, err
@@ -137,7 +137,7 @@ func (s *Store) authRow(ctx context.Context) (AuthState, sql.NullString, error) 
 	)
 	err := s.db.QueryRowContext(ctx, sqlAuthRow).Scan(&st.Username, &hash, &mode, &st.Gen, &key)
 	if errors.Is(err, sql.ErrNoRows) {
-		return AuthState{Mode: AuthInitial, Username: DefaultUsername}, hash, nil
+		return AuthState{Mode: AuthInitial}, hash, nil
 	}
 	if err != nil {
 		return AuthState{}, hash, fmt.Errorf("query auth: %w", err)
@@ -152,8 +152,8 @@ func (s *Store) authRow(ctx context.Context) (AuthState, sql.NullString, error) 
 // VerifyLogin checks a login attempt against the stored credentials and returns
 // the state it checked against, or ErrBadCredentials on a mismatch. With a
 // password set it always hashes, even for a wrong username, so the response
-// time says nothing about which half missed. A disabled gate has nothing to log
-// in to and refuses every attempt.
+// time says nothing about which half missed. A gate that is disabled, or one
+// nobody has claimed yet, has no login to check and refuses every attempt.
 func (s *Store) VerifyLogin(ctx context.Context, username, password string) (AuthState, error) {
 	st, hash, err := s.authRow(ctx)
 	if err != nil {
@@ -161,12 +161,6 @@ func (s *Store) VerifyLogin(ctx context.Context, username, password string) (Aut
 	}
 	username = strings.TrimSpace(username)
 	switch st.Mode {
-	case AuthInitial:
-		userOK := subtle.ConstantTimeCompare([]byte(username), []byte(DefaultUsername))
-		passOK := subtle.ConstantTimeCompare([]byte(password), []byte(DefaultPassword))
-		if userOK&passOK == 1 {
-			return st, nil
-		}
 	case AuthEnabled:
 		passOK, err := verifyPassword(hash.String, password)
 		if err != nil {
@@ -236,7 +230,7 @@ func (s *Store) DisableAuth(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, sqlDisableAuth, DefaultUsername, gen, key, sqlTime(time.Now())); err != nil {
+	if _, err := s.db.ExecContext(ctx, sqlDisableAuth, noUsername, gen, key, sqlTime(time.Now())); err != nil {
 		return fmt.Errorf("disable auth: %w", err)
 	}
 	return nil
@@ -260,7 +254,7 @@ func (s *Store) DisableAuthIf(ctx context.Context, gen string) error {
 	now := sqlTime(time.Now())
 	var res sql.Result
 	if gen == "" {
-		res, err = s.db.ExecContext(ctx, sqlInsertAuthIfNone, DefaultUsername, nil, AuthDisabled, next, key, now)
+		res, err = s.db.ExecContext(ctx, sqlInsertAuthIfNone, noUsername, nil, AuthDisabled, next, key, now)
 	} else {
 		res, err = s.db.ExecContext(ctx, sqlUpdateAuthIfGen, st.Username, nil, AuthDisabled, next, key, now, gen)
 	}
@@ -323,6 +317,8 @@ func validateCredentials(username, password string) error {
 	switch n := utf8.RuneCountInString(username); {
 	case n == 0:
 		return fmt.Errorf("%w: username is empty", ErrInvalidAuth)
+	case n < MinUsername:
+		return fmt.Errorf("%w: username needs at least %d characters", ErrInvalidAuth, MinUsername)
 	case n > MaxUsername:
 		return fmt.Errorf("%w: username is longer than %d characters", ErrInvalidAuth, MaxUsername)
 	}

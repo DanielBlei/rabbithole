@@ -38,6 +38,7 @@ type Server struct {
 
 	proxies    []netip.Prefix // set by TrustProxies
 	proxiesSet bool
+	dev        bool // set by Dev: serve assets no-cache
 }
 
 // New returns a Server backed by db, using cfg for request defaults. addr is the
@@ -57,6 +58,10 @@ func (s *Server) TrustProxies(nets []netip.Prefix) {
 	s.proxies, s.proxiesSet = nets, true
 }
 
+// Dev serves the embedded assets no-cache, so an edited stylesheet or script
+// shows on the next reload instead of after the normal cache window.
+func (s *Server) Dev(on bool) { s.dev = on }
+
 // Routes builds the root handler. The API sub-mux keeps its full /api/ patterns,
 // so mounting it under "/api/" (no StripPrefix) lets its method+path patterns
 // match unchanged.
@@ -65,6 +70,7 @@ func (s *Server) Routes() http.Handler {
 	if s.proxiesSet {
 		w.SetTrustedProxies(s.proxies)
 	}
+	w.SetDev(s.dev)
 	app := http.NewServeMux()
 	app.Handle("/api/", api.New(s.db).Routes())
 	// The web mux owns "/" (digest page) and "/static/" (embedded assets);

@@ -26,7 +26,8 @@ import (
 
 // gateTmpl renders the login and setup screens. It is its own set: the pages
 // stand alone, outside the layout, since they have no chrome to show.
-var gateTmpl = template.Must(template.New("login.html").ParseFS(templatesFS, "templates/login.html"))
+var gateTmpl = template.Must(template.New("login.html").ParseFS(
+	templatesFS, "templates/login.html", "templates/partials/look.html"))
 
 const (
 	sessionCookie = "rh_session"
@@ -369,9 +370,10 @@ func hstsHost(host string) bool {
 }
 
 // Gate wraps the whole app, the JSON API included, in the login. Unless the
-// owner switched it off, a request needs a live session, and one made with the
-// default login is held on the setup page until a real password is set.
-// It fails closed: if the auth state can't be read, nothing is served.
+// owner switched it off, a request needs a live session. A fresh install has
+// nobody to hold a session for, so every request lands on the setup page that
+// claims it. It fails closed: if the auth state can't be read, nothing is
+// served.
 func (s *Web) Gate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")
@@ -396,13 +398,26 @@ func (s *Web) Gate(next http.Handler) http.Handler {
 		// Nothing behind a login is cached, so the back button after a logout
 		// shows the login rather than the last page.
 		w.Header().Set("Cache-Control", "private, no-store")
+		// Nobody has claimed a fresh install, so there is no login to ask for
+		// and nothing yet worth guarding: the setup page is served to whoever
+		// arrives, and everything else points at it. The API has no page to
+		// send anyone to and is refused until the instance is claimed.
+		if st.Mode == store.AuthInitial {
+			switch {
+			case strings.HasPrefix(r.URL.Path, "/api/"):
+				unauthorized(w)
+				http.Error(w, "this instance has not been set up yet", http.StatusUnauthorized)
+			case r.URL.Path == "/setup":
+				info := authInfo{Mode: st.Mode, Username: st.Username}
+				next.ServeHTTP(w, r.WithContext(withAuth(r.Context(), info)))
+			default:
+				redirect(w, r, "/setup")
+			}
+			return
+		}
 		token, since, ok := s.hasSession(w, r, st)
 		if !ok {
 			deny(w, r)
-			return
-		}
-		if st.Mode == store.AuthInitial && r.URL.Path != "/setup" {
-			redirect(w, r, "/setup")
 			return
 		}
 		info := authInfo{
@@ -540,7 +555,7 @@ func (s *Web) plainRemote(r *http.Request) bool {
 // gateData drives the login and setup screens.
 type gateData struct {
 	Step     string // "login" or "setup"
-	Initial  bool   // the default login is still the one that works
+	Initial  bool   // the first run: nobody has claimed this instance yet
 	Username string
 	Next     string
 	Error    string
@@ -592,6 +607,10 @@ func (s *Web) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
+	if st.Mode == store.AuthInitial {
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
 	if _, _, ok := s.hasSession(w, r, st); ok {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
@@ -602,7 +621,7 @@ func (s *Web) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.renderGate(w, r, http.StatusOK, gateData{
-		Step: "login", Initial: st.Mode == store.AuthInitial, Next: safeNext(r.URL.Query().Get("next")),
+		Step: "login", Next: safeNext(r.URL.Query().Get("next")),
 	})
 }
 
@@ -617,11 +636,16 @@ func (s *Web) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
+	if st.Mode == store.AuthInitial {
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
 	client := s.clientAddr(r)
 	key := limitKey(client)
 	data := gateData{
-		Step: "login", Initial: st.Mode == store.AuthInitial,
-		Username: r.PostFormValue("username"), Next: safeNext(r.PostFormValue("next")),
+		Step:     "login",
+		Username: r.PostFormValue("username"),
+		Next:     safeNext(r.PostFormValue("next")),
 	}
 	release, ok := s.tryHash()
 	if !ok {
@@ -653,11 +677,7 @@ func (s *Web) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Info().Str("ip", client).Msg("login")
-	dest := data.Next
-	if st.Mode == store.AuthInitial {
-		dest = "/setup"
-	}
-	http.Redirect(w, r, dest, http.StatusSeeOther)
+	http.Redirect(w, r, data.Next, http.StatusSeeOther)
 }
 
 // startSession issues a session under gen and hands the browser its cookie.
@@ -696,8 +716,11 @@ func (s *Web) handleSetupPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
+	// The username field starts empty. Neither state the setup page serves has
+	// an account to carry over, and offering one to accept made it the name
+	// every install ended up with.
 	s.renderGate(w, r, http.StatusOK, gateData{
-		Step: "setup", Initial: st.Mode == store.AuthInitial, Username: st.Username,
+		Step: "setup", Initial: st.Mode == store.AuthInitial,
 	})
 }
 

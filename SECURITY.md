@@ -12,8 +12,8 @@ reachable from this code.
 
 Out of scope, because they are known and deliberate rather than something anyone missed (see
 [Where things stand](#where-things-stand)): an instance its owner chose to run without a
-password, the default `admin` / `admin` login on a fresh install, and anything that needs an
-attacker to already have a shell on the machine.
+password, an instance nobody has claimed yet, and anything that needs an attacker to already
+have a shell on the machine.
 
 ## Where things stand
 
@@ -21,9 +21,12 @@ The web UI and the JSON API sit behind one login ([docs/auth.md](docs/auth.md)).
 anyone who can reach the port gets the whole app: your items, the ingest runs, the todos and
 ideas, and the feed set, which the Sources page can add to, retune and delete. So:
 
-- **A fresh install accepts `admin` / `admin`** until its first login sets a password. Its
-  owner can also choose to run with no password at all, which puts the app back in the hands
-  of whoever can reach the port.
+- **A fresh install is unclaimed, not protected.** It holds no credential and offers no
+  login: it serves only the setup page, so whoever reaches the address first decides whether
+  the instance gets an account or stays open. Claim it before exposing it to anything but
+  loopback, which is what `serve` already requires for plain HTTP. Its owner can also choose
+  to run with no password at all, which leaves the app in the hands of whoever can reach the
+  port.
 - **The password is stored as an argon2id hash.** Sessions live in the server's memory, so a
   restart ends them, and last at most 30 days; the cookie is `HttpOnly` and `SameSite=Lax`.
 - **"Stay signed in" is an HMAC-signed cookie**, opted into per browser, that carries a session
@@ -38,7 +41,7 @@ ideas, and the feed set, which the Sources page can add to, retune and delete. S
   in place of per-form CSRF tokens.
 - **Only a shell on the machine can switch a login off**, or reset a forgotten one:
   `rabbithole auth reset` and `rabbithole auth disable` write the database directly. A reset
-  sets the new password at once, never reopening the default login.
+  sets the new password at once, never leaving the instance unclaimed again.
 
 Two more things worth knowing:
 

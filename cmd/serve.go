@@ -29,6 +29,7 @@ var (
 	serveTLSCert      string
 	serveTLSKey       string
 	serveInsecureHTTP bool
+	serveDev          bool
 	serveProxies      []string
 )
 
@@ -47,6 +48,8 @@ func init() {
 		"allow plain HTTP on an address other machines can reach, for when a TLS proxy sits in front")
 	serveCmd.Flags().StringSliceVar(&serveProxies, "trusted-proxies", []string{"127.0.0.0/8", "::1/128"},
 		"networks whose X-Forwarded-For and X-Forwarded-Proto are believed; empty trusts none")
+	serveCmd.Flags().BoolVar(&serveDev, "dev", false,
+		"serve the CSS, scripts and fonts no-cache, so an edit shows on the next reload")
 	rootCmd.AddCommand(serveCmd)
 }
 
@@ -284,6 +287,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	srv := server.New(db, cfg, serveAddr, configPath, mgr, log)
 	srv.TrustProxies(proxies)
+	srv.Dev(serveDev)
 	httpSrv := newHTTPServer(serveAddr, srv.Routes(), tlsConfig)
 	// Bound here rather than in the goroutine, so a taken port fails the command.
 	ln, err := net.Listen("tcp", serveAddr)

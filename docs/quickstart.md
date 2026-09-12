@@ -41,11 +41,11 @@ CONFIG=./configs/config.yaml make serve
 a generic profile rather than yours. Set `CONFIG` at the top of the `Makefile` to stop passing
 it each time.
 
-## 4. Log in
+## 4. Claim it
 
-Open <http://localhost:8080>. The first visit asks for the default login, `admin` / `admin`,
-and then asks you to either set a password of your own or keep the instance open with no
-login. The choice is kept across restarts. Sessions are not, so after restarting the server
+Open <http://localhost:8080>. The first visit asks who can open this instance: create an
+account with a username and password, or leave it open with no login at all. The choice is
+kept across restarts. Sessions are not, so after restarting the server
 you log in again, unless you turn on **Stay signed in** under Settings → Account for that
 browser.
 
@@ -71,7 +71,7 @@ Config changes are read at startup, so restart the server after editing any of t
 - [configuration.md](configuration.md): every config field, other providers, model tuning
 - [cli.md](cli.md): running ingest from the terminal, the `items` command, and `auth` for the login
 - [api.md](api.md): the JSON API
-- [auth.md](auth.md): the first-run login (`admin` / `admin`), sessions, and HTTPS
+- [auth.md](auth.md): the first run, sessions, and HTTPS
 - [SECURITY.md](../SECURITY.md): read this before exposing `serve` to anything but loopback
 
 `make help` lists every target.

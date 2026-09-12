@@ -6,16 +6,21 @@ notes, ideas and feeds.
 
 ## First run
 
-A fresh database starts with the default login, `admin` / `admin`, and the login card says so
-in a **First run** note above the fields; the note goes away once a password is set. Logging
-in with it lands on a setup page that asks for one of two things:
+Nobody has claimed a fresh database yet, so there is nothing to log in to and no login is
+offered: every address, the login page included, lands on the setup page, which asks who can
+open this instance. The two answers sit side by side on the card:
 
-- **Set a password.** Pick a username and a password of at least 8 characters. From then on
-  the login asks for those.
-- **Continue without a password.** The login switches off and the app is open to anyone who
-  can reach it. Settings → Account offers **set a password** to lock it again later.
+- **Create an account.** Pick a username and a password of at least 8 characters. From then
+  on the login asks for those.
+- **Leave it open.** The login switches off and the app is open to anyone who can reach it.
+  Settings → Account offers **set a password** to lock it later.
 
 The choice is stored in the database, so it survives restarts and config edits.
+
+Until it is made, the instance is unclaimed rather than protected: whoever reaches the
+address first answers the question. It is the same trust model `serve` already assumes by
+refusing plain HTTP anywhere but loopback, so claim the instance before exposing it. The
+JSON API has no page to send anyone to and answers `401` until the choice is made.
 
 The same setup card also picks the look: **Default** (terminal chrome, dense feed) or
 **Minimal** (no shell, hairline chrome), with an example feed drawn in each. Picking one
@@ -76,8 +81,10 @@ Pass the same `--config` you run `serve` with. `reset` keeps the username unless
 printf '%s\n' "$NEW_PASSWORD" | rabbithole auth reset --password-stdin
 ```
 
-A reset goes straight to the new password rather than back to `admin` / `admin`, so there is
-never a moment when whoever reaches the port first could claim the instance.
+A reset goes straight to the new password rather than back to any default, so there is
+never a moment when whoever reaches the port first could claim the instance. On an instance
+with no login yet (unclaimed, or one left open) there is no account name to keep, so a reset
+there needs `--username`.
 
 Once a password is set, nothing in the web UI or the config file can switch the login off:
 that takes a shell on the machine, the same access it would take to edit the database by

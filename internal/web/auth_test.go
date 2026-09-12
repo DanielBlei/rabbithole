@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
-	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
 // browser drives a gated handler the way one browser would, carrying the
@@ -112,7 +111,7 @@ func gatedWeb(t *testing.T) *Web {
 }
 
 func TestGateSendsVisitorsToLogin(t *testing.T) {
-	b := newBrowser(t, newTestWeb(t))
+	b := newBrowser(t, gatedWeb(t))
 
 	wantRedirect(t, b.get("/feed"), "/login?next=%2Ffeed")
 	wantRedirect(t, b.get("/"), "/login")
@@ -128,33 +127,45 @@ func TestGateSendsVisitorsToLogin(t *testing.T) {
 	wantStatus(t, b.get("/static/style.css"), http.StatusOK)
 	page := b.get("/login")
 	wantStatus(t, page, http.StatusOK)
-	if body := page.Body.String(); !strings.Contains(body, "first run") || strings.Contains(body, "forgot password") {
-		t.Error("fresh-install login should show the default-login hint and no reset instructions")
+	if body := page.Body.String(); !strings.Contains(body, "forgot password") {
+		t.Error("the login should point at the reset instructions")
 	}
 	if page.Header().Get("X-Frame-Options") != "DENY" || page.Header().Get("Cache-Control") != "no-store" {
 		t.Errorf("login headers = %v", page.Header())
 	}
 }
 
-func TestDefaultLoginIsHeldOnSetup(t *testing.T) {
+func TestFreshInstallLandsOnSetupWithNoLogin(t *testing.T) {
 	b := newBrowser(t, newTestWeb(t))
 
-	wantStatus(t, b.login("admin", "wrong"), http.StatusUnauthorized)
-	if b.cookie != nil {
-		t.Fatal("a failed login set a session cookie")
-	}
-	wantRedirect(t, b.login(store.DefaultUsername, store.DefaultPassword), "/setup")
-	if b.cookie == nil || !b.cookie.HttpOnly || b.cookie.SameSite != http.SameSiteLaxMode || b.cookie.Secure {
-		t.Fatalf("session cookie = %+v, want HttpOnly, SameSite=Lax, not Secure over plain HTTP", b.cookie)
-	}
-
+	// Nobody has claimed the instance, so there is no login to offer and none
+	// to pass: every page, and the login itself, points at the setup page.
 	wantRedirect(t, b.get("/feed"), "/setup")
+	wantRedirect(t, b.get("/login"), "/setup")
+	wantRedirect(t, b.login("admin", "admin"), "/setup")
+	if b.cookie != nil {
+		t.Fatal("a fresh install issued a session cookie")
+	}
 	rec := b.get("/maze", "HX-Request", "true")
 	if rec.Code != http.StatusNoContent || rec.Header().Get("HX-Redirect") != "/setup" {
 		t.Errorf("htmx during setup = %d %q", rec.Code, rec.Header().Get("HX-Redirect"))
 	}
+	// The API has no page to send anyone to and stays shut until setup.
+	wantStatus(t, b.get("/api/items"), http.StatusUnauthorized)
+
 	setup := b.get("/setup")
 	wantStatus(t, setup, http.StatusOK)
+	// The two ways in are a pair on the card, neither hidden behind the other.
+	for _, want := range []string{`id="gateStepAccount"`, `id="gateStepOpen"`,
+		`id="gateStepPick"`, `Create an account`, `Leave it open`} {
+		if !strings.Contains(setup.Body.String(), want) {
+			t.Errorf("first-run setup lacks %q", want)
+		}
+	}
+	// Nothing on it hands out a credential to type.
+	if strings.Contains(setup.Body.String(), "admin</code>") {
+		t.Error("the setup page still quotes a default login")
+	}
 	// The first run also picks the look, with Settings → Theme's own radios.
 	for _, want := range []string{`data-theme-pick`, `theme --first-login`, `/static/js/theme.js`} {
 		if !strings.Contains(setup.Body.String(), want) {
@@ -188,8 +199,6 @@ func TestOpenInstanceSetupHasNoLookPicker(t *testing.T) {
 func TestSetupPasswordEndsEveryOtherSession(t *testing.T) {
 	w := newTestWeb(t)
 	a, other := newBrowser(t, w), newBrowser(t, w)
-	a.login("admin", "admin")
-	other.login("admin", "admin")
 
 	mismatch := url.Values{"username": {"alice"}, "password": {"correct horse"}, "confirm": {"correct horsE"}}
 	rec := a.do(http.MethodPost, "/setup", mismatch)
@@ -203,13 +212,19 @@ func TestSetupPasswordEndsEveryOtherSession(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "at least 8 characters") {
 		t.Errorf("short password body lacks the message: %s", rec.Body)
 	}
+	tiny := url.Values{"username": {"al"}, "password": {"correct horse"}, "confirm": {"correct horse"}}
+	rec = a.do(http.MethodPost, "/setup", tiny)
+	wantStatus(t, rec, http.StatusBadRequest)
+	if !strings.Contains(rec.Body.String(), "at least 3 characters") {
+		t.Errorf("short username body lacks the message: %s", rec.Body)
+	}
 
 	good := url.Values{"username": {"alice"}, "password": {"correct horse"}, "confirm": {"correct horse"}}
 	wantRedirect(t, a.do(http.MethodPost, "/setup", good), "/")
 	wantStatus(t, a.get("/feed"), http.StatusOK)
 	wantRedirect(t, other.get("/feed"), "/login?next=%2Ffeed")
 
-	// The default login is gone; the new one works, and setup has nothing left to do.
+	// The new login works, and setup has nothing left to do.
 	wantStatus(t, other.login("admin", "admin"), http.StatusUnauthorized)
 	wantRedirect(t, other.login("alice", "correct horse"), "/")
 	wantRedirect(t, other.get("/setup"), "/")

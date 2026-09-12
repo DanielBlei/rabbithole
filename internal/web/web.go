@@ -84,6 +84,7 @@ type Web struct {
 	limiter  *loginLimiter
 	hashing  chan struct{}  // password-hash slots, hashSlots wide
 	trusted  []netip.Prefix // proxies whose forwarding headers are believed
+	dev      bool           // serve assets no-cache, for editing them live
 }
 
 // New returns a Web backed by db, using cfg for request defaults. addr is the
@@ -166,7 +167,7 @@ func (s *Web) Routes() http.Handler {
 	}
 	// Assets are quiet: one line per file on every cold load, none of it signal.
 	mux.Handle("GET /static/", httplog.QuietHandler(
-		http.StripPrefix("/static/", cacheable(static, http.FileServer(http.FS(static))))))
+		http.StripPrefix("/static/", cacheable(static, s.staticControl(), http.FileServer(http.FS(static))))))
 	return mux
 }
 
@@ -176,6 +177,13 @@ func (s *Web) Routes() http.Handler {
 // previous CSS. The ETag below closes it — past this the browser asks, and gets
 // a 304 costing headers rather than the file.
 const staticMaxAge = "public, max-age=300"
+
+// staticDev drops that window to nothing while assets are being edited: the
+// browser revalidates every time, so a rebuilt stylesheet shows on the next
+// reload instead of up to staticMaxAge later. It still costs only headers,
+// since the ETag answers most of these with a 304. "no-cache" is revalidate
+// before use, not "do not store".
+const staticDev = "no-cache"
 
 // cacheable stamps each embedded asset with a content ETag so a browser can
 // revalidate instead of re-downloading.
@@ -188,16 +196,29 @@ const staticMaxAge = "public, max-age=300"
 // The tag is set before the FileServer runs on purpose: net/http checks
 // If-None-Match against whatever is already on the header, so setting it here
 // is enough for the 304 to be handled for us, ranges and all.
-func cacheable(files fs.FS, next http.Handler) http.Handler {
+func cacheable(files fs.FS, control string, next http.Handler) http.Handler {
 	tags := contentTags(files)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if tag, ok := tags[strings.TrimPrefix(r.URL.Path, "/")]; ok {
 			w.Header().Set("ETag", tag)
-			w.Header().Set("Cache-Control", staticMaxAge)
+			w.Header().Set("Cache-Control", control)
 		}
 		next.ServeHTTP(w, r)
 	})
 }
+
+// staticControl is the Cache-Control the embedded assets carry.
+func (s *Web) staticControl() string {
+	if s.dev {
+		return staticDev
+	}
+	return staticMaxAge
+}
+
+// SetDev turns on the asset handling that suits editing them: assets are served
+// no-cache, so a rebuild shows on the next reload rather than after the normal
+// cache window.
+func (s *Web) SetDev(on bool) { s.dev = on }
 
 // contentTags hashes every embedded asset once, at startup. The whole tree is
 // under a megabyte, and doing it here means no hashing on the request path and

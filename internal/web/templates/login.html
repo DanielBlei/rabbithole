@@ -12,7 +12,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
-<title>{{if eq .Step "setup"}}Set a password{{else}}Log in{{end}} · The Rabbit Hole</title>
+<title>{{if eq .Step "setup"}}{{if .Initial}}Set up{{else}}Set a password{{end}}{{else}}Log in{{end}} · The Rabbit Hole</title>
 <script src="/static/js/fonts-preload.js"></script>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="/static/favicon.ico" sizes="16x16 32x32 48x48">
@@ -62,19 +62,13 @@
      gate__term / gate__plain pair, and the layout layer shows one. */}}
 {{define "gateLogin"}}
 <div class="gate__card{{if .Error}} gate--err{{end}}">
-  {{if not .Initial}}<input class="gate__chk" type="checkbox" id="gateForgot" aria-controls="gateForgotPanel">{{end}}
+  <input class="gate__chk" type="checkbox" id="gateForgot" aria-controls="gateForgotPanel">
   <div class="gate__bar"><span class="pane__prompt">guest@rabbithole</span><span class="sh">:</span><span class="pane__path">~</span><span class="sh">$&nbsp;</span><span class="pane__cmd"><span class="gate__cmd">login</span><span class="gate__cmd gate__cmd--forgot">man reset</span></span><span class="blink">_</span></div>
   <div class="gate__body">
     <div class="gate__top">
       {{template "gateBunny"}}
       <div class="gate__who"><b class="gate__wm">The Rabbit Hole</b></div>
     </div>
-    {{if .Initial}}
-    <div class="gate__first" role="note">
-      <span class="gate__first-lbl"><span class="gate__term">first run</span><span class="gate__plain">First run</span></span>
-      <p class="gate__first-msg">Log in with <code>admin</code> / <code>admin</code>, then set your own.</p>
-    </div>
-    {{end}}
     <div class="gate__swap">
     <form class="gate__form" method="post" action="/login">
       <input type="hidden" name="next" value="{{.Next}}">
@@ -91,113 +85,122 @@
       </label>
       {{if .Plain}}<p class="gate__warn">This connection isn't encrypted, so the password crosses the network readable.</p>{{end}}
       <button class="gate__go" type="submit"><span class="gate__term">log in</span><span class="gate__plain">Log in</span> <kbd aria-hidden="true">&crarr;</kbd></button>
-      {{if not .Initial}}<div class="gate__foot"><label class="gate__link" for="gateForgot">forgot password?</label></div>{{end}}
+      <div class="gate__foot"><label class="gate__link" for="gateForgot">forgot password?</label></div>
     </form>
-    {{if not .Initial}}
     <div class="gate__panel" id="gateForgotPanel">
       <p class="gate__lead">Only someone with shell access to the server can reset the login. On the server, run:</p>
       <pre class="gate__sh"><code>rabbithole auth reset</code></pre>
       <p class="gate__note">Add the same <code>--config</code> you start serve with. It asks for the new password, then logs every browser out.</p>
       <div class="gate__foot"><label class="gate__link" for="gateForgot">&larr; back to login</label></div>
     </div>
-    {{end}}
     </div>
   </div>
 </div>
 {{end}}
 
-{{/* On the first run the setup card widens: the form keeps its column on the
-     right and the look picker takes the left, so the password and the look are
-     chosen on one card. Later setups (an open instance locking itself) are the
-     plain card. */}}
+{{/* On the first run the setup card widens: the choice keeps its column on the
+     right and the look picker takes the left, so who gets in and what it looks
+     like are settled on one card. The right column is two steps sharing one
+     cell, so the card is one size throughout: the two ways in, then the one
+     picked, with a back button under it. They are peers, a radio trio read by
+     :has(), not a form with an escape hatch under it: leaving the instance
+     open is a reasonable answer, and hiding it under a link argued otherwise.
+     Each radio sits inside the control that picks it, so the step the keyboard
+     lands on is one you can see: a radio whose only label is in the half being
+     hidden is a tab stop with no focus ring. Both steps end in one button, so
+     back is written once under the pair rather than once per step.
+     Later setups (an open instance locking itself) have only one answer and
+     stay the plain card. */}}
 {{define "gateSetup"}}
 <div class="gate__card gate__card--setup{{if .Initial}} gate__card--first{{end}}{{if .Error}} gate--err{{end}}">
-  {{if .Initial}}<input class="gate__chk" type="checkbox" id="gateOpen" aria-controls="gateOpenPanel">{{end}}
-  <div class="gate__bar"><span class="pane__prompt">{{.Username}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~</span><span class="sh">$&nbsp;</span><span class="pane__cmd">passwd</span><span class="blink">_</span></div>
+  {{/* guest either way: a fresh install has no account yet, and an open one
+       never had a login to name. */}}
+  <div class="gate__bar"><span class="pane__prompt">guest@rabbithole</span><span class="sh">:</span><span class="pane__path">~</span><span class="sh">$&nbsp;</span><span class="pane__cmd">{{if .Initial}}setup{{else}}passwd{{end}}</span><span class="blink">_</span></div>
   <div class="gate__split">
   {{if .Initial}}{{template "gatePick"}}{{end}}
   <div class="gate__body">
     <div class="gate__top">
       {{template "gateBunny"}}
-      <div class="gate__who"><b class="gate__wm">The Rabbit Hole</b><span class="gate__sub">{{if .Initial}}You're in with the default login.{{else}}Open to anyone who can reach it.{{end}}</span></div>
+      <div class="gate__who"><b class="gate__wm">The Rabbit Hole</b><span class="gate__sub">{{if .Initial}}Nothing here yet.{{else}}Open to anyone who can reach it.{{end}}</span></div>
     </div>
     <div class="gate__swap">
+    {{if .Initial}}
+    <div class="gate__choose">
+      <p class="gate__lead">Decide who can open it.</p>
+      <label class="gate__mode">
+        <input class="gate__step" type="radio" name="gatestep" id="gateStepAccount"{{if .Error}} checked{{end}}>
+        <span class="gate__mode-body">
+          <span class="gate__mode-nm">Create an account</span>
+          <span class="gate__mode-ds">A username and password. Only you get in.</span>
+        </span>
+      </label>
+      <label class="gate__mode">
+        <input class="gate__step" type="radio" name="gatestep" id="gateStepOpen">
+        <span class="gate__mode-body">
+          <span class="gate__mode-nm">Leave it open</span>
+          <span class="gate__mode-ds">No login. Whoever can reach this machine can use it.</span>
+        </span>
+      </label>
+    </div>
+    {{end}}
     <form class="gate__form" method="post" action="/setup">
       <input type="hidden" name="action" value="password">
-      <p class="gate__lead">{{if .Initial}}Set your own password, or keep this instance open.{{else}}Set a password to lock this instance.{{end}}</p>
+      {{if not .Initial}}<p class="gate__lead">Set a password to lock this instance.</p>{{end}}
       {{if .Error}}<p class="gate__err" role="alert">{{.Error}}</p>{{end}}
       <label class="gate__line" for="gateUser">
         <span class="gate__lbl"><span class="gate__term">username:</span><span class="gate__plain">Username</span></span>
         <input class="gate__input" id="gateUser" name="username" type="text" value="{{.Username}}"
-               autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="64" required>
+               autocomplete="username" autocapitalize="none" spellcheck="false"
+               minlength="3" maxlength="64" required{{if not .Initial}} autofocus{{end}}>
       </label>
       <label class="gate__line" for="gatePw">
-        <span class="gate__lbl"><span class="gate__term">new password:</span><span class="gate__plain">New password</span></span>
+        <span class="gate__lbl"><span class="gate__term">password:</span><span class="gate__plain">Password</span></span>
         <input class="gate__input gate__pw" id="gatePw" name="password" type="password"
-               autocomplete="new-password" minlength="8" maxlength="256" required autofocus>
+               autocomplete="new-password" minlength="8" maxlength="256" required>
       </label>
       <label class="gate__line" for="gateConfirm">
-        <span class="gate__lbl"><span class="gate__term">confirm:</span><span class="gate__plain">Confirm password</span></span>
+        <span class="gate__lbl"><span class="gate__term">confirm:</span><span class="gate__plain">Confirm</span></span>
         <input class="gate__input gate__pw" id="gateConfirm" name="confirm" type="password"
                autocomplete="new-password" minlength="8" maxlength="256" required>
       </label>
       {{if .Plain}}<p class="gate__warn">This connection isn't encrypted, so the password crosses the network readable.</p>{{end}}
-      <button class="gate__go" type="submit"><span class="gate__term">set password</span><span class="gate__plain">Set password</span> <kbd aria-hidden="true">&crarr;</kbd></button>
-      <div class="gate__foot">
-        {{if .Initial}}<label class="gate__link" for="gateOpen">continue without a password</label>{{else}}<a class="gate__link" href="/">&larr; back</a>{{end}}
-      </div>
+      <button class="gate__go" type="submit"><span class="gate__term">{{if .Initial}}create account{{else}}set password{{end}}</span><span class="gate__plain">{{if .Initial}}Create account{{else}}Set password{{end}}</span> <kbd aria-hidden="true">&crarr;</kbd></button>
+      {{if not .Initial}}<a class="gate__back" href="/"><span aria-hidden="true">&larr;</span> <span class="gate__term">back</span><span class="gate__plain">Back</span></a>{{end}}
     </form>
     {{if .Initial}}
-    <form class="gate__panel" id="gateOpenPanel" method="post" action="/setup">
+    <form class="gate__panel" method="post" action="/setup">
       <input type="hidden" name="action" value="open">
       <p class="gate__lead gate__lead--warn">Anyone who can reach this address can read and edit everything. You can set a password later in Settings.</p>
-      <button class="gate__go gate__go--warn" type="submit"><span class="gate__term">keep it open</span><span class="gate__plain">Keep it open</span></button>
-      <div class="gate__foot"><label class="gate__link" for="gateOpen">&larr; back</label></div>
+      <button class="gate__go gate__go--warn" type="submit"><span class="gate__term">leave it open</span><span class="gate__plain">Leave it open</span></button>
     </form>
     {{end}}
     </div>
+    {{if .Initial}}
+    {{/* One back for both steps, under the cell they share, holding the radio
+         that returns to the choice. It hides with the steps it leaves, which
+         takes its radio out of the tab order at the same time: on the choice
+         the keyboard lands on "Create an account" instead. */}}
+    <label class="gate__back gate__back--step">
+      <input class="gate__step" type="radio" name="gatestep" id="gateStepPick"{{if not .Error}} checked{{end}}>
+      <span class="gate__back-body"><span aria-hidden="true">&larr;</span> <span class="gate__term">back</span><span class="gate__plain">Back</span></span>
+    </label>
+    {{end}}
   </div>
   </div>
 </div>
 {{end}}
 
-{{/* The first-run look picker. The radios are Settings → Theme's own
-     (data-theme-pick, driven by theme.js), so a pick restyles this page on the
-     spot and is the browser's choice from then on. The preview draws one
-     example feed in each look; the layout layer shows the one picked. The
-     stories are examples, not anyone's data. */}}
+{{/* The first-run look picker: the shared preview and radios (partials/look.html,
+     the same pair Settings → Theme shows) under a heading in the card's voice. */}}
 {{define "gatePick"}}
 <aside class="gate__pick" aria-label="Pick a look">
   <div class="gate__pick-hd">
-    <span class="gate__pick-cmd gate__term"><span class="pane__path">~/settings</span><span class="sh">$&nbsp;</span>theme --first-login</span>
     <b class="gate__pick-t"><span class="gate__term">Pick a look</span><span class="gate__plain">Choose your look</span></b>
+    <span class="gate__pick-cmd gate__term"><span class="pane__path">~/settings</span><span class="sh">$&nbsp;</span>theme --first-login</span>
     <span class="gate__pick-sub gate__plain">The same feed, drawn two ways.</span>
   </div>
-  <div class="gate__pv" aria-hidden="true">
-    <div class="gate__pvt">
-      <div class="gate__pvt-top"><span class="gate__pvt-wm">THE RABBIT HOLE</span><span class="gate__pvt-nav"><span>feed</span><span>maze</span></span><span class="gate__pvt-clk">09:41</span></div>
-      <div class="gate__pvt-pane">
-        <div class="gate__pvt-ps"><span class="pane__prompt">you@rabbithole</span><span class="sh">:</span><span class="pane__path">~/feed</span><span class="sh">$&nbsp;</span><b>digest --today</b></div>
-        <div class="gate__pvt-fl"><span>unread 12</span><span>seen</span><span>saved</span></div>
-        <div class="gate__pvt-row"><b>vLLM adds prefix caching for multi-turn chat</b><small>github.com/vllm-project &middot; 2h</small><span class="gate__pvt-g gate__sc--high" style="--s:91%"><i></i>0.91</span></div>
-        <div class="gate__pvt-row"><b>Postgres 18 brings async I/O to sequential scans</b><small>lwn.net &middot; 5h</small><span class="gate__pvt-g gate__sc--high" style="--s:78%"><i></i>0.78</span></div>
-        <div class="gate__pvt-row"><b>Running Ollama behind a reverse proxy</b><small>blog.ollama.com &middot; 1d</small><span class="gate__pvt-g gate__sc--mid" style="--s:56%"><i></i>0.56</span></div>
-      </div>
-    </div>
-    <div class="gate__pvm">
-      <div class="gate__pvm-top"><span class="gate__pvm-wm">The Rabbit Hole</span><span class="gate__pvm-nav"><span>Feed</span><span>Maze</span></span><span class="gate__pvm-clk">09:41</span></div>
-      <div class="gate__pvm-day">Today</div>
-      <div class="gate__pvm-row"><b>vLLM adds prefix caching for multi-turn chat</b><small>github.com/vllm-project &middot; 2 hours ago</small><span class="gate__pvm-s gate__sc--high">91</span></div>
-      <div class="gate__pvm-row"><b>Postgres 18 brings async I/O to sequential scans</b><small>lwn.net &middot; 5 hours ago</small><span class="gate__pvm-s gate__sc--high">78</span></div>
-      <div class="gate__pvm-row"><b>Running Ollama behind a reverse proxy</b><small>blog.ollama.com &middot; yesterday</small><span class="gate__pvm-s gate__sc--mid">56</span></div>
-    </div>
-  </div>
-  <div class="gate__opts" role="radiogroup" aria-label="Look">
-    <label class="gate__opt"><input type="radio" name="theme" value="default" id="gateLookDefault" data-theme-pick checked>
-      <span class="gate__opt-body"><span class="gate__opt-hd"><span class="gate__opt-mk" aria-hidden="true"></span><span class="gate__opt-nm">Default</span></span><span class="gate__opt-ds">terminal chrome, dense feed</span></span></label>
-    <label class="gate__opt"><input type="radio" name="theme" value="minimal" id="gateLookMinimal" data-theme-pick>
-      <span class="gate__opt-body"><span class="gate__opt-hd"><span class="gate__opt-mk" aria-hidden="true"></span><span class="gate__opt-nm">Minimal</span></span><span class="gate__opt-ds">no shell, hairline chrome</span></span></label>
-  </div>
+  {{template "lookPreview"}}
+  {{template "lookOptions"}}
   <p class="gate__pick-note">Saved in this browser. Change it in Settings.</p>
 </aside>
 {{end}}

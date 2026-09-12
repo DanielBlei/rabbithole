@@ -30,24 +30,36 @@ func TestAuthCommands(t *testing.T) {
 	db, ctx := openAuthStore(t), context.Background()
 	var out bytes.Buffer
 
-	if err := authStatus(ctx, db, &out); err != nil || !strings.Contains(out.String(), "default (admin / admin)") {
+	if err := authStatus(ctx, db, &out); err != nil || !strings.Contains(out.String(), "not set up yet") {
 		t.Fatalf("status on a fresh install = %q, %v", out.String(), err)
 	}
 
-	// A reset keeps the stored username unless told otherwise, and goes straight
-	// to a working login: there is no default-login window.
+	// An unclaimed instance has no account name to keep, so a reset has to be
+	// told one rather than inventing a default.
 	out.Reset()
-	if err := authReset(ctx, db, "", password("correct horse"), &out); err != nil {
+	if err := authReset(ctx, db, "", password("correct horse"), &out); err == nil {
+		t.Error("reset on an unclaimed instance picked a username of its own")
+	}
+	if err := authReset(ctx, db, "hatter", password("correct horse"), &out); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	if !strings.Contains(out.String(), "password set for admin") {
+	if !strings.Contains(out.String(), "password set for hatter") {
 		t.Errorf("reset output = %q", out.String())
 	}
-	if _, err := db.VerifyLogin(ctx, "admin", "correct horse"); err != nil {
+	if _, err := db.VerifyLogin(ctx, "hatter", "correct horse"); err != nil {
 		t.Errorf("new password rejected: %v", err)
 	}
 	if _, err := db.VerifyLogin(ctx, "admin", "admin"); !errors.Is(err, store.ErrBadCredentials) {
-		t.Errorf("the default login works after a reset: %v", err)
+		t.Errorf("a guessable login works after a reset: %v", err)
+	}
+
+	// With an account in place, a reset keeps its name unless told otherwise.
+	out.Reset()
+	if err := authReset(ctx, db, "", password("battery staple"), &out); err != nil {
+		t.Fatalf("reset keeping the username: %v", err)
+	}
+	if !strings.Contains(out.String(), "password set for hatter") {
+		t.Errorf("reset kept the wrong username: %q", out.String())
 	}
 
 	out.Reset()
