@@ -9,8 +9,7 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
 
-// fetchRSS fetches RSS/Atom sources. It is the only feed type ingest actually
-// implements today; the feeds package does the parsing.
+// fetchRSS fetches RSS/Atom sources through the feeds package.
 func fetchRSS(ctx context.Context, sources []feeds.Source) []feeds.Result {
 	return feeds.FetchAll(ctx, sources)
 }
