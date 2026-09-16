@@ -4,10 +4,25 @@
 
 ```mermaid
 flowchart LR
-    F[feeds<br/>RSS/Atom] --> RUN
+    CFG[configured sources] --> DISP[source-type dispatcher]
+
+    DISP --> RSS[RSS / Atom]
+    DISP --> ACAD[Academic]
+    DISP -. planned .-> BLOG[Blog]
+    DISP -. planned .-> NEWS[News]
+
+    ACAD --> ARXIV[arXiv]
+    ACAD --> S2[Semantic Scholar]
+    ACAD --> CROSSREF[Crossref]
+
+    RSS --> RUN
+    ARXIV --> RUN
+    S2 --> RUN
+    CROSSREF --> RUN
+
     CLI["ingest<br/>(CLI)"] --> RUN
     WEB["serve<br/>(ingest button)"] --> RUN
-    RUN[one run:<br/>fetch, score, record] --> DB[(SQLite store)]
+    RUN[one run:<br/>fetch, filter, score, record] --> DB[(SQLite store)]
     RUN -. "--markdown" .-> MD[markdown digest]
     DB --> UI[web UI]
     DB --> API[JSON API]
@@ -30,7 +45,7 @@ directly the way `items` does.
 
 ```mermaid
 flowchart TD
-    A[RSS feeds] --> B[fetch each feed]
+    A[configured sources] --> B[fetch by source type]
     B --> C{new, and inside<br/>the window?}
     C -- no --> D[skip]
     C -- yes --> E[title + source + summary<br/>summary capped at 1500 chars]
@@ -40,11 +55,10 @@ flowchart TD
     H --> I[(store: score, reason, model)]
 ```
 
-**What gets sent.** Three things per article: the source name, the title, and the summary the
-feed itself published. Not the article. Nothing fetches the page, so a score is a judgement on
-what the feed chose to say about a piece. The summary is capped at 1,500 characters, which
-most feeds never reach (a typical `<description>` is a few hundred); the cap is there for the
-occasional feed that inlines a whole post.
+**What gets sent.** Three things per item: the source name, the title, and the normalized
+summary supplied by the source. The scorer does not fetch the linked full text, so a score is
+a judgement on the metadata or summary available from RSS/Atom or the academic provider.
+The summary is capped at 1,500 characters before scoring.
 
 **How it's grouped.** Articles are gathered into batches of `batch_size` and each batch is one
 request, with `max_parallel` requests in flight. Both default to 1: a small local model reads
@@ -67,16 +81,18 @@ Each step has a knob, all of them in [configuration.md](configuration.md):
 | How it's split | `inference.batch_size`, `inference.max_parallel` |
 | How much reply | `model_tuning.tokens_per_item`, `tokens_overhead`, `reason_max_chars`, and `tokens_thinking` when `think` is on |
 
-The limit of all this is the first step: a feed that publishes a two-line teaser gets scored on
-a two-line teaser, and a site with no feed can't be read at all. Both are on the roadmap below.
+The limit of all this is the source material: an RSS feed that publishes a two-line teaser is
+scored on that teaser, and academic sources are scored on the metadata or summary returned by
+their provider. Full-text page retrieval is not part of the scoring path. Direct ingestion of
+ordinary pages without a feed remains on the roadmap below.
 
 ## Layout
 
 ```
 cmd/                  cobra CLI (root, ingest, serve, auth, items, eval)
 internal/config       YAML config, feed list and profile loading
-internal/ingest       fetch -> score -> record cycle, plus the background run manager
-internal/feeds        concurrent RSS/Atom fetch + normalization (gofeed)
+internal/ingest       source dispatch -> fetch -> filter -> score -> record cycle, plus the background run manager
+internal/feeds        RSS/Atom normalization plus academic providers (arXiv, Crossref, Semantic Scholar)
 internal/rank         Scorer interface, prompt/JSON parsing, batching, selection, heuristic
 internal/inference    provider factory (ollama | vllm | heuristic)
 internal/ollama       Ollama JSON-mode client
@@ -98,9 +114,6 @@ internal/logger       zerolog setup for --debug/--trace
   `items` or the API) back into the scoring prompt as liked/disliked examples.
 - **Full-text crawl** — fetch the article page and score the piece itself, rather than the
   summary a feed chose to publish about it.
-- **Pages without a feed** — follow a plain blog that publishes no RSS or Atom at all, reading
-  the posts off the page itself. Everything after the fetch already works on a title, a source
-  and some text, so the fetch is the only step that assumes a feed exists.
 - **Scheduling & delivery** — systemd timer or cron to run ingest unattended, plus email,
   push or an output feed so the digest reaches you instead of waiting to be opened.
 - **Postgres** — one store reachable from more than one of your machines, instead of each
