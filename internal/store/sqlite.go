@@ -260,7 +260,8 @@ func (s *Store) scoredChunk(ctx context.Context, links []string, scored map[stri
 // DigestEntry is a scored item. Model names the LLM that produced Score/Reason,
 // captured at scoring time so a later config change doesn't misattribute an
 // older score. Digested stamps the entry with the run day (digested_on),
-// recording when the score was produced; entries left un-Digested carry no date.
+// recording when the item was selected for a digest; entries left un-Digested
+// carry no digest date.
 type DigestEntry struct {
 	Item     feeds.Item
 	Score    int
@@ -274,7 +275,7 @@ type DigestEntry struct {
 // in place with the fresh score — so re-scoring an item whose earlier run left
 // it unscored overwrites the placeholder instead of being dropped. Scored
 // entries are written with their score, reason and model; those also flagged
-// Digested get the digest date too. Items with no scored entry are inserted
+// Digested get the digest-selection date too. Items with no scored entry are inserted
 // seen-only (NULL score) so they show up in lists and get retried next run.
 //
 // The conflict update is guarded so it never clobbers a real score with NULL,
