@@ -37,6 +37,41 @@ jobs:
       - name: Test with the race detector
         run: make test-race
 
+      # Coverage is platform-independent for this gate; run it once rather
+      # than producing duplicate Linux/macOS artifacts.
+      - name: Test with coverage
+        if: runner.os == 'Linux'
+        run: go test -coverprofile=coverage.out ./...
+
+      - name: Print total coverage
+        if: runner.os == 'Linux'
+        run: go tool cover -func=coverage.out | tail -1
+
+      # Keep the profile even when the threshold step below fails so a failed
+      # run can be inspected without reproducing it locally.
+      - name: Upload coverage profile
+        if: runner.os == 'Linux' && always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: error
+
+      - name: Enforce 75% coverage threshold
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          LC_ALL: C
+        run: |
+          total=$(go tool cover -func=coverage.out | tail -1 | awk '{gsub(/%/, "", $3); print $3}')
+          awk -v total="$total" 'BEGIN {
+            if (total + 0 < 75) {
+              printf "coverage %.1f%% is below 75%%\n", total
+              exit 1
+            }
+            printf "coverage %.1f%% meets the 75%% threshold\n", total
+          }'
+
       # The reports are only correct when rendered. Nothing else here runs the
       # renderers end to end, and the heuristic scorer needs no backend.
       - name: Render the eval reports
