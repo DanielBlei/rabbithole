@@ -53,6 +53,7 @@ All fields are optional unless marked required.
 | `inference.max_parallel` | Scoring requests in flight | `1`                               |
 | `inference.model_tuning.*` | Decoding limits — see below | see below                         |
 | `ingest.since` | Lookback window for new items | `7d`                              |
+| `ingest.min_score` | Minimum digest score (1–10); lower scores are still stored | `6` |
 | `ingest.feeds` | Path to the feed seed file | `feeds.yaml` beside `config.yaml` |
 | `ingest.digest_dir` | Output directory for `ingest --markdown` | none — required by that flag      |
 | `store.db_path` | SQLite database file | **required**                      |
@@ -169,11 +170,24 @@ feeds:
 |---|---|---|
 | `name` | Display name; also the source items are stored under | **required, unique** |
 | `url` | RSS or Atom URL; a missing scheme becomes `https://` | **required, unique** |
-| `type` | Source kind: `rss`, `blog`, `news` or `academic`. Only `rss` is implemented today | `rss` |
+| `type` | Source kind: `rss`, `blog`, `news` or `academic`. RSS and academic are implemented; blog and news are not yet implemented | `rss` |
 | `enabled` | `false` retains the feed but never fetches it | `true` |
 | `since` | Lookback window for this feed | defaults, then `ingest.since` |
 | `max_items` | Maximum items contributed per run; `0` is uncapped | defaults, then uncapped |
 | `tags` | Free-form labels, used for filtering in the UI | defaults' tags |
+
+### Academic sources
+
+Set `type: academic` to use an academic provider. The URL host selects arXiv,
+Crossref or Semantic Scholar, and its query parameters define the saved search.
+
+Supported search parameters include `q`, `query`, `search_query` and
+`query.bibliographic`. Optional filters are `publisher`, `journal`, `issn`,
+`open_access` and `min_citations`. Crossref-style `query.publisher-name` and
+`query.container-title` are also accepted.
+
+`since` and `max_items` are applied by the common ingest pipeline after provider
+results are normalized.
 
 The defaults accept `since`, `max_items`, `enabled` and `tags`, applying each to any feed
 that does not set it. Values resolve through the following chain:

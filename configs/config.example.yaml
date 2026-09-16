@@ -28,7 +28,8 @@ inference:
 
 ingest:
   since: 7d                             # how far back to look; accepts d/h/m (7d, 168h, 90m)
-  feeds: ./configs/feeds.example.yaml   # RSS feeds to pull from
+  min_score: 6                          # minimum score selected for a digest (1-10)
+  feeds: ./configs/feeds.example.yaml   # sources to pull from
   digest_dir: ./data/digests            # output for markdown report, `ingest` CLI usage only
 
 store:
