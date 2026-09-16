@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package feeds fetches and normalizes RSS/Atom items.
+// Package feeds fetches and normalizes items from supported content sources.
 package feeds
 
 import (

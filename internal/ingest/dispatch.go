@@ -20,10 +20,10 @@ import (
 // and a registry entry here, not touching the dispatch logic itself.
 type typeFetcher func(ctx context.Context, sources []feeds.Source) []feeds.Result
 
-// fetchers maps every known feed type to its fetch implementation. RSS is the
-// only one implemented today; the rest are placeholders (see skipUnimplemented)
-// until their own ingest support lands. TestFetchersCoverEveryFeedType checks
-// this stays in sync with config's FeedType constants.
+// fetchers maps every known feed type to its fetch implementation. RSS and
+// academic sources are implemented; blog and news remain placeholders until
+// their ingest support lands. TestFetchersCoverEveryFeedType checks this stays
+// in sync with config's FeedType constants.
 var fetchers = map[config.FeedType]typeFetcher{
 	config.FeedTypeRSS:      fetchRSS,
 	config.FeedTypeBlog:     fetchBlog,
@@ -73,7 +73,7 @@ func dispatchFetch(ctx context.Context, active []config.ResolvedFeed) []feeds.Re
 // type never fetches anything, and a feed stuck at zero items should show up
 // as failing on the Sources page (via the existing health/error surface)
 // rather than reading as a healthy feed that just never publishes. rss.go's
-// fetchRSS is the only fetcher that does real work; blog.go, news.go and
+// RSS and academic sources have working fetchers; blog.go and news.go
 // academic.go each just call this with their own type.
 func skipUnimplemented(ctx context.Context, sources []feeds.Source, kind config.FeedType) []feeds.Result {
 	logger := zerolog.Ctx(ctx)
