@@ -13,7 +13,7 @@ import (
 )
 
 // openTestStore opens a throwaway store, closed on cleanup.
-func openTestStore(t *testing.T) *Store {
+func openTestStore(t testing.TB) *Store {
 	t.Helper()
 	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {

@@ -138,6 +138,10 @@ test-v: ## Run the test suite verbosely
 test-race: ## Run tests with the race detector
 	go test -race $(PKG)
 
+.PHONY: bench
+bench: ## Run ranking and store benchmarks
+	go test -bench=. -benchmem ./internal/rank ./internal/store
+
 .PHONY: cover
 cover: ## Run tests and open an HTML coverage report
 	go test -coverprofile=coverage.out $(PKG)
