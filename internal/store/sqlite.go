@@ -545,6 +545,10 @@ type ListFilter struct {
 	// comma-joined, so each is matched with its delimiters — "AI" doesn't hit
 	// "AIOps".
 	Tags []string
+	// RatedOnly keeps only items that have a user_score (the user's rating).
+	RatedOnly bool
+	// ScoredBy keeps only items that were scored by the given model (llm_score_model).
+	ScoredBy string
 }
 
 // List's result-count bounds: defaultListLimit applies when ListFilter.Limit
@@ -637,6 +641,13 @@ func (filter ListFilter) whereClause() (where []string, args []any) {
 	if filter.Bookmarked {
 		where = append(where, "bookmarked = 1")
 	}
+	if filter.RatedOnly {
+		where = append(where, "user_score IS NOT NULL")
+	}
+	if filter.ScoredBy != "" {
+		where = append(where, "llm_score_model = ?")
+		args = append(args, filter.ScoredBy)
+	}
 	// One OR group, so it ANDs with the bounds above. instr rather than LIKE
 	// '%x%': the text is whatever was typed, and instr has no wildcards to
 	// escape. tags is NULL when the item carries none.
@@ -672,13 +683,28 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]ItemRow, error) 
 	if err := filter.validate(); err != nil {
 		return nil, err
 	}
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = defaultListLimit
-	} else if limit > maxListLimit {
-		limit = maxListLimit
-	}
+	return s.listItems(ctx, filter, false)
+}
 
+// ListAll returns all items matching filter, ignoring Limit and the 200-row cap.
+// It uses the same filtering and sorting as List, but returns every matching row.
+func (s *Store) ListAll(ctx context.Context, filter ListFilter) ([]ItemRow, error) {
+	if err := filter.validate(); err != nil {
+		return nil, err
+	}
+	return s.listItems(ctx, filter, true)
+}
+
+// listItems is a shared private implementation of List and ListAll.
+func (s *Store) listItems(ctx context.Context, filter ListFilter, all bool) ([]ItemRow, error) {
+	limit := filter.Limit
+	if !all {
+		if limit <= 0 {
+			limit = defaultListLimit
+		} else if limit > maxListLimit {
+			limit = maxListLimit
+		}
+	}
 	where, args := filter.whereClause()
 	q := "SELECT " + itemRowColumns + " FROM items"
 	if len(where) > 0 {
@@ -698,15 +724,15 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]ItemRow, error) 
 		q += " ORDER BY COALESCE(llm_score, ?) DESC, source ASC, id ASC"
 		args = append(args, unscoredSentinel)
 	}
-	q += " LIMIT ?"
-	args = append(args, limit)
-
+	if !all {
+		q += " LIMIT ?"
+		args = append(args, limit)
+	}
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query list: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-
 	var items []ItemRow
 	for rows.Next() {
 		r, err := scanItemRow(rows)

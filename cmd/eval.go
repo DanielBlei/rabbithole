@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/eval"
 	"github.com/DanielBlei/rabbithole/internal/inference"
 	"github.com/DanielBlei/rabbithole/internal/rank"
+	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
 // defaultBenchmarkPath sits beside the other configs, matching how the config
@@ -67,6 +69,7 @@ var (
 	auditScoredBy  string
 	auditFormat    string
 	auditOutput    string
+	auditShowWhy   bool
 )
 
 func init() {
@@ -114,11 +117,8 @@ func init() {
 			"slot, where the model disagreed with your thumbs, and how scores are distributed. " +
 			"Reads historical values rather than re-scoring, so it describes what happened " +
 			"rather than testing a change. No model is contacted and nothing is written.",
-		Args: cobra.NoArgs,
-		// Hidden until the report is built. The flags are wired and validated,
-		// but a subcommand that only ever exits non-zero is worse than one that
-		// is not offered yet.
-		Hidden: true,
+		Args:   cobra.NoArgs,
+		Hidden: false,
 		RunE:   runAudit,
 	}
 	auditCmd.Flags().
@@ -136,6 +136,8 @@ func init() {
 		StringVar(&auditScoredBy, "scored-by", "", "only items scored by this model; llm_score_model is the only provenance stored, so a mixed sample can compare rows scored under different configs")
 	auditCmd.Flags().StringVar(&auditFormat, "format", string(eval.FormatText), "report format (text|markdown|json)")
 	auditCmd.Flags().StringVar(&auditOutput, "output-path", "", "write the report here (default: stdout)")
+	auditCmd.Flags().
+		BoolVar(&auditShowWhy, "show-why", false, "also print the model's stated reason and the user's note beside every sample")
 
 	evalCmd.AddCommand(benchmarkCmd, auditCmd)
 	rootCmd.AddCommand(evalCmd)
@@ -201,6 +203,7 @@ func resolveAuditOptions(now time.Time, limitSet bool) (eval.AuditOptions, error
 		All:       auditAll,
 		Seed:      auditSeed,
 		Newest:    auditNewest,
+		ShowWhy:   auditShowWhy,
 	}
 	if auditSince != "" {
 		d, err := config.ParseDuration(auditSince)
@@ -371,19 +374,118 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	log.Debug().
-		Bool("rated_only", opts.RatedOnly).
-		Int("limit", opts.Limit).
-		Bool("all", opts.All).
-		Int64("seed", opts.Seed).
-		Bool("newest", opts.Newest).
-		Str("source", opts.Source).
-		Str("scored_by", opts.ScoredBy).
-		Str("db", cfg.Store.DBPath).
-		Str("format", string(opts.Output.Format)).
-		Msg("audit options resolved")
+	db, err := store.Open(cfg.Store.DBPath)
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer db.Close()
 
-	return errNotImplemented("eval audit")
+	filter := store.ListFilter{
+		RatedOnly: opts.RatedOnly,
+		Source:    opts.Source,
+		ScoredBy:  opts.ScoredBy,
+		After:     opts.After,
+	}
+	if opts.Newest {
+		filter.SortBy = store.SortByLatest
+	}
+
+	items, err := db.ListAll(cmd.Context(), filter)
+	if err != nil {
+		return fmt.Errorf("list items: %w", err)
+	}
+	if len(items) == 0 {
+		return fmt.Errorf("no items match the given filters")
+	}
+
+	selected := items
+	if !opts.Newest {
+		seed := opts.Seed
+		if seed == 0 {
+			seed = time.Now().UnixNano()
+		}
+		r := rand.New(rand.NewSource(seed))
+		for i := len(selected) - 1; i > 0; i-- {
+			j := r.Intn(i + 1)
+			selected[i], selected[j] = selected[j], selected[i]
+		}
+	}
+
+	if !opts.All && opts.Limit < len(selected) {
+		selected = selected[:opts.Limit]
+	}
+
+	var samples []eval.Sample
+	var outcomes []eval.Outcome
+	for _, item := range selected {
+		if item.UserScore == nil || item.LLMScore == nil {
+			continue
+		}
+		var note, reason string
+		if item.UserNote != nil {
+			note = *item.UserNote
+		}
+		if item.LLMScoreReason != nil {
+			reason = *item.LLMScoreReason
+		}
+		sample := eval.Sample{
+			ID:       item.ID,
+			Source:   item.Source,
+			Title:    item.Title,
+			Expected: item.UserScore,
+			Note:     note,
+		}
+		outcome := eval.Outcome{
+			Sample: sample,
+			Score:  *item.LLMScore,
+			Reason: reason,
+			Scored: true,
+		}
+		samples = append(samples, sample)
+		outcomes = append(outcomes, outcome)
+	}
+
+	if len(samples) == 0 {
+		return fmt.Errorf("no items with both user and LLM scores")
+	}
+
+	dataset := eval.Dataset{
+		Metadata: eval.Metadata{
+			Name: "audit",
+		},
+		Tags:    map[eval.Tag]string{},
+		Samples: samples,
+	}
+
+	res := &eval.Results{
+		Info: eval.RunInfo{
+			Benchmark:      "audit",
+			StartedAt:      time.Now().UTC(),
+			Provider:       "",
+			Model:          opts.ScoredBy,
+			Think:          false,
+			Repeats:        1,
+			ProfileHash:    "",
+			PromptHash:     "",
+			DatasetHash:    "",
+			ElapsedSeconds: 0.0,
+			DatasetSamples: len(dataset.Samples),
+			Limit: func() int {
+				if opts.All {
+					return 0
+				}
+				return opts.Limit
+			}(),
+		},
+		Runs:       [][]eval.Outcome{outcomes},
+		RunSeconds: []float64{0},
+	}
+
+	report := eval.Summarize(res, &dataset)
+	return writeReport(report, opts.Output, eval.RenderOptions{
+		Format:  opts.Output.Format,
+		ShowWhy: opts.ShowWhy,
+	})
 }
 
 // applyBackendOverride folds the --provider/--host/--model flags onto the

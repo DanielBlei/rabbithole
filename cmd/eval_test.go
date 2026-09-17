@@ -5,13 +5,23 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"math"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/eval"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/inference"
+	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
 // resetBenchmarkFlags puts the package-level flag vars back to the defaults
@@ -30,6 +40,7 @@ func resetAuditFlags() {
 	auditSeed = 0
 	auditSince, auditSource, auditScoredBy = "", "", ""
 	auditFormat, auditOutput = string(eval.FormatText), ""
+	auditShowWhy = false
 }
 
 func TestResolveBenchmarkOptions(t *testing.T) {
@@ -195,11 +206,17 @@ func TestResolveAuditOptions(t *testing.T) {
 			},
 		},
 		{
-			name:  "--rated-only and the narrowing flags carry through",
-			setup: func() { auditRatedOnly, auditSource, auditScoredBy = true, "Source One", "qwen3:0.6b" },
+			name: "--rated-only and the narrowing flags carry through",
+			setup: func() {
+				auditRatedOnly, auditSource, auditScoredBy = true, "Source One", "qwen3:0.6b"
+				auditShowWhy = true
+			},
 			check: func(t *testing.T, o eval.AuditOptions) {
 				if !o.RatedOnly || o.Source != "Source One" || o.ScoredBy != "qwen3:0.6b" {
 					t.Errorf("got %v/%q/%q, want true/Source One/qwen3:0.6b", o.RatedOnly, o.Source, o.ScoredBy)
+				}
+				if !o.ShowWhy {
+					t.Error("ShowWhy = false, want true")
 				}
 			},
 		},
@@ -267,6 +284,286 @@ func TestResolveAuditOptions(t *testing.T) {
 			}
 			tt.check(t, o)
 		})
+	}
+}
+
+type auditFixture struct {
+	id        string
+	source    string
+	model     string
+	reason    string
+	note      string
+	llmScore  *int
+	userScore *int
+	published time.Time
+}
+
+func intPtr(n int) *int { return &n }
+
+func runAuditFixture(
+	t *testing.T,
+	fixtures []auditFixture,
+	setup func(),
+	format eval.Format,
+) ([]byte, error) {
+	t.Helper()
+	resetAuditFlags()
+	defer resetAuditFlags()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "audit.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	items := make([]feeds.Item, len(fixtures))
+	var scored []store.DigestEntry
+	for i, fixture := range fixtures {
+		items[i] = feeds.Item{
+			ID:        fixture.id,
+			Source:    fixture.source,
+			Title:     fixture.id,
+			Link:      "https://example.test/" + fixture.id,
+			Published: fixture.published,
+		}
+		if fixture.llmScore != nil {
+			scored = append(scored, store.DigestEntry{
+				Item:   items[i],
+				Score:  *fixture.llmScore,
+				Reason: fixture.reason,
+				Model:  fixture.model,
+			})
+		}
+	}
+	if err := db.Record(context.Background(), items, scored, time.Now()); err != nil {
+		_ = db.Close()
+		t.Fatalf("Record: %v", err)
+	}
+	for _, fixture := range fixtures {
+		if fixture.userScore == nil && fixture.note == "" {
+			continue
+		}
+		patch := store.UserPatch{UserScore: fixture.userScore}
+		if fixture.note != "" {
+			patch.UserNote = &fixture.note
+		}
+		if err := db.UpdateUserState(context.Background(), fixture.id, patch); err != nil {
+			_ = db.Close()
+			t.Fatalf("UpdateUserState %s: %v", fixture.id, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	configFile := filepath.Join(dir, "config.yaml")
+	configBody := fmt.Sprintf("profile: unused\nstore:\n  db_path: %q\n", dbPath)
+	if err := os.WriteFile(configFile, []byte(configBody), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if setup != nil {
+		setup()
+	}
+	output := filepath.Join(dir, "report."+string(format))
+	auditFormat = string(format)
+	auditOutput = output
+
+	oldConfigPath := configPath
+	configPath = configFile
+	defer func() { configPath = oldConfigPath }()
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	cmd.Flags().Int("limit", eval.DefaultLimit, "")
+	if err := runAudit(cmd, nil); err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	return raw, nil
+}
+
+func decodeAuditReport(t *testing.T, raw []byte) eval.Report {
+	t.Helper()
+	var report eval.Report
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatalf("decode report: %v", err)
+	}
+	return report
+}
+
+func TestRunAuditMetricsShowWhyAndProvenance(t *testing.T) {
+	fixtures := []auditFixture{
+		{
+			id: "a", source: "S1", model: "m1", reason: "model reason",
+			note: "user note", llmScore: intPtr(8), userScore: intPtr(6),
+		},
+		{id: "b", source: "S2", model: "m2", llmScore: intPtr(3), userScore: intPtr(4)},
+		{id: "not-comparable", source: "S3", model: "m1", llmScore: intPtr(9)},
+	}
+	raw, err := runAuditFixture(t, fixtures, func() {
+		auditAll = true
+	}, eval.FormatJSON)
+	if err != nil {
+		t.Fatalf("runAudit: %v", err)
+	}
+	report := decodeAuditReport(t, raw)
+
+	if report.Results.Samples != 2 || report.Results.Scored != 2 {
+		t.Errorf("samples/scored = %d/%d, want 2/2", report.Results.Samples, report.Results.Scored)
+	}
+	if report.Results.MAE != 1.5 {
+		t.Errorf("MAE = %v, want 1.5", report.Results.MAE)
+	}
+	if want := math.Sqrt(2.5); math.Abs(report.Results.RMSE-want) > 1e-12 {
+		t.Errorf("RMSE = %v, want %v", report.Results.RMSE, want)
+	}
+	if report.Results.SignedMean != 0.5 {
+		t.Errorf("SignedMean = %v, want 0.5", report.Results.SignedMean)
+	}
+	info := report.Info
+	if info.Benchmark != "audit" || info.Provider != "" || info.Model != "" ||
+		info.Think || info.Repeats != 1 {
+		t.Errorf("unexpected provenance: %+v", info)
+	}
+	if info.ProfileHash != "" || info.PromptHash != "" || info.DatasetHash != "" {
+		t.Errorf("audit hashes must be empty: %+v", info)
+	}
+
+	text, err := runAuditFixture(t, fixtures, func() {
+		auditAll = true
+		auditShowWhy = true
+	}, eval.FormatText)
+	if err != nil {
+		t.Fatalf("runAudit --show-why: %v", err)
+	}
+	if !strings.Contains(string(text), "model reason") || !strings.Contains(string(text), "user note") {
+		t.Errorf("show-why report omitted stored reason/note:\n%s", text)
+	}
+}
+
+func TestRunAuditFiltersBeforeDeterministicSelection(t *testing.T) {
+	var fixtures []auditFixture
+	for i := range 12 {
+		model := "other"
+		var userScore *int
+		if i < 4 {
+			model = "target"
+			userScore = intPtr(i + 1)
+		}
+		fixtures = append(fixtures, auditFixture{
+			id: fmt.Sprintf("item-%02d", i), source: "S",
+			model: model, llmScore: intPtr(i % 11), userScore: userScore,
+		})
+	}
+	run := func() eval.Report {
+		raw, err := runAuditFixture(t, fixtures, func() {
+			auditRatedOnly = true
+			auditScoredBy = "target"
+			auditLimit = 2
+			auditSeed = 42
+		}, eval.FormatJSON)
+		if err != nil {
+			t.Fatalf("runAudit: %v", err)
+		}
+		return decodeAuditReport(t, raw)
+	}
+	first, second := run(), run()
+
+	allowed := map[string]bool{
+		"item-00": true,
+		"item-01": true,
+		"item-02": true,
+		"item-03": true,
+	}
+	ids := func(report eval.Report) []string {
+		out := make([]string, len(report.Samples))
+		for i, sample := range report.Samples {
+			out[i] = sample.ID
+			if !allowed[sample.ID] {
+				t.Errorf("selected row %q did not match pre-selection filters", sample.ID)
+			}
+		}
+		slices.Sort(out)
+		return out
+	}
+	firstIDs, secondIDs := ids(first), ids(second)
+	if len(firstIDs) != 2 {
+		t.Fatalf("selected %d rows, want 2", len(firstIDs))
+	}
+	if !slices.Equal(firstIDs, secondIDs) {
+		t.Errorf("seeded selections differ: %v vs %v", firstIDs, secondIDs)
+	}
+	if first.Info.Model != "target" || first.Info.Provider != "" {
+		t.Errorf("model/provider = %q/%q, want target/empty", first.Info.Model, first.Info.Provider)
+	}
+}
+
+func TestRunAuditAllBypassesListCap(t *testing.T) {
+	fixtures := make([]auditFixture, 205)
+	for i := range fixtures {
+		fixtures[i] = auditFixture{
+			id: fmt.Sprintf("item-%03d", i), source: "S", model: "m",
+			llmScore: intPtr(i % 11), userScore: intPtr((i + 1) % 11),
+		}
+	}
+	raw, err := runAuditFixture(t, fixtures, func() {
+		auditAll = true
+	}, eval.FormatJSON)
+	if err != nil {
+		t.Fatalf("runAudit: %v", err)
+	}
+	report := decodeAuditReport(t, raw)
+	if report.Results.Samples != len(fixtures) {
+		t.Errorf("samples = %d, want %d", report.Results.Samples, len(fixtures))
+	}
+}
+
+func TestRunAuditNewestUsesStoreOrdering(t *testing.T) {
+	now := time.Now().UTC()
+	raw, err := runAuditFixture(t, []auditFixture{
+		{
+			id: "old", source: "S", model: "m", published: now.Add(-3 * time.Hour),
+			llmScore: intPtr(1), userScore: intPtr(1),
+		},
+		{
+			id: "new", source: "S", model: "m", published: now.Add(-time.Hour),
+			llmScore: intPtr(2), userScore: intPtr(2),
+		},
+		{
+			id: "middle", source: "S", model: "m", published: now.Add(-2 * time.Hour),
+			llmScore: intPtr(3), userScore: intPtr(3),
+		},
+	}, func() {
+		auditNewest = true
+		auditLimit = 2
+	}, eval.FormatJSON)
+	if err != nil {
+		t.Fatalf("runAudit: %v", err)
+	}
+	report := decodeAuditReport(t, raw)
+	got := make([]string, len(report.Samples))
+	for i, sample := range report.Samples {
+		got[i] = sample.ID
+	}
+	slices.Sort(got)
+	if want := []string{"middle", "new"}; !slices.Equal(got, want) {
+		t.Errorf("newest IDs = %v, want %v", got, want)
+	}
+}
+
+func TestRunAuditNoComparableItems(t *testing.T) {
+	_, err := runAuditFixture(t, []auditFixture{
+		{id: "llm-only", source: "S", model: "m", llmScore: intPtr(8)},
+		{id: "user-only", source: "S", userScore: intPtr(7)},
+	}, func() {
+		auditAll = true
+	}, eval.FormatJSON)
+	if err == nil || !strings.Contains(err.Error(), "both user and LLM scores") {
+		t.Fatalf("error = %v, want clear no-comparable-items error", err)
 	}
 }
 
