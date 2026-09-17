@@ -126,5 +126,8 @@ type AuditOptions struct {
 	// quietly makes the report describe your fetch schedule instead of your feed.
 	Newest bool
 
+	// ShowWhy adds the stored model reason and user note beside each sample.
+	ShowWhy bool
+
 	Output Output
 }

@@ -836,6 +836,26 @@ func TestListLimitClamp(t *testing.T) {
 		t.Errorf("got %d rows, want clamp to %d", len(rows), maxListLimit)
 	}
 
+	// A negative limit has always meant "use the default" for List, not
+	// "unbounded".
+	rows, err = db.List(ctx, ListFilter{Limit: -1})
+	if err != nil {
+		t.Fatalf("List negative limit: %v", err)
+	}
+	if len(rows) != defaultListLimit {
+		t.Errorf("List negative limit returned %d rows, want default %d", len(rows), defaultListLimit)
+	}
+
+	// ListAll shares List's filtering and ordering, but ignores both the
+	// caller's limit and List's hard cap.
+	rows, err = db.ListAll(ctx, ListFilter{Limit: 1})
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(rows) != len(items) {
+		t.Errorf("ListAll returned %d rows, want all %d", len(rows), len(items))
+	}
+
 	// Count is not bound by the list limit — it returns the true total.
 	n, err := db.Count(ctx, ListFilter{})
 	if err != nil {
@@ -843,6 +863,107 @@ func TestListLimitClamp(t *testing.T) {
 	}
 	if n != len(items) {
 		t.Errorf("Count() = %d, want %d (uncapped)", n, len(items))
+	}
+}
+
+func TestListRatingFilters(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+
+	items := []feeds.Item{
+		{ID: "a", Source: "S", Title: "A", Link: "https://x/a"},
+		{ID: "b", Source: "S", Title: "B", Link: "https://x/b"},
+		{ID: "c", Source: "S", Title: "C", Link: "https://x/c"},
+		{ID: "d", Source: "S", Title: "D", Link: "https://x/d"},
+	}
+	scored := []DigestEntry{
+		{Item: items[0], Score: 9, Model: "m1"},
+		{Item: items[1], Score: 8, Model: "m1"},
+		{Item: items[2], Score: 7, Model: "m2"},
+		{Item: items[3], Score: 6, Model: "m2"},
+	}
+	if err := db.Record(ctx, items, scored, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	for _, id := range []string{"a", "c"} {
+		score := 5
+		if err := db.UpdateUserState(ctx, id, UserPatch{UserScore: &score}); err != nil {
+			t.Fatalf("rate %s: %v", id, err)
+		}
+	}
+
+	tests := []struct {
+		name    string
+		filter  ListFilter
+		wantIDs []string
+	}{
+		{name: "rated only", filter: ListFilter{RatedOnly: true}, wantIDs: []string{"a", "c"}},
+		{name: "scored by model", filter: ListFilter{ScoredBy: "m1"}, wantIDs: []string{"a", "b"}},
+		{
+			name:    "filters combine",
+			filter:  ListFilter{RatedOnly: true, ScoredBy: "m2"},
+			wantIDs: []string{"c"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rows, err := db.ListAll(ctx, tt.filter)
+			if err != nil {
+				t.Fatalf("ListAll: %v", err)
+			}
+			got := make([]string, len(rows))
+			for i, row := range rows {
+				got[i] = row.ID
+			}
+			if !slices.Equal(got, tt.wantIDs) {
+				t.Errorf("IDs = %v, want %v", got, tt.wantIDs)
+			}
+		})
+	}
+}
+
+func TestListLatestUsesPublishedAtWithCreatedFallback(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	items := []feeds.Item{
+		{ID: "a", Source: "S", Title: "A", Link: "https://x/a", Published: now.Add(-time.Hour)},
+		{ID: "b", Source: "S", Title: "B", Link: "https://x/b"},
+		{ID: "c", Source: "S", Title: "C", Link: "https://x/c", Published: now.Add(-2 * time.Hour)},
+		{ID: "d", Source: "S", Title: "D", Link: "https://x/d", Published: now.Add(-time.Hour)},
+	}
+	if err := db.Record(ctx, items, nil, now); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if _, err := db.db.ExecContext(
+		ctx,
+		"UPDATE items SET created_at = ? WHERE id = ?",
+		sqlTime(now),
+		"b",
+	); err != nil {
+		t.Fatalf("set created_at: %v", err)
+	}
+
+	rows, err := db.ListAll(ctx, ListFilter{SortBy: SortByLatest})
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	got := make([]string, len(rows))
+	for i, row := range rows {
+		got[i] = row.ID
+	}
+	want := []string{"b", "d", "a", "c"}
+	if !slices.Equal(got, want) {
+		t.Errorf("IDs = %v, want %v", got, want)
 	}
 }
 
