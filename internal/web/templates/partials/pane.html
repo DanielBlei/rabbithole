@@ -1,150 +1,105 @@
 {{define "pane"}}
 <section class="pane" id="pane" data-limit="{{.ListLimit}}" data-available="{{.Stats.Available}}">
+  {{/* The bar reads the view back as the command it is: the prompt, then one
+       argument per active filter, each a link to this same feed without it.
+       It is the same line however the feed is narrowed — an unfiltered page
+       still runs a command, and a bar that swapped one line for another would
+       read as two different things.
+
+       This is where the filters' state lives in this layout — the controls
+       below wear their names, not their values, so seven of them fit on one
+       row. Minimal retires the whole bar (one rule, shared with the maze
+       widgets) and moves the values onto the buttons instead. */}}
   <div class="pane__bar">
-    <span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~/feed</span><span class="sh">$&nbsp;</span><span class="pane__cmd">{{.ServeCmd}}</span><span class="blink">_</span>
+    <span class="pane__ps"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~/feed</span><span class="sh">$&nbsp;</span><span class="pane__cmd">feed</span></span>
+    {{range .Args}}{{if .Drop}}<a class="cmd__arg" href="{{.Drop}}" title="Show this feed without {{.Flag}}{{if .Value}} {{.Value}}{{end}}"><i>{{.Flag}}</i>{{if .Value}}<span{{if .Quote}} data-q{{end}}>{{.Value}}</span>{{end}}</a>{{else}}<span class="cmd__arg cmd__arg--note"><i>{{.Flag}}</i>{{if .Value}}<span>{{.Value}}</span>{{end}}</span>{{end}}{{end}}
+    <span class="blink">_</span>
+    {{if .Narrowed}}{{template "filterReset" .}}{{end}}
   </div>
 
+  {{/* Three segments rather than seven loose controls: what is being read
+       (source, tags, search), when and how good (published, score), and how it
+       is shown (view, sort). The grouping is the only label the controls have
+       now that the key words are gone. */}}
   <form class="pane__filters" method="get" action="/feed">
     <input type="hidden" name="view" value="1">
-    {{/* Source: multi-select chips in a popmenu rather than a native select, so
-         it reads as the bar's own vocabulary and several feeds can be on at
-         once. Key + value shape (like "published" below), the selection worn on
-         the closed button since it's the bar's primary filter, "All" above a
-         divider as the unnarrowed default.
+    <div class="seg">
+      {{/* Source: multi-select chips in a popmenu rather than a native select, so
+           it reads as the bar's own vocabulary and several feeds can be on at
+           once. "All" sits above a divider as the unnarrowed default.
 
-         Named inputs, so this is a store query like every other control here —
-         a bar where some filters mean "the whole feed" and others mean "the
-         rows that happen to be loaded" is a bar you can't trust. Which is also
-         why the chips list every source in the store rather than the ones on
-         this page: options drawn from the rows would disappear as you picked
-         one, with no way back. */}}
-    <div class="filter filter--source">
-      <span class="filter__key">source</span>
-      <details class="popmenu popmenu--src">
-        <summary class="popmenu__btn" {{if .SourcesPick.Title}}title="{{.SourcesPick.Title}}"{{end}}><span class="popmenu__val">{{.SourcesPick.Label}}</span><span class="popmenu__meta"><span class="popmenu__more">{{.SourcesPick.More}}</span><span class="popmenu__dot popmenu__dot--amber" {{if not .SourcesPick.On}}hidden{{end}}></span></span></summary>
-        <div class="popmenu__panel popmenu__panel--list">
-          <label class="pill"><input type="checkbox" class="pick__all" {{if not .SourcesPick.On}}checked{{end}} data-filter="all"><span>All</span></label>
-          {{if .Sources}}
-          <div class="popmenu__sep" role="separator"></div>
-          {{range .Sources}}
-          <label class="pill pill--opt"><input type="checkbox" class="src-filter__chk" name="source" value="{{.Value}}" {{if .On}}checked{{end}} data-filter="submit"><span>{{.Value}}</span></label>
-          {{end}}
-          {{else}}
-          <div class="popmenu__none">nothing ingested yet</div>
-          {{end}}
-        </div>
-      </details>
-    </div>
-    {{/* Published: one window at a time, so it's a radio set in a popmenu that
-         wears its value on the closed button — the same key + value shape as
-         Source beside it. "All" sits above a divider as the unnarrowed
-         default. Server-side, unlike Source: the window is a store query.
-         data-filter is what submits the form — see static/js/feed.js; "custom"
-         carries none because it only unfolds the date fields below it. */}}
-    <div class="filter filter--published">
-      <span class="filter__key">published</span>
-      <details class="popmenu popmenu--pub">
-        <summary class="popmenu__btn"><span class="popmenu__val">{{.FilterPublishedTxt}}</span><span class="popmenu__meta"><span class="popmenu__dot popmenu__dot--amber" {{if not (or .FilterCustom .FilterPublished)}}hidden{{end}}></span></span></summary>
-        <div class="popmenu__panel popmenu__panel--list">
-          <label class="pill"><input type="radio" name="published" value="" {{if not (or .FilterCustom .FilterPublished)}}checked{{end}} data-filter="window"><span>All</span></label>
-          <div class="popmenu__sep" role="separator"></div>
-          <label class="pill pill--opt"><input type="radio" name="published" value="today" {{if and (not .FilterCustom) (eq .FilterPublished "today")}}checked{{end}} data-filter="window"><span>today</span></label>
-          <label class="pill pill--opt"><input type="radio" name="published" value="7d" {{if and (not .FilterCustom) (eq .FilterPublished "7d")}}checked{{end}} data-filter="window"><span>7d</span></label>
-          <label class="pill pill--opt"><input type="radio" name="published" value="14d" {{if and (not .FilterCustom) (eq .FilterPublished "14d")}}checked{{end}} data-filter="window"><span>14d</span></label>
-          <label class="pill pill--opt"><input type="radio" name="published" value="30d" {{if and (not .FilterCustom) (eq .FilterPublished "30d")}}checked{{end}} data-filter="window"><span>30d</span></label>
-          {{/* custom is a disclosure, not a window of its own: it unfolds the
-               two date fields inside this panel rather than opening a second
-               floating thing that outlives the menu. Nothing is applied until a
-               date is picked, and closing the menu (click away, Escape) puts it
-               all away — there's nothing left on screen to dismiss. */}}
-          <label class="pill pill--opt pill--fold"><input type="radio" name="published" value="custom" id="pubCustom" {{if .FilterCustom}}checked{{end}}><span>custom</span></label>
-          <div class="date-fold">
-            <label class="date-fold__field">from<input class="date-input" id="filterFrom" type="date" name="from" value="{{.FilterFrom}}" data-filter="submit"></label>
-            <label class="date-fold__field">to<input class="date-input" id="filterTo" type="date" name="to" value="{{.FilterTo}}" data-filter="submit"></label>
+           Named inputs, so this is a store query like every other control here —
+           a bar where some filters mean "the whole feed" and others mean "the
+           rows that happen to be loaded" is a bar you can't trust. Which is also
+           why the chips list every source in the store rather than the ones on
+           this page: options drawn from the rows would disappear as you picked
+           one, with no way back.
+
+           The button carries both spellings, here and in every control below:
+           the name it is known by, and the value it holds. Default shows the
+           name (the bar above says what is picked), Minimal shows the value
+           once there is one. One markup, two looks. */}}
+      <div class="filter filter--source">
+        <details class="popmenu popmenu--src">
+          <summary class="popmenu__btn{{if .SourcesPick.On}} is-on{{end}}" {{if .SourcesPick.Title}}title="{{.SourcesPick.Title}}"{{end}}><span class="popmenu__key">Sources</span><span class="popmenu__val">{{.SourcesPick.Label}}</span><span class="popmenu__meta"><span class="popmenu__more">{{.SourcesPick.More}}</span></span></summary>
+          <div class="popmenu__panel popmenu__panel--list">
+            <label class="pill"><input type="checkbox" class="pick__all" {{if not .SourcesPick.On}}checked{{end}} data-filter="all"><span>All</span></label>
+            {{if .Sources}}
+            <div class="popmenu__sep" role="separator"></div>
+            {{range .Sources}}
+            <label class="pill pill--opt"><input type="checkbox" class="src-filter__chk" name="source" value="{{.Value}}" {{if .On}}checked{{end}} data-filter="submit"><span>{{.Value}}</span></label>
+            {{end}}
+            {{else}}
+            <div class="popmenu__none">nothing ingested yet</div>
+            {{end}}
           </div>
-        </div>
-      </details>
-    </div>
-    {{/* Tags: the same shape and the same rules as Source — multi-select, OR
-         within the set, AND with everything else, matched in the store against
-         the item's recorded tags. Rendered only when the store holds tags at
-         all; a menu of nothing isn't a filter. */}}
-    {{if .Tags}}
-    <div class="filter filter--tags">
-      {{/* Named on the button rather than keyed and worn like Source: a tag set
-           doesn't abbreviate into a few characters the way a window or a sort
-           does, and a truncated one says less than the word "Tags" plus a dot
-           to say some are picked. No "+N" either — with no first tag shown it
-           would be a count of nothing. The full selection is the hover title. */}}
-      <details class="popmenu popmenu--tags">
-        <summary class="popmenu__btn" {{if .TagsPick.Title}}title="{{.TagsPick.Title}}"{{end}}>Tags<span class="popmenu__meta"><span class="popmenu__dot popmenu__dot--amber" {{if not .TagsPick.On}}hidden{{end}}></span></span></summary>
-        <div class="popmenu__panel popmenu__panel--list popmenu__panel--tags">
-          <label class="pill"><input type="checkbox" class="pick__all" {{if not .TagsPick.On}}checked{{end}} data-filter="all"><span>All</span></label>
-          <div class="popmenu__sep" role="separator"></div>
-          {{range .Tags}}
-          <label class="pill pill--opt"><input type="checkbox" class="tag-filter__chk" name="tag" value="{{.Value}}" {{if .On}}checked{{end}} data-filter="submit"><span>{{.Value}}</span></label>
-          {{end}}
-        </div>
-      </details>
-    </div>
-    {{end}}
-    {{/* Named on the button too, and for the same reason as Tags: its value is
-         a set. What it does wear is the coloured dots — amber saved, green seen,
-         red hidden — which say which units are on in the vocabulary the cards
-         themselves use, and in less room than the words would take. */}}
-    <div class="filter filter--view">
-      <details class="popmenu popmenu--view">
-      <summary class="popmenu__btn" {{if .ViewPick.Title}}title="{{.ViewPick.Title}}"{{end}}>View<span class="popmenu__meta">{{if .FilterShowBookmark}}<span class="popmenu__dot popmenu__dot--bookmark"></span>{{end}}{{if .FilterShowSeen}}<span class="popmenu__dot popmenu__dot--seen"></span>{{end}}{{if .FilterShowHidden}}<span class="popmenu__dot popmenu__dot--hide"></span>{{end}}</span></summary>
-      <div class="popmenu__panel">
-        <label class="pill pill--bookmark"><input type="checkbox" name="bookmarked" value="1" {{if .FilterShowBookmark}}checked{{end}} data-filter="bookmark"><span><i class="pill__ic">&#9873;</i>Bookmarked</span></label>
-        <div class="popmenu__sep" role="separator"></div>
-        <label class="pill pill--unread"><input type="checkbox" name="unread" value="1" {{if .FilterShowUnread}}checked{{end}} data-filter="submit"><span><i class="pill__ic">&#9675;</i>Unread</span></label>
-        <label class="pill pill--seen"><input type="checkbox" name="seen" value="1" {{if .FilterShowSeen}}checked{{end}} data-filter="submit"><span><i class="pill__ic">&#10003;</i>Seen</span></label>
-        <label class="pill pill--hide"><input type="checkbox" name="hidden" value="1" {{if .FilterShowHidden}}checked{{end}} data-filter="submit"><span><i class="pill__ic">&#8856;</i>Hidden</span></label>
+        </details>
       </div>
-      </details>
-    </div>
-    <div class="filter filter--sort">
-      <span class="filter__key">sort</span>
-      <details class="popmenu popmenu--sort">
-        <summary class="popmenu__btn"><span class="popmenu__val">{{.SortPick.Label}}</span><span class="popmenu__meta"><span class="popmenu__dot popmenu__dot--amber" {{if not .SortPick.On}}hidden{{end}}></span></span></summary>
-        <div class="popmenu__panel">
-          <label class="pill pill--sort"><input type="radio" name="sort" value="latest" {{if eq .FilterSort "latest"}}checked{{end}} data-filter="submit"><span>Latest</span></label>
-          <label class="pill pill--sort"><input type="radio" name="sort" value="oldest" {{if eq .FilterSort "oldest"}}checked{{end}} data-filter="submit"><span>Oldest</span></label>
-          <label class="pill pill--sort"><input type="radio" name="sort" value="score" {{if eq .FilterSort "score"}}checked{{end}} data-filter="submit"><span>Score</span></label>
-        </div>
-      </details>
-    </div>
-    {{/* Search: the bar's only free-text control, and the only one that reaches
-         into an item rather than picking from a value the feed already carries.
-         A magnifier until asked for — the filters beside it are the everyday
-         route, this is for when you're after one specific thing.
+      {{/* Tags: the same shape and the same rules as Source — multi-select, OR
+           within the set, AND with everything else, matched in the store against
+           the item's recorded tags. Rendered only when the store holds tags at
+           all; a menu of nothing isn't a filter. */}}
+      {{if .Tags}}
+      <div class="filter filter--tags">
+        <details class="popmenu popmenu--tags">
+          <summary class="popmenu__btn{{if .TagsPick.On}} is-on{{end}}" {{if .TagsPick.Title}}title="{{.TagsPick.Title}}"{{end}}><span class="popmenu__key">Tags</span><span class="popmenu__val">{{.TagsPick.Label}}</span><span class="popmenu__meta"><span class="popmenu__more">{{.TagsPick.More}}</span></span></summary>
+          <div class="popmenu__panel popmenu__panel--list popmenu__panel--tags">
+            <label class="pill"><input type="checkbox" class="pick__all" {{if not .TagsPick.On}}checked{{end}} data-filter="all"><span>All</span></label>
+            <div class="popmenu__sep" role="separator"></div>
+            {{range .Tags}}
+            <label class="pill pill--opt"><input type="checkbox" class="tag-filter__chk" name="tag" value="{{.Value}}" {{if .On}}checked{{end}} data-filter="submit"><span>{{.Value}}</span></label>
+            {{end}}
+          </div>
+        </details>
+      </div>
+      {{end}}
+      {{/* Search: the bar's only free-text control, and the only one that reaches
+           into an item rather than picking from a value the feed already carries.
+           A magnifier until asked for — the filters beside it are the everyday
+           route, this is for when you're after one specific thing. It is the one
+           control with no name to wear: a magnifier names itself.
 
-         Typing filters the loaded rows on the spot (see static/js/feed.js) and
-         Enter submits, which is the same query the other controls run: the page
-         renders at most ListLimit rows, and a search that could only see those
-         would answer "no match" for an item further down the window. */}}
-    {{/* Sits with the filters rather than off at the end, and carries no label:
-         a magnifier is the one control that doesn't need naming. It stays that
-         narrow until there's a search on, then it wears the query — so the only
-         thing that ever changes the bar's width is a filter actually being
-         used. */}}
+           Typing filters the loaded rows on the spot (see static/js/feed.js) and
+           Enter submits, which is the same query the other controls run: the page
+           renders at most ListLimit rows, and a search that could only see those
+           would answer "no match" for an item further down the window. */}}
       <div class="filter filter--search">
         <details class="popmenu popmenu--search">
-          <summary class="popmenu__btn" aria-label="Search title, source or tag" title="Search title, source or tag">
+          <summary class="popmenu__btn{{if .FilterSearch}} is-on{{end}}" aria-label="Search title, source or tag" title="Search title, source or tag">
             <svg class="search__ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="11" cy="11" r="7"></circle>
               <path d="M20.5 20.5 16 16"></path>
             </svg>
-            {{/* Empty until something is searched for, and hidden by CSS while
-                 it is; static/js/feed.js fills it as you type. */}}
+            {{/* Empty until something is searched for; static/js/feed.js fills it
+                 as you type, and only Minimal shows it — in Default the query is
+                 an argument on the line above. */}}
             <span class="popmenu__val" data-search-label>{{.FilterSearch}}</span>
-            <span class="popmenu__meta"><span class="popmenu__dot popmenu__dot--amber" data-search-active {{if not .FilterSearch}}hidden{{end}}></span></span>
           </summary>
           <div class="popmenu__panel popmenu__panel--search">
             {{/* The in-field ✕ is the one every search box has, for wiping what
-                 you're typing; the one out in the bar undoes an applied search
-                 without opening this panel. Both do the same thing. */}}
+                 you're typing; the argument's ✕ on the line above undoes an
+                 applied search without opening this panel. Both do the same
+                 thing. */}}
             <div class="search__field">
               <input class="search__input" type="search" name="search" value="{{.FilterSearch}}"
                 data-search-query data-search-submitted="{{.FilterSearch}}" autocomplete="off"
@@ -162,14 +117,106 @@
           </div>
         </details>
       </div>
-    {{/* One way out of everything, alone at the far end of the bar and rendered
-         only while something is narrowing. Each menu's "All" chip undoes its own
-         filter; this undoes the lot, the search included — which is why nothing
-         else in the bar carries a ✕ of its own. A plain link to the unfiltered
-         feed, so it needs no JS and can't fall out of step with the controls. */}}
-    {{if .Narrowed}}
-    <a class="filter filter__clear" href="/feed" title="Back to the unfiltered feed"><span class="filter__clear-x">&times;</span>Reset</a>
-    {{end}}
+    </div>
+    <div class="seg">
+      {{/* Published: one window at a time, so it's a radio set in a popmenu.
+           "All" sits above a divider as the unnarrowed default. Server-side,
+           unlike the search preview: the window is a store query. data-filter is
+           what submits the form — see static/js/feed.js; "custom" carries none
+           because it only unfolds the date fields below it. */}}
+      <div class="filter filter--published">
+        <details class="popmenu popmenu--pub">
+          <summary class="popmenu__btn{{if or .FilterCustom .FilterPublished}} is-on{{end}}"><span class="popmenu__key">Published</span><span class="popmenu__val">{{.FilterPublishedTxt}}</span></summary>
+          <div class="popmenu__panel popmenu__panel--list">
+            <label class="pill"><input type="radio" name="published" value="" {{if not (or .FilterCustom .FilterPublished)}}checked{{end}} data-filter="window"><span>All</span></label>
+            <div class="popmenu__sep" role="separator"></div>
+            <label class="pill pill--opt"><input type="radio" name="published" value="today" {{if and (not .FilterCustom) (eq .FilterPublished "today")}}checked{{end}} data-filter="window"><span>today</span></label>
+            <label class="pill pill--opt"><input type="radio" name="published" value="7d" {{if and (not .FilterCustom) (eq .FilterPublished "7d")}}checked{{end}} data-filter="window"><span>7d</span></label>
+            <label class="pill pill--opt"><input type="radio" name="published" value="14d" {{if and (not .FilterCustom) (eq .FilterPublished "14d")}}checked{{end}} data-filter="window"><span>14d</span></label>
+            <label class="pill pill--opt"><input type="radio" name="published" value="30d" {{if and (not .FilterCustom) (eq .FilterPublished "30d")}}checked{{end}} data-filter="window"><span>30d</span></label>
+            {{/* custom is a disclosure, not a window of its own: it unfolds the
+                 two date fields inside this panel rather than opening a second
+                 floating thing that outlives the menu. Nothing is applied until a
+                 date is picked, and closing the menu (click away, Escape) puts it
+                 all away — there's nothing left on screen to dismiss. */}}
+            <label class="pill pill--opt pill--fold"><input type="radio" name="published" value="custom" id="pubCustom" {{if .FilterCustom}}checked{{end}}><span>custom</span></label>
+            <div class="date-fold">
+              <label class="date-fold__field">from<input class="date-input" id="filterFrom" type="date" name="from" value="{{.FilterFrom}}" data-filter="submit"></label>
+              <label class="date-fold__field">to<input class="date-input" id="filterTo" type="date" name="to" value="{{.FilterTo}}" data-filter="submit"></label>
+            </div>
+          </div>
+        </details>
+      </div>
+      {{/* Score: the band of model scores to show, both ends included: "2 to 5"
+           means the 2s and the 5s are in. A popmenu like everything else in the
+           bar rather than a slider sitting out in it: the bar is one row of
+           closed buttons, and a control 20rem wide would wrap it at most window
+           widths for a filter that is used once a session.
+
+           Two range inputs stacked over one track. The track carries the gauge's
+           own colour ramp, so the band is picked in the same language the cards
+           answer in, and the ends outside it are dimmed rather than uncoloured,
+           so a 7 is green wherever the thumbs stand.
+
+           The full 0-10 span is the filter off, which is the only reading under
+           which an unfiltered feed still shows the items nothing has scored yet:
+           once either thumb moves, this asks for scored items in a band, and an
+           item with no score is not a 0. See scoreRange in web.go. */}}
+      <div class="filter filter--score">
+        <details class="popmenu popmenu--score">
+          <summary class="popmenu__btn{{if .ScorePick.On}} is-on{{end}}" {{if .ScorePick.Title}}title="{{.ScorePick.Title}}"{{end}}><span class="popmenu__key">Score</span><span class="popmenu__val">{{.ScorePick.Label}}</span></summary>
+          <div class="popmenu__panel popmenu__panel--score">
+            <p class="srange__read"><b data-score-out="lo">{{.ScoreMin}}</b><span>to</span><b data-score-out="hi">{{.ScoreMax}}</b></p>
+            {{/* --lo/--hi are what the CSS paints the band from; static/js/feed.js
+                 rewrites them as a thumb moves so the track follows the drag. */}}
+            <div class="srange" data-srange style="--lo:{{.ScoreMin}};--hi:{{.ScoreMax}}">
+              <input class="srange__in srange__in--lo" type="range" name="smin" min="0" max="10" step="1"
+                value="{{.ScoreMin}}" data-score="lo" data-filter="submit" aria-label="Lowest score to show">
+              <input class="srange__in srange__in--hi" type="range" name="smax" min="0" max="10" step="1"
+                value="{{.ScoreMax}}" data-score="hi" data-filter="submit" aria-label="Highest score to show">
+            </div>
+            <div class="srange__scale" aria-hidden="true"><span>0</span><span>5</span><span>10</span></div>
+            <div class="popmenu__sep" role="separator"></div>
+            {{/* The same "All" chip Source and Tags carry, and the same handler:
+                 it puts the two thumbs back on the ends and submits. */}}
+            <label class="pill"><input type="checkbox" class="pick__all" {{if not .ScorePick.On}}checked{{end}} data-filter="all"><span>All scores</span></label>
+          </div>
+        </details>
+      </div>
+    </div>
+    <div class="seg">
+      {{/* View: its value is a set, so the button wears the first status and a
+           "+N" like Source does. What it also wears, in both looks, is the
+           coloured dots — amber saved, green seen, red hidden — which say which
+           units are on in the vocabulary the cards themselves use, and in less
+           room than the words would take. */}}
+      <div class="filter filter--view">
+        <details class="popmenu popmenu--view">
+          <summary class="popmenu__btn{{if .ViewPick.On}} is-on{{end}}" {{if .ViewPick.Title}}title="{{.ViewPick.Title}}"{{end}}><span class="popmenu__key">View</span><span class="popmenu__val">{{.ViewPick.Label}}</span><span class="popmenu__meta"><span class="popmenu__more">{{.ViewPick.More}}</span>{{if .FilterShowBookmark}}<span class="popmenu__dot popmenu__dot--bookmark"></span>{{end}}{{if .FilterShowSeen}}<span class="popmenu__dot popmenu__dot--seen"></span>{{end}}{{if .FilterShowHidden}}<span class="popmenu__dot popmenu__dot--hide"></span>{{end}}</span></summary>
+          <div class="popmenu__panel">
+            <label class="pill pill--bookmark"><input type="checkbox" name="bookmarked" value="1" {{if .FilterShowBookmark}}checked{{end}} data-filter="bookmark"><span><i class="pill__ic">&#9873;</i>Bookmarked</span></label>
+            <div class="popmenu__sep" role="separator"></div>
+            <label class="pill pill--unread"><input type="checkbox" name="unread" value="1" {{if .FilterShowUnread}}checked{{end}} data-filter="submit"><span><i class="pill__ic">&#9675;</i>Unread</span></label>
+            <label class="pill pill--seen"><input type="checkbox" name="seen" value="1" {{if .FilterShowSeen}}checked{{end}} data-filter="submit"><span><i class="pill__ic">&#10003;</i>Seen</span></label>
+            <label class="pill pill--hide"><input type="checkbox" name="hidden" value="1" {{if .FilterShowHidden}}checked{{end}} data-filter="submit"><span><i class="pill__ic">&#8856;</i>Hidden</span></label>
+          </div>
+        </details>
+      </div>
+      <div class="filter filter--sort">
+        <details class="popmenu popmenu--sort">
+          <summary class="popmenu__btn{{if .SortPick.On}} is-on{{end}}"><span class="popmenu__key">Sort</span><span class="popmenu__val">{{.SortPick.Label}}</span></summary>
+          <div class="popmenu__panel">
+            <label class="pill pill--sort"><input type="radio" name="sort" value="latest" {{if eq .FilterSort "latest"}}checked{{end}} data-filter="submit"><span>Latest</span></label>
+            <label class="pill pill--sort"><input type="radio" name="sort" value="oldest" {{if eq .FilterSort "oldest"}}checked{{end}} data-filter="submit"><span>Oldest</span></label>
+            <label class="pill pill--sort"><input type="radio" name="sort" value="score" {{if eq .FilterSort "score"}}checked{{end}} data-filter="submit"><span>Score</span></label>
+          </div>
+        </details>
+      </div>
+    </div>
+    {{/* The bar's own reset, for the look that has no line above it to carry
+         one. Both are rendered and CSS shows the one this look uses: nothing
+         moves an element between two rows. */}}
+    {{if .Narrowed}}{{template "filterReset" .}}{{end}}
   </form>
 
   {{/* Nothing to page through on an empty feed — the pager JS null-guards every
@@ -177,7 +224,11 @@
   {{if .Rows}}
   <div class="pane__nav">
     <button class="nav-btn" id="btnFirst" title="Jump to first page">&laquo; first</button>
-    <span class="pageinfo" id="pageInfo"></span>
+    <span class="pageinfo" id="pageInfo">
+      {{/* The count is the control: static/js/feed.js writes the numbers into
+           it, and the range is a button that steps the page size. */}}
+      <span data-page-none hidden>no items</span><span data-page-some hidden>items <span class="rowsize"><button type="button" class="rowsize__btn" data-rows-btn></button><span class="rowsize__hint" data-rows-hint aria-hidden="true"></span></span> of <span data-page-total></span><span data-page-cap></span></span>
+    </span>
     <div class="nav-right">
       <button class="nav-btn" id="btnPrev">&lsaquo; prev</button>
       <button class="nav-btn" id="btnNext">next &rsaquo;</button>
@@ -201,7 +252,11 @@
 {{if .Rows}}
 <nav class="pagenav" aria-label="Pagination">
   <button type="button" class="pagenav__btn" id="btnPrevBottom">&lsaquo; prev</button>
-  <span class="pagenav__info" id="pageInfoBottom"></span>
+  <span class="pagenav__info" id="pageInfoBottom">
+      {{/* The count is the control: static/js/feed.js writes the numbers into
+           it, and the range is a button that steps the page size. */}}
+      <span data-page-none hidden>no items</span><span data-page-some hidden>items <span class="rowsize"><button type="button" class="rowsize__btn" data-rows-btn></button><span class="rowsize__hint" data-rows-hint aria-hidden="true"></span></span> of <span data-page-total></span><span data-page-cap></span></span>
+    </span>
   <button type="button" class="pagenav__btn" id="btnNextBottom">next &rsaquo;</button>
 </nav>
 {{end}}
@@ -239,4 +294,14 @@
   </div>
   {{end}}
 </div>
+{{end}}
+
+{{/* One way out of everything, rendered only while something is narrowing. Each
+     menu's "All" chip undoes its own filter and each argument on the line above
+     undoes itself; this undoes the lot, the search included. A plain link to the
+     unfiltered feed, so it needs no JS and can't fall out of step with the
+     controls. Rendered twice — on the line in Default, at the end of the bar in
+     Minimal — because an element can't sit in two rows. */}}
+{{define "filterReset"}}
+<a class="filter filter__clear" href="/feed" title="Back to the unfiltered feed"><span class="filter__clear-x">&times;</span>Reset</a>
 {{end}}

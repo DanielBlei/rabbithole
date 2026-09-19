@@ -28,7 +28,7 @@ func TestHandleConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	w := New(db, &config.Config{}, ":8080", path, testIngestManager(t, db))
+	w := New(db, &config.Config{}, path, testIngestManager(t, db))
 	rec := httptest.NewRecorder()
 	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/config", nil))
 	if rec.Code != http.StatusOK {
@@ -51,7 +51,7 @@ func TestHandleConfigMissingFile(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	// A bad path renders the modal with an error rather than failing the request.
-	w := New(db, &config.Config{}, ":8080", filepath.Join(t.TempDir(), "nope.yaml"), testIngestManager(t, db))
+	w := New(db, &config.Config{}, filepath.Join(t.TempDir(), "nope.yaml"), testIngestManager(t, db))
 	rec := httptest.NewRecorder()
 	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/config", nil))
 	if rec.Code != http.StatusOK {
@@ -94,7 +94,7 @@ func TestHandleConfigRedactsSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	w := New(db, &config.Config{}, ":8080", path, testIngestManager(t, db))
+	w := New(db, &config.Config{}, path, testIngestManager(t, db))
 	rec := httptest.NewRecorder()
 	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/config", nil))
 	if rec.Code != http.StatusOK {

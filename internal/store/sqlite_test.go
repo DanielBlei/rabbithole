@@ -305,8 +305,8 @@ func TestBookmark(t *testing.T) {
 func TestUpdateUserStateErrors(t *testing.T) {
 	readStatus := StatusRead
 	badStatus := "archived"
-	badScore := maxUserScore + 1
-	okScore := maxUserScore
+	badScore := maxScore + 1
+	okScore := maxScore
 	tests := []struct {
 		name      string
 		seedItem  bool
@@ -496,6 +496,11 @@ func TestList(t *testing.T) {
 		}
 	}
 
+	// Scores in play: a=5, b=9, c and d unscored. d additionally carries a
+	// user_score of 10, which the score band must ignore: the band asks about
+	// the model's verdict, the same one the feed's gauge draws.
+	score := func(n int) *int { return &n }
+
 	tests := []struct {
 		name    string
 		filter  ListFilter
@@ -570,6 +575,45 @@ func TestList(t *testing.T) {
 		{
 			name:    "invalid sort filter",
 			filter:  ListFilter{SortBy: "newest"},
+			wantErr: true,
+		},
+		{
+			name:    "score band, both ends included",
+			filter:  ListFilter{MinScore: score(5), MaxScore: score(9)},
+			wantIDs: []string{"b", "a"},
+		},
+		{
+			name:    "score floor only",
+			filter:  ListFilter{MinScore: score(6)},
+			wantIDs: []string{"b"},
+		},
+		{
+			name:    "score ceiling only",
+			filter:  ListFilter{MaxScore: score(5)},
+			wantIDs: []string{"a"},
+		},
+		{
+			// The whole scale is still a band, and an unscored item is not a 0:
+			// c and d are out. The web layer passes no bounds at all rather
+			// than 0-10, which is what keeps an unfiltered feed whole.
+			name:    "full scale still drops the unscored",
+			filter:  ListFilter{MinScore: score(0), MaxScore: score(10)},
+			wantIDs: []string{"b", "a"},
+		},
+		{
+			// d's user_score is 10. The band reads llm_score only.
+			name:    "a user rating does not put an unscored item in the band",
+			filter:  ListFilter{MinScore: score(10), MaxScore: score(10)},
+			wantIDs: nil,
+		},
+		{
+			name:    "score bound out of range",
+			filter:  ListFilter{MinScore: score(11)},
+			wantErr: true,
+		},
+		{
+			name:    "inverted score band",
+			filter:  ListFilter{MinScore: score(7), MaxScore: score(3)},
 			wantErr: true,
 		},
 	}

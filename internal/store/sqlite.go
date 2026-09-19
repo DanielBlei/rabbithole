@@ -91,7 +91,9 @@ const (
 // unscored items sort last under SortByScore regardless.
 const unscoredSentinel = -1
 
-const minUserScore, maxUserScore = 0, 10
+// The score scale, both ends included: what the model returns, what a user
+// rating may be set to, and what the list filter's bounds are checked against.
+const minScore, maxScore = 0, 10
 
 // ErrItemNotFound is returned by UpdateUserState when no item matches the
 // given identifier.
@@ -374,8 +376,8 @@ func (s *Store) UpdateUserState(ctx context.Context, identifier string, patch Us
 	if patch.Status != nil && !isValidStatus(*patch.Status) {
 		return fmt.Errorf("invalid status %q", *patch.Status)
 	}
-	if patch.UserScore != nil && (*patch.UserScore < minUserScore || *patch.UserScore > maxUserScore) {
-		return fmt.Errorf("user score %d out of range %d-%d", *patch.UserScore, minUserScore, maxUserScore)
+	if patch.UserScore != nil && (*patch.UserScore < minScore || *patch.UserScore > maxScore) {
+		return fmt.Errorf("user score %d out of range %d-%d", *patch.UserScore, minScore, maxScore)
 	}
 	if patch.ClearUserScore && patch.UserScore != nil {
 		return errors.New("user score cannot be set and cleared at once")
@@ -508,8 +510,9 @@ func (s *Store) Get(ctx context.Context, identifier string) (ItemRow, error) {
 
 // ListFilter narrows List's results. Zero-value fields are unfiltered: an
 // empty Status/Statuses or Source matches anything, a zero After/Before leaves
-// that side of the itemDate window open, a false Bookmarked matches anything,
-// an empty SortBy falls back to SortByScore, and Limit<=0 falls back to
+// that side of the itemDate window open, a nil MinScore/MaxScore leaves that
+// end of the score band open, a false Bookmarked matches anything, an empty
+// SortBy falls back to SortByScore, and Limit<=0 falls back to
 // defaultListLimit.
 //
 // Status and Statuses both restrict by items.status; Statuses (an OR-set, via
@@ -549,6 +552,17 @@ type ListFilter struct {
 	RatedOnly bool
 	// ScoredBy keeps only items that were scored by the given model (llm_score_model).
 	ScoredBy string
+
+	// MinScore and MaxScore keep items whose llm_score falls inside
+	// [MinScore, MaxScore], both ends included. A nil side leaves that end
+	// unbounded; both nil is unfiltered.
+	//
+	// Pointers rather than ints because 0 is a real score, so the zero value
+	// can't stand for "unset". An item with no llm_score carries no score
+	// rather than a zero, so it is out whenever either bound is set: a band of
+	// scores is a question about scored items.
+	MinScore *int
+	MaxScore *int
 }
 
 // List's result-count bounds: defaultListLimit applies when ListFilter.Limit
@@ -589,6 +603,14 @@ func (filter ListFilter) validate() error {
 	}
 	if !isValidSortBy(filter.SortBy) {
 		return fmt.Errorf("%w: sort %q", ErrInvalidFilter, filter.SortBy)
+	}
+	for _, bound := range []*int{filter.MinScore, filter.MaxScore} {
+		if bound != nil && (*bound < minScore || *bound > maxScore) {
+			return fmt.Errorf("%w: score %d out of range %d-%d", ErrInvalidFilter, *bound, minScore, maxScore)
+		}
+	}
+	if filter.MinScore != nil && filter.MaxScore != nil && *filter.MinScore > *filter.MaxScore {
+		return fmt.Errorf("%w: score range %d-%d is inverted", ErrInvalidFilter, *filter.MinScore, *filter.MaxScore)
 	}
 	return nil
 }
@@ -647,6 +669,21 @@ func (filter ListFilter) whereClause() (where []string, args []any) {
 	if filter.ScoredBy != "" {
 		where = append(where, "llm_score_model = ?")
 		args = append(args, filter.ScoredBy)
+	}
+	// Both ends included, so a band names the scores it shows. The NOT NULL is
+	// the point rather than a formality: an unscored item isn't a zero, and
+	// letting it answer "0 to 3" would fill the low band with everything the
+	// model never looked at.
+	if filter.MinScore != nil || filter.MaxScore != nil {
+		where = append(where, "llm_score IS NOT NULL")
+		if filter.MinScore != nil {
+			where = append(where, "llm_score >= ?")
+			args = append(args, *filter.MinScore)
+		}
+		if filter.MaxScore != nil {
+			where = append(where, "llm_score <= ?")
+			args = append(args, *filter.MaxScore)
+		}
 	}
 	// One OR group, so it ANDs with the bounds above. instr rather than LIKE
 	// '%x%': the text is whatever was typed, and instr has no wildcards to
