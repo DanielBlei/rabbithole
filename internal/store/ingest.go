@@ -92,7 +92,7 @@ const ingestColumns = "id, started_at, finished_at, status, triggered_by, fetche
 // SQL inventory for ingest_history / ingest_run_logs — kept together so the
 // queries are easy to scan and maintain rather than buried in each method.
 const (
-	sqlInsertIngestRun = "INSERT INTO ingest_history (started_at, status, triggered_by) VALUES (?, ?, ?)"
+	sqlInsertIngestRun = "INSERT INTO ingest_history (started_at, status, triggered_by) VALUES (?, ?, ?) RETURNING id"
 
 	sqlFinishIngestRun = `UPDATE ingest_history
 		SET finished_at = ?, status = ?, fetched = ?, new_items = ?, scored = ?, skipped = ?, failed = ?, error = ?
@@ -153,14 +153,10 @@ func scanIngestRunWithLog(sc rowScanner) (IngestRun, string, error) {
 // triggeredBy (IngestTriggerManual/IngestTriggerCron) and returns its id, which
 // the caller hands to FinishIngestRun when the run ends.
 func (s *Store) StartIngestRun(ctx context.Context, triggeredBy string) (int64, error) {
-	res, err := s.db.ExecContext(ctx, sqlInsertIngestRun,
-		sqlTime(time.Now()), IngestStatusRunning, triggeredBy)
-	if err != nil {
+	var id int64
+	if err := s.queryRow(ctx, sqlInsertIngestRun,
+		sqlTime(time.Now()), IngestStatusRunning, triggeredBy).Scan(&id); err != nil {
 		return 0, fmt.Errorf("insert ingest run: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return 0, fmt.Errorf("ingest run insert id: %w", err)
 	}
 	return id, nil
 }
@@ -176,7 +172,7 @@ func (s *Store) FinishIngestRun(
 	counts IngestCounts,
 	errMsg string,
 ) error {
-	res, err := s.db.ExecContext(ctx, sqlFinishIngestRun,
+	res, err := s.exec(ctx, sqlFinishIngestRun,
 		sqlTime(time.Now()), status, counts.Fetched, counts.NewItems, counts.Scored, counts.Skipped, counts.Failed,
 		errMsg, id, IngestStatusRunning)
 	if err != nil {
@@ -195,7 +191,7 @@ func (s *Store) FinishIngestRun(
 // LastIngestRun returns the most recently started run, or nil if none exists
 // yet (a fresh database).
 func (s *Store) LastIngestRun(ctx context.Context) (*IngestRun, error) {
-	r, err := scanIngestRun(s.db.QueryRowContext(ctx, sqlLastIngestRun))
+	r, err := scanIngestRun(s.queryRow(ctx, sqlLastIngestRun))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -209,7 +205,7 @@ func (s *Store) LastIngestRun(ctx context.Context) (*IngestRun, error) {
 // query. The log slice is nil when the run has no stored log (e.g. a run from
 // before logs were persisted). ErrIngestRunNotFound if no run matches id.
 func (s *Store) GetIngestRunWithLog(ctx context.Context, id int64) (*IngestRun, []string, error) {
-	r, log, err := scanIngestRunWithLog(s.db.QueryRowContext(ctx, sqlGetIngestRunWithLog, id))
+	r, log, err := scanIngestRunWithLog(s.queryRow(ctx, sqlGetIngestRunWithLog, id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, fmt.Errorf("%w: %d", ErrIngestRunNotFound, id)
@@ -227,7 +223,7 @@ func (s *Store) GetIngestRunWithLog(ctx context.Context, id int64) (*IngestRun, 
 // first, plus hasMore: whether a further page exists. It queries limit+1 rows
 // and trims the extra, so paging needs no separate COUNT.
 func (s *Store) ListIngestRuns(ctx context.Context, limit, offset int) (runs []IngestRun, hasMore bool, err error) {
-	rows, err := s.db.QueryContext(ctx, sqlListIngestRuns, limit+1, offset)
+	rows, err := s.query(ctx, sqlListIngestRuns, limit+1, offset)
 	if err != nil {
 		return nil, false, fmt.Errorf("query ingest runs: %w", err)
 	}
@@ -252,7 +248,7 @@ func (s *Store) ListIngestRuns(ctx context.Context, limit, offset int) (runs []I
 // SaveIngestRunLog records a run's captured log lines (newline-joined) against
 // its id. Upsert so a re-save can't error.
 func (s *Store) SaveIngestRunLog(ctx context.Context, runID int64, lines []string) error {
-	if _, err := s.db.ExecContext(ctx, sqlSaveIngestRunLog,
+	if _, err := s.exec(ctx, sqlSaveIngestRunLog,
 		runID, strings.Join(lines, "\n")); err != nil {
 		return fmt.Errorf("save ingest run log %d: %w", runID, err)
 	}
@@ -264,7 +260,7 @@ func (s *Store) SaveIngestRunLog(ctx context.Context, runID int64, lines []strin
 // the run manager, before any new run can start, so a stale "running" can
 // never be mistaken for a live one.
 func (s *Store) InterruptStaleIngestRuns(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx, sqlInterruptIngestRuns,
+	if _, err := s.exec(ctx, sqlInterruptIngestRuns,
 		sqlTime(time.Now()), IngestStatusError, IngestStatusRunning); err != nil {
 		return fmt.Errorf("interrupt stale ingest runs: %w", err)
 	}

@@ -132,16 +132,14 @@ func (s *Store) AddIdea(ctx context.Context, body, color string) (Idea, error) {
 		color = randomColor()
 	}
 	now := sqlTime(time.Now())
-	res, err := s.db.ExecContext(ctx,
+	var id int64
+	err = s.queryRow(ctx,
 		`INSERT INTO ideas (body, color, position, created_at, updated_at)
-		 VALUES (?, ?, (SELECT COALESCE(MIN(position), 0) - 1 FROM ideas WHERE deleted_at IS NULL), ?, ?)`,
-		body, color, now, now)
+		 VALUES (?, ?, (SELECT COALESCE(MIN(position), 0) - 1 FROM ideas WHERE deleted_at IS NULL), ?, ?)
+		 RETURNING id`,
+		body, color, now, now).Scan(&id)
 	if err != nil {
 		return Idea{}, fmt.Errorf("insert idea: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return Idea{}, fmt.Errorf("idea insert id: %w", err)
 	}
 	return s.GetIdea(ctx, id)
 }
@@ -149,7 +147,7 @@ func (s *Store) AddIdea(ctx context.Context, body, color string) (Idea, error) {
 // GetIdea returns the live note with the given id, or ErrIdeaNotFound. A
 // soft-deleted note is treated as not found.
 func (s *Store) GetIdea(ctx context.Context, id int64) (Idea, error) {
-	i, err := scanIdea(s.db.QueryRowContext(ctx,
+	i, err := scanIdea(s.queryRow(ctx,
 		"SELECT "+ideaColumns+" FROM ideas WHERE id = ? AND deleted_at IS NULL", id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -163,7 +161,7 @@ func (s *Store) GetIdea(ctx context.Context, id int64) (Idea, error) {
 // ListIdeas returns the live notes in manual order (position ascending, newest
 // first on ties). Soft-deleted notes are excluded.
 func (s *Store) ListIdeas(ctx context.Context) ([]Idea, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.query(ctx,
 		"SELECT "+ideaColumns+" FROM ideas WHERE deleted_at IS NULL ORDER BY position ASC, created_at DESC LIMIT ?",
 		defaultIdeaLimit)
 	if err != nil {
@@ -197,7 +195,7 @@ func (s *Store) UpdateIdea(ctx context.Context, id int64, body, color string) (I
 	if !validColor(color) {
 		color = cur.Color
 	}
-	if _, err := s.db.ExecContext(ctx,
+	if _, err := s.exec(ctx,
 		"UPDATE ideas SET body = ?, color = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
 		body, color, sqlTime(time.Now()), id); err != nil {
 		return Idea{}, fmt.Errorf("update idea %d: %w", id, err)
@@ -209,7 +207,7 @@ func (s *Store) UpdateIdea(ctx context.Context, id int64, body, color string) (I
 // database but is hidden everywhere. Returns ErrIdeaNotFound when no live note
 // matched (already deleted or never existed).
 func (s *Store) DeleteIdea(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.exec(ctx,
 		"UPDATE ideas SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL",
 		sqlTime(time.Now()), id)
 	if err != nil {
@@ -240,7 +238,7 @@ func (s *Store) ReorderIdeas(ctx context.Context, ids []int64) error {
 	defer func() { _ = tx.Rollback() }()
 
 	for pos, id := range ids {
-		if _, err := tx.ExecContext(ctx,
+		if _, err := s.txExec(ctx, tx,
 			"UPDATE ideas SET position = ? WHERE id = ? AND deleted_at IS NULL",
 			pos, id); err != nil {
 			return fmt.Errorf("reorder idea %d: %w", id, err)

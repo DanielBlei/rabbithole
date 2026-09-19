@@ -103,9 +103,10 @@ func (a FeedAttempt) OK() bool { return a.Status == FeedStatusOK }
 
 const (
 	// Only rows whose tags actually differ are written, so a restart with an
-	// unchanged feeds file is a no-op rather than a table-wide rewrite. IS NOT
-	// is the null-safe comparison, which matters because untagged stores NULL.
-	sqlSyncSourceTags = `UPDATE items SET tags = ? WHERE source = ? AND tags IS NOT ?`
+	// unchanged feeds file is a no-op rather than a table-wide rewrite. IS
+	// DISTINCT FROM is the null-safe comparison, which matters because untagged
+	// stores NULL.
+	sqlSyncSourceTags = `UPDATE items SET tags = ? WHERE source = ? AND tags IS DISTINCT FROM ?`
 
 	sqlInsertFeedFetch = `INSERT INTO feed_fetches
 		(feed_id, feed_name, url, status, error, items, elapsed_ms, fetched_at)
@@ -134,7 +135,7 @@ const (
 				SELECT feed_id, id, fetched_at,
 				       ROW_NUMBER() OVER (PARTITION BY feed_id ORDER BY id DESC) AS rn
 				FROM feed_fetches WHERE status = '` + FeedStatusOK + `'
-			) WHERE rn = 1
+			) ranked_ok WHERE rn = 1
 		)
 		SELECT l.feed_id, l.feed_name, l.url, l.status, l.error, l.items, l.elapsed_ms, l.fetched_at,
 		       o.ok_at,
@@ -164,7 +165,7 @@ const (
 			SELECT id FROM (
 				SELECT id, ROW_NUMBER() OVER (PARTITION BY feed_id ORDER BY id DESC) AS rn
 				FROM feed_fetches
-			) WHERE rn > ?
+			) ranked WHERE rn > ?
 		)`
 )
 
@@ -186,7 +187,7 @@ func (s *Store) SyncSourceTags(ctx context.Context, tags map[string][]string) er
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	stmt, err := tx.PrepareContext(ctx, sqlSyncSourceTags)
+	stmt, err := s.prepareTx(ctx, tx, sqlSyncSourceTags)
 	if err != nil {
 		return fmt.Errorf("prepare tag sync: %w", err)
 	}
@@ -218,7 +219,7 @@ func (s *Store) RecordFeedFetches(ctx context.Context, fetches []FeedFetch) erro
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	stmt, err := tx.PrepareContext(ctx, sqlInsertFeedFetch)
+	stmt, err := s.prepareTx(ctx, tx, sqlInsertFeedFetch)
 	if err != nil {
 		return fmt.Errorf("prepare feed fetch insert: %w", err)
 	}
@@ -240,7 +241,7 @@ func (s *Store) RecordFeedFetches(ctx context.Context, fetches []FeedFetch) erro
 // A map (rather than a slice) because callers join it onto the configured feed
 // list, which owns the ordering.
 func (s *Store) FeedHealthByID(ctx context.Context, recentLimit int) (map[string]FeedHealth, error) {
-	rows, err := s.db.QueryContext(ctx, sqlFeedHealth)
+	rows, err := s.query(ctx, sqlFeedHealth)
 	if err != nil {
 		return nil, fmt.Errorf("query feed health: %w", err)
 	}
@@ -285,7 +286,7 @@ func (s *Store) FeedHealthByID(ctx context.Context, recentLimit int) (map[string
 
 // recentFeedAttempts returns each feed's newest attempts, newest first.
 func (s *Store) recentFeedAttempts(ctx context.Context, limit int) (map[string][]FeedAttempt, error) {
-	rows, err := s.db.QueryContext(ctx, sqlRecentFeedAttempts, limit)
+	rows, err := s.query(ctx, sqlRecentFeedAttempts, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query recent feed attempts: %w", err)
 	}
@@ -313,7 +314,7 @@ func (s *Store) PruneFeedFetches(ctx context.Context, keep int) error {
 	if keep <= 0 {
 		keep = defaultFeedFetchRetention
 	}
-	if _, err := s.db.ExecContext(ctx, sqlPruneFeedFetches, keep); err != nil {
+	if _, err := s.exec(ctx, sqlPruneFeedFetches, keep); err != nil {
 		return fmt.Errorf("prune feed fetches: %w", err)
 	}
 	return nil

@@ -201,7 +201,7 @@ func TestOpenAddsAuthTableToExistingDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)
 	}
-	for _, stmt := range allSchemas {
+	for _, stmt := range (sqliteDialect{}).schemas() {
 		if _, err := raw.Exec(stmt); err != nil {
 			t.Fatalf("create old schema: %v", err)
 		}

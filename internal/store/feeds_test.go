@@ -5,23 +5,11 @@ package store
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
-
-// openTestStore opens a throwaway store, closed on cleanup.
-func openTestStore(t testing.TB) *Store {
-	t.Helper()
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
-}
 
 // attempt is a compact description of one recorded fetch for test tables:
 // an empty errMsg means success, and ageHours places it in the past.
