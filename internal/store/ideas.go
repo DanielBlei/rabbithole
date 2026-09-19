@@ -97,9 +97,9 @@ func scanIdea(sc rowScanner) (Idea, error) {
 	if err := sc.Scan(&i.ID, &i.Body, &i.Color, &i.Position, &i.CreatedAt, &i.UpdatedAt, &deletedAt); err != nil {
 		return Idea{}, err
 	}
-	if deletedAt.Valid {
-		i.DeletedAt = &deletedAt.Time
-	}
+	i.DeletedAt = utcTimePtr(deletedAt)
+	i.CreatedAt = utcTime(i.CreatedAt)
+	i.UpdatedAt = utcTime(i.UpdatedAt)
 	return i, nil
 }
 

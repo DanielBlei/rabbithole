@@ -273,9 +273,8 @@ func (s *Store) FeedHealthByID(ctx context.Context, recentLimit int) (map[string
 			&h.Items, &elapsedMs, &h.LastFetch, &lastOK, &h.FailStreak); err != nil {
 			return nil, fmt.Errorf("scan feed health: %w", err)
 		}
-		if lastOK.Valid {
-			h.LastOK = &lastOK.Time
-		}
+		h.LastOK = utcTimePtr(lastOK)
+		h.LastFetch = utcTime(h.LastFetch)
 		h.Elapsed = time.Duration(elapsedMs) * time.Millisecond
 		out[h.FeedID] = h
 	}
@@ -316,6 +315,7 @@ func (s *Store) recentFeedAttempts(ctx context.Context, limit int) (map[string][
 		if err := rows.Scan(&id, &a.Status, &a.Items, &a.Error, &a.At); err != nil {
 			return nil, fmt.Errorf("scan feed attempt: %w", err)
 		}
+		a.At = utcTime(a.At)
 		out[id] = append(out[id], a)
 	}
 	return out, rows.Err()

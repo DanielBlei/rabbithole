@@ -296,9 +296,11 @@ that run the binary do pick up `./.env`.
 export RABBITHOLE_DB_PASSWORD=...
 ```
 
-A URL that already carries a password still works, and the environment variable overrides it
+A URL that already carries a password still works, in either form the drivers accept
+(`postgres://user:pw@host/db` or `?password=pw`), and the environment variable overrides it
 when both are set. Expect a warning at startup in that case: a password in `store.url` lives
-in the config file, which is the thing the variable exists to avoid.
+in the config file, which is the thing the variable exists to avoid. The config viewer shows
+`$RABBITHOLE_DB_PASSWORD` in its place rather than the value.
 
 ### TLS
 

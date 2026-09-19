@@ -139,9 +139,9 @@ func scanTodo(sc rowScanner) (Todo, error) {
 			t.DueOn = &d
 		}
 	}
-	if completedAt.Valid {
-		t.CompletedAt = &completedAt.Time
-	}
+	t.CompletedAt = utcTimePtr(completedAt)
+	t.CreatedAt = utcTime(t.CreatedAt)
+	t.UpdatedAt = utcTime(t.UpdatedAt)
 	t.Tags = splitTags(tags)
 	return t, nil
 }
@@ -245,7 +245,11 @@ func (s *Store) ListTodos(ctx context.Context, filter TodoFilter) ([]Todo, error
 		args = append(args, *filter.Done)
 	}
 	if filter.Done != nil && *filter.Done {
-		q += " ORDER BY completed_at DESC"
+		// NULLS LAST is explicit because the engines disagree by default:
+		// SQLite sorts NULL last under DESC, Postgres sorts it first. A task
+		// completed before completed_at was recorded would otherwise head the
+		// list on one engine and tail it on the other.
+		q += " ORDER BY completed_at DESC NULLS LAST"
 	} else {
 		q += " ORDER BY due_on IS NULL, due_on ASC, created_at ASC"
 	}

@@ -581,9 +581,7 @@ func scanItemRow(sc rowScanner) (ItemRow, error) {
 	if userNote.Valid {
 		r.UserNote = &userNote.String
 	}
-	if publishedAt.Valid {
-		r.PublishedAt = &publishedAt.Time
-	}
+	r.PublishedAt = utcTimePtr(publishedAt)
 	return r, nil
 }
 

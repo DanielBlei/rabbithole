@@ -523,3 +523,45 @@ func TestResolvePostgres(t *testing.T) {
 		}
 	})
 }
+
+// The drivers accept the password as a query parameter as well as in the
+// userinfo. It has to be treated the same either way, or it slips past both
+// the environment override and the warning the caller prints.
+func TestResolvePostgresPasswordAsQueryParameter(t *testing.T) {
+	t.Run("used and flagged", func(t *testing.T) {
+		pg, err := StoreConfig{URL: "postgres://rabbit@db.host/rabbithole?password=hunter2"}.ResolvePostgres()
+		if err != nil {
+			t.Fatalf("ResolvePostgres: %v", err)
+		}
+		if !pg.PasswordFromURL {
+			t.Error("PasswordFromURL = false, want true so the caller warns")
+		}
+		u, err := url.Parse(pg.DSN)
+		if err != nil {
+			t.Fatalf("parse DSN: %v", err)
+		}
+		if got, _ := u.User.Password(); got != "hunter2" {
+			t.Errorf("password = %q, want it lifted into the userinfo", got)
+		}
+		if u.Query().Get("password") != "" {
+			t.Error("the password is still in the query string; it should have moved")
+		}
+		if strings.Contains(pg.Label, "hunter2") {
+			t.Errorf("Label = %q, must not carry the password", pg.Label)
+		}
+	})
+
+	t.Run("the environment still wins", func(t *testing.T) {
+		t.Setenv(DBPasswordEnv, "from-env")
+		pg, err := StoreConfig{URL: "postgres://rabbit@db.host/rabbithole?password=from-url"}.ResolvePostgres()
+		if err != nil {
+			t.Fatalf("ResolvePostgres: %v", err)
+		}
+		if strings.Contains(pg.DSN, "from-url") {
+			t.Errorf("DSN = %q, want the environment's password", pg.DSN)
+		}
+		if pg.PasswordFromURL {
+			t.Error("PasswordFromURL = true, want false when the environment supplied it")
+		}
+	})
+}

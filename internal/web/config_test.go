@@ -142,15 +142,37 @@ func TestRedactSecrets(t *testing.T) {
 			`  url: postgres://rabbit@db.host:5432/rabbithole`,
 			`  url: postgres://rabbit@db.host:5432/rabbithole`,
 		},
+		// A Postgres password names the variable it belongs in rather than
+		// showing dots, so the viewer is one more place that says where to
+		// put it.
 		{
 			"url with password",
 			`  url: postgres://rabbit:hunter2@db.host:5432/rabbithole`,
-			`  url: postgres://rabbit:` + redactedMask + `@db.host:5432/rabbithole`,
+			`  url: postgres://rabbit:` + dbPasswordHint + `@db.host:5432/rabbithole`,
 		},
 		{
 			"url with password and query",
 			`url: postgresql://u:p@h/db?sslmode=verify-full`,
-			`url: postgresql://u:` + redactedMask + `@h/db?sslmode=verify-full`,
+			`url: postgresql://u:` + dbPasswordHint + `@h/db?sslmode=verify-full`,
+		},
+		// libpq takes the password as a query parameter too, which the
+		// userinfo pattern does not see.
+		{
+			"password as a query parameter",
+			`  url: postgres://rabbit@db.host/rabbithole?password=hunter2&sslmode=require`,
+			`  url: postgres://rabbit@db.host/rabbithole?password=` + dbPasswordHint + `&sslmode=require`,
+		},
+		{
+			"password parameter not first",
+			`url: postgres://rabbit@h/db?sslmode=require&password=hunter2`,
+			`url: postgres://rabbit@h/db?sslmode=require&password=` + dbPasswordHint,
+		},
+		// A non-Postgres URL keeps the generic mask: the variable is the
+		// store's, and naming it here would be a lie.
+		{
+			"other scheme keeps the plain mask",
+			`endpoint: https://user:hunter2@example.com/v1`,
+			`endpoint: https://user:` + redactedMask + `@example.com/v1`,
 		},
 		// A bare host:port is not credentials and must stay readable.
 		{"host and port", `host: http://localhost:11434`, `host: http://localhost:11434`},

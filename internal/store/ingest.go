@@ -149,9 +149,8 @@ func scanIngestRun(sc rowScanner) (IngestRun, error) {
 		&r.Counts.Failed, &r.Error); err != nil {
 		return IngestRun{}, err
 	}
-	if finishedAt.Valid {
-		r.FinishedAt = &finishedAt.Time
-	}
+	r.FinishedAt = utcTimePtr(finishedAt)
+	r.StartedAt = utcTime(r.StartedAt)
 	return r, nil
 }
 
@@ -168,9 +167,8 @@ func scanIngestRunWithLog(sc rowScanner) (IngestRun, string, error) {
 		&r.Counts.Failed, &r.Error, &log); err != nil {
 		return IngestRun{}, "", err
 	}
-	if finishedAt.Valid {
-		r.FinishedAt = &finishedAt.Time
-	}
+	r.FinishedAt = utcTimePtr(finishedAt)
+	r.StartedAt = utcTime(r.StartedAt)
 	return r, log, nil
 }
 

@@ -299,6 +299,23 @@ func pgTableExists(ctx context.Context, db *sql.DB, table string) (bool, error) 
 	return exists, nil
 }
 
+// Timestamps come back in different zones per engine: SQLite yields UTC, since
+// the stored text ends in Z, while pgx yields the process's local zone whatever
+// the server's timezone is set to. The instant is the same either way, but
+// callers bucket by day and format clock times, so a row written at 23:30 UTC
+// would land on a different date depending on the engine and the machine.
+// Every scanned time is normalized here so both engines agree.
+func utcTime(t time.Time) time.Time { return t.UTC() }
+
+// utcTimePtr is utcTime for a nullable column, returning nil for NULL.
+func utcTimePtr(n sql.NullTime) *time.Time {
+	if !n.Valid {
+		return nil
+	}
+	t := n.Time.UTC()
+	return &t
+}
+
 // Every statement in this package reaches the database through the wrappers
 // below rather than through s.db directly, so no query can miss rebinding.
 // A call site that bypasses them works on SQLite and fails on Postgres, which
