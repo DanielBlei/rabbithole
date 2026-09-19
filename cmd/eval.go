@@ -378,7 +378,11 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Warn().Err(err).Msg("db close failed")
+		}
+	}()
 
 	filter := store.ListFilter{
 		RatedOnly: opts.RatedOnly,
@@ -398,7 +402,22 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("no items match the given filters")
 	}
 
-	selected := items
+	// The audit compares two scores, so a row missing either is not one it can
+	// report on. Narrowing here rather than while building samples is what
+	// makes --limit a question about comparable items: otherwise an unrated
+	// row spends a slot, and an audit limited to 20 can report on five, or on
+	// none while comparable rows sit just outside the cut.
+	comparable := make([]store.ItemRow, 0, len(items))
+	for _, item := range items {
+		if item.UserScore != nil && item.LLMScore != nil {
+			comparable = append(comparable, item)
+		}
+	}
+	if len(comparable) == 0 {
+		return fmt.Errorf("no items with both user and LLM scores")
+	}
+
+	selected := comparable
 	if !opts.Newest {
 		seed := opts.Seed
 		if seed == 0 {
@@ -418,9 +437,6 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 	var samples []eval.Sample
 	var outcomes []eval.Outcome
 	for _, item := range selected {
-		if item.UserScore == nil || item.LLMScore == nil {
-			continue
-		}
 		var note, reason string
 		if item.UserNote != nil {
 			note = *item.UserNote
@@ -445,10 +461,6 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 		outcomes = append(outcomes, outcome)
 	}
 
-	if len(samples) == 0 {
-		return fmt.Errorf("no items with both user and LLM scores")
-	}
-
 	dataset := eval.Dataset{
 		Metadata: eval.Metadata{
 			Name: "audit",
@@ -469,7 +481,9 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 			PromptHash:     "",
 			DatasetHash:    "",
 			ElapsedSeconds: 0.0,
-			DatasetSamples: len(dataset.Samples),
+			// The comparable pool before --limit, so a narrowed audit renders
+			// as "20 of 140 samples" rather than as a full one.
+			DatasetSamples: len(comparable),
 			Limit: func() int {
 				if opts.All {
 					return 0
@@ -538,10 +552,4 @@ func resolveJudgeScorer(
 		return nil, fmt.Errorf("backend validation: %w", err)
 	}
 	return c, nil
-}
-
-// errNotImplemented marks a subcommand whose flags are wired but whose body is
-// not written yet, so the shell can be exercised without pretending to work.
-func errNotImplemented(what string) error {
-	return fmt.Errorf("%s: not implemented yet; flags are wired and validated, the report is not built", what)
 }
