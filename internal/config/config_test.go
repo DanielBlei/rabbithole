@@ -4,6 +4,7 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -416,6 +417,109 @@ func TestResolveSummary(t *testing.T) {
 		if got.Provider != want.Provider || got.Host != want.Host || got.Model != want.Model ||
 			got.APIKey != want.APIKey || got.Think != want.Think {
 			t.Errorf("ResolveSummary() = %+v, want %+v", got, want)
+		}
+	})
+}
+
+// The engine is chosen by which key is set, so the pair has to be exclusive:
+// neither leaves nothing to open, both leaves two answers and no tiebreak.
+func TestValidateStoreNeedsExactlyOneTarget(t *testing.T) {
+	cases := []struct {
+		name    string
+		store   StoreConfig
+		wantErr bool
+	}{
+		{"sqlite only", StoreConfig{DBPath: "./data/rabbithole.db"}, false},
+		{"postgres only", StoreConfig{URL: "postgres://u@h/db"}, false},
+		{"neither", StoreConfig{}, true},
+		{"both", StoreConfig{DBPath: "./x.db", URL: "postgres://u@h/db"}, true},
+		{"url not a postgres one", StoreConfig{URL: "mysql://u@h/db"}, true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			c := Config{Profile: "p", Inference: InferenceConfig{Provider: "heuristic"}, Store: tt.store}
+			if err := c.validate(); (err != nil) != tt.wantErr {
+				t.Errorf("validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestResolvePostgres(t *testing.T) {
+	t.Run("the environment beats a password in the url", func(t *testing.T) {
+		t.Setenv(DBPasswordEnv, "from-env")
+		pg, err := StoreConfig{URL: "postgres://rabbit:from-url@db.host:5432/rabbithole"}.ResolvePostgres()
+		if err != nil {
+			t.Fatalf("ResolvePostgres: %v", err)
+		}
+		if !strings.Contains(pg.DSN, "from-env") || strings.Contains(pg.DSN, "from-url") {
+			t.Errorf("DSN = %q, want the environment's password", pg.DSN)
+		}
+		if pg.PasswordFromURL {
+			t.Error("PasswordFromURL = true, want false when the environment supplied it")
+		}
+	})
+
+	t.Run("a password in the url is used and flagged", func(t *testing.T) {
+		pg, err := StoreConfig{URL: "postgres://rabbit:from-url@db.host/rabbithole"}.ResolvePostgres()
+		if err != nil {
+			t.Fatalf("ResolvePostgres: %v", err)
+		}
+		if !strings.Contains(pg.DSN, "from-url") {
+			t.Errorf("DSN = %q, want the url's password", pg.DSN)
+		}
+		if !pg.PasswordFromURL {
+			t.Error("PasswordFromURL = false, want true so the caller can warn")
+		}
+	})
+
+	t.Run("the label never carries the password", func(t *testing.T) {
+		t.Setenv(DBPasswordEnv, "hunter2")
+		pg, err := StoreConfig{URL: "postgres://rabbit@db.host:5432/rabbithole"}.ResolvePostgres()
+		if err != nil {
+			t.Fatalf("ResolvePostgres: %v", err)
+		}
+		if strings.Contains(pg.Label, "hunter2") {
+			t.Errorf("Label = %q, must not carry the password", pg.Label)
+		}
+		if !strings.Contains(pg.Label, "rabbit@db.host") {
+			t.Errorf("Label = %q, want the user and host kept", pg.Label)
+		}
+	})
+
+	t.Run("punctuation in a password survives", func(t *testing.T) {
+		const nasty = "p@ss/w:rd?#x"
+		t.Setenv(DBPasswordEnv, nasty)
+		pg, err := StoreConfig{URL: "postgres://rabbit@db.host/rabbithole"}.ResolvePostgres()
+		if err != nil {
+			t.Fatalf("ResolvePostgres: %v", err)
+		}
+		u, err := url.Parse(pg.DSN)
+		if err != nil {
+			t.Fatalf("the DSN did not survive escaping: %v", err)
+		}
+		if got, _ := u.User.Password(); got != nasty {
+			t.Errorf("password round-tripped as %q, want %q", got, nasty)
+		}
+		if u.Host != "db.host" {
+			t.Errorf("host = %q, want db.host; the password leaked into it", u.Host)
+		}
+	})
+
+	t.Run("sslmode defaults to verify-full but is never overridden", func(t *testing.T) {
+		pg, err := StoreConfig{URL: "postgres://rabbit@db.host/rabbithole"}.ResolvePostgres()
+		if err != nil {
+			t.Fatalf("ResolvePostgres: %v", err)
+		}
+		if !strings.Contains(pg.DSN, "sslmode=verify-full") {
+			t.Errorf("DSN = %q, want sslmode=verify-full applied", pg.DSN)
+		}
+		pg, err = StoreConfig{URL: "postgres://rabbit@db.host/rabbithole?sslmode=disable"}.ResolvePostgres()
+		if err != nil {
+			t.Fatalf("ResolvePostgres: %v", err)
+		}
+		if !strings.Contains(pg.DSN, "sslmode=disable") {
+			t.Errorf("DSN = %q, want the explicit sslmode kept", pg.DSN)
 		}
 	})
 }

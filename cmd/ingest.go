@@ -13,7 +13,6 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/digest"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/profilemgr"
-	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
 var (
@@ -66,7 +65,7 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 		Bool("think", think).
 		Msg("config loaded")
 
-	db, err := store.Open(cfg.Store.DBPath)
+	db, err := openStore(ctx, cfg)
 	if err != nil {
 		return err
 	}

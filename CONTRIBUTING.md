@@ -58,6 +58,19 @@ matching that locally avoids a surprise. The linter also reports formatting, and
 
 Add tests for new behaviour, and update the page under `docs/` your change makes wrong.
 
+The suite runs on SQLite and needs nothing installed, which is what `make check` and CI use.
+If your change touches `internal/store`, you can run the same tests a second time against
+Postgres:
+
+```bash
+make pg-up     # a throwaway Postgres in podman or docker
+make test-pg   # the store suite against it
+make pg-down   # stop it and drop its data
+```
+
+This is opt-in and never part of `make check`. The container is disposable: it keeps no volume,
+and `make pg-down` removes it.
+
 Fork PRs need a maintainer to approve the workflow run before checks start, so expect the
 checks to sit idle for a bit on your first contribution.
 

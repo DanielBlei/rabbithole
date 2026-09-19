@@ -36,6 +36,19 @@ CREATE TABLE IF NOT EXISTS ideas (
 CREATE INDEX IF NOT EXISTS idx_ideas_live ON ideas(deleted_at, position);
 `
 
+const ideaSchemaPG = `
+CREATE TABLE IF NOT EXISTS ideas (
+	id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	body       TEXT NOT NULL,
+	color      TEXT NOT NULL DEFAULT 'amber',
+	position   INTEGER NOT NULL DEFAULT 0,
+	created_at TIMESTAMPTZ NOT NULL,
+	updated_at TIMESTAMPTZ NOT NULL,
+	deleted_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_ideas_live ON ideas(deleted_at, position);
+`
+
 // MaxIdeaBody caps a note's text. Sticky notes are meant to be loose and short;
 // the web composer mirrors this with a maxlength, but AddIdea/UpdateIdea enforce
 // it server-side too.

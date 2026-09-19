@@ -36,7 +36,7 @@ func seedPrunable(t *testing.T, db *Store, now time.Time) {
 		"c": 2 * 24 * time.Hour,
 		"d": 1 * 24 * time.Hour,
 	} {
-		if _, err := db.db.ExecContext(ctx,
+		if _, err := db.exec(ctx,
 			"UPDATE items SET created_at = ? WHERE id = ?", sqlTime(now.Add(-age)), id); err != nil {
 			t.Fatalf("backdate %s: %v", id, err)
 		}
@@ -47,7 +47,7 @@ func seedPrunable(t *testing.T, db *Store, now time.Time) {
 // prune left behind.
 func remainingIDs(t *testing.T, db *Store) []string {
 	t.Helper()
-	rows, err := db.db.QueryContext(context.Background(), "SELECT id FROM items ORDER BY id")
+	rows, err := db.query(context.Background(), "SELECT id FROM items ORDER BY id")
 	if err != nil {
 		t.Fatalf("query ids: %v", err)
 	}
@@ -257,6 +257,10 @@ func TestPruneItemsAll(t *testing.T) {
 // TestPruneItemsBounds pins the inclusive-low/exclusive-high asymmetry the
 // bounds inherit from ListFilter, and with it the fixed-width sqlTime layout
 // SQLite compares as text.
+//
+// The offset below is a microsecond, not a nanosecond: Postgres timestamps
+// resolve to microseconds, so a finer gap would round onto the cutoff and the
+// boundary this test is about would stop existing.
 func TestPruneItemsBounds(t *testing.T) {
 	now := time.Now()
 	cutoff := now.Add(-48 * time.Hour)
@@ -285,12 +289,12 @@ func TestPruneItemsBounds(t *testing.T) {
 			seedPrunable(t, db, now)
 			ctx := context.Background()
 
-			// Land c exactly on the cutoff and b one nanosecond older than it.
+			// Land c exactly on the cutoff and b one tick older than it.
 			for id, at := range map[string]time.Time{
 				"c": cutoff,
-				"b": cutoff.Add(-time.Nanosecond),
+				"b": cutoff.Add(-time.Microsecond),
 			} {
-				if _, err := db.db.ExecContext(ctx,
+				if _, err := db.exec(ctx,
 					"UPDATE items SET created_at = ? WHERE id = ?", sqlTime(at), id); err != nil {
 					t.Fatalf("backdate %s: %v", id, err)
 				}
@@ -325,7 +329,7 @@ func TestPruneItemsPublishedAtWins(t *testing.T) {
 	if err := db.Record(ctx, items, nil, now); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	if _, err := db.db.ExecContext(ctx,
+	if _, err := db.exec(ctx,
 		"UPDATE items SET created_at = ? WHERE id = 'undated'", sqlTime(now.AddDate(0, 0, -90))); err != nil {
 		t.Fatalf("backdate undated: %v", err)
 	}

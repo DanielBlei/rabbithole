@@ -37,11 +37,36 @@ CREATE TABLE IF NOT EXISTS ingest_history (
 );
 `
 
+const ingestSchemaPG = `
+CREATE TABLE IF NOT EXISTS ingest_history (
+	id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	started_at   TIMESTAMPTZ NOT NULL,
+	finished_at  TIMESTAMPTZ,
+	status       TEXT NOT NULL,
+	triggered_by TEXT NOT NULL,
+	fetched      INTEGER NOT NULL DEFAULT 0,
+	new_items    INTEGER NOT NULL DEFAULT 0,
+	scored       INTEGER NOT NULL DEFAULT 0,
+	skipped      INTEGER NOT NULL DEFAULT 0,
+	failed       INTEGER NOT NULL DEFAULT 0,
+	error        TEXT NOT NULL DEFAULT ''
+);
+`
+
 // ingestLogSchema holds each run's full captured log in its own table so
 // listing runs never drags the log bodies along.
 const ingestLogSchema = `
 CREATE TABLE IF NOT EXISTS ingest_run_logs (
 	run_id INTEGER PRIMARY KEY REFERENCES ingest_history(id) ON DELETE CASCADE,
+	log    TEXT NOT NULL DEFAULT ''
+);
+`
+
+// run_id is BIGINT to match ingest_history.id, which the identity column makes
+// wider than SQLite's INTEGER; a foreign key needs the types to line up.
+const ingestLogSchemaPG = `
+CREATE TABLE IF NOT EXISTS ingest_run_logs (
+	run_id BIGINT PRIMARY KEY REFERENCES ingest_history(id) ON DELETE CASCADE,
 	log    TEXT NOT NULL DEFAULT ''
 );
 `

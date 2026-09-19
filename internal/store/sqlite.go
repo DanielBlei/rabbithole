@@ -18,6 +18,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
 
@@ -49,6 +50,47 @@ CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
 -- matches the itemDate expression the date filter and date sorts use.
 CREATE INDEX IF NOT EXISTS idx_items_date ON items(COALESCE(published_at, created_at));
 CREATE INDEX IF NOT EXISTS idx_items_bookmarked ON items(bookmarked);
+`
+
+// Postgres wants TIMESTAMPTZ over TIMESTAMP, a real FALSE for the boolean
+// default, and its own parenthesis rule for an expression index.
+const schemaPG = `
+CREATE TABLE IF NOT EXISTS items (
+	id               TEXT PRIMARY KEY,
+	source           TEXT NOT NULL,
+	title            TEXT NOT NULL,
+	link             TEXT NOT NULL UNIQUE,
+	summary          TEXT,
+	published_at     TIMESTAMPTZ,
+	created_at       TIMESTAMPTZ NOT NULL,
+	updated_at       TIMESTAMPTZ NOT NULL,
+	llm_score        INTEGER,
+	llm_score_reason TEXT,
+	llm_score_model  TEXT,
+	llm_profile_id   TEXT,
+	llm_profile_name TEXT,
+	llm_profile_hash TEXT,
+	digested_on      DATE,
+	status           TEXT NOT NULL DEFAULT 'unread',
+	user_score       INTEGER,
+	user_note        TEXT,
+	bookmarked       BOOLEAN NOT NULL DEFAULT FALSE,
+	tags             TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_items_digested ON items(digested_on);
+CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
+-- matches the itemDate expression the date filter and date sorts use.
+CREATE INDEX IF NOT EXISTS idx_items_date ON items ((COALESCE(published_at, created_at)));
+CREATE INDEX IF NOT EXISTS idx_items_bookmarked ON items(bookmarked);
+`
+
+// schemaVersionPG records what SQLite keeps in PRAGMA user_version, which
+// Postgres has no equivalent for. The number is the same on both.
+const schemaVersionPG = `
+CREATE TABLE IF NOT EXISTS schema_version (
+	id      INTEGER PRIMARY KEY CHECK (id = 1),
+	version INTEGER NOT NULL
+);
 `
 
 // schemaVersion stamps the database via PRAGMA user_version. Version 2 moved
@@ -152,6 +194,19 @@ type Store struct {
 	d  dialect
 }
 
+// OpenFrom opens whichever engine the config names: a db_path means SQLite, a
+// url means Postgres. config.Load has already rejected setting both or neither.
+func OpenFrom(ctx context.Context, cfg config.StoreConfig) (*Store, error) {
+	if !cfg.IsPostgres() {
+		return Open(cfg.DBPath)
+	}
+	pg, err := cfg.ResolvePostgres()
+	if err != nil {
+		return nil, err
+	}
+	return openPostgres(ctx, pg.DSN, pg.Label)
+}
+
 // Open opens the SQLite database at path, creating it when it does not exist yet.
 func Open(path string) (*Store, error) {
 	if dir := filepath.Dir(path); dir != "" {
@@ -188,7 +243,7 @@ func initSchema(ctx context.Context, db *sql.DB, d dialect, label string) error 
 		switch version {
 		case schemaVersion:
 		case 3:
-			if err := migrateV3ToV4(db); err != nil {
+			if err := d.migrateV3(ctx, db); err != nil {
 				return fmt.Errorf("migrate database %s from version 3 to 4: %w", label, err)
 			}
 		default:
@@ -211,28 +266,6 @@ func initSchema(ctx context.Context, db *sql.DB, d dialect, label string) error 
 		}
 	}
 	return nil
-}
-
-// migrateV3ToV4 adds local profiles and nullable provenance columns. It is one
-// transaction so an interrupted upgrade cannot expose a half-migrated store.
-func migrateV3ToV4(db *sql.DB) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("begin migration: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	for _, stmt := range []string{
-		"ALTER TABLE items ADD COLUMN llm_profile_id TEXT",
-		"ALTER TABLE items ADD COLUMN llm_profile_name TEXT",
-		"ALTER TABLE items ADD COLUMN llm_profile_hash TEXT",
-		profileSchema,
-		fmt.Sprintf("PRAGMA user_version = %d", schemaVersion),
-	} {
-		if _, err := tx.Exec(stmt); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
 }
 
 // Close releases the database handle.

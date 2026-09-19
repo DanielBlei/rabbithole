@@ -59,7 +59,7 @@ func TestRecordReScoresUnscoredLink(t *testing.T) {
 
 	score := func() *int {
 		var s *int
-		if err := db.db.QueryRowContext(ctx, "SELECT llm_score FROM items WHERE link = ?", item.Link).
+		if err := db.queryRow(ctx, "SELECT llm_score FROM items WHERE link = ?", item.Link).
 			Scan(&s); err != nil {
 			t.Fatalf("query score: %v", err)
 		}
@@ -90,7 +90,7 @@ func TestRecordReScoresUnscoredLink(t *testing.T) {
 
 	// Still exactly one row for the link.
 	var count int
-	if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM items WHERE link = ?", item.Link).
+	if err := db.queryRow(ctx, "SELECT COUNT(*) FROM items WHERE link = ?", item.Link).
 		Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestRecordPersistsScoresWithoutDigesting(t *testing.T) {
 	}
 	get := func(id string) row {
 		var r row
-		if err := db.db.QueryRowContext(ctx,
+		if err := db.queryRow(ctx,
 			"SELECT llm_score, digested_on FROM items WHERE id = ?", id).
 			Scan(&r.score, &r.digestDay); err != nil {
 			t.Fatalf("query %s: %v", id, err)
@@ -181,7 +181,7 @@ func TestRecordIgnoresDuplicateLink(t *testing.T) {
 	}
 
 	var count int
-	if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM items WHERE link = ?", "https://x/dup").
+	if err := db.queryRow(ctx, "SELECT COUNT(*) FROM items WHERE link = ?", "https://x/dup").
 		Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestUpdateUserState(t *testing.T) {
 
 	var gotStatus, gotNote string
 	var gotScore int
-	row := db.db.QueryRowContext(ctx, "SELECT status, user_score, user_note FROM items WHERE link = ?", "https://x/a")
+	row := db.queryRow(ctx, "SELECT status, user_score, user_note FROM items WHERE link = ?", "https://x/a")
 	if err := row.Scan(&gotStatus, &gotScore, &gotNote); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
@@ -391,7 +391,7 @@ func TestUpdateUserStateByID(t *testing.T) {
 	}
 
 	var got string
-	row := db.db.QueryRowContext(ctx, "SELECT status FROM items WHERE link = ?", "https://x/a")
+	row := db.queryRow(ctx, "SELECT status FROM items WHERE link = ?", "https://x/a")
 	if err := row.Scan(&got); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
@@ -442,7 +442,7 @@ func TestList(t *testing.T) {
 		"c": 2 * 24 * time.Hour,
 		"d": 1 * 24 * time.Hour,
 	} {
-		if _, err := db.db.ExecContext(
+		if _, err := db.exec(
 			ctx,
 			"UPDATE items SET created_at = ? WHERE id = ?",
 			sqlTime(now.Add(-age)),
@@ -920,7 +920,7 @@ func TestListLatestUsesPublishedAtWithCreatedFallback(t *testing.T) {
 	if err := db.Record(ctx, items, nil, now); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	if _, err := db.db.ExecContext(
+	if _, err := db.exec(
 		ctx,
 		"UPDATE items SET created_at = ? WHERE id = ?",
 		sqlTime(now),

@@ -6,6 +6,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -171,10 +172,91 @@ type IngestConfig struct {
 	Feeds     string   `yaml:"feeds"`      // path to the feed seed file; empty looks for feeds.yaml beside the config
 }
 
-// StoreConfig configures item persistence. Local sqlite for now; host/credentials
-// can join here if a remote store is added.
+// StoreConfig configures item persistence. Exactly one of the two fields is
+// set, and which one picks the engine: a path means SQLite, a URL means
+// Postgres. There is no separate driver setting, so nothing can disagree.
 type StoreConfig struct {
 	DBPath string `yaml:"db_path"` // sqlite database path
+	URL    string `yaml:"url"`     // postgres connection url; the password comes from DBPasswordEnv
+}
+
+// DBPasswordEnv supplies the Postgres password. It is kept out of the config
+// file so it stays out of the web UI's config viewer and out of anything that
+// copies the file around.
+const DBPasswordEnv = "RABBITHOLE_DB_PASSWORD"
+
+// defaultSSLMode is applied when the URL names none. Anything weaker has to be
+// asked for: require alone encrypts without checking who answered.
+const defaultSSLMode = "verify-full"
+
+// IsPostgres reports whether the store is configured for Postgres.
+func (s StoreConfig) IsPostgres() bool { return s.URL != "" }
+
+// Postgres is a resolved connection: DSN carries the password and must never
+// be logged, Label is the same URL with the password removed and is what
+// errors and log lines show.
+type Postgres struct {
+	DSN   string
+	Label string
+
+	// PasswordFromURL records that the password was written into the config
+	// file rather than supplied by DBPasswordEnv, which callers warn about.
+	PasswordFromURL bool
+
+	// HasPassword is false when neither source supplied one, which is legal
+	// (a server can trust the client) but is the likeliest reason a connection
+	// is refused, so callers say so when one is.
+	HasPassword bool
+}
+
+// ResolvePostgres builds the connection from store.url plus DBPasswordEnv. The
+// environment wins over a password in the URL, so an exported variable can
+// override a checked-in file without editing it.
+func (s StoreConfig) ResolvePostgres() (Postgres, error) {
+	u, err := url.Parse(s.URL)
+	if err != nil {
+		return Postgres{}, fmt.Errorf("store.url is not a valid url: %w", err)
+	}
+	switch u.Scheme {
+	case "postgres", "postgresql":
+	default:
+		return Postgres{}, fmt.Errorf("store.url scheme is %q, want postgres", u.Scheme)
+	}
+
+	user := u.User.Username()
+	inURL, hasInURL := u.User.Password()
+	password := inURL
+	if env := os.Getenv(DBPasswordEnv); env != "" {
+		password = env
+		hasInURL = false
+	}
+	// url.UserPassword escapes, so a password holding @ / # or ? cannot
+	// corrupt the DSN the way string concatenation would.
+	switch {
+	case password != "":
+		u.User = url.UserPassword(user, password)
+	case user != "":
+		u.User = url.User(user)
+	}
+
+	q := u.Query()
+	if q.Get("sslmode") == "" {
+		q.Set("sslmode", defaultSSLMode)
+		u.RawQuery = q.Encode()
+	}
+
+	labelURL := *u
+	if user != "" {
+		labelURL.User = url.User(user)
+	} else {
+		labelURL.User = nil
+	}
+	return Postgres{
+		DSN:             u.String(),
+		Label:           labelURL.String(),
+		PasswordFromURL: hasInURL,
+		HasPassword:     password != "",
+	}, nil
 }
 
 // Defaults (Ollama on localhost).
@@ -240,8 +322,16 @@ func (c *Config) validate() error {
 	if c.Inference.Summary != (SummaryConfig{}) && c.Inference.Summary.Model == "" {
 		return fmt.Errorf("inference.summary.model is required when other inference.summary fields are set")
 	}
-	if c.Store.DBPath == "" {
-		return fmt.Errorf("store.db_path is required")
+	switch {
+	case c.Store.DBPath == "" && c.Store.URL == "":
+		return fmt.Errorf("store needs either db_path (sqlite) or url (postgres)")
+	case c.Store.DBPath != "" && c.Store.URL != "":
+		return fmt.Errorf("store has both db_path and url; keep the one for the engine you want")
+	}
+	if c.Store.IsPostgres() {
+		if _, err := c.Store.ResolvePostgres(); err != nil {
+			return err
+		}
 	}
 	if c.Ingest.Since < 0 {
 		return fmt.Errorf("since must be positive, got %s", c.Ingest.Since)

@@ -250,7 +250,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	log.Debug().Str("config", configPath).Str("addr", serveAddr).Msg("config loaded")
 
-	db, err := store.Open(cfg.Store.DBPath)
+	db, err := openStore(ctx, cfg)
 	if err != nil {
 		return err
 	}

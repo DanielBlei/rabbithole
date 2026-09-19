@@ -116,12 +116,13 @@ internal/vllm         OpenAI-compatible JSON-mode client
 internal/httpclient   shared HTTP transport (bearer auth injection)
 internal/retry        exponential backoff for a still-starting-up inference server
 internal/digest       markdown renderer
-internal/store        SQLite (items, profiles, feed config, run history, user state)
+internal/store        SQLite or Postgres (items, profiles, feed config, run history, user state)
 internal/server       composition root for serve: mounts api + web behind the login gate, health endpoints
 internal/api          JSON API route set (/api/*)
 internal/web          server-rendered htmx UI, the login gate and sessions, templates and static assets
 internal/httplog      HTTP access-log middleware
 internal/logger       zerolog setup for --debug/--trace
+scripts/              a throwaway Postgres for running the store tests; not used at runtime
 ```
 
 ## Roadmap

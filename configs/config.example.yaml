@@ -32,4 +32,9 @@ ingest:
   digest_dir: ./data/digests            # output for markdown report, `ingest` CLI usage only
 
 store:
-  db_path: ./data/rabbithole.db
+  db_path: ./data/rabbithole.db   # sqlite, the local default
+
+  # Postgres instead, to reach one store from more than one machine. Set either
+  # db_path or url, never both. The password comes from RABBITHOLE_DB_PASSWORD
+  # (see .env.example); sslmode defaults to verify-full.
+  # url: postgres://rabbithole@db.example.com:5432/rabbithole
