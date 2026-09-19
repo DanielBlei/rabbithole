@@ -135,6 +135,25 @@ func TestRedactSecrets(t *testing.T) {
 		// Non-secret keys are untouched, including ones merely mentioning it.
 		{"other key", `model: qwen3:4b`, `model: qwen3:4b`},
 		{"comment only", `# set api_key here`, `# set api_key here`},
+		// A password inside a value: the key says nothing, so only the URL's
+		// own shape gives it away. store.url is the one that matters.
+		{
+			"url password",
+			`  url: postgres://rabbit@db.host:5432/rabbithole`,
+			`  url: postgres://rabbit@db.host:5432/rabbithole`,
+		},
+		{
+			"url with password",
+			`  url: postgres://rabbit:hunter2@db.host:5432/rabbithole`,
+			`  url: postgres://rabbit:` + redactedMask + `@db.host:5432/rabbithole`,
+		},
+		{
+			"url with password and query",
+			`url: postgresql://u:p@h/db?sslmode=verify-full`,
+			`url: postgresql://u:` + redactedMask + `@h/db?sslmode=verify-full`,
+		},
+		// A bare host:port is not credentials and must stay readable.
+		{"host and port", `host: http://localhost:11434`, `host: http://localhost:11434`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

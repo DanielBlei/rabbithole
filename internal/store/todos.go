@@ -38,6 +38,22 @@ CREATE INDEX IF NOT EXISTS idx_todos_done ON todos(done);
 CREATE INDEX IF NOT EXISTS idx_todos_due ON todos(due_on);
 `
 
+const todoSchemaPG = `
+CREATE TABLE IF NOT EXISTS todos (
+	id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	title        TEXT NOT NULL,
+	note         TEXT NOT NULL DEFAULT '',
+	done         BOOLEAN NOT NULL DEFAULT FALSE,
+	due_on       TEXT,
+	completed_at TIMESTAMPTZ,
+	tags         TEXT NOT NULL DEFAULT '',
+	created_at   TIMESTAMPTZ NOT NULL,
+	updated_at   TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_todos_done ON todos(done);
+CREATE INDEX IF NOT EXISTS idx_todos_due ON todos(due_on);
+`
+
 // MaxTodoTitle caps a task title: titles are meant to be short and scannable, so
 // anything longer belongs in the (optional) note. The web add form mirrors this
 // with a maxlength, but AddTodo enforces it server-side too.

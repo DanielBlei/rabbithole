@@ -18,6 +18,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
 
@@ -46,6 +47,44 @@ CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
 -- matches the itemDate expression the date filter and date sorts use.
 CREATE INDEX IF NOT EXISTS idx_items_date ON items(COALESCE(published_at, created_at));
 CREATE INDEX IF NOT EXISTS idx_items_bookmarked ON items(bookmarked);
+`
+
+// Postgres wants TIMESTAMPTZ over TIMESTAMP, a real FALSE for the boolean
+// default, and its own parenthesis rule for an expression index.
+const schemaPG = `
+CREATE TABLE IF NOT EXISTS items (
+	id               TEXT PRIMARY KEY,
+	source           TEXT NOT NULL,
+	title            TEXT NOT NULL,
+	link             TEXT NOT NULL UNIQUE,
+	summary          TEXT,
+	published_at     TIMESTAMPTZ,
+	created_at       TIMESTAMPTZ NOT NULL,
+	updated_at       TIMESTAMPTZ NOT NULL,
+	llm_score        INTEGER,
+	llm_score_reason TEXT,
+	llm_score_model  TEXT,
+	digested_on      DATE,
+	status           TEXT NOT NULL DEFAULT 'unread',
+	user_score       INTEGER,
+	user_note        TEXT,
+	bookmarked       BOOLEAN NOT NULL DEFAULT FALSE,
+	tags             TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_items_digested ON items(digested_on);
+CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
+-- matches the itemDate expression the date filter and date sorts use.
+CREATE INDEX IF NOT EXISTS idx_items_date ON items ((COALESCE(published_at, created_at)));
+CREATE INDEX IF NOT EXISTS idx_items_bookmarked ON items(bookmarked);
+`
+
+// schemaVersionPG records what SQLite keeps in PRAGMA user_version, which
+// Postgres has no equivalent for. The number is the same on both.
+const schemaVersionPG = `
+CREATE TABLE IF NOT EXISTS schema_version (
+	id      INTEGER PRIMARY KEY CHECK (id = 1),
+	version INTEGER NOT NULL
+);
 `
 
 // schemaVersion stamps the database via PRAGMA user_version. Version 2 moved
@@ -146,6 +185,19 @@ func sqlTimeOrNull(t time.Time) any {
 type Store struct {
 	db *sql.DB
 	d  dialect
+}
+
+// OpenFrom opens whichever engine the config names: a db_path means SQLite, a
+// url means Postgres. config.Load has already rejected setting both or neither.
+func OpenFrom(ctx context.Context, cfg config.StoreConfig) (*Store, error) {
+	if !cfg.IsPostgres() {
+		return Open(cfg.DBPath)
+	}
+	pg, err := cfg.ResolvePostgres()
+	if err != nil {
+		return nil, err
+	}
+	return openPostgres(ctx, pg.DSN, pg.Label)
 }
 
 // Open opens the SQLite database at path, creating it when it does not exist yet.

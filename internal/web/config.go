@@ -52,6 +52,17 @@ var secretKeyRE = regexp.MustCompile(
 // redactedMask stands in for a secret's value in the viewer.
 const redactedMask = "••••••••"
 
+// urlPasswordRE matches the password in a URL's userinfo, wherever it appears
+// in a value. secretKeyRE only looks at the key, so `store.url` would otherwise
+// print a Postgres password in full to anyone who can open the viewer.
+var urlPasswordRE = regexp.MustCompile(`([a-z][a-z0-9+.-]*://[^\s:/?#@]+):[^\s/?#@]+@`)
+
+// redactURLPasswords masks credentials embedded in a URL, keeping the scheme,
+// user and host so the line still says what it connects to.
+func redactURLPasswords(line string) string {
+	return urlPasswordRE.ReplaceAllString(line, "${1}:"+redactedMask+"@")
+}
+
 // redactSecrets masks the value of any credential-looking key in raw YAML,
 // keeping the key, indentation and trailing comment so the viewer still shows
 // that the field exists and what it's for. An empty value is left alone —
@@ -67,6 +78,10 @@ func redactSecrets(src string) string {
 	for i, line := range lines {
 		m := secretKeyRE.FindStringSubmatch(line)
 		if m == nil {
+			// The key says nothing, but the value may still carry a password.
+			if masked := redactURLPasswords(line); masked != line {
+				lines[i] = masked
+			}
 			continue
 		}
 		value, comment := splitComment(m[4])

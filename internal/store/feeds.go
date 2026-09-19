@@ -34,6 +34,21 @@ CREATE TABLE IF NOT EXISTS feed_fetches (
 CREATE INDEX IF NOT EXISTS idx_feed_fetches_feed ON feed_fetches(feed_id, fetched_at DESC, id DESC);
 `
 
+const feedFetchSchemaPG = `
+CREATE TABLE IF NOT EXISTS feed_fetches (
+	id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	feed_id    TEXT NOT NULL,
+	feed_name  TEXT NOT NULL DEFAULT '',
+	url        TEXT NOT NULL DEFAULT '',
+	status     TEXT NOT NULL,
+	error      TEXT NOT NULL DEFAULT '',
+	items      INTEGER NOT NULL DEFAULT 0,
+	elapsed_ms INTEGER NOT NULL DEFAULT 0,
+	fetched_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_feed_fetches_feed ON feed_fetches(feed_id, fetched_at DESC, id DESC);
+`
+
 // Feed fetch statuses for feed_fetches.status.
 const (
 	FeedStatusOK    = "ok"

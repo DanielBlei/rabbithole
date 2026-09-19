@@ -374,7 +374,7 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	db, err := store.Open(cfg.Store.DBPath)
+	db, err := openStore(cmd.Context(), cfg)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}

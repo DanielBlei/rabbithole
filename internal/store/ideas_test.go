@@ -62,7 +62,7 @@ func TestIdeaLifecycle(t *testing.T) {
 		t.Errorf("GetIdea after delete err = %v, want ErrIdeaNotFound", err)
 	}
 	var deletedNotNull bool
-	if err := db.db.QueryRowContext(ctx,
+	if err := db.queryRow(ctx,
 		"SELECT deleted_at IS NOT NULL FROM ideas WHERE id = ?", idea.ID).Scan(&deletedNotNull); err != nil {
 		t.Fatalf("query tombstone: %v", err)
 	}

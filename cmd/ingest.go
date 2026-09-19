@@ -12,7 +12,6 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/digest"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
-	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
 var (
@@ -71,7 +70,7 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 	}
 	log.Debug().Str("path", cfg.Profile).Int("chars", len(profile)).Msg("interest profile loaded")
 
-	db, err := store.Open(cfg.Store.DBPath)
+	db, err := openStore(ctx, cfg)
 	if err != nil {
 		return err
 	}
