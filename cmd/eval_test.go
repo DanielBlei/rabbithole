@@ -502,6 +502,45 @@ func TestRunAuditFiltersBeforeDeterministicSelection(t *testing.T) {
 	}
 }
 
+func TestRunAuditLimitsComparableRowsOnly(t *testing.T) {
+	// Only the first four rows carry both scores, and no flag narrows the
+	// query to them, so the store hands back all forty.
+	var fixtures []auditFixture
+	for i := range 40 {
+		var userScore *int
+		if i < 4 {
+			userScore = intPtr(i%10 + 1)
+		}
+		fixtures = append(fixtures, auditFixture{
+			id: fmt.Sprintf("item-%02d", i), source: "S", model: "m",
+			llmScore: intPtr(i % 11), userScore: userScore,
+		})
+	}
+	raw, err := runAuditFixture(t, fixtures, func() {
+		auditLimit = 3
+		auditSeed = 42
+	}, eval.FormatJSON)
+	if err != nil {
+		t.Fatalf("runAudit: %v", err)
+	}
+	report := decodeAuditReport(t, raw)
+
+	if report.Results.Samples != 3 {
+		t.Errorf("samples = %d, want 3: the limit must spend its slots on comparable rows", report.Results.Samples)
+	}
+	comparable := map[string]bool{"item-00": true, "item-01": true, "item-02": true, "item-03": true}
+	for _, sample := range report.Samples {
+		if !comparable[sample.ID] {
+			t.Errorf("row %q has no user score and cannot be audited", sample.ID)
+		}
+	}
+	// The denominator is the comparable pool, not what survived --limit, so
+	// the report reads "3 of 4 samples" rather than as a full audit.
+	if report.Info.DatasetSamples != 4 {
+		t.Errorf("dataset_samples = %d, want 4", report.Info.DatasetSamples)
+	}
+}
+
 func TestRunAuditAllBypassesListCap(t *testing.T) {
 	fixtures := make([]auditFixture, 205)
 	for i := range fixtures {
