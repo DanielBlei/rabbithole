@@ -28,7 +28,7 @@ type PruneResult struct {
 
 // savedItem matches an item carrying state you wrote yourself, the one thing on
 // a row a re-ingest cannot bring back.
-const savedItem = "(bookmarked = 1 OR user_score IS NOT NULL OR user_note IS NOT NULL)"
+const savedItem = "(bookmarked = TRUE OR user_score IS NOT NULL OR user_note IS NOT NULL)"
 
 // validate rejects a filter that would empty the feed without saying so, one
 // that says so and then narrows anyway, and a window with nothing in it.
@@ -81,7 +81,7 @@ func (s *Store) counts(ctx context.Context, filter PruneFilter) (deleted, kept i
 	selection, args := filter.selection()
 	var total, saved int
 	q := "SELECT COUNT(*), COUNT(*) FILTER (WHERE " + savedItem + ") FROM items WHERE " + selection
-	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&total, &saved); err != nil {
+	if err := s.queryRow(ctx, q, args...).Scan(&total, &saved); err != nil {
 		return 0, 0, fmt.Errorf("count prunable items: %w", err)
 	}
 	if filter.IncludeSaved {
@@ -108,7 +108,7 @@ func (s *Store) PrunePreview(ctx context.Context, filter PruneFilter, sample int
 	where, args := filter.whereClause()
 	q := "SELECT " + itemRowColumns + " FROM items WHERE " + where +
 		" ORDER BY " + itemDate + " DESC, id DESC LIMIT ?"
-	rows, err := s.db.QueryContext(ctx, q, append(args, sample)...)
+	rows, err := s.query(ctx, q, append(args, sample)...)
 	if err != nil {
 		return PruneResult{}, fmt.Errorf("query prune sample: %w", err)
 	}
@@ -140,7 +140,7 @@ func (s *Store) PruneItems(ctx context.Context, filter PruneFilter) (PruneResult
 	}
 
 	where, args := filter.whereClause()
-	res, err := s.db.ExecContext(ctx, "DELETE FROM items WHERE "+where, args...)
+	res, err := s.exec(ctx, "DELETE FROM items WHERE "+where, args...)
 	if err != nil {
 		return PruneResult{}, fmt.Errorf("prune items: %w", err)
 	}

@@ -135,7 +135,7 @@ func (s *Store) authRow(ctx context.Context) (AuthState, sql.NullString, error) 
 		mode string
 		key  string
 	)
-	err := s.db.QueryRowContext(ctx, sqlAuthRow).Scan(&st.Username, &hash, &mode, &st.Gen, &key)
+	err := s.queryRow(ctx, sqlAuthRow).Scan(&st.Username, &hash, &mode, &st.Gen, &key)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AuthState{Mode: AuthInitial}, hash, nil
 	}
@@ -207,11 +207,11 @@ func (s *Store) setPassword(ctx context.Context, ifGen *string, username, passwo
 	var res sql.Result
 	switch {
 	case ifGen == nil:
-		res, err = s.db.ExecContext(ctx, sqlSetPassword, username, hash, gen, key, now)
+		res, err = s.exec(ctx, sqlSetPassword, username, hash, gen, key, now)
 	case *ifGen == "":
-		res, err = s.db.ExecContext(ctx, sqlInsertAuthIfNone, username, hash, AuthEnabled, gen, key, now)
+		res, err = s.exec(ctx, sqlInsertAuthIfNone, username, hash, AuthEnabled, gen, key, now)
 	default:
-		res, err = s.db.ExecContext(ctx, sqlUpdateAuthIfGen, username, hash, AuthEnabled, gen, key, now, *ifGen)
+		res, err = s.exec(ctx, sqlUpdateAuthIfGen, username, hash, AuthEnabled, gen, key, now, *ifGen)
 	}
 	if err != nil {
 		return fmt.Errorf("set password: %w", err)
@@ -230,7 +230,7 @@ func (s *Store) DisableAuth(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, sqlDisableAuth, noUsername, gen, key, sqlTime(time.Now())); err != nil {
+	if _, err := s.exec(ctx, sqlDisableAuth, noUsername, gen, key, sqlTime(time.Now())); err != nil {
 		return fmt.Errorf("disable auth: %w", err)
 	}
 	return nil
@@ -254,9 +254,9 @@ func (s *Store) DisableAuthIf(ctx context.Context, gen string) error {
 	now := sqlTime(time.Now())
 	var res sql.Result
 	if gen == "" {
-		res, err = s.db.ExecContext(ctx, sqlInsertAuthIfNone, noUsername, nil, AuthDisabled, next, key, now)
+		res, err = s.exec(ctx, sqlInsertAuthIfNone, noUsername, nil, AuthDisabled, next, key, now)
 	} else {
-		res, err = s.db.ExecContext(ctx, sqlUpdateAuthIfGen, st.Username, nil, AuthDisabled, next, key, now, gen)
+		res, err = s.exec(ctx, sqlUpdateAuthIfGen, st.Username, nil, AuthDisabled, next, key, now, gen)
 	}
 	if err != nil {
 		return fmt.Errorf("disable auth: %w", err)
@@ -274,7 +274,7 @@ func (s *Store) RetireSessionsIf(ctx context.Context, gen string) (string, error
 	if err != nil {
 		return "", err
 	}
-	res, err := s.db.ExecContext(ctx, sqlRetireSessions, next, sqlTime(time.Now()), gen)
+	res, err := s.exec(ctx, sqlRetireSessions, next, sqlTime(time.Now()), gen)
 	if err != nil {
 		return "", fmt.Errorf("retire sessions: %w", err)
 	}

@@ -72,8 +72,8 @@ var (
 const (
 	feedColumns = "id, name, url, type, enabled, since, max_items, tags"
 
-	sqlLiveFeeds    = `SELECT ` + feedColumns + ` FROM feeds WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE`
-	sqlDeletedFeeds = `SELECT ` + feedColumns + ` FROM feeds WHERE deleted_at IS NOT NULL ORDER BY name COLLATE NOCASE`
+	sqlLiveFeeds    = `SELECT ` + feedColumns + ` FROM feeds WHERE deleted_at IS NULL ORDER BY lower(name)`
+	sqlDeletedFeeds = `SELECT ` + feedColumns + ` FROM feeds WHERE deleted_at IS NOT NULL ORDER BY lower(name)`
 	sqlFeedByID     = `SELECT ` + feedColumns + ` FROM feeds WHERE id = ?`
 
 	sqlInsertFeed = `INSERT INTO feeds (id, name, url, type, enabled, since, max_items, tags, created_at, updated_at)
@@ -122,7 +122,7 @@ func (s *Store) DeletedFeeds(ctx context.Context) ([]config.Feed, error) {
 }
 
 func (s *Store) queryFeeds(ctx context.Context, query string) ([]config.Feed, error) {
-	rows, err := s.db.QueryContext(ctx, query)
+	rows, err := s.query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query feeds: %w", err)
 	}
@@ -142,7 +142,7 @@ func (s *Store) queryFeeds(ctx context.Context, query string) ([]config.Feed, er
 // FeedByID returns one feed, deleted or not, so the detail pane can render a
 // parked feed the same way it renders a live one.
 func (s *Store) FeedByID(ctx context.Context, id string) (config.Feed, error) {
-	f, err := scanFeed(s.db.QueryRowContext(ctx, sqlFeedByID, id))
+	f, err := scanFeed(s.queryRow(ctx, sqlFeedByID, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return config.Feed{}, fmt.Errorf("%w: %s", ErrFeedNotFound, id)
 	}
@@ -160,7 +160,7 @@ func (s *Store) FeedDefaults(ctx context.Context) (config.FeedDefaults, error) {
 		maxItems sql.NullInt64
 		tags     sql.NullString
 	)
-	err := s.db.QueryRowContext(ctx, sqlFeedDefaults).Scan(&enabled, &since, &maxItems, &tags)
+	err := s.queryRow(ctx, sqlFeedDefaults).Scan(&enabled, &since, &maxItems, &tags)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, nil
 	}
@@ -217,7 +217,7 @@ func (s *Store) AddFeed(ctx context.Context, f config.Feed) (string, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	existing, err := findFeedConflict(ctx, tx, f.Name, f.URL, "")
+	existing, err := s.findFeedConflict(ctx, tx, f.Name, f.URL, "")
 	if err != nil {
 		return "", err
 	}
@@ -229,12 +229,12 @@ func (s *Store) AddFeed(ctx context.Context, f config.Feed) (string, error) {
 		// The ID is the URL's digest, so a feed added, hard-purged and added
 		// again would collide on the primary key. Nothing hard-deletes today,
 		// but leaving it as a constraint error would be an unhelpful surprise.
-		if _, err := tx.ExecContext(ctx, sqlInsertFeed, id, f.Name, f.URL, nullFeedType(f.Type),
+		if _, err := s.txExec(ctx, tx, sqlInsertFeed, id, f.Name, f.URL, nullFeedType(f.Type),
 			nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
 			now, now); err != nil {
 			return "", fmt.Errorf("insert feed %q: %w", f.Name, err)
 		}
-	} else if _, err := tx.ExecContext(ctx, sqlRestoreFeed, f.Name, f.URL, nullFeedType(f.Type),
+	} else if _, err := s.txExec(ctx, tx, sqlRestoreFeed, f.Name, f.URL, nullFeedType(f.Type),
 		nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
 		now, id); err != nil {
 		return "", fmt.Errorf("restore feed %q: %w", f.Name, err)
@@ -261,11 +261,11 @@ func (s *Store) UpdateFeed(ctx context.Context, id string, f config.Feed) error 
 	// Any conflict here is with a different feed — a live one is a collision, a
 	// deleted one still holds the unique name or URL and has to be reported too
 	// rather than being silently resurrected under someone else's edit.
-	if _, err := findFeedConflict(ctx, tx, f.Name, f.URL, id); err != nil {
+	if _, err := s.findFeedConflict(ctx, tx, f.Name, f.URL, id); err != nil {
 		return err
 	}
 
-	res, err := tx.ExecContext(ctx, sqlUpdateFeed, f.Name, f.URL, nullFeedType(f.Type),
+	res, err := s.txExec(ctx, tx, sqlUpdateFeed, f.Name, f.URL, nullFeedType(f.Type),
 		nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
 		sqlTime(time.Now()), id)
 	if err != nil {
@@ -280,7 +280,7 @@ func (s *Store) UpdateFeed(ctx context.Context, id string, f config.Feed) error 
 // SetFeedEnabled parks or unparks a feed. A nil value clears the column, so the
 // feed goes back to inheriting whatever the defaults say.
 func (s *Store) SetFeedEnabled(ctx context.Context, id string, on *bool) error {
-	res, err := s.db.ExecContext(ctx, sqlSetFeedEnabled, nullBool(on), sqlTime(time.Now()), id)
+	res, err := s.exec(ctx, sqlSetFeedEnabled, nullBool(on), sqlTime(time.Now()), id)
 	if err != nil {
 		return fmt.Errorf("set feed enabled %q: %w", id, err)
 	}
@@ -291,7 +291,7 @@ func (s *Store) SetFeedEnabled(ctx context.Context, id string, on *bool) error {
 // its row — see feedConfigSchema for why deletion isn't a DELETE.
 func (s *Store) SoftDeleteFeed(ctx context.Context, id string) error {
 	now := sqlTime(time.Now())
-	res, err := s.db.ExecContext(ctx, sqlSoftDeleteFeed, now, now, id)
+	res, err := s.exec(ctx, sqlSoftDeleteFeed, now, now, id)
 	if err != nil {
 		return fmt.Errorf("delete feed %q: %w", id, err)
 	}
@@ -300,7 +300,7 @@ func (s *Store) SoftDeleteFeed(ctx context.Context, id string) error {
 
 // RestoreFeed brings a soft-deleted feed back with the values it had.
 func (s *Store) RestoreFeed(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, sqlUndeleteFeed, sqlTime(time.Now()), id)
+	res, err := s.exec(ctx, sqlUndeleteFeed, sqlTime(time.Now()), id)
 	if err != nil {
 		return fmt.Errorf("restore feed %q: %w", id, err)
 	}
@@ -312,7 +312,7 @@ func (s *Store) SetFeedDefaults(ctx context.Context, d config.FeedDefaults) erro
 	if err := d.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrFeedInvalid, err)
 	}
-	if _, err := s.db.ExecContext(ctx, sqlSetFeedDefaults,
+	if _, err := s.exec(ctx, sqlSetFeedDefaults,
 		nullBool(d.Enabled), nullDuration(d.Since), nullInt(d.MaxItems), nullTags(d.Tags),
 		sqlTime(time.Now())); err != nil {
 		return fmt.Errorf("set feed defaults: %w", err)
@@ -364,7 +364,7 @@ func (s *Store) SeedFeeds(ctx context.Context, doc config.FeedsDoc) (SeedResult,
 			continue
 		}
 		id := config.FeedID(f.URL)
-		if _, err := tx.ExecContext(ctx, sqlInsertFeed, id, f.Name, f.URL, nullFeedType(f.Type),
+		if _, err := s.txExec(ctx, tx, sqlInsertFeed, id, f.Name, f.URL, nullFeedType(f.Type),
 			nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
 			now, now); err != nil {
 			return result, fmt.Errorf("seed feed %q: %w", f.Name, err)
@@ -377,12 +377,12 @@ func (s *Store) SeedFeeds(ctx context.Context, doc config.FeedsDoc) (SeedResult,
 	// Defaults seed once and are never overwritten: after the first boot they
 	// belong to whoever last edited them on the Sources page.
 	var hasDefaults bool
-	if err := tx.QueryRowContext(ctx, sqlHasFeedDefaults).Scan(&hasDefaults); err != nil {
+	if err := s.txQueryRow(ctx, tx, sqlHasFeedDefaults).Scan(&hasDefaults); err != nil {
 		return result, fmt.Errorf("check feed defaults: %w", err)
 	}
 	if !hasDefaults {
 		d := doc.Defaults
-		if _, err := tx.ExecContext(ctx, sqlSetFeedDefaults,
+		if _, err := s.txExec(ctx, tx, sqlSetFeedDefaults,
 			nullBool(d.Enabled), nullDuration(d.Since), nullInt(d.MaxItems), nullTags(d.Tags),
 			now); err != nil {
 			return result, fmt.Errorf("seed feed defaults: %w", err)
@@ -402,7 +402,7 @@ func (s *Store) RenameSource(ctx context.Context, oldName, newName string) (int6
 	if oldName == newName || oldName == "" {
 		return 0, nil
 	}
-	res, err := s.db.ExecContext(ctx, sqlRenameSource, newName, oldName)
+	res, err := s.exec(ctx, sqlRenameSource, newName, oldName)
 	if err != nil {
 		return 0, fmt.Errorf("rename source %q: %w", oldName, err)
 	}
@@ -416,7 +416,7 @@ func (s *Store) RenameSource(ctx context.Context, oldName, newName string) (int6
 // knownFeedKeys is every name and URL the store holds, deleted rows included,
 // as the prefixed keys of one map — the seeder's "have I seen this" test.
 func (s *Store) knownFeedKeys(ctx context.Context) (map[string]bool, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT name, url FROM feeds`)
+	rows, err := s.query(ctx, `SELECT name, url FROM feeds`)
 	if err != nil {
 		return nil, fmt.Errorf("query feed keys: %w", err)
 	}
@@ -476,7 +476,7 @@ func scanFeed(row rowScanner) (config.Feed, error) {
 // findFeedConflict reports the ID of a feed already holding name or url. A live
 // match is an error; a deleted one is returned as the row to restore. exclude
 // is the feed being edited, which can of course keep its own name and URL.
-func findFeedConflict(ctx context.Context, tx *sql.Tx, name, url, exclude string) (string, error) {
+func (s *Store) findFeedConflict(ctx context.Context, tx *sql.Tx, name, url, exclude string) (string, error) {
 	for _, probe := range []struct {
 		query string
 		arg   string
@@ -489,7 +489,7 @@ func findFeedConflict(ctx context.Context, tx *sql.Tx, name, url, exclude string
 			id   string
 			live bool
 		)
-		err := tx.QueryRowContext(ctx, probe.query, probe.arg).Scan(&id, &live)
+		err := s.txQueryRow(ctx, tx, probe.query, probe.arg).Scan(&id, &live)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
