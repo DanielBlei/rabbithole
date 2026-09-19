@@ -18,7 +18,7 @@ import (
 // restart is the same store behind a new process: every in-memory session gone.
 func restart(t *testing.T, w *Web, b ...*browser) *Web {
 	t.Helper()
-	fresh := New(w.db, &config.Config{}, ":8080", "", testIngestManager(t, w.db))
+	fresh := New(w.db, &config.Config{}, "", testIngestManager(t, w.db))
 	for _, br := range b {
 		br.h = fresh.Gate(fresh.Routes())
 	}

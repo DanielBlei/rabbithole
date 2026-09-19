@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os/user"
 	"strconv"
 	"strings"
@@ -64,6 +65,13 @@ const (
 	midSignalScore  = rank.MidSignalScore
 )
 
+// The score scale the slider runs, and the one the store records: 0-10, both
+// ends included. A selection spanning the whole of it is the filter off.
+const (
+	scoreFloor = 0
+	scoreCeil  = 10
+)
+
 // What the thumbs write to user_score. Both sit inside the store's 0-10 range,
 // so a finer-grained control can replace them without touching the column.
 const (
@@ -75,7 +83,6 @@ const (
 type Web struct {
 	db      *store.Store
 	cfg     *config.Config
-	addr    string // the serve listen address, shown in the faux shell prompt
 	user    string // shell-prompt name: cfg.User, or the OS user when blank
 	cfgPath string // config file path, read on demand by the config viewer
 	ing     *ingest.Manager
@@ -87,13 +94,12 @@ type Web struct {
 	dev      bool           // serve assets no-cache, for editing them live
 }
 
-// New returns a Web backed by db, using cfg for request defaults. addr is the
-// listen address the serve command bound, surfaced in the page's shell prompt.
-// cfgPath is the config file the viewer reads and displays read-only. ing owns
-// the in-process ingest runs the UI triggers and watches.
-func New(db *store.Store, cfg *config.Config, addr, cfgPath string, ing *ingest.Manager) *Web {
+// New returns a Web backed by db, using cfg for request defaults. cfgPath is
+// the config file the viewer reads and displays read-only. ing owns the
+// in-process ingest runs the UI triggers and watches.
+func New(db *store.Store, cfg *config.Config, cfgPath string, ing *ingest.Manager) *Web {
 	return &Web{
-		db: db, cfg: cfg, addr: addr, user: promptUser(cfg.User), cfgPath: cfgPath, ing: ing,
+		db: db, cfg: cfg, user: promptUser(cfg.User), cfgPath: cfgPath, ing: ing,
 		sessions: newSessionStore(), limiter: newLoginLimiter(),
 		hashing: make(chan struct{}, hashSlots), trusted: DefaultTrustedProxies,
 	}
@@ -253,7 +259,6 @@ type pageData struct {
 	Active             string
 	Chrome             chromeData // shared topbar/rail state (ingest chip + rail action)
 	PromptUser         string     // shell-prompt user in the pane title bar
-	ServeCmd           string     // the command the prompt shows running, incl. the real --addr
 	Stats              statsData
 	Sources            []pickChip // every source in the store, with the picked ones flagged
 	SourcesPick        pickState  // what the source button reads while closed
@@ -267,8 +272,14 @@ type pageData struct {
 	FilterShowSeen     bool
 	FilterShowHidden   bool
 	FilterShowBookmark bool
-	FilterSearch       string     // the search control's text, echoed back into its field and button
-	Tags               []pickChip // every tag in the store, with the picked ones flagged
+	FilterSearch       string // the search control's text, echoed back into its field and button
+	// The score band's two ends, as the slider's thumbs stand. Both are always
+	// rendered (a range input always has a value); scoreFloor-scoreCeil is the
+	// filter off, which is what ScorePick.On reports.
+	ScoreMin  int
+	ScoreMax  int
+	ScorePick pickState
+	Tags      []pickChip // every tag in the store, with the picked ones flagged
 	// Tags and View name themselves on the button rather than wearing their
 	// value, so their pickState is what the tooltip lists and what decides
 	// whether they count towards Narrowed — not a label.
@@ -277,7 +288,11 @@ type pageData struct {
 	SortPick pickState // what the sort button reads while closed
 	// Narrowed is whether anything in the bar is filtering, which is the whole
 	// question the "clear" button answers — so it decides whether one renders.
-	Narrowed  bool
+	Narrowed bool
+	// Args is the same narrowing as the arguments of the line the pane's title
+	// bar reads, each carrying the URL that drops it. Built from the fields
+	// above, so the bar and the zero-state can't say different things.
+	Args      []cmdArg
 	ListLimit int // listLimit, so the pager can say when the set below is truncated
 	Rows      []rowData
 	Empty     emptyData // the zero-state, filled only when Rows is empty
@@ -370,7 +385,10 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		sort = store.SortByLatest
 	}
 	after, before, custom := windowFor(published, from, to)
-	if custom {
+	// "custom" is the fold that unfolds the two date fields, not a window of its
+	// own: with a date it is the range, with neither it narrows nothing. Either
+	// way the word is not a window the rest of the page can read.
+	if custom || published == "custom" {
 		published = ""
 	}
 
@@ -381,6 +399,11 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 	if runes := []rune(search); len(runes) > maxSearchLen {
 		search = string(runes[:maxSearchLen])
 	}
+
+	// The score band, both ends included. Only a narrowed band reaches the store:
+	// the full range means the filter is off, and passing it as bounds would
+	// drop every unscored item from an unfiltered feed.
+	scoreLo, scoreHi, scoreOn := scoreRange(q)
 
 	// Source and tag chips: multi-select, OR within each set, AND across them.
 	// Repeated params rather than one comma-joined value, so a feed name with a
@@ -428,6 +451,8 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 			Before:     before,
 			Bookmarked: onlyBookmark,
 			Search:     search,
+			MinScore:   scoreBound(scoreLo, scoreOn),
+			MaxScore:   scoreBound(scoreHi, scoreOn),
 			SortBy:     sort,
 			Limit:      listLimit,
 		})
@@ -458,7 +483,6 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		Active:     "feed",
 		Chrome:     chrome,
 		PromptUser: s.user,
-		ServeCmd:   "go run . serve --addr " + s.addr,
 		Stats: s.stats(
 			r,
 			rows,
@@ -473,6 +497,8 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 				Before:     before,
 				Bookmarked: onlyBookmark,
 				Search:     search,
+				MinScore:   scoreBound(scoreLo, scoreOn),
+				MaxScore:   scoreBound(scoreHi, scoreOn),
 			},
 		),
 		Sources:            pickChips(sourceNames(counts), pickedSources),
@@ -488,6 +514,9 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		FilterShowHidden:   showHidden,
 		FilterShowBookmark: onlyBookmark,
 		FilterSearch:       search,
+		ScoreMin:           scoreLo,
+		ScoreMax:           scoreHi,
+		ScorePick:          wornScore(scoreLo, scoreHi, scoreOn),
 		Tags:               pickChips(tagOptions, pickedTags),
 		TagsPick:           worn(pickedTags, "All"),
 		ListLimit:          listLimit,
@@ -498,7 +527,8 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 	// its own chips spell it; latest is the default and so isn't a narrowing.
 	data.SortPick = pickState{Label: sortLabel(sort), On: sort != store.SortByLatest}
 	data.Narrowed = data.SourcesPick.On || data.TagsPick.On || data.ViewPick.On ||
-		published != "" || custom || search != "" || sort != store.SortByLatest
+		published != "" || custom || search != "" || scoreOn || sort != store.SortByLatest
+	data.Args = data.args(q)
 	if len(items) == 0 {
 		data.Empty = s.emptyState(r.Context(), chrome.IngNever, data.cmd())
 	}
@@ -531,54 +561,184 @@ func (s *Web) emptyState(ctx context.Context, neverIngested bool, cmd string) em
 	return e
 }
 
-// cmd renders the active filters as a shell line in the filter bar's own
-// vocabulary. The zero-state shows it as the command that came back with
-// nothing, so an empty page says which view is empty.
-func (d pageData) cmd() string {
-	cmd := "rabbithole feed"
+// feedCmd is the command the readout and the zero-state both quote. The
+// filters are its arguments, so one line answers "what is this page showing"
+// in the vocabulary the CLI already uses. Bare: the prompt beside it already
+// says which hole this is, and the line reads as typed rather than as a
+// program being named twice.
+const feedCmd = "feed"
+
+// cmdArg is one active filter as an argument of that line: the flag, the value
+// it carries (empty for a boolean like --unread), and the feed URL with this
+// one filter dropped. Drop is empty for an argument that can't be undone on its
+// own — a note like "--status none", or any argument built without a query.
+type cmdArg struct {
+	Flag  string
+	Value string
+	Quote bool // values that carry spaces: feed names and the search text
+	Drop  string
+}
+
+// text is the argument as the shell line spells it.
+func (a cmdArg) text() string {
+	switch {
+	case a.Value == "":
+		return a.Flag
+	case a.Quote:
+		return a.Flag + " " + strconv.Quote(a.Value)
+	}
+	return a.Flag + " " + a.Value
+}
+
+// args is the active filters as the readout's arguments, in the order the line
+// spells them. q is the request's query, which each argument needs to write the
+// URL that drops it; a nil q builds the same list with no links, which is what
+// cmd() renders for the zero-state.
+func (d pageData) args(q url.Values) []cmdArg {
+	var out []cmdArg
+	// Unread-only is where a bare feed lands, so the line doesn't spell it out:
+	// an argument that is on every page says nothing about this one. The moment
+	// another status or the bookmark filter is on, which statuses are showing is
+	// a real question, and --unread comes back to answer it.
+	landing := d.FilterShowUnread && !d.FilterShowSeen && !d.FilterShowHidden && !d.FilterShowBookmark
+	// A status is a way out only while another status survives it: dropping the
+	// last one leaves a view holding nothing, which the View menu can still do on
+	// purpose but the line should not offer by accident. Bookmarked is orthogonal
+	// and always drops.
+	onlyStatus := statusCount(d.FilterShowUnread, d.FilterShowSeen, d.FilterShowHidden) == 1
 	for _, f := range []struct {
-		on   bool
-		flag string
+		on     bool
+		flag   string
+		key    string
+		status bool
 	}{
-		{d.FilterShowUnread, "--unread"},
-		{d.FilterShowSeen, "--seen"},
-		{d.FilterShowHidden, "--hidden"},
-		{d.FilterShowBookmark, "--bookmarked"},
+		{d.FilterShowUnread && !landing, "--unread", "unread", true},
+		{d.FilterShowSeen, "--seen", "seen", true},
+		{d.FilterShowHidden, "--hidden", "hidden", true},
+		{d.FilterShowBookmark, "--bookmarked", "bookmarked", false},
 	} {
-		if f.on {
-			cmd += " " + f.flag
+		if !f.on {
+			continue
 		}
+		arg := cmdArg{Flag: f.flag}
+		if !f.status || !onlyStatus {
+			arg.Drop = dropArg(q, f.key, "")
+		}
+		out = append(out, arg)
 	}
 	// Every status chip cleared is itself the reason the page is empty — say so
 	// rather than rendering a bare command that looks like it should have worked.
+	// A note, not a filter: there is nothing to drop.
 	if !d.FilterShowUnread && !d.FilterShowSeen && !d.FilterShowHidden {
-		cmd += " --status none"
+		out = append(out, cmdArg{Flag: "--status", Value: "none"})
 	}
 	switch {
 	case d.FilterCustom:
 		if d.FilterFrom != "" {
-			cmd += " --from " + d.FilterFrom
+			out = append(out, cmdArg{Flag: "--from", Value: d.FilterFrom, Drop: dropArg(q, "from", "")})
 		}
 		if d.FilterTo != "" {
-			cmd += " --to " + d.FilterTo
+			out = append(out, cmdArg{Flag: "--to", Value: d.FilterTo, Drop: dropArg(q, "to", "")})
 		}
 	case d.FilterPublished != "":
-		cmd += " --published " + d.FilterPublished
+		// The window and the two custom dates are one control, so dropping it
+		// takes the fields it unfolds with it.
+		out = append(out, cmdArg{
+			Flag: "--published", Value: d.FilterPublished,
+			Drop: dropArg(q, "published", "", "from", "to"),
+		})
 	}
 	// Repeated flags for the multi-selects, the way the query string repeats
-	// them. Quoted, since feed names and the search text carry spaces.
+	// them, so each pick is its own argument and drops on its own. Quoted, since
+	// feed names and the search text carry spaces.
 	for _, chip := range d.Sources {
 		if chip.On {
-			cmd += " --source " + strconv.Quote(chip.Value)
+			out = append(out, cmdArg{
+				Flag: "--source", Value: chip.Value, Quote: true,
+				Drop: dropArg(q, "source", chip.Value),
+			})
 		}
 	}
 	for _, chip := range d.Tags {
 		if chip.On {
-			cmd += " --tag " + strconv.Quote(chip.Value)
+			out = append(out, cmdArg{
+				Flag: "--tag", Value: chip.Value, Quote: true,
+				Drop: dropArg(q, "tag", chip.Value),
+			})
 		}
 	}
 	if d.FilterSearch != "" {
-		cmd += " --search " + strconv.Quote(d.FilterSearch)
+		out = append(out, cmdArg{
+			Flag: "--search", Value: d.FilterSearch, Quote: true,
+			Drop: dropArg(q, "search", ""),
+		})
+	}
+	// The band, spelled the way the closed button spells it, and only while it
+	// is narrowing something. The full range is the filter being off, and its two
+	// ends are one control: dropping it puts both thumbs back.
+	if d.ScorePick.On {
+		out = append(out, cmdArg{
+			Flag: "--score", Value: d.ScorePick.Label,
+			Drop: dropArg(q, "smin", "", "smax"),
+		})
+	}
+	// Sort is an ordering rather than a narrowing, but it is still something the
+	// bar is doing that the page cannot show on its own — latest is the default
+	// and so says nothing.
+	if d.SortPick.On {
+		out = append(out, cmdArg{
+			Flag: "--sort", Value: d.FilterSort,
+			Drop: dropArg(q, "sort", ""),
+		})
+	}
+	return out
+}
+
+// statusCount is how many of the three statuses are on.
+func statusCount(on ...bool) int {
+	n := 0
+	for _, s := range on {
+		if s {
+			n++
+		}
+	}
+	return n
+}
+
+// dropArg is the feed URL with one filter taken out: the query minus one value
+// of a repeated key (or the whole key when value is empty), minus the companion
+// keys a filter is spelled with. Without a query there is nothing to link to,
+// which is what leaves an argument unremovable.
+func dropArg(q url.Values, key, value string, also ...string) string {
+	if q == nil {
+		return ""
+	}
+	left := url.Values{}
+	for k, vs := range q {
+		for _, v := range vs {
+			if k == key && (value == "" || v == value) {
+				continue
+			}
+			left.Add(k, v)
+		}
+	}
+	for _, k := range also {
+		left.Del(k)
+	}
+	if len(left) == 0 {
+		return "/feed"
+	}
+	return "/feed?" + left.Encode()
+}
+
+// cmd renders the active filters as a shell line in the filter bar's own
+// vocabulary. The pane's title bar reads it as the command this view is, and
+// the zero-state as the command that came back with nothing, so an empty page
+// says which view is empty.
+func (d pageData) cmd() string {
+	cmd := feedCmd
+	for _, a := range d.args(nil) {
+		cmd += " " + a.text()
 	}
 	return cmd
 }
@@ -777,6 +937,61 @@ func cleanPicks(values []string) []string {
 		}
 	}
 	return out
+}
+
+// scoreRange reads the score slider's two ends off the query. Both are always
+// present once the bar has been submitted (a range input always has a value),
+// so the defaults here are for a bare /feed and for a hand-written URL.
+//
+// A value that doesn't parse leaves that end where it was, one out of range is
+// pulled back to it, and a crossed pair is put back in order rather than
+// rejected: the thumbs can be dragged past each other, and a band is the two
+// numbers whichever way round they arrive. on reports whether the pair narrows
+// anything, which is the only thing the rest of the page asks it.
+func scoreRange(q url.Values) (lo, hi int, on bool) {
+	lo, hi = scoreFloor, scoreCeil
+	if n, err := strconv.Atoi(q.Get("smin")); err == nil {
+		lo = clampScore(n)
+	}
+	if n, err := strconv.Atoi(q.Get("smax")); err == nil {
+		hi = clampScore(n)
+	}
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	return lo, hi, lo != scoreFloor || hi != scoreCeil
+}
+
+func clampScore(n int) int {
+	return min(max(n, scoreFloor), scoreCeil)
+}
+
+// scoreBound is one end of the band as the store wants it: the value while the
+// filter is narrowing, nil while it isn't. An unnarrowed feed passes no bounds
+// at all, so it keeps the items the model hasn't scored yet.
+func scoreBound(n int, on bool) *int {
+	if !on {
+		return nil
+	}
+	return &n
+}
+
+// wornScore builds the score button's closed state. It wears the band the way
+// the menu reads it ("2-5", or a single number when the ends meet), and "All"
+// when it spans the scale, the same word every other filter's unnarrowed button
+// uses.
+func wornScore(lo, hi int, on bool) pickState {
+	st := pickState{Label: "All", On: on}
+	switch {
+	case !on:
+	case lo == hi:
+		st.Label = strconv.Itoa(lo)
+		st.Title = "Only score " + st.Label
+	default:
+		st.Label = strconv.Itoa(lo) + "-" + strconv.Itoa(hi)
+		st.Title = "Scores " + strconv.Itoa(lo) + " to " + strconv.Itoa(hi)
+	}
+	return st
 }
 
 func sourceNames(counts []store.SourceCount) []string {

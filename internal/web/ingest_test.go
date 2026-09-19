@@ -41,7 +41,7 @@ func newIngestWeb(t *testing.T) *Web {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	return New(db, cfg, ":8080", "", m)
+	return New(db, cfg, "", m)
 }
 
 func get(t *testing.T, w *Web, path string) string {

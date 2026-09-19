@@ -47,7 +47,7 @@ func newTestWeb(t *testing.T) *Web {
 		nil, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	return New(db, &config.Config{}, ":8080", "", testIngestManager(t, db))
+	return New(db, &config.Config{}, "", testIngestManager(t, db))
 }
 
 func post(t *testing.T, w *Web, path string) *httptest.ResponseRecorder {
@@ -189,7 +189,7 @@ func newEmptyWeb(t *testing.T) *Web {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return New(db, &config.Config{}, ":8080", "", testIngestManager(t, db))
+	return New(db, &config.Config{}, "", testIngestManager(t, db))
 }
 
 // A never-ingested store lands on the first-run zero-state: the ingest chip and
@@ -271,22 +271,24 @@ func TestPageDataCmd(t *testing.T) {
 		data pageData
 		want string
 	}{
-		{"default", pageData{FilterShowUnread: true}, "rabbithole feed --unread"},
+		// Unread-only is the landing view: the line says nothing it would say on
+		// every page.
+		{"landing view", pageData{FilterShowUnread: true}, "feed"},
 		{
 			"window and statuses",
 			pageData{FilterShowUnread: true, FilterShowSeen: true, FilterPublished: "7d"},
-			"rabbithole feed --unread --seen --published 7d",
+			"feed --unread --seen --published 7d",
 		},
 		{
 			"bookmark library",
 			pageData{FilterShowUnread: true, FilterShowSeen: true, FilterShowHidden: true, FilterShowBookmark: true},
-			"rabbithole feed --unread --seen --hidden --bookmarked",
+			"feed --unread --seen --hidden --bookmarked",
 		},
-		{"no status picked", pageData{}, "rabbithole feed --status none"},
+		{"no status picked", pageData{}, "feed --status none"},
 		{
 			"search, quoted because it's free text",
 			pageData{FilterShowUnread: true, FilterSearch: "edge cases"},
-			`rabbithole feed --unread --search "edge cases"`,
+			`feed --search "edge cases"`,
 		},
 		{
 			// Only the picked chips make it into the line, repeated per pick.
@@ -296,7 +298,7 @@ func TestPageDataCmd(t *testing.T) {
 				Sources:          []pickChip{{Value: "Red Hat", On: true}, {Value: "HF blog"}},
 				Tags:             []pickChip{{Value: "AI", On: true}, {Value: "Infra", On: true}},
 			},
-			`rabbithole feed --unread --source "Red Hat" --tag "AI" --tag "Infra"`,
+			`feed --source "Red Hat" --tag "AI" --tag "Infra"`,
 		},
 		{
 			"custom range wins over the window",
@@ -307,7 +309,18 @@ func TestPageDataCmd(t *testing.T) {
 				FilterFrom:       "2026-01-02",
 				FilterTo:         "2026-01-09",
 			},
-			"rabbithole feed --unread --from 2026-01-02 --to 2026-01-09",
+			"feed --from 2026-01-02 --to 2026-01-09",
+		},
+		{
+			"score band, spelled the way the button wears it",
+			pageData{FilterShowUnread: true, ScorePick: wornScore(2, 5, true)},
+			"feed --score 2-5",
+		},
+		{
+			// The full scale is the filter off, so it says nothing.
+			"unnarrowed score band",
+			pageData{FilterShowUnread: true, ScorePick: wornScore(0, 10, false)},
+			"feed",
 		},
 	}
 	for _, tt := range tests {
@@ -335,7 +348,7 @@ func TestFeedSearch(t *testing.T) {
 	if err := db.Record(context.Background(), items, nil, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	w := New(db, &config.Config{}, ":8080", "", testIngestManager(t, db))
+	w := New(db, &config.Config{}, "", testIngestManager(t, db))
 
 	body := get(t, w, "/feed?view=1&unread=1&search=kuber")
 	if !strings.Contains(body, "Kubernetes at the edge") {
@@ -346,6 +359,83 @@ func TestFeedSearch(t *testing.T) {
 	}
 	if !strings.Contains(body, `value="kuber"`) {
 		t.Error("search text didn't come back in the search field")
+	}
+}
+
+// Rows per page is the pager's own count: the range it names is a button that
+// cycles the page size client-side, so it renders wherever the count does and
+// only when there is something to page.
+func TestFeedPagerRowsControl(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	items := []feeds.Item{{ID: "a", Source: "S1", Title: "One", Link: "https://x/a"}}
+	if err := db.Record(context.Background(), items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	w := New(db, &config.Config{}, "", testIngestManager(t, db))
+
+	body := get(t, w, "/feed")
+	// Both pagers carry it: they write the same sentence.
+	if n := strings.Count(body, "data-rows-btn"); n != 2 {
+		t.Errorf("rows control renders %d times, want one per pager; body=%s", n, body)
+	}
+	if !strings.Contains(body, "data-rows-hint") {
+		t.Error("the rows control has no hint to name the setting it changes")
+	}
+
+	// Nothing to page through, nothing to size: the pagers are not rendered.
+	body = get(t, w, "/feed?view=1&search=nothingmatchesthis")
+	if strings.Contains(body, "data-rows-btn") {
+		t.Error("an empty feed should carry no pager and no rows control")
+	}
+}
+
+// The bar reads the view back as a command, and every argument on it is a way
+// out of that one filter: the link is this same query minus itself, so the rest
+// of the narrowing survives dropping one part of it.
+func TestFeedCmdArgs(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	items := []feeds.Item{
+		{ID: "a", Source: "Red Hat", Title: "Edge computing", Link: "https://x/a", Tags: []string{"Infra"}},
+		{ID: "b", Source: "HF blog", Title: "Small models", Link: "https://x/b", Tags: []string{"AI"}},
+	}
+	if err := db.Record(context.Background(), items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	w := New(db, &config.Config{}, "", testIngestManager(t, db))
+
+	body := get(t, w, "/feed?view=1&unread=1&source=Red+Hat&source=HF+blog&published=7d")
+	for _, want := range []string{"--source", "--published"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the line is missing %s; body=%s", want, body)
+		}
+	}
+	// Dropping one source keeps the other, and keeps the window.
+	if !strings.Contains(body, "/feed?published=7d&amp;source=HF&#43;blog&amp;unread=1&amp;view=1") {
+		t.Errorf("no way out of the Red Hat pick alone; body=%s", body)
+	}
+	// Dropping the window keeps both sources, and takes the custom dates with it.
+	if !strings.Contains(body, "/feed?source=Red&#43;Hat&amp;source=HF&#43;blog&amp;unread=1&amp;view=1") {
+		t.Errorf("no way out of the window alone; body=%s", body)
+	}
+
+	// The landing view is unread-only, which every page would say: the line is
+	// the bare command, and only a real narrowing puts arguments on it.
+	body = get(t, w, "/feed")
+	if strings.Contains(body, "cmd__arg") {
+		t.Errorf("an unfiltered bar should carry no arguments; body=%s", body)
+	}
+	// It comes back as soon as the statuses are a choice rather than the default.
+	body = get(t, w, "/feed?view=1&unread=1&seen=1")
+	if !strings.Contains(body, "--unread") || !strings.Contains(body, "--seen") {
+		t.Errorf("a mixed status view should spell both statuses; body=%s", body)
 	}
 }
 
@@ -365,7 +455,7 @@ func TestFeedSourceAndTagFilters(t *testing.T) {
 	if err := db.Record(context.Background(), items, nil, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	w := New(db, &config.Config{}, ":8080", "", testIngestManager(t, db))
+	w := New(db, &config.Config{}, "", testIngestManager(t, db))
 
 	body := get(t, w, "/feed?view=1&unread=1&source=Red+Hat")
 	if !strings.Contains(body, "Edge computing") || strings.Contains(body, "Small models") {
@@ -393,6 +483,76 @@ func TestFeedSourceAndTagFilters(t *testing.T) {
 
 	if body = get(t, w, "/feed"); strings.Contains(body, "filter__clear") {
 		t.Error("an unfiltered bar should not offer the reset")
+	}
+}
+
+// The score band is a store query like the rest of the bar: it narrows what
+// comes back, both ends are included, and an item the model never scored is out
+// of every band, but still in an unfiltered feed.
+func TestFeedScoreFilter(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	items := []feeds.Item{
+		{ID: "a", Source: "S1", Title: "Scored two", Link: "https://x/a"},
+		{ID: "b", Source: "S1", Title: "Scored five", Link: "https://x/b"},
+		{ID: "c", Source: "S1", Title: "Scored nine", Link: "https://x/c"},
+		{ID: "d", Source: "S1", Title: "Never scored", Link: "https://x/d"},
+	}
+	digested := []store.DigestEntry{
+		{Item: items[0], Score: 2, Reason: "low"},
+		{Item: items[1], Score: 5, Reason: "mid"},
+		{Item: items[2], Score: 9, Reason: "high"},
+	}
+	if err := db.Record(context.Background(), items, digested, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	w := New(db, &config.Config{}, "", testIngestManager(t, db))
+
+	// Both ends included: the 2 and the 5 are in, the 9 is not.
+	body := get(t, w, "/feed?view=1&unread=1&smin=2&smax=5")
+	for _, want := range []string{"Scored two", "Scored five"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("score band dropped %q, which sits on its edge", want)
+		}
+	}
+	for _, unwanted := range []string{"Scored nine", "Never scored"} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("score band rendered %q", unwanted)
+		}
+	}
+	if !strings.Contains(body, "filter__clear") {
+		t.Error("a narrowed bar should offer the reset")
+	}
+
+	// The full scale is the filter off, so the unscored item is back.
+	body = get(t, w, "/feed?view=1&unread=1&smin=0&smax=10")
+	if !strings.Contains(body, "Never scored") {
+		t.Error("the full scale should be the filter off, unscored items included")
+	}
+	if strings.Contains(body, "filter__clear") {
+		t.Error("the full scale is not a narrowing and should not offer the reset")
+	}
+
+	// Thumbs that crossed, or a hand-written URL with the ends the wrong way
+	// round: a band is the two numbers whichever order they arrive in.
+	body = get(t, w, "/feed?view=1&unread=1&smin=9&smax=5")
+	if !strings.Contains(body, "Scored five") || !strings.Contains(body, "Scored nine") {
+		t.Errorf("a crossed pair should read as the band between them; body=%s", body)
+	}
+	if strings.Contains(body, "Scored two") {
+		t.Error("a crossed pair widened the band instead of reversing it")
+	}
+
+	// Out of range is pulled back to the end of the scale rather than rejected.
+	body = get(t, w, "/feed?view=1&unread=1&smin=-5&smax=5")
+	if !strings.Contains(body, "Scored two") || strings.Contains(body, "Scored nine") {
+		t.Errorf("an out-of-range floor should clamp to 0, not error; body=%s", body)
+	}
+	if strings.Contains(body, "Never scored") {
+		t.Error("a clamped band is still a band; the unscored item should be out")
 	}
 }
 

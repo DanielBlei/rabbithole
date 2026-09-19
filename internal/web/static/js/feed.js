@@ -4,6 +4,7 @@
 // The filter bar has no submit button — every control submits on change, and
 // each one carries data-filter naming what its change should do. Delegated on
 // document so it keeps working on a re-rendered pane.
+var rangeSubmit; // the score band's coalescing timer, see the bottom of this handler
 document.addEventListener('change', function(e){
   var el = e.target.closest && e.target.closest('[data-filter]');
   if (!el) return;
@@ -17,9 +18,16 @@ document.addEventListener('change', function(e){
     // clears its menu's chips and submits without them. Unchecking it directly
     // would mean what it already means, so it just puts itself back.
     if (!el.checked){ el.checked = true; return; }
-    el.closest('.popmenu__panel').querySelectorAll('input[type="checkbox"]').forEach(function(box){
+    var panel = el.closest('.popmenu__panel');
+    panel.querySelectorAll('input[type="checkbox"]').forEach(function(box){
       if (box !== el) box.checked = false;
     });
+    // A range has no unchecked state to fall back to: "all" for the score band
+    // is both thumbs back on the ends of the scale.
+    panel.querySelectorAll('input[type="range"]').forEach(function(slider){
+      slider.value = slider.dataset.score === 'lo' ? slider.min : slider.max;
+    });
+    if (window.scoreRange) window.scoreRange.paint();
   } else if (kind === 'bookmark' && el.checked){
     // Checking Bookmarked enters the saved-library view; auto-tick all three
     // status units first so the whole library shows on entry (a saved item may
@@ -30,15 +38,160 @@ document.addEventListener('change', function(e){
       if (b) b.checked = true;
     });
   }
+  // A range is the only control here whose value changes many times from one
+  // gesture: every arrow keypress fires change, and so does every drag that
+  // ends on a different notch. Coalesce those into one navigation. Everything
+  // else submits on the spot, the way the bar has always worked.
+  if (el.type === 'range'){
+    clearTimeout(rangeSubmit);
+    var form = el.form;
+    rangeSubmit = setTimeout(function(){ form.submit(); }, 400);
+    return;
+  }
   el.form.submit();
 });
+
+// The score band's two thumbs. They share one track, so this owns the pointer
+// for both of them: it decides which thumb a press is reaching for, drags it,
+// and keeps the pair in order. The form submit is the delegated handler above,
+// on the change this fires when the press ends.
+//
+// The thumbs are not dragged natively. Two range inputs stacked over one track
+// have to stop taking the pointer over their whole width or the upper one
+// swallows every press meant for the lower one's thumb, and an input that has
+// given up the pointer cannot be dragged. Driving them from here gets the
+// other half back too: the track can be pressed anywhere, and the nearer thumb
+// comes to meet the press, which is what a slider does.
+//
+// Global so the "All scores" chip can repaint after putting both thumbs back.
+window.scoreRange = (function(){
+  var THUMB = 7; // half a thumb's width, the inset the track is painted with
+
+  function ends(){
+    return {
+      box: document.querySelector('[data-srange]'),
+      lo: document.querySelector('[data-score="lo"]'),
+      hi: document.querySelector('[data-score="hi"]'),
+    };
+  }
+
+  // Paint the track from wherever the thumbs stand, and say the band in words
+  // above it. Read off the DOM every time: the pane is re-rendered on every
+  // filter change and swapped by htmx on a row mutation.
+  function paint(){
+    var el = ends();
+    if (!el.box || !el.lo || !el.hi) return;
+    var lo = +el.lo.value, hi = +el.hi.value;
+    el.box.style.setProperty('--lo', lo);
+    el.box.style.setProperty('--hi', hi);
+    document.querySelectorAll('[data-score-out]').forEach(function(out){
+      out.textContent = out.dataset.scoreOut === 'lo' ? lo : hi;
+    });
+    // Two thumbs on the same notch are one thumb to look at. Lifting the low
+    // one above the high one keeps which is which stable while they overlap.
+    el.lo.classList.toggle('srange__in--over', lo >= hi);
+  }
+
+  // Where along the scale a press landed. The track is inset by half a thumb at
+  // each end so its 0% is the thumb's centre at 0, and this has to measure the
+  // same span or a press at either end would ask for a score off the scale.
+  function valueAt(box, x){
+    var rect = box.getBoundingClientRect();
+    var span = rect.width - THUMB * 2;
+    if (span <= 0) return 0;
+    var at = Math.round((x - rect.left - THUMB) / span * 10);
+    return Math.min(10, Math.max(0, at));
+  }
+
+  // Which thumb a press at this score is reaching for: the one outside it if
+  // the press is beyond the band, otherwise the nearer of the two. A tie inside
+  // the band goes to the low thumb, so a press in the middle of a wide band
+  // always does the same thing.
+  function nearest(el, at){
+    var lo = +el.lo.value, hi = +el.hi.value;
+    if (at < lo) return el.lo;
+    if (at > hi) return el.hi;
+    return at - lo <= hi - at ? el.lo : el.hi;
+  }
+
+  // The thumbs push rather than stop: dragging the low one past the high one
+  // carries it along. Clamping instead would strand both of them against an end
+  // of the scale, with the covered thumb unreachable.
+  function move(el, thumb, at){
+    thumb.value = at;
+    if (thumb === el.lo && +el.hi.value < at) el.hi.value = at;
+    if (thumb === el.hi && +el.lo.value > at) el.lo.value = at;
+    paint();
+  }
+
+  var dragging = null;
+
+  document.addEventListener('pointerdown', function(e){
+    var box = e.target.closest && e.target.closest('[data-srange]');
+    if (!box || e.button !== 0) return;
+    var el = ends();
+    if (!el.lo || !el.hi) return;
+    e.preventDefault();
+    var at = valueAt(box, e.clientX);
+    dragging = nearest(el, at);
+    // The press hands the keyboard the same thumb it just moved, so the arrows
+    // carry on from where the pointer left off.
+    dragging.focus();
+    box.setPointerCapture(e.pointerId);
+    dragging._box = box;
+    move(el, dragging, at);
+  });
+
+  document.addEventListener('pointermove', function(e){
+    if (!dragging) return;
+    var el = ends();
+    if (el.lo && el.hi) move(el, dragging, valueAt(dragging._box, e.clientX));
+  });
+
+  function release(e){
+    if (!dragging) return;
+    var thumb = dragging;
+    dragging = null;
+    if (thumb._box && e.pointerId !== undefined && thumb._box.hasPointerCapture(e.pointerId)){
+      thumb._box.releasePointerCapture(e.pointerId);
+    }
+    // The delegated filter handler submits on change, debounced. A range input
+    // dispatched to by script doesn't fire one on its own.
+    thumb.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  document.addEventListener('pointerup', release);
+  document.addEventListener('pointercancel', release);
+
+  // The keyboard still drives the inputs themselves, which is the whole reason
+  // they are real range inputs: this only has to keep the pair in order and the
+  // track painted afterwards.
+  document.addEventListener('input', function(e){
+    var moved = e.target.closest && e.target.closest('[data-score]');
+    if (!moved || dragging) return;
+    var el = ends();
+    if (el.lo && el.hi) move(el, moved, +moved.value);
+  });
+
+  document.addEventListener('htmx:afterSwap', paint);
+  paint();
+  return { paint: paint };
+})();
 
 // Mockup-era client-side pagination, kept only so this page is interactive to
 // evaluate. Replaced by real server-side after/before/limit paging + htmx once
 // backend work starts — see .claude/frontend-goals.md. Global (not in an IIFE)
 // so the tag filter and the row-leave animation can re-render it.
 var feedPager = (function(){
-  var PAGE_SIZE = 10;
+  // The sizes the count cycles through. Three is what a cycle can carry before
+  // stepping to the one you want becomes a chore.
+  var SIZES = [10, 25, 50];
+  // Per browser, beside the clock and font prefs: how much lands at once is
+  // about the reader, not about this feed, and the server renders the same
+  // rows either way.
+  var size = (function(){
+    var saved = parseInt(localStorage.getItem('feed.rows'), 10);
+    return SIZES.indexOf(saved) === -1 ? SIZES[0] : saved;
+  })();
   var page = 1;
 
   var pane = document.getElementById('pane');
@@ -60,23 +213,40 @@ var feedPager = (function(){
     // with gaps.
     var shown = rows.filter(function(row){ return !row.classList.contains('row--filtered'); });
     var total = shown.length;
-    var totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    var totalPages = Math.max(1, Math.ceil(total / size));
     if (page > totalPages) page = totalPages;
-    var start = (page - 1) * PAGE_SIZE;
-    var end = Math.min(start + PAGE_SIZE, total);
+    var start = (page - 1) * size;
+    var end = Math.min(start + size, total);
 
     rows.forEach(function(row){ row.style.display = 'none'; });
     shown.forEach(function(row, i){
       if (i >= start && i < end) row.style.display = '';
     });
 
-    var label = total ? 'items ' + (start + 1) + '–' + end + ' of ' + total : 'no items';
     // The server caps the render at listLimit, so say when there are matches
     // below the fold that no amount of paging will reach.
     var limit = parseInt(pane.dataset.limit, 10);
     var avail = parseInt(pane.dataset.available, 10);
-    if (rows.length >= limit && avail > rows.length) label += ' · first ' + limit + ' of ' + avail;
-    infos.forEach(function(el){ if (el) el.textContent = label; });
+    var cap = rows.length >= limit && avail > rows.length ? ' · first ' + limit + ' of ' + avail : '';
+    var next = SIZES[(SIZES.indexOf(size) + 1) % SIZES.length];
+    // The range names the page you are on, which is the size only on page one
+    // and only while the page is full: at 50 of 46 items it reads 1-46. So the
+    // hint is what names the setting.
+    var says = size + ' rows per page';
+    infos.forEach(function(el){
+      if (!el) return;
+      var none = el.querySelector('[data-page-none]');
+      var some = el.querySelector('[data-page-some]');
+      if (none) none.hidden = total !== 0;
+      if (!some) return;
+      some.hidden = total === 0;
+      if (total === 0) return;
+      el.querySelector('[data-rows-btn]').textContent = (start + 1) + '–' + end;
+      el.querySelector('[data-rows-btn]').setAttribute('aria-label', says + ', click for ' + next);
+      el.querySelector('[data-rows-hint]').textContent = says + ' · click for ' + next;
+      el.querySelector('[data-page-total]').textContent = total;
+      el.querySelector('[data-page-cap]').textContent = cap;
+    });
     if (btnFirst) btnFirst.disabled = page === 1;
     tops.concat(bottoms).forEach(function(btn, i){
       if (btn) btn.disabled = (i % 2 === 0) ? page === 1 : page === totalPages;
@@ -94,6 +264,18 @@ var feedPager = (function(){
   // happens while you type, being yanked to the top of the pane on every
   // keystroke is worse than not moving at all.
   function reset(){ page = 1; render(); }
+
+  // The count is the control. Clicking the range it names steps the page size
+  // and puts you back on page one, the way a filter change does — paging is
+  // over a set that just changed shape, so where you were doesn't survive it.
+  document.querySelectorAll('[data-rows-btn]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      size = SIZES[(SIZES.indexOf(size) + 1) % SIZES.length];
+      localStorage.setItem('feed.rows', size);
+      page = 1;
+      render();
+    });
+  });
 
   if (btnFirst) btnFirst.addEventListener('click', function(){ goTo(1); });
   tops.concat(bottoms).forEach(function(btn, i){
@@ -154,9 +336,12 @@ var feedPager = (function(){
     // there's something to say, and CSS hides the span while it holds nothing.
     el.textContent = typed;
     var btn = el.closest('.popmenu__btn');
-    if (btn) btn.title = typed ? 'Searching for "' + typed + '"' : 'Search title, source or tag';
-    var dot = document.querySelector('[data-search-active]');
-    if (dot) dot.hidden = !typed;
+    if (btn) {
+      btn.title = typed ? 'Searching for "' + typed + '"' : 'Search title, source or tag';
+      // Same lit state every narrowing control in the bar wears, and in Minimal
+      // it's what shows the query on the closed button.
+      btn.classList.toggle('is-on', !!typed);
+    }
     // Nothing to clear on an empty field.
     var clear = document.querySelector('[data-search-clear]');
     if (clear) clear.hidden = !typed;

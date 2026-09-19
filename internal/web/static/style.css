@@ -648,10 +648,17 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
              0 1px 2px rgba(0,0,0,.25), 0 18px 44px rgba(0,0,0,.38);
 }
 .pane__bar{
-  display:flex;align-items:center;
+  display:flex;flex-wrap:wrap;align-items:center;
+  /* One space between arguments, the width the mono face gives one, so the
+     line reads as a command and not as a row of chips. The row gap is wider:
+     wrapped lines need to stay apart. */
+  gap:.7em .6em;
   padding:9px 14px;border-bottom:1px solid var(--line);
   font-size:1.25rem;color:var(--text-dim);
 }
+/* The prompt is one flex item, so the bar's gap spaces the arguments after it
+   and not the prompt's own pieces. */
+.pane__ps{white-space:pre;}
 /* Faux shell prompt, classic zsh colouring: green user@host, blue path, dim
    punctuation (inherited from the bar), bright command. Shared by the feed
    pane, both maze widgets, and the ingest modal's title bar. */
@@ -659,14 +666,67 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .pane__path{color:var(--blue);}
 .pane__cmd{color:var(--title);}
 
+/* The active filters as that command's arguments, one space apart, because the
+   line is a command and not a row of chips. Each one is a link back to this
+   same feed without it: hovering strikes the argument through in red, which is
+   the whole affordance — a ✕ of its own would have to hold its width on every
+   argument all the time, and the line would stop reading as typed. The maze
+   widgets render the same shape for their counts, as plain spans: there is
+   nothing to drop about how many tasks are open. */
+.cmd__arg{
+  display:inline-flex;align-items:center;gap:.6em;
+  white-space:nowrap;color:var(--text-dim);text-decoration:none;
+}
+.cmd__arg i{font-style:normal;}
+.cmd__arg > span{color:var(--accent);}
+/* The dashes mark an argument you can take off. They sit under the value, or
+   under the flag itself when the argument is a switch with no value, so a
+   boolean reads as removable too; the maze widgets' counts and the arguments
+   that aren't links wear the same shape without them. */
+a.cmd__arg > span,a.cmd__arg > i:only-child{border-bottom:1px dashed rgba(128,203,196,.42);}
+a.cmd__arg > i:only-child{color:var(--accent);}
+/* The quotes the shell line writes around a value that carries spaces, drawn
+   rather than stored, so the value itself stays the plain text. */
+.cmd__arg span[data-q]::before,.cmd__arg span[data-q]::after{content:"\0022";color:var(--text-dim);}
+a.cmd__arg:hover span[data-q]::before,a.cmd__arg:hover span[data-q]::after,
+a.cmd__arg:focus-visible span[data-q]::before,a.cmd__arg:focus-visible span[data-q]::after{color:var(--warn);}
+.cmd__arg--note{color:var(--text-dim);}
+.cmd__arg--note > span{color:var(--text-dim);border-bottom:0;}
+a.cmd__arg:hover i,a.cmd__arg:focus-visible i,
+a.cmd__arg:hover > span,a.cmd__arg:focus-visible > span{
+  color:var(--warn);text-decoration:line-through;border-bottom-color:transparent;
+}
+a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;border-radius:6px;}
+
 .pane__filters{
-  display:flex;flex-wrap:wrap;align-items:center;gap:12px;
+  display:flex;flex-wrap:wrap;align-items:center;gap:18px;
   padding:10px 14px;border-bottom:1px solid var(--line);
   font-size:1.2rem;
 }
 .filter{display:flex;align-items:center;gap:6px;color:var(--text-dim);}
+/* The feed bar dropped its key words for segments; the sources modal still
+   spells its one control key + value. */
 .filter__key{letter-spacing:0.035em;text-transform:uppercase;font-size:1.05rem;}
-.filter--published{position:relative;gap:8px;}
+.filter--published{position:relative;}
+
+/* Segments. The controls are grouped by what they answer — what is being read
+   (source, tags, search), when and how good (published, score), how it is shown
+   (view, sort) — and the group is the only label they have, now that the key
+   word beside each button is gone. The fill moves from the buttons to the
+   group, so a segment reads as one control with parts; the gap above is between
+   segments, not between controls. */
+.seg{display:inline-flex;align-items:center;background:var(--fill);border-radius:999px;padding:2px;}
+.seg .popmenu__btn{background:none;}
+/* Hairlines between members, drawn rather than marked up: Tags renders only
+   while the store holds tags, and a separator in the template would outlive
+   it. */
+.seg > .filter + .filter::before{
+  content:"";flex:none;width:1px;height:15px;margin-left:6px;
+  background:var(--hairline-strong);
+}
+/* The bar's own reset, for the look with no command line to carry one. Both are
+   rendered; each look shows one. */
+.pane__filters .filter__clear{display:none;}
 .pills{display:flex;gap:6px;}
 .pill{position:relative;display:inline-flex;cursor:pointer;}
 .pill input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;}
@@ -733,29 +793,39 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
   background:var(--fill);border:1px solid transparent;color:var(--text);
   font-family:inherit;font-size:1.2rem;padding:5px 13px;border-radius:999px;
 }
-/* Every filter's closed button wears its value, so they all take the same
-   treatment: a fixed width (a button that resized with its label would shove
-   the bar on every pick), the value centred and ellipsised inside it, and the
+/* One shape for every button in the bar: a fixed width (a button that resized
+   with its label would shove the row on every pick, and would resize under the
+   pointer on a look switch), the label centred and ellipsised inside it, the
    caret pinned to the edge. The left padding is the shallower of the two by
-   about the caret's width, so the value reads centred in the button rather than
-   centred in a box the caret is visibly crowding — with equal padding it leaves
-   a gap on the left. The "+N"/dot cluster rides in the flow after the value,
-   see .popmenu__meta below. Widths differ only by what each filter holds. */
-.popmenu--src .popmenu__btn{position:relative;width:18rem;padding:5px 26px 5px 14px;gap:0;justify-content:center;}
-.popmenu--pub .popmenu__btn{position:relative;width:10rem;padding:5px 26px 5px 14px;gap:0;justify-content:center;}
-.popmenu--pub .popmenu__btn::after{
-  position:absolute;right:13px;top:50%;transform:translateY(-50%);
+   about the caret's width, so the label reads centred in the button rather than
+   centred in a box the caret is visibly crowding. Widths differ only by what
+   each control holds, and each is the room its longest reading needs and no
+   more: with seven controls plus the reset, slack in any one of them is a
+   second line for all of them once they are narrowed at once. */
+.pane__filters .popmenu__btn{
+  position:relative;width:var(--btn-w,9rem);padding:5px 24px 5px 12px;
+  gap:0;justify-content:center;
 }
-/* Tags and View name themselves instead of wearing a value, so they size to
-   their label and keep the default inline caret — no fixed width to truncate
-   against, and the bar gets the room back. */
-.popmenu--tags .popmenu__btn,.popmenu--view .popmenu__btn{padding:5px 14px;}
-/* The value ellipsises inside that fixed width rather than pushing the button
-   wider; the "+N" is its own element, so truncating a long first name can never
-   swallow the count. It shrinks to its text rather than filling the button, so
-   value and dot centre as one group — the text sitting left of centre by the
-   dot's share, instead of the dot pushing it off a centre of its own. */
-.popmenu__val{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pane__filters .popmenu__btn::after{
+  position:absolute;right:11px;top:50%;transform:translateY(-50%);
+}
+.popmenu--src{--btn-w:16.5rem;}
+.popmenu--tags{--btn-w:9rem;}
+.popmenu--pub{--btn-w:10.6rem;}
+.popmenu--score{--btn-w:8.8rem;}
+/* View is the widest of them: it carries a label and the status dots at the
+   same time, and three dots take as much room as the word. */
+.popmenu--view{--btn-w:12rem;}
+.popmenu--sort{--btn-w:8.8rem;}
+/* Both spellings ride on every button: the name the control is known by, and
+   the value it holds. Default wears the names — the line above the bar already
+   says what is picked — and Minimal, which has no line, wears the values. One
+   markup, two looks, and the same width either way. Either spelling ellipsises
+   inside that width rather than pushing the button wider; the "+N" is its own
+   element, so truncating a long first name can never swallow the count. */
+.popmenu__key,.popmenu__val{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pane__filters .popmenu__val{display:none;}
+.pane__filters .popmenu__more{display:none;}
 /* The cluster rides in the flow after the value instead of being pinned over
    the padding. Empty, it takes no width and no margin — display:none children
    contribute neither — so the value centres in the whole button; full, it just
@@ -764,12 +834,13 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .popmenu__meta > *{margin-left:6px;}
 .popmenu__more:empty{display:none;}
 .popmenu__more{flex:none;color:var(--caution);font-size:1.05rem;letter-spacing:.02em;}
-.popmenu--src .popmenu__btn::after{
-  position:absolute;right:13px;top:50%;transform:translateY(-50%);
-}
 .popmenu__btn::-webkit-details-marker{display:none;}
 .popmenu__btn::after{content:"\25be";color:var(--text-dim);font-size:1rem;}
 .popmenu__btn:hover,.popmenu[open] .popmenu__btn{color:var(--accent);background:var(--tint);}
+/* A control that is narrowing something lights up, in both looks. It replaces
+   the amber dot the value-wearing buttons used to carry: with seven controls,
+   four identical dots said that four filters were on and nothing about which. */
+.popmenu__btn.is-on{color:var(--accent);background:var(--tint);}
 .popmenu[open] .popmenu__btn::after{color:var(--accent);}
 .popmenu__btn:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
 .popmenu__dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px rgba(128,203,196,.6);}
@@ -822,13 +893,111 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
    but they do need more than the narrow trigger they now hang off. */
 .popmenu__panel--tags{min-width:max(100%,15rem);}
 
-/* Sort wears its value like Source and Published do — it has exactly one, and
-   it's a word worth reading without opening anything. Same fixed-width,
-   centred-value, pinned-caret treatment as the two of them. */
-.popmenu--sort .popmenu__btn{position:relative;width:10rem;padding:5px 26px 5px 14px;gap:0;justify-content:center;}
-.popmenu--sort .popmenu__btn::after{
-  position:absolute;right:13px;top:50%;transform:translateY(-50%);
+/* Room for the slider to be dragged in. Below this the thumbs are closer
+   together than a fingertip and the notches stop being separate places. */
+.popmenu__panel--score{--thumb:7px;min-width:max(100%,21rem);}
+
+/* The band in words, above the track it is set on. It answers while dragging,
+   which is the only readout there is: the numerals on the scale below mark the
+   ends of the range, not the selection. */
+.srange__read{
+  display:flex;align-items:baseline;justify-content:center;gap:8px;
+  margin:1px 0 0;font-size:1.2rem;color:var(--text-dim);
 }
+.srange__read b{
+  font-weight:500;font-size:1.5rem;color:var(--accent);
+  font-variant-numeric:tabular-nums;min-width:1.4em;text-align:center;
+}
+
+/* Two range inputs stacked over one painted track. The inputs themselves are
+   invisible and full-width; all the paint is on this element's two
+   pseudo-elements, which is what lets one track carry two thumbs.
+
+   --thumb is half a thumb's width. The track is inset by it on both sides so
+   that 0% of the track is where the thumb's centre sits at value 0: a browser
+   keeps the thumb inside the input's box, so a full-width track would put the
+   colour for a 0 seven pixels left of the thumb claiming it. */
+.srange{
+  position:relative;height:24px;margin:9px 0 0;
+  /* This element takes the pointer for both thumbs, see static/js/feed.js.
+     touch-action stops a drag across the track scrolling the page under it. */
+  cursor:pointer;touch-action:none;
+}
+.srange:active{cursor:grabbing;}
+.srange::before,.srange::after{
+  content:"";position:absolute;left:var(--thumb);right:var(--thumb);
+  top:50%;transform:translateY(-50%);height:4px;border-radius:999px;
+}
+/* The unlit track: the scale as it stands with nothing picked, notched every
+   point so the eleven steps are places rather than a continuum. */
+.srange::before{
+  background:
+    repeating-linear-gradient(90deg,
+      transparent 0 calc(10% - 1px), var(--hairline-strong) calc(10% - 1px) 10%),
+    var(--line);
+}
+/* The band, painted with the gauge's own ramp and clipped to [--lo, --hi]
+   rather than stretched across it: the gradient stays pinned to the scale, so
+   a 7 is the same green wherever the thumbs stand. Straight-line stops rather
+   than the gauge's OKLab mix, but anchored at the same three scores, with green
+   landing on 7 where the high tier starts. */
+.srange::after{
+  background:linear-gradient(90deg,
+    var(--score-low) 0%, var(--score-mid) 50%, var(--score-high) 70%, var(--score-high) 100%);
+  clip-path:inset(0 calc((10 - var(--hi, 10)) * 10%) 0 calc(var(--lo, 0) * 10%) round 999px);
+}
+.srange__in{
+  -webkit-appearance:none;appearance:none;
+  position:absolute;inset:0;width:100%;height:100%;margin:0;
+  background:none;border:0;
+  /* Both inputs cover the whole track, so the upper one's box would swallow
+     every press meant for the lower one's thumb. Neither takes the pointer;
+     the track above owns it and drives them. They stay real range inputs for
+     the keyboard and for what a screen reader is handed, which is the reason
+     this is two inputs rather than two divs. */
+  pointer-events:none;
+}
+.srange__in:focus{outline:none;}
+/* Stacked, so the pair can always be pulled apart: static/js/feed.js lifts the
+   low thumb while the two sit on the same notch. */
+.srange__in--lo{z-index:2;}
+.srange__in--hi{z-index:1;}
+.srange__in--over{z-index:3;}
+.srange__in::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;
+  width:14px;height:14px;border-radius:50%;
+  background:var(--accent);border:2px solid var(--pane);
+  box-shadow:0 1px 3px rgba(0,0,0,.45);
+  transition:box-shadow .15s var(--ease);
+}
+.srange__in::-moz-range-thumb{
+  width:14px;height:14px;border-radius:50%;
+  background:var(--accent);border:2px solid var(--pane);
+  box-shadow:0 1px 3px rgba(0,0,0,.45);
+  transition:box-shadow .15s var(--ease);
+}
+.srange__in::-moz-range-track{background:none;border:0;}
+/* The ring goes on the thumb, not the input: an outline on the input would
+   draw a rectangle round the whole track and say nothing about which of the
+   two thumbs the keyboard is holding. */
+.srange__in:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 3px var(--tint),0 0 0 4px var(--accent);}
+.srange__in:focus-visible::-moz-range-thumb{box-shadow:0 0 0 3px var(--tint),0 0 0 4px var(--accent);}
+@media (prefers-reduced-motion: reduce){
+  .srange__in::-webkit-slider-thumb{transition:none;}
+  .srange__in::-moz-range-thumb{transition:none;}
+}
+/* The ends of the scale and its middle. Three numbers, not eleven: the readout
+   above says where the thumbs are, this says what they are moving through. */
+.srange__scale{
+  display:flex;margin:-2px 0 2px;padding:0 var(--thumb);
+  font-size:1.05rem;color:var(--text-dim);font-variant-numeric:tabular-nums;
+}
+/* Equal thirds so the middle numeral centres on the middle of the track, which
+   space-between would not do: it aligns box edges, and these boxes are not the
+   same width. */
+.srange__scale span{flex:1;text-align:center;}
+.srange__scale span:first-child{text-align:left;}
+.srange__scale span:last-child{text-align:right;}
 
 /* The bar's reset, alone at the far end. A text action rather than a pill: it
    undoes filters, it isn't one, and it only exists while there's something to
@@ -847,7 +1016,12 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
    that names itself, so idle it's just the glyph. It widens only once it holds
    a query, which it then wears like the menus beside it, ellipsised past a
    point so a long phrase can't run away with the bar. */
-.popmenu--search .popmenu__btn{gap:0;padding:5px 11px;max-width:22rem;}
+/* Capped like every other value-wearing button in the bar. It was the one
+   control whose width followed its contents, which is the whole of what makes
+   a full bar wrap: past this the query ellipsises instead of pushing the
+   controls beside it onto a second line. All of it is still in the field, and
+   in the button's tooltip. */
+.pane__filters .popmenu--search .popmenu__btn{width:auto;gap:0;padding:5px 11px;max-width:12rem;}
 .popmenu--search .popmenu__btn::after{content:none;}
 /* Spacing hangs off the label rather than the button's gap, so the idle
    magnifier sits centred in its pill instead of against a gap to nothing. */
@@ -934,6 +1108,41 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .pagenav__btn:focus-visible{outline:1px solid var(--accent);outline-offset:2px;opacity:1;}
 .pagenav__btn:disabled{opacity:.2;cursor:not-allowed;}
 .pagenav__info{opacity:.55;font-size:1.15rem;}
+
+/* Rows per page lives in the count, because the count is the sentence it
+   changes: "items 1-10 of 46". The range is a button that is plain until the
+   pointer finds it, then dashed and carated like an argument on the line above
+   the bar, and each click steps 10, 25, 50. The number can't name the setting
+   on its own (on page two it reads 26-46, at 50 rows it reads 1-46), so the
+   hint does. Both pagers carry it: they already write the same sentence. */
+.rowsize{position:relative;}
+.rowsize__btn{
+  font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;
+  border-bottom:1px dashed transparent;
+  transition:color .14s var(--ease),border-color .14s var(--ease);
+}
+.rowsize__btn::after{
+  content:"\25be";font-size:.8em;margin-left:5px;display:inline-block;opacity:0;
+  transition:opacity .14s,transform .16s var(--ease);
+}
+.rowsize__btn:hover,.rowsize__btn:focus-visible{
+  color:var(--accent);border-bottom-color:rgba(128,203,196,.45);outline:none;
+}
+.rowsize__btn:hover::after,.rowsize__btn:focus-visible::after{opacity:.8;}
+/* Under the range rather than over it: the row above is the filter bar, and a
+   bubble there would land on the controls. */
+.rowsize__hint{
+  position:absolute;left:0;top:calc(100% + 7px);z-index:var(--z-panel);
+  white-space:nowrap;font-size:1.05rem;color:var(--text-dim);
+  background:var(--overlay);border:1px solid var(--hairline-strong);border-radius:8px;
+  padding:3px 9px;backdrop-filter:blur(18px) saturate(1.5);
+  box-shadow:0 1px 2px rgba(0,0,0,.30), 0 10px 22px rgba(0,0,0,.30);
+  opacity:0;pointer-events:none;transition:opacity .14s;
+}
+.rowsize__btn:hover ~ .rowsize__hint,.rowsize__btn:focus-visible ~ .rowsize__hint{opacity:1;}
+@media (prefers-reduced-motion: reduce){
+  .rowsize__btn,.rowsize__btn::after,.rowsize__hint{transition:none;}
+}
 
 .pane__body{padding:18px 18px 6px;font-size:1.4rem;line-height:1.55;}
 
@@ -1252,6 +1461,13 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
   :root{--content-pad:16px;}
   .content{padding:20px var(--content-pad) 60px;}
   .pane__body{padding:16px 16px 4px;}
+  /* The segments group the controls at a width that can hold them. Narrower
+     than that they stop being a grouping and start being an overflow, so the
+     run breaks back into its own controls and the hairlines go with it. */
+  .pane__filters{gap:10px;}
+  .seg{flex-wrap:wrap;gap:6px;background:none;padding:0;}
+  .seg > .filter + .filter::before{content:none;}
+  .seg .popmenu__btn{background:var(--fill);}
   .pane__nav{flex-wrap:wrap;gap:8px;}
   .feed-empty{padding:32px 4px 38px;gap:12px;}
   .feed-empty__acts{flex-direction:column;gap:8px;}
@@ -3249,12 +3465,43 @@ button.modal__act{border:0;font:inherit;}
 }
 :root[data-theme="minimal"] .pane__bar{display:none;}
 :root[data-theme="minimal"] .pane__filters{
-  padding:0 0 16px;border-bottom:1px solid var(--hairline);gap:14px;
+  padding:0 0 16px;border-bottom:1px solid var(--hairline);gap:16px;
 }
+/* With the command line retired above it, the bar is what reports the view:
+   each button reads its name until something is picked and what is picked
+   after, with the "+N" the multi-selects carry. Paint and wording only — the
+   widths are pinned in :root and are not restated here, so the swap can't
+   resize a control or move one out from under the pointer. */
+:root[data-theme="minimal"] .pane__filters .popmenu__btn.is-on .popmenu__key{display:none;}
+:root[data-theme="minimal"] .pane__filters .popmenu__btn.is-on .popmenu__val{display:block;}
+:root[data-theme="minimal"] .pane__filters .popmenu__btn.is-on .popmenu__more:not(:empty){display:inline;}
+/* Except on View, where the dots already count the statuses and say which: a
+   "+2" beside them says the same thing twice, in room the value needs. */
+:root[data-theme="minimal"] .pane__filters .popmenu--view .popmenu__btn.is-on .popmenu__more{display:none;}
+/* Search names itself with its magnifier either way, so it has no name to swap
+   out: it wears whatever is in the field, including what is still being typed. */
+:root[data-theme="minimal"] .pane__filters .popmenu--search .popmenu__val:not(:empty){display:block;}
+/* And the reset comes back into the bar, the line that carries it in the other
+   look being gone. */
+:root[data-theme="minimal"] .pane__filters .filter__clear{display:flex;}
 :root[data-theme="minimal"] .filter__key{text-transform:none;letter-spacing:.02em;font-size:1.15rem;}
 :root[data-theme="minimal"] .pane__body{padding:0;}
+/* The score slider follows the rest of the bar: the notched track drops to a
+   plain rule and the thumb loses its cast shadow. Paint only: the button's
+   width, the panel's width and the track's height are pinned in :root and are
+   not restated here, so switching look never resizes the control or moves a
+   thumb out from under the pointer. */
+:root[data-theme="minimal"] .srange::before{background:var(--hairline-strong);}
+:root[data-theme="minimal"] .srange__in::-webkit-slider-thumb{box-shadow:none;}
+:root[data-theme="minimal"] .srange__in::-moz-range-thumb{box-shadow:none;}
+:root[data-theme="minimal"] .srange__read b{font-family:var(--font-title);font-variant-numeric:normal;}
 :root[data-theme="minimal"] .pane__nav{padding:16px 0 18px;border-bottom:0;}
-:root[data-theme="minimal"] .nav-btn{background:none;opacity:.7;padding:5px 12px;border-radius:var(--r-full);}
+/* The resting dim is for buttons you can press. A disabled one keeps the
+   fade :root gives it, so a page you cannot turn reads as unavailable here too
+   and not only under the pointer: this look has no fill to lose, so opacity is
+   the whole signal. */
+:root[data-theme="minimal"] .nav-btn:not(:disabled){opacity:.7;}
+:root[data-theme="minimal"] .nav-btn{background:none;padding:5px 12px;border-radius:var(--r-full);}
 :root[data-theme="minimal"] .nav-btn:hover:not(:disabled){opacity:1;}
 :root[data-theme="minimal"] .pagenav{padding:22px 0 2px;}
 

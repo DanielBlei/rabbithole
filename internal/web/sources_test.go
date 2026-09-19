@@ -34,7 +34,7 @@ func sourcesTestWeb(t *testing.T, doc config.FeedsDoc) (*Web, *store.Store) {
 	cfg := &config.Config{
 		Ingest: config.IngestConfig{Since: config.Duration(globalSince), Feeds: "/tmp/feeds.yaml"},
 	}
-	return New(db, cfg, ":8080", "", testIngestManager(t, db)), db
+	return New(db, cfg, "", testIngestManager(t, db)), db
 }
 
 // feedID looks up the stored ID for a feed by name, which is how the dialog

@@ -66,7 +66,7 @@ func (s *Server) Dev(on bool) { s.dev = on }
 // so mounting it under "/api/" (no StripPrefix) lets its method+path patterns
 // match unchanged.
 func (s *Server) Routes() http.Handler {
-	w := web.New(s.db, s.cfg, s.addr, s.cfgPath, s.ing)
+	w := web.New(s.db, s.cfg, s.cfgPath, s.ing)
 	if s.proxiesSet {
 		w.SetTrustedProxies(s.proxies)
 	}
