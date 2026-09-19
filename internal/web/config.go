@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog/log"
+
+	"github.com/DanielBlei/rabbithole/internal/config"
 )
 
 // configData is the model for the read-only config viewer modal.
@@ -52,15 +54,34 @@ var secretKeyRE = regexp.MustCompile(
 // redactedMask stands in for a secret's value in the viewer.
 const redactedMask = "••••••••"
 
-// urlPasswordRE matches the password in a URL's userinfo, wherever it appears
-// in a value. secretKeyRE only looks at the key, so `store.url` would otherwise
+// urlPasswordRE matches the password in a URL's userinfo, and urlPasswordParam
+// the libpq `password=` query parameter, which is the other form the drivers
+// accept. secretKeyRE only looks at the key, so `store.url` would otherwise
 // print a Postgres password in full to anyone who can open the viewer.
-var urlPasswordRE = regexp.MustCompile(`([a-z][a-z0-9+.-]*://[^\s:/?#@]+):[^\s/?#@]+@`)
+var (
+	urlPasswordRE    = regexp.MustCompile(`([a-z][a-z0-9+.-]*://[^\s:/?#@]*):[^\s/?#@]+@`)
+	urlPasswordParam = regexp.MustCompile(`([?&]password=)[^\s&#]+`)
+)
 
-// redactURLPasswords masks credentials embedded in a URL, keeping the scheme,
-// user and host so the line still says what it connects to.
+// dbPasswordHint stands in for the store's password rather than a row of dots,
+// so the viewer says where the real one belongs. It is the last place someone
+// looks before asking why their connection is refused.
+const dbPasswordHint = "$" + config.DBPasswordEnv
+
+// redactURLPasswords hides credentials embedded in a URL, keeping the scheme,
+// user and host so the line still says what it connects to. A Postgres URL
+// names the environment variable instead of masking, since that is the only
+// place its password is meant to live.
 func redactURLPasswords(line string) string {
-	return urlPasswordRE.ReplaceAllString(line, "${1}:"+redactedMask+"@")
+	mask := redactedMask
+	if strings.Contains(line, "postgres://") || strings.Contains(line, "postgresql://") {
+		mask = dbPasswordHint
+	}
+	// $ opens a capture reference in a replacement, and the hint starts with
+	// one, so it has to be escaped or it expands to nothing.
+	mask = strings.ReplaceAll(mask, "$", "$$")
+	line = urlPasswordRE.ReplaceAllString(line, "${1}:"+mask+"@")
+	return urlPasswordParam.ReplaceAllString(line, "${1}"+mask)
 }
 
 // redactSecrets masks the value of any credential-looking key in raw YAML,

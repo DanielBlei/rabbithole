@@ -225,6 +225,17 @@ func (s StoreConfig) ResolvePostgres() (Postgres, error) {
 
 	user := u.User.Username()
 	inURL, hasInURL := u.User.Password()
+
+	// The drivers also take the password as a query parameter. Lift it into
+	// the userinfo so there is one path from here on, and so it cannot slip
+	// past the warning below by arriving in the other form.
+	q := u.Query()
+	if param := q.Get("password"); param != "" {
+		inURL, hasInURL = param, true
+		q.Del("password")
+		u.RawQuery = q.Encode()
+	}
+
 	password := inURL
 	if env := os.Getenv(DBPasswordEnv); env != "" {
 		password = env
@@ -239,7 +250,6 @@ func (s StoreConfig) ResolvePostgres() (Postgres, error) {
 		u.User = url.User(user)
 	}
 
-	q := u.Query()
 	if q.Get("sslmode") == "" {
 		q.Set("sslmode", defaultSSLMode)
 		u.RawQuery = q.Encode()
