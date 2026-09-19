@@ -190,22 +190,20 @@ func (s *Store) AddTodo(ctx context.Context, title, note string, due *time.Time,
 		dueVal = due.Format(dueDateLayout)
 	}
 	now := sqlTime(time.Now())
-	res, err := s.db.ExecContext(ctx,
-		"INSERT INTO todos (title, note, done, due_on, tags, created_at, updated_at) VALUES (?, ?, 0, ?, ?, ?, ?)",
-		title, strings.TrimSpace(note), dueVal, joinTags(tags), now, now)
+	var id int64
+	err := s.queryRow(ctx,
+		`INSERT INTO todos (title, note, done, due_on, tags, created_at, updated_at)
+		 VALUES (?, ?, FALSE, ?, ?, ?, ?) RETURNING id`,
+		title, strings.TrimSpace(note), dueVal, joinTags(tags), now, now).Scan(&id)
 	if err != nil {
 		return Todo{}, fmt.Errorf("insert todo: %w", err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return Todo{}, fmt.Errorf("todo insert id: %w", err)
 	}
 	return s.GetTodo(ctx, id)
 }
 
 // GetTodo returns the task with the given id, or ErrTodoNotFound.
 func (s *Store) GetTodo(ctx context.Context, id int64) (Todo, error) {
-	t, err := scanTodo(s.db.QueryRowContext(ctx, "SELECT "+todoColumns+" FROM todos WHERE id = ?", id))
+	t, err := scanTodo(s.queryRow(ctx, "SELECT "+todoColumns+" FROM todos WHERE id = ?", id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Todo{}, fmt.Errorf("%w: %d", ErrTodoNotFound, id)
@@ -238,7 +236,7 @@ func (s *Store) ListTodos(ctx context.Context, filter TodoFilter) ([]Todo, error
 	q += " LIMIT ?"
 	args = append(args, limit)
 
-	rows, err := s.db.QueryContext(ctx, q, args...)
+	rows, err := s.query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query todos: %w", err)
 	}
@@ -270,7 +268,7 @@ func (s *Store) ToggleTodo(ctx context.Context, id int64) (Todo, error) {
 	if done {
 		completed = now
 	}
-	if _, err := s.db.ExecContext(ctx,
+	if _, err := s.exec(ctx,
 		"UPDATE todos SET done = ?, completed_at = ?, updated_at = ? WHERE id = ?",
 		done, completed, now, id); err != nil {
 		return Todo{}, fmt.Errorf("toggle todo %d: %w", id, err)
@@ -281,7 +279,7 @@ func (s *Store) ToggleTodo(ctx context.Context, id int64) (Todo, error) {
 // SetTodoTags replaces a task's labels with the normalised tags and returns the
 // updated Todo, or ErrTodoNotFound when no task matched.
 func (s *Store) SetTodoTags(ctx context.Context, id int64, tags []string) (Todo, error) {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.exec(ctx,
 		"UPDATE todos SET tags = ?, updated_at = ? WHERE id = ?",
 		joinTags(tags), sqlTime(time.Now()), id)
 	if err != nil {
@@ -297,7 +295,7 @@ func (s *Store) SetTodoTags(ctx context.Context, id int64, tags []string) (Todo,
 
 // DeleteTodo removes a task, returning ErrTodoNotFound when none matched.
 func (s *Store) DeleteTodo(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, "DELETE FROM todos WHERE id = ?", id)
+	res, err := s.exec(ctx, "DELETE FROM todos WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete todo %d: %w", id, err)
 	}

@@ -39,7 +39,7 @@ func TestRecentScoredItemsWindowAndLegacyProvenance(t *testing.T) {
 	}
 	// Simulate an old first-seen time for the undated row. Its NULL profile
 	// provenance is intentional: legacy scored rows must still be candidates.
-	if _, err := db.db.ExecContext(ctx,
+	if _, err := db.exec(ctx,
 		"UPDATE items SET created_at = ?, updated_at = ? WHERE id = ?",
 		sqlTime(now.Add(-2*time.Hour)), sqlTime(now.Add(-2*time.Hour)), "undated",
 	); err != nil {
@@ -83,7 +83,7 @@ func TestReplaceItemScoresPreservesUserAndUnrelatedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	var oldDigest string
-	if err := db.db.QueryRowContext(ctx, "SELECT digested_on FROM items WHERE id = ?", item.ID).
+	if err := db.queryRow(ctx, "SELECT digested_on FROM items WHERE id = ?", item.ID).
 		Scan(&oldDigest); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestReplaceItemScoresPreservesUserAndUnrelatedState(t *testing.T) {
 		t.Fatalf("user/unrelated state changed: %+v", row)
 	}
 	var digest string
-	if err := db.db.QueryRowContext(ctx, "SELECT digested_on FROM items WHERE id = ?", item.ID).
+	if err := db.queryRow(ctx, "SELECT digested_on FROM items WHERE id = ?", item.ID).
 		Scan(&digest); err != nil {
 		t.Fatal(err)
 	}

@@ -6,20 +6,9 @@ package store
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 )
-
-func openIdeaStore(t *testing.T) (*Store, context.Context) {
-	t.Helper()
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db, context.Background()
-}
 
 // liveBodies returns the bodies of the live notes in board order — a compact way
 // to assert ordering and presence.
@@ -40,7 +29,7 @@ func liveBodies(t *testing.T, db *Store, ctx context.Context) []string {
 // (body + colour), then soft-deleted — gone from the board but the row survives
 // with deleted_at set.
 func TestIdeaLifecycle(t *testing.T) {
-	db, ctx := openIdeaStore(t)
+	db, ctx := openTestStore(t), context.Background()
 
 	idea, err := db.AddIdea(ctx, "  a loose thought  ", "")
 	if err != nil {
@@ -85,7 +74,7 @@ func TestIdeaLifecycle(t *testing.T) {
 // New notes land at the front of the board (newest-first), and a reorder rewrites
 // that order to an arbitrary sequence.
 func TestIdeaOrdering(t *testing.T) {
-	db, ctx := openIdeaStore(t)
+	db, ctx := openTestStore(t), context.Background()
 
 	first, _ := db.AddIdea(ctx, "first", "")
 	second, _ := db.AddIdea(ctx, "second", "")
@@ -106,7 +95,7 @@ func TestIdeaOrdering(t *testing.T) {
 
 // AddIdea rejects empty / over-long bodies with ErrInvalidIdea and writes no row.
 func TestAddIdeaValidation(t *testing.T) {
-	db, ctx := openIdeaStore(t)
+	db, ctx := openTestStore(t), context.Background()
 
 	if _, err := db.AddIdea(ctx, "   ", ""); !errors.Is(err, ErrInvalidIdea) {
 		t.Errorf("empty body err = %v, want ErrInvalidIdea", err)
@@ -122,7 +111,7 @@ func TestAddIdeaValidation(t *testing.T) {
 // AddIdea honours an explicit palette colour, and falls back to a random palette
 // colour for an empty or unknown one (so a note is never colourless).
 func TestAddIdeaColor(t *testing.T) {
-	db, ctx := openIdeaStore(t)
+	db, ctx := openTestStore(t), context.Background()
 
 	picked, err := db.AddIdea(ctx, "chosen", "violet")
 	if err != nil {
@@ -143,7 +132,7 @@ func TestAddIdeaColor(t *testing.T) {
 // An unknown colour on edit is ignored (the current colour is kept) rather than
 // blanking the note; an empty body is still rejected.
 func TestUpdateIdeaColorGuard(t *testing.T) {
-	db, ctx := openIdeaStore(t)
+	db, ctx := openTestStore(t), context.Background()
 
 	idea, err := db.AddIdea(ctx, "pick a colour for me", "")
 	if err != nil {
@@ -164,7 +153,7 @@ func TestUpdateIdeaColorGuard(t *testing.T) {
 
 // Editing or deleting a missing (or already-deleted) note is ErrIdeaNotFound.
 func TestIdeaNotFound(t *testing.T) {
-	db, ctx := openIdeaStore(t)
+	db, ctx := openTestStore(t), context.Background()
 	if _, err := db.UpdateIdea(ctx, 999, "x", "amber"); !errors.Is(err, ErrIdeaNotFound) {
 		t.Errorf("update missing err = %v, want ErrIdeaNotFound", err)
 	}

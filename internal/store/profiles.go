@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 	CHECK (length(trim(name)) > 0),
 	CHECK (length(trim(content)) > 0)
 );
-CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(name COLLATE NOCASE, id);
+CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(lower(name), id);
 
 CREATE TABLE IF NOT EXISTS profile_state (
 	singleton         INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -82,8 +82,9 @@ func (s *Store) EnsureProfile(
 		return Profile{}, false, err
 	}
 	now := sqlTime(time.Now())
-	res, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO profiles
-		(id, name, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+	res, err := s.exec(ctx, `INSERT INTO profiles
+		(id, name, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT DO NOTHING`,
 		id, name, content, now, now)
 	if err != nil {
 		return Profile{}, false, fmt.Errorf("ensure profile %s: %w", id, err)
@@ -121,8 +122,9 @@ func (s *Store) ImportProfileOnce(
 	defer func() { _ = tx.Rollback() }()
 
 	now := sqlTime(time.Now())
-	marker, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO profile_imports
-		(source, profile_id, imported_at) VALUES (?, ?, ?)`, source, id, now)
+	marker, err := s.txExec(ctx, tx, `INSERT INTO profile_imports
+		(source, profile_id, imported_at) VALUES (?, ?, ?)
+		ON CONFLICT DO NOTHING`, source, id, now)
 	if err != nil {
 		return false, fmt.Errorf("record profile import: %w", err)
 	}
@@ -133,16 +135,18 @@ func (s *Store) ImportProfileOnce(
 	if n == 0 {
 		return false, nil
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO profiles
-		(id, name, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+	if _, err := s.txExec(ctx, tx, `INSERT INTO profiles
+		(id, name, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT DO NOTHING`,
 		id, name, content, now, now); err != nil {
 		return false, fmt.Errorf("import profile %s: %w", id, err)
 	}
 	// Preserve file-based behavior only on the first import into a database
 	// that has no user selection. The profile, marker and initial activation
 	// commit together.
-	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO profile_state
-		(singleton, active_profile_id) VALUES (1, ?)`, id); err != nil {
+	if _, err := s.txExec(ctx, tx, `INSERT INTO profile_state
+		(singleton, active_profile_id) VALUES (1, ?)
+		ON CONFLICT DO NOTHING`, id); err != nil {
 		return false, fmt.Errorf("activate imported profile: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -161,7 +165,7 @@ func (s *Store) createProfile(ctx context.Context, id, name, content string) (Pr
 		return Profile{}, err
 	}
 	now := sqlTime(time.Now())
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO profiles
+	if _, err := s.exec(ctx, `INSERT INTO profiles
 		(id, name, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
 		id, name, content, now, now); err != nil {
 		return Profile{}, fmt.Errorf("create profile: %w", err)
@@ -191,8 +195,8 @@ func newProfileID() (string, error) {
 
 // ListProfiles returns local profiles ordered by display name then stable ID.
 func (s *Store) ListProfiles(ctx context.Context) ([]Profile, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, content, created_at, updated_at
-		FROM profiles ORDER BY name COLLATE NOCASE, id`)
+	rows, err := s.query(ctx, `SELECT id, name, content, created_at, updated_at
+		FROM profiles ORDER BY lower(name), id`)
 	if err != nil {
 		return nil, fmt.Errorf("list profiles: %w", err)
 	}
@@ -216,7 +220,7 @@ func (s *Store) GetProfile(ctx context.Context, id string) (Profile, error) {
 	if err := profile.ValidateID(id); err != nil {
 		return Profile{}, err
 	}
-	p, err := scanProfile(s.db.QueryRowContext(ctx,
+	p, err := scanProfile(s.queryRow(ctx,
 		"SELECT id, name, content, created_at, updated_at FROM profiles WHERE id = ?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Profile{}, fmt.Errorf("%w: %s", ErrProfileNotFound, id)
@@ -245,7 +249,7 @@ func (s *Store) UpdateProfile(ctx context.Context, id, name, content string) (Pr
 	if err != nil {
 		return Profile{}, err
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.exec(ctx,
 		"UPDATE profiles SET name = ?, content = ?, updated_at = ? WHERE id = ?",
 		name, content, sqlTime(time.Now()), id)
 	if err != nil {
@@ -280,14 +284,14 @@ func (s *Store) DeleteProfile(ctx context.Context, id string) error {
 		return fmt.Errorf("begin delete profile: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	res, err := tx.ExecContext(ctx, "DELETE FROM profiles WHERE id = ?", id)
+	res, err := s.txExec(ctx, tx, "DELETE FROM profiles WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete profile %s: %w", id, err)
 	}
 	if err := requireProfileRow(res, id); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE profile_state
+	if _, err := s.txExec(ctx, tx, `UPDATE profile_state
 		SET active_profile_id = ? WHERE singleton = 1 AND active_profile_id = ?`,
 		profile.DefaultID, id); err != nil {
 		return fmt.Errorf("fall back active profile: %w", err)
@@ -309,7 +313,7 @@ func requireProfileRow(res sql.Result, id string) error {
 // ActiveProfileID returns the persisted active reference and whether one has
 // ever been explicitly set. Absence means application policy chooses a default.
 func (s *Store) ActiveProfileID(ctx context.Context) (id string, set bool, err error) {
-	err = s.db.QueryRowContext(ctx,
+	err = s.queryRow(ctx,
 		"SELECT active_profile_id FROM profile_state WHERE singleton = 1").Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
@@ -327,7 +331,7 @@ func (s *Store) SetActiveProfile(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	res, err := s.db.ExecContext(ctx, `INSERT INTO profile_state (singleton, active_profile_id)
+	res, err := s.exec(ctx, `INSERT INTO profile_state (singleton, active_profile_id)
 		SELECT 1, ? WHERE ? = ? OR EXISTS (SELECT 1 FROM profiles WHERE id = ?)
 		ON CONFLICT(singleton) DO UPDATE SET active_profile_id = excluded.active_profile_id`,
 		id, id, profile.DefaultID, id)

@@ -56,16 +56,11 @@ CREATE INDEX IF NOT EXISTS idx_items_bookmarked ON items(bookmarked);
 // interest profiles and score provenance. Version 3 upgrades in place.
 const schemaVersion = 4
 
-// allSchemas is every table's DDL, applied in order to a new database.
-var allSchemas = []string{
-	schema, todoSchema, ideaSchema, ingestSchema, ingestLogSchema, feedFetchSchema, feedConfigSchema, profileSchema,
-}
-
-// additiveSchemas are tables added since schemaVersion was last bumped. Each is
-// created if missing on every open, so an existing database gains it without
-// being recreated. Only new tables that nothing older depends on belong here;
-// changing an existing table still means a schemaVersion bump.
-var additiveSchemas = []string{authSchema}
+// Each engine's DDL is listed in its dialect: schemas() for a new database,
+// additiveSchemas() for tables added since schemaVersion last moved, which are
+// created if missing on every open so an existing database gains them without
+// being recreated. Only new tables that nothing older depends on belong in the
+// additive list; changing an existing table still means a schemaVersion bump.
 
 // Status values for the items.status column. llm_score/llm_score_reason are
 // the model's verdict, written by the daily run; status/user_score/user_note
@@ -86,11 +81,11 @@ const (
 )
 
 // unscoredSentinel stands in for a NULL score in ORDER BY so result order
-// doesn't depend on the SQL engine's NULL-ordering default. SQLite (the only
-// engine today) always sorts NULL smallest, so this is belt-and-suspenders
-// here; it matters only if we ever add Postgres, whose default flips to NULLS
-// FIRST under DESC. The value sits below the valid 0-10 score range, so
-// unscored items sort last under SortByScore regardless.
+// doesn't depend on the SQL engine's NULL-ordering default: SQLite sorts NULL
+// smallest, Postgres puts it first under DESC. The value sits below the valid
+// 0-10 score range, so unscored items sort last under SortByScore either way.
+// It is spliced into the SQL rather than bound, since Postgres cannot infer a
+// parameter's type inside COALESCE in an ORDER BY.
 const unscoredSentinel = -1
 
 // The score scale, both ends included: what the model returns, what a user
@@ -151,12 +146,13 @@ func sqlTimeOrNull(t time.Time) any {
 	return sqlTime(t)
 }
 
-// Store is a SQLite-backed item store.
+// Store is an item store. d spells the queries for whichever engine db holds.
 type Store struct {
 	db *sql.DB
+	d  dialect
 }
 
-// Open opens the database at path, creating it when it does not exist yet.
+// Open opens the SQLite database at path, creating it when it does not exist yet.
 func Open(path string) (*Store, error) {
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -167,49 +163,50 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	if err := initSchema(db, path); err != nil {
+	d := sqliteDialect{}
+	if err := initSchema(context.Background(), db, d, path); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, d: d}, nil
 }
 
 // initSchema creates every table on a new database and stamps it with schemaVersion.
 // An existing database is checked against that version and rejected on a mismatch.
-// Either way, additiveSchemas are then created if missing.
-func initSchema(db *sql.DB, path string) error {
-	var tables int
-	if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").Scan(&tables); err != nil {
-		return fmt.Errorf("inspect database: %w", err)
+// Either way, additiveSchemas are then created if missing. label names the
+// database in errors, and must not carry a password.
+func initSchema(ctx context.Context, db *sql.DB, d dialect, label string) error {
+	fresh, err := d.isFresh(ctx, db)
+	if err != nil {
+		return err
 	}
-	if tables > 0 {
-		var version int
-		if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
-			return fmt.Errorf("read schema version: %w", err)
+	if !fresh {
+		version, err := d.readVersion(ctx, db)
+		if err != nil {
+			return err
 		}
 		switch version {
 		case schemaVersion:
 		case 3:
 			if err := migrateV3ToV4(db); err != nil {
-				return fmt.Errorf("migrate database %s from version 3 to 4: %w", path, err)
+				return fmt.Errorf("migrate database %s from version 3 to 4: %w", label, err)
 			}
 		default:
 			return fmt.Errorf("%w: %s is version %d, this build expects %d — delete it and run ingest again",
-				ErrSchemaVersion, path, version, schemaVersion)
+				ErrSchemaVersion, label, version, schemaVersion)
 		}
 	} else {
-		for _, stmt := range allSchemas {
-			if _, err := db.Exec(stmt); err != nil {
+		for _, stmt := range d.schemas() {
+			if _, err := db.ExecContext(ctx, stmt); err != nil {
 				return fmt.Errorf("create schema: %w", err)
 			}
 		}
-		// PRAGMA takes no bound parameters; schemaVersion is a compile-time constant.
-		if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
-			return fmt.Errorf("stamp schema version: %w", err)
+		if err := d.stampVersion(ctx, db, schemaVersion); err != nil {
+			return err
 		}
 	}
-	for _, stmt := range additiveSchemas {
-		if _, err := db.Exec(stmt); err != nil {
+	for _, stmt := range d.additiveSchemas() {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("create additive schema: %w", err)
 		}
 	}
@@ -271,7 +268,7 @@ func (s *Store) scoredChunk(ctx context.Context, links []string, scored map[stri
 	for i, l := range links {
 		args[i] = l
 	}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.query(ctx,
 		"SELECT link FROM items WHERE llm_score IS NOT NULL AND link IN ("+placeholders+")", args...)
 	if err != nil {
 		return fmt.Errorf("query scored links: %w", err)
@@ -334,11 +331,11 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEnt
 			llm_profile_id   = excluded.llm_profile_id,
 			llm_profile_name = excluded.llm_profile_name,
 			llm_profile_hash = excluded.llm_profile_hash,
-			digested_on      = COALESCE(excluded.digested_on, digested_on),
+			digested_on      = COALESCE(excluded.digested_on, items.digested_on),
 			updated_at       = excluded.updated_at,
 			tags             = excluded.tags
 		WHERE excluded.llm_score IS NOT NULL`
-	stmt, err := tx.PrepareContext(ctx, q)
+	stmt, err := s.prepareTx(ctx, tx, q)
 	if err != nil {
 		return fmt.Errorf("prepare insert: %w", err)
 	}
@@ -455,7 +452,7 @@ func (s *Store) UpdateUserState(ctx context.Context, identifier string, patch Us
 	args = append(args, identifier, identifier)
 
 	q := fmt.Sprintf("UPDATE items SET %s WHERE link = ? OR id = ?", strings.Join(sets, ", "))
-	res, err := s.db.ExecContext(ctx, q, args...)
+	res, err := s.exec(ctx, q, args...)
 	if err != nil {
 		return fmt.Errorf("update item %s: %w", identifier, err)
 	}
@@ -562,7 +559,7 @@ func scanItemRow(sc rowScanner) (ItemRow, error) {
 // ErrItemNotFound when nothing matches.
 func (s *Store) Get(ctx context.Context, identifier string) (ItemRow, error) {
 	q := "SELECT " + itemRowColumns + " FROM items WHERE link = ? OR id = ?"
-	r, err := scanItemRow(s.db.QueryRowContext(ctx, q, identifier, identifier))
+	r, err := scanItemRow(s.queryRow(ctx, q, identifier, identifier))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ItemRow{}, fmt.Errorf("%w: %s", ErrItemNotFound, identifier)
@@ -682,7 +679,7 @@ func (filter ListFilter) validate() error {
 // whereClause builds the shared WHERE fragments and their args from the
 // filter's status/source/time bounds — everything except sort and limit — so
 // List and Count restrict rows identically.
-func (filter ListFilter) whereClause() (where []string, args []any) {
+func (filter ListFilter) whereClause(d dialect) (where []string, args []any) {
 	if len(filter.Statuses) > 0 {
 		placeholders := make([]string, len(filter.Statuses))
 		for i, st := range filter.Statuses {
@@ -711,7 +708,7 @@ func (filter ListFilter) whereClause() (where []string, args []any) {
 	if len(filter.Tags) > 0 {
 		ors := make([]string, len(filter.Tags))
 		for i, tag := range filter.Tags {
-			ors[i] = "instr(',' || lower(COALESCE(tags, '')) || ',', ',' || lower(?) || ',') > 0"
+			ors[i] = d.contains("',' || lower(COALESCE(tags, '')) || ','", "',' || lower(?) || ','")
 			args = append(args, tag)
 		}
 		where = append(where, "("+strings.Join(ors, " OR ")+")")
@@ -725,7 +722,7 @@ func (filter ListFilter) whereClause() (where []string, args []any) {
 		args = append(args, sqlTime(filter.Before))
 	}
 	if filter.Bookmarked {
-		where = append(where, "bookmarked = 1")
+		where = append(where, "bookmarked = TRUE")
 	}
 	if filter.RatedOnly {
 		where = append(where, "user_score IS NOT NULL")
@@ -749,13 +746,13 @@ func (filter ListFilter) whereClause() (where []string, args []any) {
 			args = append(args, *filter.MaxScore)
 		}
 	}
-	// One OR group, so it ANDs with the bounds above. instr rather than LIKE
-	// '%x%': the text is whatever was typed, and instr has no wildcards to
-	// escape. tags is NULL when the item carries none.
+	// One OR group, so it ANDs with the bounds above. A substring test rather
+	// than LIKE '%x%': the text is whatever was typed, and this has no
+	// wildcards to escape. tags is NULL when the item carries none.
 	if filter.Search != "" {
-		where = append(where, "(instr(lower(title), lower(?)) > 0"+
-			" OR instr(lower(source), lower(?)) > 0"+
-			" OR instr(lower(COALESCE(tags, '')), lower(?)) > 0)")
+		where = append(where, "("+d.contains("lower(title)", "lower(?)")+
+			" OR "+d.contains("lower(source)", "lower(?)")+
+			" OR "+d.contains("lower(COALESCE(tags, ''))", "lower(?)")+")")
 		args = append(args, filter.Search, filter.Search, filter.Search)
 	}
 	return where, args
@@ -768,13 +765,13 @@ func (s *Store) Count(ctx context.Context, filter ListFilter) (int, error) {
 	if err := filter.validate(); err != nil {
 		return 0, err
 	}
-	where, args := filter.whereClause()
+	where, args := filter.whereClause(s.d)
 	q := "SELECT COUNT(*) FROM items"
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
 	var n int
-	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
+	if err := s.queryRow(ctx, q, args...).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count items: %w", err)
 	}
 	return n, nil
@@ -806,7 +803,7 @@ func (s *Store) listItems(ctx context.Context, filter ListFilter, all bool) ([]I
 			limit = maxListLimit
 		}
 	}
-	where, args := filter.whereClause()
+	where, args := filter.whereClause(s.d)
 	q := "SELECT " + itemRowColumns + " FROM items"
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
@@ -822,14 +819,13 @@ func (s *Store) listItems(ctx context.Context, filter ListFilter, all bool) ([]I
 		// The model's score alone: a user rating is recorded for later use and
 		// does not reorder anything yet. Source then id break ties, so a page of
 		// equally scored items holds still between renders.
-		q += " ORDER BY COALESCE(llm_score, ?) DESC, source ASC, id ASC"
-		args = append(args, unscoredSentinel)
+		q += fmt.Sprintf(" ORDER BY COALESCE(llm_score, %d) DESC, source ASC, id ASC", unscoredSentinel)
 	}
 	if !all {
 		q += " LIMIT ?"
 		args = append(args, limit)
 	}
-	rows, err := s.db.QueryContext(ctx, q, args...)
+	rows, err := s.query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query list: %w", err)
 	}
@@ -855,7 +851,7 @@ type SourceCount struct {
 // item count, ordered by source name. This is the domain of values that
 // ListFilter.Source can match against.
 func (s *Store) Sources(ctx context.Context) ([]SourceCount, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT source, COUNT(*) FROM items GROUP BY source ORDER BY source")
+	rows, err := s.query(ctx, "SELECT source, COUNT(*) FROM items GROUP BY source ORDER BY source")
 	if err != nil {
 		return nil, fmt.Errorf("query sources: %w", err)
 	}
@@ -878,7 +874,7 @@ func (s *Store) Sources(ctx context.Context) ([]SourceCount, error) {
 // combinations are few (one per feed), which is a much smaller scan than it
 // looks.
 func (s *Store) Tags(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.query(ctx,
 		"SELECT DISTINCT tags FROM items WHERE tags IS NOT NULL AND tags != ''")
 	if err != nil {
 		return nil, fmt.Errorf("query tags: %w", err)

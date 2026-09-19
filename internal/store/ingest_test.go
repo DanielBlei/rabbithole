@@ -6,24 +6,13 @@ package store
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 )
-
-func openIngestStore(t *testing.T) (*Store, context.Context) {
-	t.Helper()
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db, context.Background()
-}
 
 // A run's lifecycle: started as 'running' (no finished_at), then finished with
 // its outcome and counts. LastIngestRun tracks the newest row throughout.
 func TestIngestRunLifecycle(t *testing.T) {
-	db, ctx := openIngestStore(t)
+	db, ctx := openTestStore(t), context.Background()
 
 	last, err := db.LastIngestRun(ctx)
 	if err != nil {
@@ -69,7 +58,7 @@ func TestIngestRunLifecycle(t *testing.T) {
 // ListIngestRuns returns newest-first and honors the limit; error runs carry
 // their message.
 func TestIngestRunListAndErrors(t *testing.T) {
-	db, ctx := openIngestStore(t)
+	db, ctx := openTestStore(t), context.Background()
 
 	first, err := db.StartIngestRun(ctx, IngestTriggerCron)
 	if err != nil {
@@ -132,7 +121,7 @@ func TestIngestRunListAndErrors(t *testing.T) {
 // InterruptStaleIngestRuns flips leftover 'running' rows to error/interrupted
 // (crash recovery) and leaves finished rows alone.
 func TestInterruptStaleIngestRuns(t *testing.T) {
-	db, ctx := openIngestStore(t)
+	db, ctx := openTestStore(t), context.Background()
 
 	done, err := db.StartIngestRun(ctx, IngestTriggerManual)
 	if err != nil {

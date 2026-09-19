@@ -28,7 +28,7 @@ type ScoreReplacement struct {
 // date, or first-seen date when publication is unknown, is on or after cutoff.
 // Newest items come first with stable ID as the tie-break.
 func (s *Store) RecentScoredItems(ctx context.Context, cutoff time.Time) ([]feeds.Item, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, source, title, link,
+	rows, err := s.query(ctx, `SELECT id, source, title, link,
 		COALESCE(summary, ''), published_at, COALESCE(tags, '')
 		FROM items
 		WHERE llm_score IS NOT NULL
@@ -96,7 +96,7 @@ func (s *Store) ReplaceItemScores(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	stmt, err := tx.PrepareContext(ctx, `UPDATE items SET
+	stmt, err := s.prepareTx(ctx, tx, `UPDATE items SET
 		llm_score = ?, llm_score_reason = ?, llm_score_model = ?,
 		llm_profile_id = ?, llm_profile_name = ?, llm_profile_hash = ?,
 		updated_at = ?

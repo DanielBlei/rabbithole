@@ -17,11 +17,7 @@ import (
 )
 
 func TestRecordAndScoredLinksRoundTrip(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := []feeds.Item{
@@ -51,11 +47,7 @@ func TestRecordAndScoredLinksRoundTrip(t *testing.T) {
 }
 
 func TestRecordReScoresUnscoredLink(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	item := feeds.Item{ID: "a", Source: "S", Title: "A", Link: "https://x/a"}
@@ -108,11 +100,7 @@ func TestRecordReScoresUnscoredLink(t *testing.T) {
 }
 
 func TestRecordPersistsScoresWithoutDigesting(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := []feeds.Item{
@@ -163,11 +151,7 @@ func TestRecordPersistsScoresWithoutDigesting(t *testing.T) {
 }
 
 func TestRecordIsIdempotent(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := []feeds.Item{{ID: "a", Source: "S", Title: "A", Link: "https://x/a"}}
@@ -181,11 +165,7 @@ func TestRecordIsIdempotent(t *testing.T) {
 }
 
 func TestRecordIgnoresDuplicateLink(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	// Different IDs (e.g. distinct guids) can still resolve to the same link.
@@ -211,11 +191,7 @@ func TestRecordIgnoresDuplicateLink(t *testing.T) {
 }
 
 func TestUpdateUserState(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := []feeds.Item{{ID: "a", Source: "S", Title: "A", Link: "https://x/a"}}
@@ -246,11 +222,7 @@ func TestUpdateUserState(t *testing.T) {
 }
 
 func TestBookmark(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := []feeds.Item{
@@ -345,11 +317,7 @@ func TestUpdateUserStateErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-			if err != nil {
-				t.Fatalf("Open: %v", err)
-			}
-			defer func() { _ = db.Close() }()
+			db := openTestStore(t)
 			ctx := context.Background()
 
 			if tt.seedItem {
@@ -359,7 +327,7 @@ func TestUpdateUserStateErrors(t *testing.T) {
 				}
 			}
 
-			err = db.UpdateUserState(ctx, tt.link, tt.patch)
+			err := db.UpdateUserState(ctx, tt.link, tt.patch)
 			if tt.wantErrIs != nil {
 				if !errors.Is(err, tt.wantErrIs) {
 					t.Errorf("UpdateUserState() error = %v, want errors.Is(_, %v)", err, tt.wantErrIs)
@@ -376,11 +344,7 @@ func TestUpdateUserStateErrors(t *testing.T) {
 // ClearUserScore puts the column back to NULL, which a zero score must not: 0
 // is the lowest rating, and the two have to stay distinguishable.
 func TestClearUserScore(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := []feeds.Item{{ID: "a", Source: "S", Title: "A", Link: "https://x/a"}}
@@ -412,11 +376,7 @@ func TestClearUserScore(t *testing.T) {
 }
 
 func TestUpdateUserStateByID(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := []feeds.Item{{ID: "a", Source: "S", Title: "A", Link: "https://x/a"}}
@@ -441,11 +401,7 @@ func TestUpdateUserStateByID(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := []feeds.Item{
@@ -641,11 +597,7 @@ func TestList(t *testing.T) {
 }
 
 func TestListSearch(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := []feeds.Item{
@@ -737,11 +689,7 @@ func TestListSearch(t *testing.T) {
 // The feed page's source and tag chips are multi-select and OR within
 // themselves, but AND with each other and with everything else in the bar.
 func TestListSourcesAndTags(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := []feeds.Item{
@@ -829,11 +777,7 @@ func TestListSourcesAndTags(t *testing.T) {
 // The tag chips come from the store, not from the rendered rows, so the filter
 // can offer a tag the current view has none of.
 func TestTags(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := []feeds.Item{
@@ -855,11 +799,7 @@ func TestTags(t *testing.T) {
 }
 
 func TestListLimitClamp(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := make([]feeds.Item, maxListLimit+5)
@@ -911,11 +851,7 @@ func TestListLimitClamp(t *testing.T) {
 }
 
 func TestListRatingFilters(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := []feeds.Item{
@@ -971,11 +907,7 @@ func TestListRatingFilters(t *testing.T) {
 }
 
 func TestListLatestUsesPublishedAtWithCreatedFallback(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
 
@@ -1012,11 +944,7 @@ func TestListLatestUsesPublishedAtWithCreatedFallback(t *testing.T) {
 }
 
 func TestCount(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := []feeds.Item{
@@ -1066,11 +994,7 @@ func TestCount(t *testing.T) {
 }
 
 func TestSources(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer func() { _ = db.Close() }()
+	db := openTestStore(t)
 	ctx := context.Background()
 
 	items := []feeds.Item{

@@ -7,27 +7,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-func openTodoStore(t *testing.T) (*Store, context.Context) {
-	t.Helper()
-	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db, context.Background()
-}
-
 // A task's full lifecycle: added open, completed (which stamps completed_at and
 // moves it to the done list), then re-opened and deleted — each transition
 // reflected by ListTodos.
 func TestTodoLifecycle(t *testing.T) {
-	db, ctx := openTodoStore(t)
+	db, ctx := openTestStore(t), context.Background()
 
 	todo, err := db.AddTodo(ctx, "  write the thing  ", "with a note", nil, nil)
 	if err != nil {
@@ -79,7 +68,7 @@ func TestTodoLifecycle(t *testing.T) {
 // Open tasks are ordered by due date soonest-first, with undated tasks last —
 // the order the board renders top-to-bottom.
 func TestListTodosDueOrder(t *testing.T) {
-	db, ctx := openTodoStore(t)
+	db, ctx := openTestStore(t), context.Background()
 
 	day := func(s string) *time.Time {
 		d, _ := time.ParseInLocation(dueDateLayout, s, time.Local)
@@ -116,7 +105,7 @@ func TestListTodosDueOrder(t *testing.T) {
 // AddTodo rejects an empty or over-long title with ErrInvalidTodo (so the web
 // layer can answer 400), and never writes the bad row.
 func TestAddTodoValidation(t *testing.T) {
-	db, ctx := openTodoStore(t)
+	db, ctx := openTestStore(t), context.Background()
 
 	if _, err := db.AddTodo(ctx, "   ", "", nil, nil); !errors.Is(err, ErrInvalidTodo) {
 		t.Errorf("empty title err = %v, want ErrInvalidTodo", err)
@@ -132,7 +121,7 @@ func TestAddTodoValidation(t *testing.T) {
 // Toggling or deleting a task that doesn't exist is ErrTodoNotFound, not a
 // silent no-op.
 func TestTodoNotFound(t *testing.T) {
-	db, ctx := openTodoStore(t)
+	db, ctx := openTestStore(t), context.Background()
 	if _, err := db.ToggleTodo(ctx, 999); !errors.Is(err, ErrTodoNotFound) {
 		t.Errorf("toggle missing err = %v, want ErrTodoNotFound", err)
 	}
@@ -144,7 +133,7 @@ func TestTodoNotFound(t *testing.T) {
 // Tags survive an add round-trip after normalisation (trim, drop blanks, dedupe
 // case-insensitively), and SetTodoTags replaces them on an existing task.
 func TestTodoTags(t *testing.T) {
-	db, ctx := openTodoStore(t)
+	db, ctx := openTestStore(t), context.Background()
 
 	todo, err := db.AddTodo(ctx, "tagged", "", nil,
 		[]string{" day-to-day ", "work", "Work", "", "day-to-day"})
