@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -108,12 +109,45 @@ func openTestStore(t testing.TB) *Store {
 // truncateAll empties every table so a test starts from the same blank slate a
 // fresh SQLite file gives. RESTART IDENTITY matters: tests assert on generated
 // ids, which would otherwise keep climbing across the run.
+//
+// The list is read from the catalog rather than written down, so a table added
+// later is cleared too. A hardcoded list would leave the new table's rows
+// bleeding between tests on the Postgres run only, with nothing failing.
 func truncateAll(t testing.TB, s *Store) {
 	t.Helper()
-	const tables = "items, todos, ideas, ingest_history, ingest_run_logs, feed_fetches, feeds, " +
-		"feed_defaults, profiles, profile_state, profile_imports, auth"
-	if _, err := s.db.ExecContext(t.Context(),
-		"TRUNCATE "+tables+" RESTART IDENTITY CASCADE"); err != nil {
+	ctx := t.Context()
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT tablename FROM pg_tables WHERE schemaname = current_schema()`)
+	if err != nil {
+		t.Fatalf("list tables: %v", err)
+	}
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan table name: %v", err)
+		}
+		// schema_version is the store's own bookkeeping, not test data;
+		// emptying it would make the next open think the database is new.
+		if name != "schema_version" {
+			tables = append(tables, pq(name))
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("list tables: %v", err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if len(tables) == 0 {
+		return
+	}
+	if _, err := s.db.ExecContext(ctx,
+		"TRUNCATE "+strings.Join(tables, ", ")+" RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
+
+// pq quotes an identifier read back from the catalog, so a table name is never
+// pasted into SQL raw.
+func pq(name string) string { return `"` + strings.ReplaceAll(name, `"`, `""`) + `"` }

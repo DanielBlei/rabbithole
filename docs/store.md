@@ -64,6 +64,18 @@ nanosecond text layout below. Nothing in the feed pipeline works at that scale, 
 timestamps less than a microsecond apart are distinguishable on one engine and equal on the
 other.
 
+**Every scanned time is normalized to UTC**, because the engines disagree about the zone
+rather than the instant: SQLite returns UTC, since its stored text ends in `Z`, while pgx
+returns the process's local zone no matter what the server's `timezone` is set to. Setting
+it on the connection does not help, and the difference is invisible until something buckets
+by day. A row written at 23:30 UTC would otherwise fall on a different date depending on the
+engine and the machine, which reaches the Maze's completed-by-date grouping and the digest's
+day-window stats. `TestScannedTimesAreUTC` pins it.
+
+The other default they disagree on is NULL ordering: SQLite sorts NULL last under `DESC`,
+Postgres first. `ORDER BY` over a nullable column therefore says `NULLS LAST` explicitly, and
+`unscoredSentinel` exists for the same reason.
+
 ## SQLite pragmas
 
 Applied per pooled connection via the DSN:
