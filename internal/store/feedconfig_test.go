@@ -124,6 +124,57 @@ func TestAddFeedRejectsUnknownType(t *testing.T) {
 }
 
 // Name and URL are both unique: one feed per name, one per link.
+// TestUniqueViolationMapsToFeedTaken covers what the conflict probe inside the
+// transaction cannot. The probe is a check-then-act: on Postgres two callers
+// can both pass it and the loser fails on the unique index instead. That has
+// to come back as ErrFeedNameTaken/ErrFeedURLTaken, because internal/web
+// matches on those and renders anything else as a 500.
+//
+// The violation is provoked directly rather than by racing goroutines, which
+// in practice serialize enough that the probe catches them and the test passes
+// whether or not the mapping works.
+func TestUniqueViolationMapsToFeedTaken(t *testing.T) {
+	db := openTestStore(t)
+	ctx := t.Context()
+
+	first := config.Feed{Name: "Alpha", URL: "https://alpha.test/feed"}
+	if _, err := db.AddFeed(ctx, first); err != nil {
+		t.Fatalf("AddFeed: %v", err)
+	}
+
+	now := sqlTime(time.Now())
+	cases := []struct {
+		name string
+		feed config.Feed
+		want error
+	}{
+		{
+			name: "name already indexed",
+			feed: config.Feed{Name: "Alpha", URL: "https://other.test/feed"},
+			want: ErrFeedNameTaken,
+		},
+		{
+			name: "url already indexed",
+			feed: config.Feed{Name: "Other", URL: "https://alpha.test/feed"},
+			want: ErrFeedURLTaken,
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			// Straight at the table, so the insert reaches the index the way a
+			// writer that lost a race would.
+			_, err := db.exec(ctx, sqlInsertFeed, config.FeedID(tt.feed.URL), tt.feed.Name, tt.feed.URL,
+				nil, nil, nil, nil, nil, now, now)
+			if err == nil {
+				t.Fatal("insert succeeded, want a unique violation")
+			}
+			if got := db.feedUniqueErr(err, tt.feed); !errors.Is(got, tt.want) {
+				t.Errorf("feedUniqueErr() = %v, want errors.Is(_, %v)", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAddFeedRejectsDuplicates(t *testing.T) {
 	db := openTestStore(t)
 	if _, err := db.AddFeed(t.Context(), config.Feed{Name: "Alpha", URL: "https://alpha.test/feed"}); err != nil {

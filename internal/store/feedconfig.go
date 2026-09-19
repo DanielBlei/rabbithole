@@ -57,6 +57,36 @@ CREATE TABLE IF NOT EXISTS feed_defaults (
 );
 `
 
+// feed_defaults keeps a plain INTEGER key: the value is always the literal 1,
+// so it needs no identity column.
+const feedConfigSchemaPG = `
+CREATE TABLE IF NOT EXISTS feeds (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL,
+	url        TEXT NOT NULL,
+	type       TEXT,
+	enabled    BOOLEAN,
+	since      TEXT,
+	max_items  INTEGER,
+	tags       TEXT,
+	created_at TIMESTAMPTZ NOT NULL,
+	updated_at TIMESTAMPTZ NOT NULL,
+	deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feeds_name ON feeds(name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feeds_url ON feeds(url);
+CREATE INDEX IF NOT EXISTS idx_feeds_live ON feeds(deleted_at);
+
+CREATE TABLE IF NOT EXISTS feed_defaults (
+	id         INTEGER PRIMARY KEY CHECK (id = 1),
+	enabled    BOOLEAN,
+	since      TEXT,
+	max_items  INTEGER,
+	tags       TEXT,
+	updated_at TIMESTAMPTZ NOT NULL
+);
+`
+
 // Feed-management errors. Name and URL are both unique, so the two collisions
 // are reported apart: the Sources page puts the message on the field that
 // caused it.
@@ -232,11 +262,17 @@ func (s *Store) AddFeed(ctx context.Context, f config.Feed) (string, error) {
 		if _, err := s.txExec(ctx, tx, sqlInsertFeed, id, f.Name, f.URL, nullFeedType(f.Type),
 			nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
 			now, now); err != nil {
+			if taken := s.feedUniqueErr(err, f); taken != nil {
+				return "", taken
+			}
 			return "", fmt.Errorf("insert feed %q: %w", f.Name, err)
 		}
 	} else if _, err := s.txExec(ctx, tx, sqlRestoreFeed, f.Name, f.URL, nullFeedType(f.Type),
 		nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
 		now, id); err != nil {
+		if taken := s.feedUniqueErr(err, f); taken != nil {
+			return "", taken
+		}
 		return "", fmt.Errorf("restore feed %q: %w", f.Name, err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -269,6 +305,9 @@ func (s *Store) UpdateFeed(ctx context.Context, id string, f config.Feed) error 
 		nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
 		sqlTime(time.Now()), id)
 	if err != nil {
+		if taken := s.feedUniqueErr(err, f); taken != nil {
+			return taken
+		}
 		return fmt.Errorf("update feed %q: %w", id, err)
 	}
 	if err := expectOneRow(res, id); err != nil {
@@ -526,6 +565,28 @@ func validateFeedInput(f config.Feed) (config.Feed, error) {
 		return f, fmt.Errorf("%w: %w", ErrFeedInvalid, err)
 	}
 	return f, nil
+}
+
+// feedUniqueErr turns a unique-index failure into the same error
+// findFeedConflict would have returned, and leaves anything else alone.
+//
+// The probe inside the transaction catches almost every collision, but it is a
+// check-then-act: on Postgres two concurrent adds both pass it and the loser
+// fails here instead. Without this the handlers would see an unrecognized
+// error and render a 500 rather than "that name is taken".
+// It returns nil when err is not a uniqueness failure, leaving the caller to
+// wrap it as it otherwise would.
+func (s *Store) feedUniqueErr(err error, f config.Feed) error {
+	switch s.d.uniqueViolation(err) {
+	case "idx_feeds_name", "feeds.name":
+		return fmt.Errorf("%w: %s", ErrFeedNameTaken, f.Name)
+	// The primary key is the URL's digest, so colliding on it means the same
+	// URL. Postgres checks it before the URL index and reports it instead.
+	case "idx_feeds_url", "feeds.url", "feeds_pkey", "feeds.id":
+		return fmt.Errorf("%w: %s", ErrFeedURLTaken, f.URL)
+	default:
+		return nil
+	}
 }
 
 // expectOneRow turns "the update matched nothing" into ErrFeedNotFound, which

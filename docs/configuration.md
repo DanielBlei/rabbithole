@@ -54,7 +54,8 @@ All fields are optional unless marked required.
 | `ingest.since` | Lookback window for new items | `7d`                              |
 | `ingest.feeds` | Path to the feed seed file | `feeds.yaml` beside `config.yaml` |
 | `ingest.digest_dir` | Output directory for `ingest --markdown` | none — required by that flag      |
-| `store.db_path` | SQLite database file | **required**                      |
+| `store.db_path` | SQLite database file | one of `db_path`/`url` required   |
+| `store.url` | Postgres connection URL, instead of `db_path` | one of `db_path`/`url` required   |
 
 Durations accept a `d` (days) suffix in addition to the standard `h`, `m` and `s` — for
 example `14d`, `168h`, `1h30m`.
@@ -261,6 +262,56 @@ rather than only the most recent result.
 https://medium.com/feed/tag/<tag>
 https://medium.com/feed/@<username>
 ```
+
+## Store
+
+Set exactly one of `store.db_path` or `store.url`. Which one is set picks the engine, so
+there is no separate driver setting that could disagree with it. Setting both, or neither,
+is rejected at startup.
+
+```yaml
+store:
+  db_path: ./data/rabbithole.db   # SQLite, the local default
+  # url: postgres://rabbithole@db.example.com:5432/rabbithole
+```
+
+SQLite is the right answer for one machine and needs nothing installed. Postgres is for
+reaching the same store from more than one machine, and is what to use with a hosted
+database such as Supabase, RDS or Cloud SQL.
+
+**One process at a time.** Whichever engine you choose, only one `rabbithole serve` may
+point at a store at a time. Machines take turns. A second server reaching the same database
+marks the first one's running ingest as failed, because interrupted runs are reconciled at
+startup (see [store](store.md#one-writer-at-a-time)).
+
+### The password
+
+It comes from the `RABBITHOLE_DB_PASSWORD` environment variable, not the config file, which
+keeps it out of anything that copies `config.yaml` around and out of the web UI's config
+viewer. `.env.example` is a starting point; nothing reads `.env` automatically, so source it
+from your shell or point a systemd unit at it with `EnvironmentFile=`. The `make` targets
+that run the binary do pick up `./.env`.
+
+```bash
+export RABBITHOLE_DB_PASSWORD=...
+```
+
+A URL that already carries a password still works, and the environment variable overrides it
+when both are set. Expect a warning at startup in that case: a password in `store.url` lives
+in the config file, which is the thing the variable exists to avoid.
+
+### TLS
+
+`sslmode` defaults to **`verify-full`** when the URL does not name one, which both encrypts
+the connection and checks that the server is who it claims to be. Weaker modes have to be
+asked for explicitly:
+
+| Mode | Meaning |
+|---|---|
+| `verify-full` | Encrypted, certificate and hostname verified. The default |
+| `verify-ca` | Encrypted, certificate verified, hostname not |
+| `require` | Encrypted, but nothing is verified, so it can be intercepted |
+| `disable` | Not encrypted. Only sensible over a loopback connection |
 
 ## Interest profile
 

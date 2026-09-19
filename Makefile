@@ -15,6 +15,11 @@ FORMAT   ?= text
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  := -X github.com/DanielBlei/rabbithole/cmd.version=$(VERSION)
 
+# Pick up ./.env if it exists, so targets that run the binary see
+# RABBITHOLE_DB_PASSWORD without it being exported by hand. See .env.example.
+-include .env
+export RABBITHOLE_DB_PASSWORD
+
 .DEFAULT_GOAL := help
 
 ##@ General
@@ -145,6 +150,23 @@ bench: ## Run ranking and store benchmarks
 cover: ## Run tests and open an HTML coverage report
 	go test -coverprofile=coverage.out $(PKG)
 	go tool cover -html=coverage.out
+
+# The suite runs on SQLite by default and needs nothing installed. These three
+# run the same tests a second time against Postgres, which is opt-in: `check`
+# does not depend on them, and neither does CI.
+
+.PHONY: pg-up
+pg-up: ## Start a throwaway Postgres for the store tests
+	@./scripts/dev-postgres.sh up
+
+.PHONY: pg-down
+pg-down: ## Stop the throwaway Postgres and drop its data
+	@./scripts/dev-postgres.sh down
+
+.PHONY: test-pg
+test-pg: ## Run the store suite against the throwaway Postgres
+	@./scripts/dev-postgres.sh status >/dev/null || { echo "not running; start it with 'make pg-up'" >&2; exit 1; }
+	@RABBITHOLE_TEST_POSTGRES="$$(./scripts/dev-postgres.sh dsn)" go test ./internal/store/...
 
 ##@ Quality
 

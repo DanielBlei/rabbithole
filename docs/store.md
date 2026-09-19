@@ -1,14 +1,72 @@
 # Store
 
-Everything persists in a single SQLite file at `store.db_path`, accessed through
-`internal/store`. The setting is required and has no default; the shipped example config uses
-`./data/rabbithole.db`.
+Everything persists through `internal/store`, on one of two engines. `store.db_path` is a
+SQLite file, the local default, and the shipped example config uses `./data/rabbithole.db`.
+`store.url` is a Postgres connection instead, for reaching the same store from more than one
+machine. Exactly one of the two is set; see [configuration](configuration.md#store).
 
-> SQLite is the only supported backend. Postgres is on the roadmap, so that one person can
-> reach the same store from more than one machine rather than each process owning its own local
-> file.
+## One implementation, two engines
 
-Connection pragmas, applied per pooled connection via the DSN:
+There is no `Store` interface and no second implementation. Queries are written once, in the
+form SQLite accepts, and a `dialect` (`internal/store/dialect.go`) translates the few things
+the engines spell differently. With 57 methods and a single implementation, an interface would
+duplicate every signature and buy nothing.
+
+The whole divergence is five items:
+
+| | SQLite | Postgres |
+|---|---|---|
+| Placeholders | `?` | `$1, $2, …`, renumbered by `rebind` |
+| Substring test | `instr(…)` | `strpos(…)` |
+| DDL | beside each feature, e.g. `todoSchema` | its twin, e.g. `todoSchemaPG` |
+| Schema version | `PRAGMA user_version` | a one-row `schema_version` table |
+| Unique violation | message text | SQLSTATE 23505 |
+
+That list is a budget rather than an observation. Most of what looks like a dialect problem is
+only old SQL: the driver embeds SQLite 3.53, so `RETURNING`, `IS DISTINCT FROM` and
+`TRUE`/`FALSE` all work, and writing SQL both engines accept removes the branch instead of
+hiding it. If the table above grows past a handful of rows, two separate implementations
+become easier to reason about than a seam that wide.
+
+Queries never touch the database handle directly; they go through `query`/`queryRow`/`exec`
+and the transaction wrappers, which is what applies `rebind`. A statement that bypassed them
+would work on SQLite and fail on Postgres, so `TestNoDirectDatabaseAccess` fails the build
+instead of leaving that to review.
+
+## One writer at a time
+
+Only one `rabbithole serve` may point at a store, on either engine. Machines take turns. Four
+things depend on it, and none is enforced in code:
+
+- **Ingest runs are reconciled at startup.** `InterruptStaleIngestRuns` flips every `running`
+  row to `error`, which is right after a crash and wrong if another server is mid-run. Fixing
+  it properly needs an owner and a heartbeat on `ingest_history`, and so a schema version bump.
+- **The run manager is single-flight per process**, so two servers would score the same items
+  twice and spend the model calls twice.
+- **Sessions live in memory** (`internal/web/auth.go`), so each server keeps its own. The `gen`
+  and `signing_key` columns do carry password changes and remember-me cookies across
+  processes correctly.
+- **The login rate limiter is per process**, so lockout could be sidestepped via the second one.
+
+Two concurrent requests inside one server are fine and are handled: the feed conflict probe is
+a check-then-act, and on Postgres the loser comes back as `ErrFeedNameTaken` rather than a raw
+constraint error, so the Sources page still shows it against the field.
+
+## Postgres connections
+
+The pool is capped in `dialect.go` rather than in config, since nothing has needed tuning:
+10 open, 5 idle, a 30 minute lifetime and a 5 minute idle timeout. The lifetime is the one
+that matters against a hosted database, where a pooler recycles server connections underneath
+a handle held open forever.
+
+Timestamps are `TIMESTAMPTZ`, which resolves to microseconds, where SQLite stores the
+nanosecond text layout below. Nothing in the feed pipeline works at that scale, but two
+timestamps less than a microsecond apart are distinguishable on one engine and equal on the
+other.
+
+## SQLite pragmas
+
+Applied per pooled connection via the DSN:
 
 | Pragma | Reason |
 |---|---|
@@ -452,15 +510,28 @@ an `items.feed_id` column is the real fix and the natural next step.
 
 ## Schema version
 
-Each table's DDL lives beside its feature (`todos.go`, `ideas.go`, `profiles.go`, …) and is
-listed in `allSchemas`. On a database with no tables, `Open` applies them all and records
-`schemaVersion` in SQLite's `user_version`.
+Each table's DDL lives beside its feature (`todos.go`, `ideas.go`, `profiles.go`, …), as a
+pair: the SQLite form and its Postgres twin, adjacent so neither can be changed without the
+other being in view. Each dialect lists its own set in `schemas()`.
 
-Schema version 4 upgrades version 3 transactionally: it creates the profile tables and adds
-the three nullable provenance columns to `items`, then advances `user_version`. Other unknown
-versions still return `ErrSchemaVersion`, naming the file rather than touching it. Independent
-additive tables may still be created on every open without a version bump where older code has
-no dependency on them.
+On a database that has never been set up, `Open` applies them all and stamps `schemaVersion`.
+On an existing one it compares the two and returns `ErrSchemaVersion` on a mismatch, naming
+the database rather than touching it. **Both engines carry the same number**; only where it
+is kept differs, since `PRAGMA user_version` has no Postgres equivalent and a `schema_version`
+table stands in.
+
+Schema version 4 adds the profile tables and the three nullable provenance columns on `items`.
+On SQLite that is an in-place upgrade from version 3, run in one transaction; a Postgres
+database was never version 3, so it is only ever created at 4. Other unknown versions return
+`ErrSchemaVersion`. Independent additive tables may still be created on every open without a
+version bump where older code has no dependency on them.
+
+The freshness check asks after a table the application owns rather than after the version
+record, so a Postgres database holding these tables but no version row is refused instead of
+being stamped over whatever is in it.
+
+Changing the schema therefore means editing **both** `CREATE TABLE` blocks and raising
+`schemaVersion`. Existing databases are then refused until they are upgraded or replaced.
 
 Changing an owned live-state schema means editing the `CREATE TABLE` block, adding an ordered
 transactional migration from the previous version, and raising `schemaVersion`. Databases with
@@ -481,8 +552,9 @@ that do not require a coordinated backfill or versioned column change; `auth` wa
   created with it, so on an existing one freed pages go to the freelist and get reused
   rather than returned. Reclaiming disk means running `VACUUM` by hand with the server
   stopped.
-- **No `Store` interface.** Callers take `*store.Store` directly. Supporting a second backend
-  means introducing one first.
+- **Two DDL blocks per table.** The engines' schemas are kept in step by hand, and nothing
+  compares them. They sit adjacent in each file so a change to one is visible next to the
+  other, which is a convention rather than a guarantee.
 - **`items.source` holds the feed's name, not its ID.** Feeds are in the database now, so
   the link could be real; making it one means adding `items.feed_id`, backfilling it, and
   reworking every query that filters on `source`. Until then `RenameSource` keeps a rename

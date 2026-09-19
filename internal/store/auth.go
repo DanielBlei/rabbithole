@@ -43,6 +43,20 @@ CREATE TABLE IF NOT EXISTS auth (
 );
 `
 
+// Identical but for the CHECK quoting rules, which both engines share; kept
+// beside its twin so the pair stays visible when either changes.
+const authSchemaPG = `
+CREATE TABLE IF NOT EXISTS auth (
+	id          INTEGER PRIMARY KEY CHECK (id = 1),
+	username    TEXT NOT NULL,
+	pass_hash   TEXT,
+	mode        TEXT NOT NULL CHECK (mode IN ('enabled', 'disabled')),
+	gen         TEXT NOT NULL,
+	signing_key TEXT NOT NULL,
+	updated_at  TEXT NOT NULL
+);
+`
+
 // AuthMode is where the login gate stands.
 type AuthMode string
 

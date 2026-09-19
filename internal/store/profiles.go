@@ -40,6 +40,33 @@ CREATE TABLE IF NOT EXISTS profile_imports (
 );
 `
 
+// profileSchemaPG is the Postgres twin: TIMESTAMPTZ for the timestamps. The
+// CHECKs and the lower(name) index carry over as they are.
+const profileSchemaPG = `
+CREATE TABLE IF NOT EXISTS profiles (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL,
+	content    TEXT NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL,
+	updated_at TIMESTAMPTZ NOT NULL,
+	CHECK (id != 'builtin-default'),
+	CHECK (length(trim(name)) > 0),
+	CHECK (length(trim(content)) > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(lower(name), id);
+
+CREATE TABLE IF NOT EXISTS profile_state (
+	singleton         INTEGER PRIMARY KEY CHECK (singleton = 1),
+	active_profile_id TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS profile_imports (
+	source      TEXT PRIMARY KEY,
+	profile_id  TEXT NOT NULL,
+	imported_at TIMESTAMPTZ NOT NULL
+);
+`
+
 var (
 	// ErrProfileNotFound is returned when a local profile ID does not exist.
 	ErrProfileNotFound = errors.New("profile not found")

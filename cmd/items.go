@@ -131,6 +131,35 @@ func init() {
 	rootCmd.AddCommand(itemsCmd)
 }
 
+// openStore opens whichever engine the config names and logs which one. Every
+// command goes through it so the redaction and the warning below cannot be
+// forgotten at one call site: cfg.Store.URL carries the password, so it is the
+// resolved Label that reaches a log line or an error, never the DSN.
+func openStore(ctx context.Context, cfg *config.Config) (*store.Store, error) {
+	label := cfg.Store.DBPath
+	var pg config.Postgres
+	if cfg.Store.IsPostgres() {
+		var err error
+		if pg, err = cfg.Store.ResolvePostgres(); err != nil {
+			return nil, err
+		}
+		label = pg.Label
+		if pg.PasswordFromURL {
+			log.Warn().Msgf("store.url carries a password; %s keeps it out of the config file"+
+				" and out of the web config viewer", config.DBPasswordEnv)
+		}
+	}
+	db, err := store.OpenFrom(ctx, cfg.Store)
+	if err != nil {
+		if cfg.Store.IsPostgres() && !pg.HasPassword {
+			return nil, fmt.Errorf("%w (no password given: set %s)", err, config.DBPasswordEnv)
+		}
+		return nil, err
+	}
+	log.Debug().Str("db", label).Msg("store opened")
+	return db, nil
+}
+
 // withStore opens the configured store, runs fn, and closes it. The loaded
 // config is passed through so callers can apply config-driven defaults (e.g.
 // `items list`'s default window) without reloading it.
@@ -139,7 +168,7 @@ func withStore(cmd *cobra.Command, fn func(ctx context.Context, db *store.Store,
 	if err != nil {
 		return err
 	}
-	db, err := store.Open(cfg.Store.DBPath)
+	db, err := openStore(cmd.Context(), cfg)
 	if err != nil {
 		return err
 	}
