@@ -3,10 +3,21 @@
 // Loaded blocking (no defer) from <head> for that reason; fonts.js and theme.js
 // own the actual UI wiring.
 (function(){
-  var m={'title':'data-ft','body':'data-fb','titleSize':'data-fts','bodySize':'data-fbs'};
+  var m={'ui':'data-fu','uiSize':'data-fus','title':'data-ft','body':'data-fb',
+         'titleSize':'data-fts','bodySize':'data-fbs'};
+  // Checked against the same option lists fonts.js offers. A value no rule knows
+  // would be worse than no value: the stylesheet falls back to the base face,
+  // and the attribute's mere presence switches off the :not([data-fu]) rules a
+  // layout uses for its own defaults — so a stale pref would make Minimal paint
+  // mono chrome. fonts.js repairs that on the next frame, but the login page
+  // loads this file alone and never gets the chance.
+  var ok={'ui':['mono','plex'],'uiSize':['s','m','l'],
+          'title':['mono','inter','plex','manrope','grotesk','serif'],
+          'titleSize':['s','m','l'],'bodySize':['s','m','l']};
+  ok['body']=ok['title'];
   for (var k in m){
     var v=localStorage.getItem('font.'+k);
-    if (v) document.documentElement.setAttribute(m[k], v);
+    if (v && ok[k].indexOf(v) >= 0) document.documentElement.setAttribute(m[k], v);
   }
   // The chrome layout and whether the side menu is docked. Absence is the
   // default in both cases, so only a non-default choice lands on the element —

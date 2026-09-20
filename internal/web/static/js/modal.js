@@ -47,7 +47,7 @@
 
   // Tab stops inside the open frame, in document order.
   function stops(f){
-    var sel = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    var sel = 'a[href], button:not([disabled]), summary, input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
     return Array.prototype.slice.call(f.querySelectorAll(sel)).filter(function(el){
       return el.getClientRects().length > 0;
     });
@@ -103,7 +103,8 @@
     });
   });
   document.addEventListener('keydown', function(e){
-    if (e.key === 'Escape' && top()) dismiss();
+    // chrome.js prevents the Escape that closed a popmenu, and is loaded ahead of this file.
+    if (e.key === 'Escape' && !e.defaultPrevented && top()) dismiss();
   });
 
   // Keep Tab inside the open frame so it can't reach the page behind it.
