@@ -44,7 +44,11 @@
   src:url('/static/fonts/source-serif-4-v14-latin_latin-ext-600.woff2') format('woff2');}
 
 :root{
-  font-size:10px;
+  /* The rem base, and with it every chrome type size. --ui-scale is the reader's
+     interface size (Theme → Appearance → Interface); the ladder it steps through is at
+     the end of the file, where the rest of the type prefs live. Spacing is in px
+     throughout the sheet, so this moves the lettering and leaves the boxes. */
+  font-size:calc(10px * var(--ui-scale,1));
 
   /* The page's ground. Named because the side menu continues it rather than
      painting over it — see .navrail. */
@@ -93,17 +97,24 @@
      not a left margin. A stepper stretched to the full pane puts its two arrows
      a hand apart; capped but pinned left, all the slack piles up on one side
      instead. Labels and controls share the column's left edge, so the block
-     reads as a column rather than as things that happen to line up. */
-  --stg-col:30rem;
+     reads as a column rather than as things that happen to line up.
+     Pinned in px, not rem: the interface size below scales the rem base, and a
+     dialog that resized while you picked a size in it would be unusable. */
+  --stg-col:300px;
 
-  /* User type prefs (settings → Fonts). Chrome stays mono; only the title and
-     text layers read these. Face/size blocks at the end of the file override
-     them per the data-ft/fb/fts/fbs attrs the font IIFE sets on <html>. */
+  /* User type prefs (settings → Theme → Appearance). Three layers, three prefs: the
+     chrome reads --font-ui and --ui-scale, titles read --font-title/--fs-title,
+     reading text reads --font-body/--fs-body. Face/size blocks at the end of the
+     file override them per the data-fu/fus/ft/fb/fts/fbs attrs the font IIFE
+     sets on <html>. */
   --font-mono:'IBM Plex Mono',Menlo,Consolas,monospace;
+  --font-ui:var(--font-mono);
   --font-title:var(--font-mono);
   --font-body:var(--font-mono);
-  --fs-title:1.4rem;       /* ONE size for article + todo titles — never split */
-  --fs-body:1.35rem;
+  /* The two content sizes are px, not rem, so the interface scale can move the
+     chrome without dragging the reading text along with it. */
+  --fs-title:14px;         /* ONE size for article + todo titles — never split */
+  --fs-body:13.5px;
 
   /* The centred column every page sits in. Sized so the feed's filter bar
      holds all six controls plus the reset on one line. */
@@ -189,7 +200,9 @@ body{
      page depth without a flat fill. `fixed` so it doesn't scroll with content. */
   background:var(--page-field) fixed;
   color:var(--text);
-  font-family:var(--font-mono);
+  /* The chrome's face. Everything that doesn't re-pin a family inherits it from
+     here, which is what makes one variable enough. */
+  font-family:var(--font-ui);
   /* dvh tracks the mobile URL bar collapsing; the vh line above it is the
      fallback for browsers that don't know the unit. */
   min-height:100vh;
@@ -262,7 +275,7 @@ header.topbar{
    leads the bar instead of receding. The one place we step off IBM Plex Mono. */
 .topbar__left .wordmark b{
   font-family:'Archivo',sans-serif;color:var(--title);font-weight:700;
-  font-size:1.6rem;letter-spacing:0.028em;text-transform:uppercase;
+  font-size:1.5rem;letter-spacing:0.028em;text-transform:uppercase;
 }
 .topbar__left .breaker{color:var(--line);font-size:1.4rem;}
 /* Pages as a segmented pill control — a filled track with the active page
@@ -270,7 +283,7 @@ header.topbar{
    didn't). No sliding thumb: page switches are full navigations. */
 .topbar__nav{
   display:flex;background:var(--fill);border-radius:var(--r-full);padding:3px;
-  font-size:1.1rem;letter-spacing:0.035em;text-transform:uppercase;color:var(--text-dim);
+  font-size:1.25rem;letter-spacing:0.035em;text-transform:uppercase;color:var(--text-dim);
 }
 .topbar__nav a{padding:4px 14px;border-radius:var(--r-full);transition:color .15s ease,background .15s ease;}
 .topbar__nav a:hover{color:var(--accent);}
@@ -336,16 +349,15 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .modal--stg{z-index:calc(var(--z-modal) - 1);}
 .modal__frame--stg{width:min(720px,94vw);}
 /* One height for every section, so switching never resizes the dialog under
-   the pointer — Weather is the tallest and the rest carry the slack. Set as a
-   height with flex-shrink live, the same trick the sources columns use: this
-   tall, but give way when 84vh says otherwise.
-   Sized to the tallest section's content rather than to a round number: at 428
-   Weather ran past the bottom and the location field — the one control in there
-   you have to reach for rather than glance at — was below the fold on a window
-   with room to spare. */
+   the pointer — Theme (preview, look radios and the font menus) is the tallest
+   and the rest carry the slack. Set as a height with flex-shrink live, the same
+   trick the sources columns use: this tall, but give way when 84vh says
+   otherwise.
+   Sized to the tallest section's content rather than to a round number, so the
+   preview and the menus that redraw it are on screen together. */
 .stg{
   display:grid;grid-template-columns:180px minmax(0,1fr);
-  height:512px;min-height:0;flex:1 1 auto;
+  height:528px;min-height:0;flex:1 1 auto;
 }
 .stg__rail{
   display:flex;flex-direction:column;gap:2px;min-width:0;min-height:0;
@@ -379,7 +391,6 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .stg__sect{display:none;width:min(100%, var(--stg-col));margin:0 auto;}
 .stg:has(#stgTime:checked)  .stg__sect--time {display:block;}
 .stg:has(#stgWx:checked)    .stg__sect--wx   {display:block;}
-.stg:has(#stgFonts:checked) .stg__sect--fonts{display:block;}
 .stg:has(#stgTheme:checked) .stg__sect--theme{display:block;}
 /* The section label, at the same 12px inset every control row below it uses.
    Set in the brightest text there is: it is the only thing in the pane that
@@ -389,11 +400,13 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
   padding:6px 0 5px;font-size:1.05rem;letter-spacing:0.084em;
   text-transform:uppercase;color:var(--title);
 }
+/* A second block under one that ends in a line of text needs air above it, or
+   the heading reads as a caption for what came before. */
+.stg__lbl--apart{padding-top:18px;}
 /* The title bar wears the open section as the command it just ran, the way the
    sources dialog wears its counts. */
 .modal__frame--stg:has(#stgTime:checked)  .stg__cmd::after{content:"date-time";}
 .modal__frame--stg:has(#stgWx:checked)    .stg__cmd::after{content:"weather";}
-.modal__frame--stg:has(#stgFonts:checked) .stg__cmd::after{content:"fonts";}
 .modal__frame--stg:has(#stgTheme:checked) .stg__cmd::after{content:"theme";}
 
 /* --- Settings → Date format ----------------------------------------------- */
@@ -430,14 +443,17 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
    preview over the two radios. It has more room than the setup card, so the
    drawing is larger here, stopping short of the column's full width so the
    panel keeps its margins. */
-.stg__sect--theme{width:min(100%, 42rem);}
+.stg__sect--theme{width:min(100%, 420px);}
 .look--stg{display:flex;flex-direction:column;gap:12px;padding:4px 0 2px;}
-.look--stg .look__pv{height:23rem;}
+.look--stg .look__pv{height:250px;}
 /* Side by side, as on the setup card. Pinned height, like every other control
    the two layouts share: the faces differ in height, and a row that resized
-   under the pointer would read as a glitch rather than a restyle. */
-.look--stg .look__opts{height:4.6rem;}
-.look--stg .look__opt-body{height:4.6rem;}
+   under the pointer would read as a glitch rather than a restyle.
+   In px, not rem: rem rides --ui-scale, which both the layout switch and the
+   Interface size step move, so a rem height is not pinned against either. The
+   steppers under this row are clicked repeatedly, and they have to stay put. */
+.look--stg .look__opts{height:46px;}
+.look--stg .look__opt-body{height:46px;}
 .look__note{margin:0;font-size:1.1rem;color:var(--text-dim);}
 
 /* button rows / slider / location share the label's 12px left inset so the
@@ -582,25 +598,6 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .wx-credit a{color:var(--accent-dim);text-decoration:none;}
 .wx-credit a:hover{color:var(--accent);text-decoration:underline;}
 
-.clk-slider{display:flex;flex-direction:column;gap:9px;padding:5px 0 2px;}
-.clk-slider__preview{
-  font-size:1.2rem;color:var(--accent);text-align:center;min-height:1.4em;
-  font-variant-numeric:tabular-nums;
-}
-.clk-slider input[type=range]{
-  -webkit-appearance:none;appearance:none;width:100%;height:3px;
-  background:var(--line);border-radius:999px;cursor:pointer;
-}
-.clk-slider input[type=range]::-webkit-slider-thumb{
-  -webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;
-  background:var(--accent);border:2px solid var(--pane);cursor:pointer;
-}
-.clk-slider input[type=range]::-moz-range-thumb{
-  width:14px;height:14px;border:2px solid var(--pane);border-radius:50%;
-  background:var(--accent);cursor:pointer;
-}
-.clk-slider input[type=range]:focus-visible{outline:1px solid var(--accent);outline-offset:4px;}
-
 /* scroll-margin clears the sticky bar when the skip link jumps here, so the
    first line of content doesn't land underneath it. */
 .content{
@@ -621,11 +618,9 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
   box-shadow:inset 0 1px 0 rgba(255,255,255,.04), 0 1px 2px rgba(0,0,0,.22);
   padding:8px 12px;border-radius:14px;text-align:center;
 }
-/* A summary of the feed, not the headline of the page: the numbers were set
-   large enough to read before the articles did. */
-.tile .num{font-size:2rem;font-weight:600;color:var(--accent);text-shadow:0 0 7px rgba(128,203,196,.22);}
+.tile .num{font-size:1.5rem;font-weight:600;color:var(--accent);text-shadow:0 0 7px rgba(128,203,196,.22);}
 .tile .num--high{color:var(--score-high);text-shadow:0 0 7px rgba(195,232,141,.25);}
-.tile .label{font-size:1.05rem;letter-spacing:0.035em;text-transform:uppercase;color:var(--text-dim);margin-top:1px;}
+.tile .label{font-size:1.25rem;letter-spacing:0.035em;text-transform:uppercase;color:var(--text-dim);margin-top:1px;}
 /* The fourth slot with nothing in it. It used to announce that more was
    coming, which is a promise the row cannot keep on its own; a prompt and a
    cursor say the same thing and say it as a detail. One line, centred in a box
@@ -649,8 +644,9 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 }
 .pane__bar{
   display:flex;flex-wrap:wrap;align-items:center;
-  /* One space between arguments, the width the mono face gives one, so the
-     line reads as a command and not as a row of chips. The row gap is wider:
+  /* About one space between arguments, so the line reads as a command and not
+     as a row of chips. In em, so it tracks whatever face the chrome is wearing
+     rather than the mono width it was measured against. The row gap is wider:
      wrapped lines need to stay apart. */
   gap:.7em .6em;
   padding:9px 14px;border-bottom:1px solid var(--line);
@@ -706,7 +702,7 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
 .filter{display:flex;align-items:center;gap:6px;color:var(--text-dim);}
 /* The feed bar dropped its key words for segments; the sources modal still
    spells its one control key + value. */
-.filter__key{letter-spacing:0.035em;text-transform:uppercase;font-size:1.05rem;}
+.filter__key{letter-spacing:0.035em;text-transform:uppercase;font-size:1.15rem;}
 .filter--published{position:relative;}
 
 /* Segments. The controls are grouped by what they answer — what is being read
@@ -803,20 +799,24 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
    more: with seven controls plus the reset, slack in any one of them is a
    second line for all of them once they are narrowed at once. */
 .pane__filters .popmenu__btn{
-  position:relative;width:var(--btn-w,9rem);padding:5px 24px 5px 12px;
+  position:relative;width:var(--btn-w,90px);padding:5px 24px 5px 12px;
   gap:0;justify-content:center;
 }
 .pane__filters .popmenu__btn::after{
   position:absolute;right:11px;top:50%;transform:translateY(-50%);
 }
-.popmenu--src{--btn-w:16.5rem;}
-.popmenu--tags{--btn-w:9rem;}
-.popmenu--pub{--btn-w:10.6rem;}
-.popmenu--score{--btn-w:8.8rem;}
+/* In px, not rem: these widths are measured against a fixed 36px of padding and
+   caret, so scaling them with the interface size would take room away from the
+   label faster than the label itself shrinks, and "Published" would ellipsise at
+   the smallest step. The box holds still; only the lettering inside it moves. */
+.popmenu--src{--btn-w:165px;}
+.popmenu--tags{--btn-w:90px;}
+.popmenu--pub{--btn-w:106px;}
+.popmenu--score{--btn-w:88px;}
 /* View is the widest of them: it carries a label and the status dots at the
    same time, and three dots take as much room as the word. */
-.popmenu--view{--btn-w:12rem;}
-.popmenu--sort{--btn-w:8.8rem;}
+.popmenu--view{--btn-w:120px;}
+.popmenu--sort{--btn-w:88px;}
 /* Both spellings ride on every button: the name the control is known by, and
    the value it holds. Default wears the names — the line above the bar already
    says what is picked — and Minimal, which has no line, wears the values. One
@@ -1277,7 +1277,7 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
   padding-top:0;padding-bottom:0;border-width:0;
 }
 @media (prefers-reduced-motion: reduce){ .row--leaving{transition:none;} }
-.row .time{color:var(--text-dim);margin-right:10px;}
+.row .time{color:var(--text-dim);margin-right:10px;font-size:1.15rem;}
 .row .title a{color:var(--title);}
 .row .title a:hover{text-decoration:underline;text-decoration-color:var(--accent);}
 
@@ -1696,7 +1696,7 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
    loudest type in the whole chrome, for a menu. Down to a size that still reads
    as a tier above the config commands without competing with the brand. */
 .navrail__nm{
-  display:block;font-size:1.5rem;line-height:1.2;color:var(--title);
+  display:block;font-size:1.4rem;line-height:1.2;color:var(--title);
   transition:color .16s ease;
 }
 .navrail__ds{display:block;margin-top:1px;font-size:1.15rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;}
@@ -1772,7 +1772,9 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
    face, and off the longest command that actually has a comment to align —
    "sources". "settings" is a character wider and simply takes the room; with
    nothing after it there is nothing for it to line up with, and holding the
-   column open to its width only costs the comments beside the other two. */
+   column open to its width only costs the comments beside the other two.
+   Caveat, predating the type prefs: the menu follows the Text face, so a
+   proportional pick there makes ch stop meaning what this assumes. */
 .navrail__cmd{
   position:relative;flex:none;min-width:7ch;
   color:var(--text);transition:color .13s ease;
@@ -2992,7 +2994,7 @@ button.modal__act{border:0;font:inherit;}
 .maze-tab{
   position:relative;z-index:1;text-align:center;min-width:96px;
   padding:7px 18px;border-radius:6px;color:var(--text-dim);cursor:pointer;
-  font-size:1.3rem;user-select:none;transition:color .13s ease;
+  font-size:1.35rem;user-select:none;transition:color .13s ease;
 }
 .maze-tab:hover{color:var(--text);}
 /* the thumb: a teal pill that springs between the two equal columns. Inset
@@ -3125,14 +3127,21 @@ button.modal__act{border:0;font:inherit;}
   .maze-tabs::before{transition:none;}
 }
 
-/* ══════════════ user type layer (settings gear → Fonts) ═════════════════════
-   Two user prefs: Titles (article card titles + todo titles) and Text
-   (reading/markdown text, notes, sticky-note bodies, content inputs). All
-   terminal chrome — topbar, prompt bar, times, counts, chips, filters, tags,
-   clock, YAML viewer, due chips — stays IBM Plex Mono and never reads these.
+/* ══════════════ user type layer (settings gear → Theme → Appearance) ═════════════
+   Three user prefs, one per layer: Interface (all the terminal chrome — topbar,
+   prompt bar, times, counts, chips, filters, tags, clock, due chips), Titles
+   (article card titles + todo titles) and Text (reading/markdown text, notes,
+   sticky-note bodies, content inputs). Interface carries a face and a size; the
+   other two carry a face and a size each of their own, and the three sets never
+   read one another.
+
+   The chrome reaches its face by inheriting from body, which is why one variable
+   covers it and why the handful of things that must stay mono whatever happens
+   are pinned explicitly further down.
+
    The font IIFE in layout.html reflects the localStorage prefs as
-   data-ft/fb/fts/fbs attrs on <html>; the blocks below resolve them. Per-face
-   blocks may tune weight/tracking ONLY — sizes belong to the size prefs. */
+   data-fu/fus/ft/fb/fts/fbs attrs on <html>; the blocks below resolve them.
+   Per-face blocks may tune weight/tracking ONLY — sizes belong to the size prefs. */
 
 /* ONE title size variable, two consumers: article and todo titles can't drift */
 .row .title a,.todo__title{
@@ -3144,22 +3153,24 @@ button.modal__act{border:0;font:inherit;}
    roots (article rows, todo rows + add form, sticky notes) and inherits into
    every minor text inside them (times, source lines, tab labels, chips,
    buttons, inputs), so nothing gets missed. Titles re-pin --font-title above;
-   code re-pins mono below. Mono chrome is what sits AROUND the cards: topbar,
-   prompt/filter/nav bars, board tabs, tiles, settings, YAML. Two chrome
-   exceptions read like content and follow the Text face — the side menu and
-   the weather/pollen widget (every placement) — face only: their sizes
-   stay pinned, page zoom is the size knob for chrome. .md and textarea are
-   kept as a safety net for note surfaces outside a card. */
+   code re-pins mono below. The chrome is what sits AROUND the cards: topbar,
+   prompt/filter/nav bars, board tabs, tiles, settings, YAML — it follows the
+   Interface pref, not this one. Two chrome exceptions read like content and
+   follow the Text face instead — the side menu and the weather/pollen widget
+   (every placement) — face only: their sizes stay pinned, so the Interface size
+   is what moves them. .md and textarea are kept as a safety net for note
+   surfaces outside a card. */
 .row,.todo,.todo-add,.todo-empty,.note,.md,textarea,
 .navrail,.wx-subbar,.wx-chip,.wx-band{font-family:var(--font-body);}
 /* text layer, sizes — the calc offsets preserve the hierarchy (reading text
-   1.35, sticky bodies / placeholders / title input 1.4, edit inputs 1.2–1.3)
-   at every size step */
+   13.5, sticky bodies / placeholders / title input 14, edit inputs 12–13)
+   at every size step. In px, like --fs-body itself: the interface size moves
+   the rem base, and reading text must not ride along with it. */
 .tg-panel .md,.tg-why-msg{font-size:var(--fs-body);}
-.note-empty,.todo-add__title,.idea__body,.note__new-input{font-size:calc(var(--fs-body) + .05rem);}
-.tg-footnote,.note-input{font-size:calc(var(--fs-body) - .05rem);}
-.todo-add__note textarea{font-size:calc(var(--fs-body) - .1rem);}
-.idea__input{font-size:calc(var(--fs-body) - .15rem);}
+.note-empty,.todo-add__title,.idea__body,.note__new-input{font-size:calc(var(--fs-body) + .5px);}
+.tg-footnote,.note-input{font-size:calc(var(--fs-body) - .5px);}
+.todo-add__note textarea{font-size:calc(var(--fs-body) - 1px);}
+.idea__input{font-size:calc(var(--fs-body) - 1.5px);}
 /* code stays mono whatever the text face */
 .md code,.md pre{font-family:var(--font-mono);}
 
@@ -3188,23 +3199,61 @@ button.modal__act{border:0;font:inherit;}
 :root[data-fb="grotesk"]{--font-body:var(--ff-grotesk);}
 :root[data-fb="serif"]  {--font-body:var(--ff-serif);}
 
-/* size ladders — m is the unset default (1.4 / 1.35, today's rendering) */
-:root[data-fts="s"]  {--fs-title:1.25rem;}
-:root[data-fts="l"]  {--fs-title:1.55rem;}
-:root[data-fts="xl"] {--fs-title:1.7rem;}
-:root[data-fts="xxl"]{--fs-title:1.85rem;}
-:root[data-fbs="s"]  {--fs-body:1.2rem;}
-:root[data-fbs="l"]  {--fs-body:1.5rem;}
-:root[data-fbs="xl"] {--fs-body:1.65rem;}
-:root[data-fbs="xxl"]{--fs-body:1.8rem;}
+/* size ladders — m is the unset default (14 / 13.5, today's rendering) */
+:root[data-fts="s"]  {--fs-title:12.5px;}
+:root[data-fts="l"]  {--fs-title:15.5px;}
+:root[data-fbs="s"]  {--fs-body:12px;}
+:root[data-fbs="l"]  {--fs-body:15px;}
 
-/* Fonts flyout: a ‹ face › stepper cycles the 6 faces — the centred name is
-   the live preview (rendered in its own family via .ff-*), the dot strip
-   tracks the position in the cycle. Sliders reuse the clk-slider idiom; their
-   preview lines render in the chosen face at the live size. */
-/* Capped, so the two arrows sit either side of the name instead of at opposite
-   ends of the pane. Left-aligned on the same inset as every label above them. */
-.font-step,.wx-layout-step{
+/* Interface face and size — the chrome's own two prefs, the pair the other four
+   sit beside in the Fonts section.
+
+   The face: two options, not six. Chrome is dense small type in fixed pills and
+   rails, and the choice here is about density, not decoration — mono gives every
+   glyph the same advance, which is the whole of why Default reads wider than
+   Minimal at identical pixel sizes.
+
+   The size: a ladder anchored per layout, because the two layouts do not start
+   from the same density. Default's Large is today's Default and nothing goes
+   above it; Default opens a step below that. Minimal's Small is today's Minimal
+   exactly — it is already the compact one, so its ladder climbs instead of
+   dropping. The step a layout anchors on is named Default and the others are
+   named by which way they move from it, so the two ladders read differently. */
+:root[data-fu="mono"]{--font-ui:var(--font-mono);}
+:root[data-fu="plex"]{--font-ui:var(--ff-plex);}
+
+/* Default with a sans chrome keeps these in mono: a shell prompt, a blinking
+   cursor, an ASCII mascot and a log of aligned key=value lines are drawings made
+   of characters, and a proportional face breaks all four. Minimal is excluded
+   because it already answered this question its own way — it retires the shell
+   voice rather than restyling it, and the title bars it does keep are meant to
+   read as dialog titles in its own face.
+
+   Containers, not leaves, on purpose: .pane__ps and .modal__title hold the
+   coloured prompt spans, and pinning .pane__path itself would reach into the
+   side menu (layout.html nests one inside .navrail__ps1) and outrank the Text
+   face that legitimately owns it there. Left out for the same reason: .cmd__arg,
+   which carries filter values rather than punctuation, and is the widest row in
+   the chrome — it should get the benefit of a narrower face, not be exempt from
+   it. The bunnies in the account card, the gate and the empty feed, and the
+   empty feed's shell line, already pin mono in their own rules. */
+:root[data-fu="plex"]:not([data-theme="minimal"]) :is(.pane__ps,.modal__title,.gate__bar,
+    .sh,.blink,.topbar__bunny,.tile.placeholder,.ing__lines,.modal__path){
+  font-family:var(--font-mono);
+}
+:root                                  {--ui-scale:.94;}   /* Default's own anchor */
+:root[data-fus="s"]                    {--ui-scale:.88;}
+:root[data-fus="m"]                    {--ui-scale:.94;}
+:root[data-fus="l"]                    {--ui-scale:1;}
+:root[data-theme="minimal"]            {--ui-scale:1;}     /* Minimal's own anchor */
+:root[data-theme="minimal"][data-fus="s"]{--ui-scale:1;}
+:root[data-theme="minimal"][data-fus="m"]{--ui-scale:1.06;}
+:root[data-theme="minimal"][data-fus="l"]{--ui-scale:1.12;}
+
+/* A ‹ name › stepper: the arrows cycle a short list, the centred name says
+   where you are and the dot strip tracks the position. Weather's layout and
+   side-menu pickers wear it. */
+.wx-layout-step,.font-step{
   display:flex;align-items:center;gap:10px;padding:3px 0 7px;
 }
 .font-step__arrow{
@@ -3225,7 +3274,7 @@ button.modal__act{border:0;font:inherit;}
 .font-step__arrow:disabled:hover{background:var(--fill);box-shadow:none;color:var(--text-dim);}
 .font-step__arrow:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
 .font-step__face{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px;}
-.font-step__name{font-size:1.35rem;color:var(--title);white-space:nowrap;}
+.font-step__name{font-size:1.35rem;color:var(--title);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;}
 .font-step__dots{display:flex;gap:5px;}
 .font-step__dots i{width:4px;height:4px;border-radius:50%;background:var(--line);}
 .font-step__dots i.is-on{background:var(--accent);box-shadow:0 0 5px rgba(128,203,196,.55);}
@@ -3236,11 +3285,33 @@ button.modal__act{border:0;font:inherit;}
 .ff-manrope{font-family:var(--ff-manrope);}
 .ff-grotesk{font-family:var(--ff-grotesk);}
 .ff-serif{font-family:var(--ff-serif);}
-.font-preview--title{
-  font-family:var(--font-title);font-size:var(--fs-title);
-  font-weight:var(--fw-title,500);letter-spacing:var(--ls-title,normal);
-}
-.font-preview--body{font-family:var(--font-body);font-size:var(--fs-body);}
+
+/* --- Settings → Theme → Appearance ---------------------------------------- */
+/* Interface, Titles and Text, one row each: a face stepper beside a size
+   stepper. The preview above reads the same variables the page does, so a pick
+   redraws it on the spot, the chrome face included. Nothing here opens, so the
+   drawing stays in view while the picks land on it. */
+.fpick{display:flex;flex-direction:column;gap:3px;padding:2px 0 4px;}
+.fpick__row{display:flex;align-items:center;gap:10px;}
+/* The name column and the size column are pinned in px, like the rest of the
+   dialog: the interface size moves the lettering inside them and leaves the
+   boxes, so a size step and a look switch both leave the rows where they are. */
+.fpick__lbl{flex:none;width:74px;font-size:1.1rem;color:var(--text-dim);}
+/* The face stepper takes what the pinned label and size column leave. The
+   rows carry their own spacing, so the stepper's stacked padding, which is what
+   separates weather's two from the labels above them, is given back here: with
+   it the block is tall enough to scroll the pane. */
+.fpick .font-step{flex:1;min-width:0;padding:2px 0;}
+/* The size column is sized to its longest reading, Biggest, at the top of the
+   interface ladder where the lettering is largest; its arrows sit closer than
+   the face stepper's so the word has the room. What is left over is the face
+   stepper's, which needs the most of it: Space Grotesk is the longest name. */
+.fpick .font-step--size{flex:none;width:134px;gap:4px;}
+/* A step below the stepper's own size. Two names share a 420px row here, where
+   weather's sit one per row, and both of the longest (Space Grotesk, Biggest)
+   reach the end of their box at the top of the interface ladder: the row is
+   only as wide as the dialog, so the lettering gives way rather than the box. */
+.fpick .font-step__name{font-size:1.2rem;}
 
 /* --- Request feedback ------------------------------------------------------ */
 /* In-flight and failed requests. Both surfaces follow the floating recipe used
@@ -3357,14 +3428,16 @@ button.modal__act{border:0;font:inherit;}
   --page-field:linear-gradient(180deg, #1D272C 0%, var(--bg-2) 100%);
 }
 /* Minimal's default reading faces — but only where the reader has expressed no
-   preference. The Fonts tab writes data-ft/data-fb, and a face chosen there
+   preference. Theme → Appearance writes data-ft/data-fb, and a face chosen there
    outranks these and survives the switch, which is the promise the Theme tab
    makes. */
 :root[data-theme="minimal"]:not([data-ft]){--font-title:var(--ff-grotesk);--fw-title:500;--ls-title:-.008em;}
 :root[data-theme="minimal"]:not([data-fb]){--font-body:var(--ff-plex);}
 /* The chrome's own face. Mono is the shell's voice; without a shell it is just
-   a hard face to read small type in. */
-:root[data-theme="minimal"] body{font-family:var(--ff-plex);}
+   a hard face to read small type in. Written as :not([data-fu]) rather than on
+   body, so an interface face picked in Theme → Appearance outranks it the same way a
+   picked title or text face does. */
+:root[data-theme="minimal"]:not([data-fu]){--font-ui:var(--ff-plex);}
 
 /* --- the shell voice, everywhere it appears -------------------------------
    Four class names carry the whole conceit — the green user@host, the
@@ -3391,12 +3464,12 @@ button.modal__act{border:0;font:inherit;}
    set of plain links under a rule, which is what a two-page site's nav is. */
 :root[data-theme="minimal"] .topbar__left .breaker{display:none;}
 :root[data-theme="minimal"] .topbar__left .wordmark b{
-  font-weight:600;font-size:1.5rem;letter-spacing:.005em;text-transform:none;
+  font-weight:600;letter-spacing:.005em;text-transform:none;
 }
 :root[data-theme="minimal"] .topbar__left{gap:20px;}
 :root[data-theme="minimal"] .topbar__nav{
   background:none;padding:0;gap:2px;
-  font-size:1.25rem;letter-spacing:0;text-transform:none;
+  letter-spacing:0;text-transform:none;
 }
 :root[data-theme="minimal"] .topbar__nav a{
   position:relative;padding:7px 12px;border-radius:var(--r-sm);
@@ -3443,7 +3516,7 @@ button.modal__act{border:0;font:inherit;}
 :root[data-theme="minimal"] .navrail__item--page{
   gap:0;padding:10px 12px;border-radius:var(--r-sm);
 }
-:root[data-theme="minimal"] .navrail__nm{font-size:1.4rem;font-weight:500;}
+:root[data-theme="minimal"] .navrail__nm{font-weight:500;}
 /* The lit page keeps Default's whole treatment — the decaying wash, the accent
    rule down the left edge, the bloom on the name. Which page you are on is the
    one thing the menu has to say without being read, and there is no ❯ here to
@@ -3484,7 +3557,7 @@ button.modal__act{border:0;font:inherit;}
 /* And the reset comes back into the bar, the line that carries it in the other
    look being gone. */
 :root[data-theme="minimal"] .pane__filters .filter__clear{display:flex;}
-:root[data-theme="minimal"] .filter__key{text-transform:none;letter-spacing:.02em;font-size:1.15rem;}
+:root[data-theme="minimal"] .filter__key{text-transform:none;letter-spacing:.02em;}
 :root[data-theme="minimal"] .pane__body{padding:0;}
 /* The score slider follows the rest of the bar: the notched track drops to a
    plain rule and the thumb loses its cast shadow. Paint only: the button's
@@ -3518,12 +3591,12 @@ button.modal__act{border:0;font:inherit;}
   content:"\00b7";margin:0 13px;color:var(--text-dim);
 }
 :root[data-theme="minimal"] .tile .num{
-  font-size:1.5rem;font-weight:600;color:var(--title);text-shadow:none;
+  font-weight:600;color:var(--title);text-shadow:none;
   font-variant-numeric:tabular-nums;
 }
 :root[data-theme="minimal"] .tile .num--high{color:var(--score-high);text-shadow:none;}
 :root[data-theme="minimal"] .tile .label{
-  font-size:1.25rem;text-transform:none;letter-spacing:0;margin-top:0;
+  text-transform:none;letter-spacing:0;margin-top:0;
 }
 :root[data-theme="minimal"] .tile.placeholder{display:none;}
 
@@ -3549,13 +3622,13 @@ button.modal__act{border:0;font:inherit;}
 :root[data-theme="minimal"] .row .line1{padding-right:0;}
 :root[data-theme="minimal"] .row .title{grid-column:1 / 3;grid-row:1;min-width:0;}
 :root[data-theme="minimal"] .row .title a{
-  font-size:calc(var(--fs-title) + .35rem);line-height:1.32;text-wrap:balance;
+  font-size:var(--fs-title);line-height:1.32;text-wrap:balance;
   transition:color .18s var(--ease);
 }
 :root[data-theme="minimal"] .row .title a:hover{color:var(--accent);text-decoration:none;}
 /* Row two carries everything that is about the item rather than in it: when,
    where from, and the triage pair pushed to the far end of the measure. */
-:root[data-theme="minimal"] .row .time{grid-column:1;grid-row:2;margin-top:9px;font-size:1.15rem;}
+:root[data-theme="minimal"] .row .time{grid-column:1;grid-row:2;margin-top:9px;}
 :root[data-theme="minimal"] .gauge__meta{
   grid-column:2;grid-row:2;margin-top:9px;align-self:center;
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
@@ -3634,7 +3707,7 @@ button.modal__act{border:0;font:inherit;}
 :root[data-theme="minimal"] .maze-tabs{
   background:none;border:0;border-radius:0;padding:3px 3px 0;margin-bottom:-1px;
 }
-:root[data-theme="minimal"] .maze-tab{border-radius:0;font-size:1.35rem;}
+:root[data-theme="minimal"] .maze-tab{border-radius:0;}
 /* The weather band gives up its tray with every other tray in this layout, and
    is separated by a rule along the side facing what it sits above — the same
    hairline that separates a task from the task above it. */
@@ -3711,9 +3784,9 @@ button.modal__act{border:0;font:inherit;}
 .ghost__bunny .bunny__ears{color:var(--accent);}
 .ghost__wm{
   font-family:'Archivo',sans-serif;color:var(--title);font-weight:700;
-  font-size:1.6rem;letter-spacing:0.028em;text-transform:uppercase;
+  font-size:1.5rem;letter-spacing:0.028em;text-transform:uppercase;
 }
-:root[data-ghost="minimal"] .ghost__wm{font-weight:600;font-size:1.5rem;letter-spacing:.005em;text-transform:none;}
+:root[data-ghost="minimal"] .ghost__wm{font-weight:600;letter-spacing:.005em;text-transform:none;}
 .ghost__chips{display:flex;gap:10px;}
 .ghost__chips i{display:block;width:92px;height:26px;border-radius:var(--r-full);background:var(--fill);}
 .ghost__chips i:last-child{width:26px;}
@@ -4044,13 +4117,15 @@ button.modal__act{border:0;font:inherit;}
 
 /* One example feed, drawn in each look. Both drawings share a cell and
    crossfade, so a pick reads as the same feed redrawn. */
-.look__pv{display:grid;flex:none;height:20.4rem;}
+.look__pv{display:grid;flex:none;height:204px;}
 .look__pv > *{grid-area:1/1;min-width:0;overflow:hidden;transition:opacity .35s var(--ease),transform .35s var(--ease);}
 .look__pvm{opacity:0;transform:translateY(4px);}
 .look__sc--high{--c:var(--score-high);}
 .look__sc--mid{--c:var(--score-mid);}
 
-.look__pvt{display:flex;flex-direction:column;border-radius:var(--r-xs);background:var(--bg);box-shadow:inset 0 0 0 1px var(--line);font-family:var(--font-mono);}
+/* The drawing wears the chrome face the page is actually wearing, so it stops
+   advertising mono the moment the reader picks something else. */
+.look__pvt{display:flex;flex-direction:column;border-radius:var(--r-xs);background:var(--bg);box-shadow:inset 0 0 0 1px var(--line);font-family:var(--font-ui);}
 .look__pvt-top{display:flex;flex:none;align-items:center;gap:8px;height:2.6rem;padding:0 9px;background:#212C31;border-bottom:1px solid var(--line);}
 .look__pvt-wm{font:700 .85rem 'Archivo',sans-serif;letter-spacing:0.056em;color:var(--title);}
 .look__pvt-nav{display:flex;gap:3px;margin-left:4px;}
@@ -4065,8 +4140,15 @@ button.modal__act{border:0;font:inherit;}
 .look__pvt-fl span{padding:1px 6px;border-radius:var(--r-full);font-size:.75rem;color:var(--text-dim);box-shadow:inset 0 0 0 1px var(--hairline-strong);}
 .look__pvt-fl span:first-child{color:var(--accent);box-shadow:inset 0 0 0 1px rgba(128,203,196,.4);}
 .look__pvt-row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:2px 10px;margin:5px 8px 0;padding:6px 8px;border-radius:5px;background:var(--card);}
-.look__pvt-row b{font-size:.9rem;font-weight:500;color:var(--title);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.look__pvt-row small{grid-column:1;font-size:.75rem;color:var(--text-dim);}
+/* The headline and the meta line read the reader's Titles and Text prefs, so
+   the drawing shows what a pick will do. The ratios are the drawing's scale:
+   they give back its old sizes at the default size step. */
+.look__pvt-row b{
+  font-family:var(--font-title);font-size:calc(var(--fs-title) * .643);
+  font-weight:var(--fw-title,500);letter-spacing:var(--ls-title,normal);
+  color:var(--title);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.look__pvt-row small{grid-column:1;font-family:var(--font-body);font-size:.75rem;color:var(--text-dim);}
 .look__pvt-g{display:flex;grid-row:1/3;grid-column:2;align-items:center;gap:5px;font-size:.8rem;color:var(--c);font-variant-numeric:tabular-nums;}
 .look__pvt-g i{display:block;width:3.4rem;height:4px;border-radius:2px;background:linear-gradient(90deg,var(--c) var(--s),rgba(255,255,255,.08) var(--s));}
 
@@ -4079,9 +4161,22 @@ button.modal__act{border:0;font:inherit;}
 .look__pvm-day{margin:10px 0 2px;font-size:.8rem;font-weight:600;letter-spacing:0.098em;text-transform:uppercase;color:var(--text-dim);}
 .look__pvm-row{display:grid;grid-template-columns:1fr auto;align-items:baseline;gap:1px 14px;padding:7px 0;border-bottom:1px solid var(--hairline);}
 .look__pvm-row:last-child{border-bottom:0;}
-.look__pvm-row b{font-size:1.05rem;font-weight:500;color:var(--title);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.look__pvm-row small{grid-column:1;font-size:.85rem;color:var(--text-dim);}
+.look__pvm-row b{
+  font-family:var(--font-title);font-size:calc(var(--fs-title) * .75);
+  font-weight:var(--fw-title,500);letter-spacing:var(--ls-title,normal);
+  color:var(--title);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.look__pvm-row small{grid-column:1;font-family:var(--font-body);font-size:.85rem;color:var(--text-dim);}
 .look__pvm-s{grid-row:1;grid-column:2;font-size:1rem;font-weight:600;color:var(--c);font-variant-numeric:tabular-nums;}
+/* A line of reading text, so the Text prefs have something to act on. Settings
+   only: the first-run card's drawing is pinned shorter and has no room for it. */
+.look__pvt-why,.look__pvm-why{
+  display:none;margin:0;color:var(--text);line-height:1.5;font-family:var(--font-body);
+  -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.look__pvt-why{margin:7px 8px 0;padding:0 8px;font-size:calc(var(--fs-body) * .6);}
+.look__pvm-why{margin-top:9px;font-size:calc(var(--fs-body) * .75);}
+.look--stg .look__pvt-why,.look--stg .look__pvm-why{display:-webkit-box;}
 
 /* The two looks sit side by side in both layouts, in the same place; only
    their shape changes: a terminal radio in Default, a soft card with a dot in

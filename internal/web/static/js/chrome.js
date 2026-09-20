@@ -50,9 +50,13 @@
 // swaps in are covered too.
 (function(){
   function closeAll(except){
+    var closed = false;
     document.querySelectorAll('details.popmenu[open]').forEach(function(menu){
-      if (menu !== except) menu.open = false;
+      if (menu === except) return;
+      menu.open = false;
+      closed = true;
     });
+    return closed;
   }
   document.addEventListener('click', function(e){
     // The clicked menu stays open — chips inside it are the point, and its
@@ -61,7 +65,9 @@
     closeAll(e.target.closest('details.popmenu'));
   });
   document.addEventListener('keydown', function(e){
-    if (e.key === 'Escape') closeAll(null);
+    // Escape that closed a menu has done its job: modal.js skips a
+    // defaultPrevented one, so it doesn't also dismiss the dialog the menu is in.
+    if (e.key === 'Escape' && closeAll(null)) e.preventDefault();
   });
 })();
 

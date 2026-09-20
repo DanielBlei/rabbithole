@@ -192,7 +192,6 @@
           <legend class="stg__legend">Settings section</legend>
           <label class="stg__tab"><input type="radio" name="stgSect" id="stgTime" checked><span>Date &amp; time</span></label>
           <label class="stg__tab"><input type="radio" name="stgSect" id="stgWx"><span>Weather</span></label>
-          <label class="stg__tab"><input type="radio" name="stgSect" id="stgFonts"><span>Fonts</span></label>
           <label class="stg__tab"><input type="radio" name="stgSect" id="stgTheme"><span>Theme</span></label>
           {{if .Chrome.Account.Mode}}<label class="stg__tab stg__tab--acct"><input type="radio" name="stgSect" id="stgAccount"><span>Account</span></label>{{end}}
         </fieldset>
@@ -341,35 +340,6 @@
             </p>
           </section>
 
-          <section class="stg__sect stg__sect--fonts">
-            <div class="stg__lbl">Titles</div>
-            <div class="font-step" data-font-step="title">
-              <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous titles font">&#8249;</button>
-              <div class="font-step__face">
-                <span class="font-step__name" data-font-name></span>
-                <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
-              </div>
-              <button type="button" class="font-step__arrow" data-font-next aria-label="Next titles font">&#8250;</button>
-            </div>
-            <div class="clk-slider">
-              <div class="clk-slider__preview font-preview--title">Follow the rabbit</div>
-              <input type="range" min="0" max="4" step="1" value="1" data-font-range="titleSize" aria-label="Title size">
-            </div>
-            <div class="stg__lbl">Text</div>
-            <div class="font-step" data-font-step="body">
-              <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous text font">&#8249;</button>
-              <div class="font-step__face">
-                <span class="font-step__name" data-font-name></span>
-                <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
-              </div>
-              <button type="button" class="font-step__arrow" data-font-next aria-label="Next text font">&#8250;</button>
-            </div>
-            <div class="clk-slider">
-              <div class="clk-slider__preview font-preview--body">Down the rabbit hole&hellip;</div>
-              <input type="range" min="0" max="4" step="1" value="1" data-font-range="bodySize" aria-label="Text size">
-            </div>
-          </section>
-
           {{/* The chrome layout, not the palette. The preview and the radios are
                the first-run setup card's own (partials/look.html), so the two
                places that pick a look show the same thing. The preview is
@@ -379,8 +349,73 @@
             <div class="look look--stg">
               {{template "lookPreview"}}
               {{template "lookOptions"}}
-              <p class="look__note">Saved in this browser.</p>
             </div>
+            {{/* The type prefs sit under the preview they drive: it reads the same
+                 variables the page does, so a pick redraws it on the spot,
+                 including Interface, since the drawing wears the chrome face too.
+                 Each row is a face beside a size. fonts.js writes every name and
+                 builds the dot strips from its own option lists. */}}
+            <div class="stg__lbl stg__lbl--apart">Appearance</div>
+            <div class="fpick">
+              <div class="fpick__row">
+                <span class="fpick__lbl">Interface</span>
+                <div class="font-step" data-font-step="ui" role="group" aria-label="Interface face">
+                  <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous interface face">&#8249;</button>
+                  <div class="font-step__face">
+                    <span class="font-step__name" data-font-name aria-live="polite"></span>
+                    <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
+                  </div>
+                  <button type="button" class="font-step__arrow" data-font-next aria-label="Next interface face">&#8250;</button>
+                </div>
+                <div class="font-step font-step--size" data-font-step="uiSize" role="group" aria-label="Interface size">
+                  <button type="button" class="font-step__arrow" data-font-prev aria-label="Smaller interface">&#8249;</button>
+                  <div class="font-step__face">
+                    <span class="font-step__name" data-font-name aria-live="polite"></span>
+                    <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
+                  </div>
+                  <button type="button" class="font-step__arrow" data-font-next aria-label="Bigger interface">&#8250;</button>
+                </div>
+              </div>
+              <div class="fpick__row">
+                <span class="fpick__lbl">Titles</span>
+                <div class="font-step" data-font-step="title" role="group" aria-label="Titles face">
+                  <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous titles face">&#8249;</button>
+                  <div class="font-step__face">
+                    <span class="font-step__name" data-font-name aria-live="polite"></span>
+                    <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
+                  </div>
+                  <button type="button" class="font-step__arrow" data-font-next aria-label="Next titles face">&#8250;</button>
+                </div>
+                <div class="font-step font-step--size" data-font-step="titleSize" role="group" aria-label="Titles size">
+                  <button type="button" class="font-step__arrow" data-font-prev aria-label="Smaller titles">&#8249;</button>
+                  <div class="font-step__face">
+                    <span class="font-step__name" data-font-name aria-live="polite"></span>
+                    <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
+                  </div>
+                  <button type="button" class="font-step__arrow" data-font-next aria-label="Bigger titles">&#8250;</button>
+                </div>
+              </div>
+              <div class="fpick__row">
+                <span class="fpick__lbl">Text</span>
+                <div class="font-step" data-font-step="body" role="group" aria-label="Text face">
+                  <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous text face">&#8249;</button>
+                  <div class="font-step__face">
+                    <span class="font-step__name" data-font-name aria-live="polite"></span>
+                    <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
+                  </div>
+                  <button type="button" class="font-step__arrow" data-font-next aria-label="Next text face">&#8250;</button>
+                </div>
+                <div class="font-step font-step--size" data-font-step="bodySize" role="group" aria-label="Text size">
+                  <button type="button" class="font-step__arrow" data-font-prev aria-label="Smaller text">&#8249;</button>
+                  <div class="font-step__face">
+                    <span class="font-step__name" data-font-name aria-live="polite"></span>
+                    <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
+                  </div>
+                  <button type="button" class="font-step__arrow" data-font-next aria-label="Bigger text">&#8250;</button>
+                </div>
+              </div>
+            </div>
+            <p class="look__note">Layout and type are saved in this browser.</p>
           </section>
           {{if .Chrome.Account.Mode}}
           <section class="stg__sect stg__sect--account">{{template "accountSect" .Chrome.Account}}</section>
