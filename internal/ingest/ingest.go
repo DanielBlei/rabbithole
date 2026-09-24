@@ -189,7 +189,7 @@ func Run(
 		results := rank.Select(unseen, scores)
 
 		if opts.Record {
-			if err := record(ctx, db, unseen, scores, cfg.Inference.Model, day, cfg.Ingest.MinScore); err != nil {
+			if err := record(ctx, db, unseen, scores, cfg.Inference.Model, day); err != nil {
 				logger.Warn().Str("feed", f.Name).Err(err).Msg("recording feed failed, skipping")
 				continue
 			}
@@ -338,8 +338,8 @@ func filterUnscored(ctx context.Context, db *store.Store, items []feeds.Item) ([
 	return out, nil
 }
 
-// record persists every fetched item and every successful score. Only scores
-// meeting minScore are stamped with the run's digest date.
+// record persists every scored item's verdict. Each scored item is stamped with
+// the run day (digested_on), so the store retains when a score was produced.
 func record(
 	ctx context.Context,
 	db *store.Store,
@@ -347,7 +347,6 @@ func record(
 	scores map[string]rank.ItemScore,
 	model string,
 	day time.Time,
-	minScore int,
 ) error {
 	var entries []store.DigestEntry
 	for _, it := range all {
@@ -360,7 +359,7 @@ func record(
 			Score:    sc.Score,
 			Reason:   sc.Reason,
 			Model:    model,
-			Digested: sc.Score >= minScore,
+			Digested: true,
 		})
 	}
 	return db.Record(ctx, all, entries, day)

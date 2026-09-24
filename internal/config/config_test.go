@@ -4,7 +4,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -378,38 +377,4 @@ func TestResolveSummary(t *testing.T) {
 			t.Errorf("ResolveSummary() = %+v, want %+v", got, want)
 		}
 	})
-}
-
-func TestLoadMinScoreDefaultsAndOverride(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		yaml string
-		want int
-	}{
-		{"omitted defaults to six", "", 6},
-		{"explicit threshold", "ingest:\n  min_score: 8\n", 8},
-		{"minimum threshold", "ingest:\n  min_score: 1\n", 1},
-		{"maximum threshold", "ingest:\n  min_score: 10\n", 10},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := Load(writeConfig(t, baseFeeds+tc.yaml))
-			if err != nil {
-				t.Fatalf("Load() error = %v", err)
-			}
-			if cfg.Ingest.MinScore != tc.want {
-				t.Errorf("MinScore = %d, want %d", cfg.Ingest.MinScore, tc.want)
-			}
-		})
-	}
-}
-
-func TestLoadMinScoreRejectsOutOfRange(t *testing.T) {
-	for _, score := range []int{-1, 11} {
-		t.Run(fmt.Sprintf("score_%d", score), func(t *testing.T) {
-			body := fmt.Sprintf("ingest:\n  min_score: %d\n", score)
-			if _, err := Load(writeConfig(t, baseFeeds+body)); err == nil {
-				t.Fatalf("Load(min_score=%d) succeeded, want error", score)
-			}
-		})
-	}
 }

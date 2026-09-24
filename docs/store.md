@@ -101,7 +101,7 @@ The core table: one row per article ever seen, whether or not it was scored.
 | `llm_score` | INTEGER | 0–10; NULL means seen but not yet scored |
 | `llm_score_reason` | TEXT | The model's rationale |
 | `llm_score_model` | TEXT | Model that produced the score, captured at scoring time |
-| `digested_on` | DATE | Run day the item was selected for the digest |
+| `digested_on` | DATE | Run day the item's score was produced |
 | `status` | TEXT | `unread` \| `read` \| `skipped` |
 | `user_score` | INTEGER | 0–10, your own rating; outranks `llm_score` in sorting |
 | `user_note` | TEXT | Free text |

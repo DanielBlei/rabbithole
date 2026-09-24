@@ -167,7 +167,6 @@ func (s *SystemPromptSetting) UnmarshalYAML(value *yaml.Node) error {
 // IngestConfig governs the fetch/score run.
 type IngestConfig struct {
 	Since     Duration `yaml:"since"`      // lookback window (e.g. 14d, 168h)
-	MinScore  int      `yaml:"min_score"`  // minimum score included in the digest; defaults to 6
 	DigestDir string   `yaml:"digest_dir"` // optional: where `ingest --markdown` writes the digest; no default
 	Feeds     string   `yaml:"feeds"`      // path to the feed seed file; empty looks for feeds.yaml beside the config
 }
@@ -186,7 +185,6 @@ const (
 	defaultBatchSize   = 1
 	defaultMaxParallel = 1
 	defaultSince       = 7 * 24 * time.Hour
-	defaultMinScore    = 6
 )
 
 // Load reads and validates the config at path, applying defaults for unset fields.
@@ -229,9 +227,6 @@ func (c *Config) applyDefaults() {
 	if c.Ingest.Since == 0 {
 		c.Ingest.Since = Duration(defaultSince)
 	}
-	if c.Ingest.MinScore == 0 {
-		c.Ingest.MinScore = defaultMinScore
-	}
 }
 
 func (c *Config) validate() error {
@@ -253,9 +248,6 @@ func (c *Config) validate() error {
 	}
 	if c.Ingest.Since < 0 {
 		return fmt.Errorf("since must be positive, got %s", c.Ingest.Since)
-	}
-	if c.Ingest.MinScore < 1 || c.Ingest.MinScore > 10 {
-		return fmt.Errorf("min_score must be between 1 and 10, got %d", c.Ingest.MinScore)
 	}
 	return nil
 }

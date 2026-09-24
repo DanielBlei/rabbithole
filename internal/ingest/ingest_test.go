@@ -17,6 +17,7 @@ import (
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/rank"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -91,6 +92,49 @@ func sourceCounts(t *testing.T, db *store.Store) map[string]int {
 		got[s.Source] = s.Count
 	}
 	return got
+}
+
+func TestRecordPersistsLowAndHighScores(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	items := []feeds.Item{
+		{ID: "low", Source: "Academic", Title: "Low score", Link: "https://x.test/low"},
+		{ID: "high", Source: "Academic", Title: "High score", Link: "https://x.test/high"},
+	}
+	scores := map[string]rank.ItemScore{
+		"low":  {ID: "low", Score: 1, Reason: "weak match"},
+		"high": {ID: "high", Score: 10, Reason: "strong match"},
+	}
+	if err := record(t.Context(), db, items, scores, "test-model", time.Now()); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	for _, want := range []struct {
+		id     string
+		score  int
+		reason string
+	}{
+		{id: "low", score: 1, reason: "weak match"},
+		{id: "high", score: 10, reason: "strong match"},
+	} {
+		got, err := db.Get(t.Context(), want.id)
+		if err != nil {
+			t.Fatalf("get %s: %v", want.id, err)
+		}
+		if got.LLMScore == nil || *got.LLMScore != want.score {
+			t.Errorf("%s score = %v, want %d", want.id, got.LLMScore, want.score)
+		}
+		if got.LLMScoreReason == nil || *got.LLMScoreReason != want.reason {
+			t.Errorf("%s reason = %v, want %q", want.id, got.LLMScoreReason, want.reason)
+		}
+		if got.LLMScoreModel == nil || *got.LLMScoreModel != "test-model" {
+			t.Errorf("%s model = %v, want test-model", want.id, got.LLMScoreModel)
+		}
+	}
 }
 
 func TestRunProcessesFeedsPerSourceAndDedups(t *testing.T) {
