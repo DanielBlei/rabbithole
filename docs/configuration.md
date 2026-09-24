@@ -53,7 +53,6 @@ All fields are optional unless marked required.
 | `inference.max_parallel` | Scoring requests in flight | `1`                               |
 | `inference.model_tuning.*` | Decoding limits — see below | see below                         |
 | `ingest.since` | Lookback window for new items | `7d`                              |
-| `ingest.min_score` | Minimum digest score (1–10); lower scores are still stored | `6` |
 | `ingest.feeds` | Path to the feed seed file | `feeds.yaml` beside `config.yaml` |
 | `ingest.digest_dir` | Output directory for `ingest --markdown` | none — required by that flag      |
 | `store.db_path` | SQLite database file | **required**                      |
