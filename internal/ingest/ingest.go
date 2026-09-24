@@ -116,11 +116,7 @@ func Run(
 		if resolved {
 			return scorer, nil
 		}
-		systemPrompt, err := cfg.Inference.LoadSystemPrompt()
-		if err != nil {
-			return nil, err
-		}
-		s, err := inference.Resolve(ctx, cfg.Inference, opts.Think, systemPrompt)
+		s, err := resolveConfiguredScorer(ctx, cfg, opts.Think)
 		if err != nil {
 			return nil, err
 		}
@@ -216,6 +212,18 @@ func Run(
 		Str("elapsed", time.Since(runStart).Round(100*time.Millisecond).String()).Msg("ingest complete")
 
 	return outcome, nil
+}
+
+func resolveConfiguredScorer(
+	ctx context.Context,
+	cfg *config.Config,
+	think bool,
+) (rank.Scorer, error) {
+	systemPrompt, err := cfg.Inference.LoadSystemPrompt()
+	if err != nil {
+		return nil, err
+	}
+	return inference.Resolve(ctx, cfg.Inference, think, systemPrompt)
 }
 
 // ResolveFeeds reads the configured feeds out of the store and walks them

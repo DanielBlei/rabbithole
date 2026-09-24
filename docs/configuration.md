@@ -285,6 +285,20 @@ profile therefore affects the next run immediately, without restarting `serve`; 
 in progress keeps its original immutable snapshot for every feed and batch. Existing scores
 are never automatically invalidated or rescored.
 
+To update existing feed rows intentionally, use **Settings → Profiles → Rescore recent
+items**. After confirmation, the application:
+
+- snapshots the currently active profile once;
+- loads already-scored items from the last seven days from SQLite, without refetching feeds;
+- scores them with the configured provider, model, system prompt, thinking, batch and
+  parallelism settings;
+- replaces successful LLM scores, explanations, model attribution and profile provenance;
+- preserves ratings, notes, read/hidden state, bookmarks, tags and digest dates.
+
+Items that still fail after the normal scoring retries keep their previous valid score. The
+runner reports candidates, successful replacements and failures. Rescoring can incur the same
+runtime or provider cost as scoring an equivalent number of new articles.
+
 HTML comments (`<!-- ... -->`) are removed before the profile reaches the model, so notes to
 yourself can be kept in raw Markdown without being read as interests.
 

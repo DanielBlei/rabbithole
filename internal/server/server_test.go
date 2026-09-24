@@ -206,6 +206,8 @@ func TestGateCoversEverythingButHealthAndAssets(t *testing.T) {
 		{http.MethodPost, "/api/items/1/seen", http.StatusUnauthorized, ""},
 		{http.MethodPost, "/todos", http.StatusUnauthorized, ""},
 		{http.MethodPost, "/profiles", http.StatusUnauthorized, ""},
+		{http.MethodGet, "/profiles/rescore", http.StatusSeeOther, "/login?next=%2Fprofiles%2Frescore"},
+		{http.MethodPost, "/profiles/rescore", http.StatusUnauthorized, ""},
 		{http.MethodDelete, "/profiles/profile-example", http.StatusUnauthorized, ""},
 		{http.MethodGet, "/healthz", http.StatusOK, ""},
 		{http.MethodGet, "/readyz", http.StatusOK, ""},

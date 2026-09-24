@@ -40,16 +40,33 @@ type runFunc func(
 	Options,
 ) (Outcome, error)
 
-// Manager owns manual (and later scheduled) ingest runs inside the serve
-// process: it enforces single-flight — at most one cycle at a time — runs the
-// cycle on a server-owned context so it survives the HTTP request that
-// triggered it, records every run in the store's ingest_history, and captures
-// the run's log output for the web UI.
+type rescoreFunc func(
+	context.Context,
+	*config.Config,
+	profile.Snapshot,
+	*store.Store,
+	time.Time,
+	time.Duration,
+) (RescoreOutcome, error)
+
+// RunKind identifies which scoring workflow owns a history row and live run.
+type RunKind string
+
+const (
+	RunKindIngest  RunKind = "ingest"
+	RunKindRescore RunKind = "rescore"
+)
+
+// Manager owns ingest and explicit rescore runs inside the serve process. It
+// enforces one shared single-flight slot, runs work on a server-owned context
+// so it survives the triggering request, records every run in ingest_history,
+// and captures logs for the web UI.
 type Manager struct {
 	db       *store.Store
 	cfg      *config.Config
 	profiles *profilemgr.Service
 	run      runFunc
+	rescore  rescoreFunc
 	logLevel zerolog.Level // --debug also prints the run's lines in the terminal
 
 	mu     sync.Mutex
@@ -63,6 +80,9 @@ type activeRun struct {
 	started time.Time
 	cancel  context.CancelFunc
 	done    chan struct{}
+	kind    RunKind
+	profile string
+	window  time.Duration
 }
 
 // Status is a point-in-time snapshot for the web UI. Lines is the most recent
@@ -73,6 +93,8 @@ type Status struct {
 	Running   bool
 	StartedAt time.Time // zero unless running
 	Lines     []string  // raw zerolog JSON, one event per line
+	Kind      RunKind
+	Profile   string
 }
 
 // NewManager returns a Manager for db/cfg. logLevel decides whether a run's own
@@ -84,7 +106,8 @@ func NewManager(db *store.Store, cfg *config.Config, logLevel zerolog.Level) (*M
 		return nil, err
 	}
 	return &Manager{
-		db: db, cfg: cfg, profiles: profilemgr.New(db), run: Run, logLevel: logLevel,
+		db: db, cfg: cfg, profiles: profilemgr.New(db),
+		run: Run, rescore: RescoreRecent, logLevel: logLevel,
 	}, nil
 }
 
@@ -93,6 +116,25 @@ func NewManager(db *store.Store, cfg *config.Config, logLevel zerolog.Level) (*M
 // (single-flight). ctx covers only the setup writes; the run itself gets a
 // server-owned context so closing the browser/request never kills it.
 func (m *Manager) Start(ctx context.Context, triggeredBy string) error {
+	return m.start(ctx, RunKindIngest, triggeredBy, 0)
+}
+
+// StartRescore launches an explicit recent-item rescore using the active
+// profile. It shares the ingest manager's single-flight slot, history, logs
+// and cancellation lifecycle.
+func (m *Manager) StartRescore(ctx context.Context, window time.Duration) error {
+	if window <= 0 {
+		return errors.New("rescore window must be positive")
+	}
+	return m.start(ctx, RunKindRescore, store.IngestTriggerProfileRescore, window)
+}
+
+func (m *Manager) start(
+	ctx context.Context,
+	kind RunKind,
+	triggeredBy string,
+	window time.Duration,
+) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.active != nil {
@@ -111,7 +153,10 @@ func (m *Manager) Start(ctx context.Context, triggeredBy string) error {
 	}
 
 	runCtx, cancel := context.WithCancel(context.Background())
-	run := &activeRun{id: id, started: time.Now(), cancel: cancel, done: make(chan struct{})}
+	run := &activeRun{
+		id: id, started: time.Now(), cancel: cancel, done: make(chan struct{}),
+		kind: kind, profile: activeProfile.Name, window: window,
+	}
 	m.active = run
 	m.buf = newLogBuffer(maxLogLines)
 	go m.execute(runCtx, run, m.buf, activeProfile)
@@ -152,6 +197,8 @@ func (m *Manager) Status() Status {
 	if m.active != nil {
 		st.Running = true
 		st.StartedAt = m.active.started
+		st.Kind = m.active.kind
+		st.Profile = m.active.profile
 	}
 	buf := m.buf
 	m.mu.Unlock()
@@ -172,10 +219,35 @@ func (m *Manager) execute(
 
 	runLogger := newRunLogger(buf, m.logLevel)
 	ctx = runLogger.WithContext(ctx)
-	outcome, err := m.run(ctx, m.cfg, activeProfile, m.db, time.Now(), Options{
-		Think:  *m.cfg.Inference.Think,
-		Record: true,
-	})
+	var (
+		counts store.IngestCounts
+		err    error
+	)
+	switch run.kind {
+	case RunKindRescore:
+		var outcome RescoreOutcome
+		outcome, err = m.rescore(
+			ctx, m.cfg, activeProfile, m.db, time.Now(), run.window,
+		)
+		counts = store.IngestCounts{
+			Fetched: outcome.Candidates,
+			Scored:  outcome.Scored,
+			Failed:  outcome.Failed,
+		}
+	default:
+		var outcome Outcome
+		outcome, err = m.run(ctx, m.cfg, activeProfile, m.db, time.Now(), Options{
+			Think:  *m.cfg.Inference.Think,
+			Record: true,
+		})
+		counts = store.IngestCounts{
+			Fetched:  outcome.Fetched,
+			NewItems: len(outcome.Unseen),
+			Scored:   outcome.Scored,
+			Skipped:  outcome.Skipped,
+			Failed:   outcome.Failed,
+		}
+	}
 
 	// A cancelled run doesn't always surface context.Canceled: FetchAll treats
 	// per-feed failures — including cancelled fetches — as skippable, so Run can
@@ -192,16 +264,10 @@ func (m *Manager) execute(
 	// otherwise the UI's log tail ends mid-stream and reads as still running.
 	switch status {
 	case store.IngestStatusCancelled:
-		runLogger.Warn().Msg("ingest cancelled")
+		runLogger.Warn().Str("kind", string(run.kind)).Msg(string(run.kind) + " cancelled")
 	case store.IngestStatusError:
-		runLogger.Error().Str("error", msg).Msg("ingest failed")
-	}
-	counts := store.IngestCounts{
-		Fetched:  outcome.Fetched,
-		NewItems: len(outcome.Unseen),
-		Scored:   outcome.Scored,
-		Skipped:  outcome.Skipped,
-		Failed:   outcome.Failed,
+		runLogger.Error().Str("kind", string(run.kind)).Str("error", msg).
+			Msg(string(run.kind) + " failed")
 	}
 
 	// The run's ctx may be cancelled (that's how Cancel works); the history
@@ -232,8 +298,10 @@ func (m *Manager) execute(
 		Int("scored", counts.Scored).
 		Int("skipped", counts.Skipped).
 		Int("failed", counts.Failed).
+		Str("kind", string(run.kind)).
+		Str("profile", activeProfile.Name).
 		Str("took", time.Since(run.started).Round(time.Second).String()).
-		Msg("ingest run finished")
+		Msg("scoring run finished")
 
 	m.mu.Lock()
 	m.active = nil

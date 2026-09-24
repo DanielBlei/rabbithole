@@ -3,7 +3,7 @@
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__frame modal__frame--ingest" role="dialog" aria-modal="true" aria-label="Ingest runner">
     <div class="modal__bar">
-      <span class="modal__title"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~</span><span class="sh">$&nbsp;</span><span class="pane__cmd">go run . ingest</span><span class="blink">_</span></span>
+      <span class="modal__title"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~</span><span class="sh">$&nbsp;</span><span class="pane__cmd">{{if eq .Body.RunKind "rescore"}}rescore recent{{else}}go run . ingest{{end}}</span><span class="blink">_</span></span>
       <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
     </div>
     {{template "ingestBody" .Body}}
@@ -27,8 +27,10 @@
 <div class="ing" id="ingestBody" {{if .Running}}hx-get="/ingest/status?histPage={{.HistPage}}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML"{{end}}>
   <div class="ing__runline">
     {{if .Running}}
-      <span class="ing__st ing__st--run">◌ running</span>
+      {{if eq .RunKind "rescore"}}<span class="ing__st ing__st--run">◌ rescoring recent items</span>
+      {{else}}<span class="ing__st ing__st--run">◌ running ingest</span>{{end}}
       <span class="ing__sep">·</span><span class="ing__dim">started {{.StartedAgo}}</span>
+      {{if .RunProfile}}<span class="ing__dim">with {{.RunProfile}}</span>{{end}}
     {{else if .Last}}
       {{if eq .Last.Status "ok"}}<span class="ing__st ing__st--ok">✓ ok</span>
       {{else if eq .Last.Status "cancelled"}}<span class="ing__st ing__st--err">✕ cancelled</span>
@@ -47,10 +49,15 @@
 
   {{if .Last}}
   <div class="ing__counts">
+    {{if .Last.Rescore}}
+    <span class="ing__cnt">candidates<b>{{.Last.Counts.Fetched}}</b></span>
+    <span class="ing__cnt ing__cnt--new">rescored<b>{{.Last.Counts.Scored}}</b></span>
+    {{else}}
     <span class="ing__cnt">fetched<b>{{.Last.Counts.Fetched}}</b></span>
     <span class="ing__cnt ing__cnt--new">new<b>{{.Last.Counts.NewItems}}</b></span>
     <span class="ing__cnt">scored<b>{{.Last.Counts.Scored}}</b></span>
     <span class="ing__cnt">skipped<b>{{.Last.Counts.Skipped}}</b></span>
+    {{end}}
     <span class="ing__cnt {{if gt .Last.Counts.Failed 0}}ing__cnt--warn{{end}}">failed<b>{{.Last.Counts.Failed}}</b></span>
   </div>
   {{end}}
@@ -78,7 +85,11 @@
 
   {{if .ShowBanner}}
   <div class="ing__done">
+    {{if .Last.Rescore}}
+    <span>✓ rescore complete — <b>{{.Last.Counts.Scored}}</b> of <b>{{.Last.Counts.Fetched}}</b> candidate{{if ne .Last.Counts.Fetched 1}}s{{end}} updated</span>
+    {{else}}
     <span>✓ run complete — <b>{{.Last.Counts.NewItems}}</b> new item{{if ne .Last.Counts.NewItems 1}}s{{end}} scored</span>
+    {{end}}
     <a href="/feed">refresh feed →</a>
   </div>
   {{end}}
@@ -130,9 +141,10 @@
     {{else}}<td class="ing__hist-st ing__hist-st--err">{{.Run.Status}}</td>{{end}}
     {{/* Same here: a cancelled row shows its partial haul, not the word twice. */}}
     {{if and .Run.Error (ne .Run.Status "cancelled")}}<td class="ing__hist-info">{{.Run.Error}}</td>
+    {{else if .Run.Rescore}}<td class="ing__hist-info">{{.Run.Counts.Scored}}/{{.Run.Counts.Fetched}} rescored</td>
     {{else}}<td class="ing__hist-info">{{.Run.Counts.NewItems}} new</td>{{end}}
     <td class="ing__hist-took">{{.Run.Took}}</td>
-    <td><span class="ing__trigger">{{.Run.Trigger}}</span></td>
+    <td><span class="ing__trigger">{{if .Run.Rescore}}rescore{{else}}{{.Run.Trigger}}{{end}}</span></td>
   </tr>
   {{if .Expanded}}
   <tr class="ing__hist-log">
@@ -162,6 +174,6 @@
 <span id="ingChip" class="ing-chip{{if .State}} ing-chip--{{.State}}{{end}}"
       {{if .OOB}}hx-swap-oob="true"{{end}} {{if not .State}}hidden{{end}}
       hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML" role="button" tabindex="0">
-  {{- if eq .State "running"}}<i></i>ingest running…{{else if eq .State "failed"}}<i></i>ingest failed · {{.Ago}}{{else if eq .State "warn"}}<i></i>ingest cancelled · {{.Ago}}{{else if eq .State "never"}}<i></i>ingest never ran{{end -}}
+  {{- if eq .State "running"}}<i></i>{{if eq .Activity "rescore"}}rescoring…{{else}}ingest running…{{end}}{{else if eq .State "failed"}}<i></i>{{.Activity}} failed · {{.Ago}}{{else if eq .State "warn"}}<i></i>{{.Activity}} cancelled · {{.Ago}}{{else if eq .State "never"}}<i></i>ingest never ran{{end -}}
 </span>
 {{end}}
