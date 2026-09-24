@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/rabbithole/internal/httplog"
+	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -32,9 +33,10 @@ const ingestBannerWindow = 5 * time.Minute
 // nothing ingested yet) or "" — idle and healthy, in which case the chip renders
 // hidden (the element must still exist so htmx OOB swaps can find it).
 type ingestChipData struct {
-	State string
-	Ago   string
-	OOB   bool // render with hx-swap-oob so a poll response updates the topbar
+	State    string
+	Ago      string
+	Activity string
+	OOB      bool // render with hx-swap-oob so a poll response updates the topbar
 }
 
 // ingestKV is one structured field of a captured log line.
@@ -62,6 +64,7 @@ type ingestRunView struct {
 	Trigger string // manual | cron
 	Counts  store.IngestCounts
 	Error   string
+	Rescore bool
 }
 
 // ingestHistRowData is one history row rendered on its own — the summary row
@@ -83,6 +86,8 @@ type ingestBodyData struct {
 	ShowBanner bool           // fresh successful finish — offer the feed refresh
 	History    []ingestHistRowData
 	Chip       ingestChipData
+	RunKind    ingest.RunKind
+	RunProfile string
 
 	HistPage     int  // zero-based page currently shown (poll re-uses it)
 	HistPrevPage int  // HistPage-1, the "newer" pager target
@@ -127,9 +132,15 @@ func (s *Web) ingestChrome(ctx context.Context) chromeData {
 	st := s.ing.Status()
 	if st.Running {
 		// A live run pulses the topbar chip, the side menu's dot and the edge tab.
+		activity := "ingest"
+		sub := "running…"
+		if st.Kind == ingest.RunKindRescore {
+			activity = "rescore"
+			sub = "rescoring…"
+		}
 		return chromeData{
-			Chip:   ingestChipData{State: "running"},
-			IngDot: "run", IngSub: "running…", Running: true,
+			Chip:   ingestChipData{State: "running", Activity: activity},
+			IngDot: "run", IngSub: sub, Running: true,
 		}
 	}
 	last, err := s.db.LastIngestRun(ctx)
@@ -146,19 +157,31 @@ func (s *Web) ingestChrome(ctx context.Context) chromeData {
 			IngDot: "warn", IngSub: "never ran", IngNever: true,
 		}
 	case last.Status == store.IngestStatusOK:
-		return chromeData{IngSub: "ok · " + agoPhrase(last.StartedAt, now)}
+		prefix := "ok"
+		if last.TriggeredBy == store.IngestTriggerProfileRescore {
+			prefix = "rescore ok"
+		}
+		return chromeData{IngSub: prefix + " · " + agoPhrase(last.StartedAt, now)}
 	case last.Status == store.IngestStatusError:
 		// Red chip, tab and menu item until the next successful run.
 		ago := agoPhrase(last.StartedAt, now)
+		activity := "ingest"
+		if last.TriggeredBy == store.IngestTriggerProfileRescore {
+			activity = "rescore"
+		}
 		return chromeData{
-			Chip:   ingestChipData{State: "failed", Ago: ago},
+			Chip:   ingestChipData{State: "failed", Ago: ago, Activity: activity},
 			IngDot: "err", IngSub: "error · " + ago,
 		}
 	default:
 		// Cancelled: amber chip and dot.
 		ago := agoPhrase(last.StartedAt, now)
+		activity := "ingest"
+		if last.TriggeredBy == store.IngestTriggerProfileRescore {
+			activity = "rescore"
+		}
 		return chromeData{
-			Chip:   ingestChipData{State: "warn", Ago: ago},
+			Chip:   ingestChipData{State: "warn", Ago: ago, Activity: activity},
 			IngDot: "warn", IngSub: "cancelled · " + ago,
 		}
 	}
@@ -169,7 +192,11 @@ func (s *Web) ingestChrome(ctx context.Context) chromeData {
 // only entry point that means "just opened", so it renders fresh: no completion
 // banner and no leftover log from a run that already ended.
 func (s *Web) handleIngest(w http.ResponseWriter, r *http.Request) {
-	body, err := s.ingestBody(r.Context(), histPageFromQuery(r), true)
+	s.renderIngestModal(w, r, true)
+}
+
+func (s *Web) renderIngestModal(w http.ResponseWriter, r *http.Request, fresh bool) {
+	body, err := s.ingestBody(r.Context(), histPageFromQuery(r), fresh)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -317,6 +344,8 @@ func (s *Web) ingestBody(ctx context.Context, page int, fresh bool) (ingestBodyD
 	now := time.Now()
 	data := ingestBodyData{
 		Running:      st.Running,
+		RunKind:      st.Kind,
+		RunProfile:   st.Profile,
 		HistPage:     page,
 		HistPrevPage: page - 1,
 		HistNextPage: page + 1,
@@ -351,7 +380,7 @@ func (s *Web) ingestBody(ctx context.Context, page int, fresh bool) (ingestBodyD
 		break
 	}
 
-	data.Chip = ingestChip(st.Running, data.Last)
+	data.Chip = ingestChip(st.Running, st.Kind, data.Last)
 	return data, nil
 }
 
@@ -368,18 +397,22 @@ func histPageFromQuery(r *http.Request) int {
 // ingestChip derives the topbar chip state: "running" while a run is live,
 // "failed" after an error, "warn" after a cancel, "never" until the first run,
 // hidden otherwise (idle and healthy).
-func ingestChip(running bool, last *ingestRunView) ingestChipData {
+func ingestChip(running bool, kind ingest.RunKind, last *ingestRunView) ingestChipData {
 	if running {
-		return ingestChipData{State: "running"}
+		activity := "ingest"
+		if kind == ingest.RunKindRescore {
+			activity = "rescore"
+		}
+		return ingestChipData{State: "running", Activity: activity}
 	}
 	if last == nil {
 		return ingestChipData{State: "never"}
 	}
 	switch last.Status {
 	case store.IngestStatusError:
-		return ingestChipData{State: "failed", Ago: last.When}
+		return ingestChipData{State: "failed", Ago: last.When, Activity: runActivity(last.Rescore)}
 	case store.IngestStatusCancelled:
-		return ingestChipData{State: "warn", Ago: last.When}
+		return ingestChipData{State: "warn", Ago: last.When, Activity: runActivity(last.Rescore)}
 	default:
 		return ingestChipData{}
 	}
@@ -395,11 +428,19 @@ func toIngestRunView(r store.IngestRun, now time.Time) ingestRunView {
 		Trigger: r.TriggeredBy,
 		Counts:  r.Counts,
 		Error:   r.Error,
+		Rescore: r.TriggeredBy == store.IngestTriggerProfileRescore,
 	}
 	if r.FinishedAt != nil {
 		v.Took = fmtRunDur(r.FinishedAt.Sub(r.StartedAt))
 	}
 	return v
+}
+
+func runActivity(rescore bool) string {
+	if rescore {
+		return "rescore"
+	}
+	return "ingest"
 }
 
 // agoPhrase renders a start time as readable prose: relTime's bare "5m"/"3h"

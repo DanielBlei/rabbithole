@@ -21,7 +21,9 @@ make setup
 They start as working examples, so you can run first and edit later. A fresh database uses
 the immutable built-in **Default** interest profile. In the web UI, open
 **Settings → Profiles**, duplicate Default or create a profile, and select it. Profile
-changes are persisted in SQLite and affect the next ingest without a server restart.
+changes are persisted in SQLite and affect newly scored items without a server restart.
+Existing scores stay unchanged unless you explicitly confirm **Rescore recent items**, which
+recomputes already-stored items from the last seven days.
 
 Every field is documented in [configuration.md](configuration.md), including the model-free
 `heuristic` scorer and OpenAI-compatible endpoints if you would rather not run Ollama.
@@ -68,6 +70,9 @@ for tasks, todos and ideas.
 Configuration-file changes are read at startup, so restart the server after editing
 `config.yaml`. Profile selections and edits are different: they live in SQLite and apply to
 the next ingest immediately. An ingest already running keeps the snapshot it started with.
+Switching alone does not rewrite the existing feed. Use **Settings → Profiles → Rescore
+recent items** when you intentionally want the last seven days recomputed; it uses stored
+titles/summaries, preserves your ratings and may incur model runtime or provider cost.
 
 ## Next
 

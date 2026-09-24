@@ -136,7 +136,9 @@ Indexes: `digested_on`, `created_at`, `bookmarked`.
 than by the schema:
 
 - **Model-owned** — `llm_score`, `llm_score_reason`, `llm_score_model`, the three
-  `llm_profile_*` columns and `digested_on`. Only `Record` writes these.
+  `llm_profile_*` columns and `digested_on`. `Record` writes them during ingest;
+  `ReplaceItemScores` replaces score/provenance fields during an explicit rescore without
+  changing `digested_on`.
 - **User-owned** — `status`, `user_score`, `user_note`, `bookmarked`. Only `UpdateUserState`
   writes these, and it is the single mutation path shared by the CLI and the HTTP handlers.
 
@@ -147,7 +149,15 @@ NULL, and re-seeing an article never resets your own state on it.
 Profile provenance is historical metadata, not a live join. Renaming, editing, switching or
 deleting a local profile does not rewrite scores already produced with it. The hash
 distinguishes two versions that share one stable profile ID. Rows from before schema version 4
-keep NULL provenance and remain readable.
+keep NULL provenance and remain readable. An explicit recent-item rescore replaces provenance
+with the exact active-profile snapshot used by that operation.
+
+`RecentScoredItems(cutoff)` supplies the rescore workflow with deterministic, newest-first
+stored `feeds.Item` values. It uses `COALESCE(published_at, created_at)`, requires an existing
+LLM score, and includes legacy scored rows whose profile provenance is NULL.
+`ReplaceItemScores` performs the short database write only after model calls finish. It updates
+successful score/reason/model/profile fields in one transaction while leaving user ratings,
+notes, status, bookmarks, item metadata, tags and digest membership untouched.
 
 ## profiles and profile_state
 
@@ -394,6 +404,11 @@ Two properties worth preserving:
 - **Dedup precedes scoring.** `ScoredLinks` runs before the model is called, so the
   expensive step only ever sees genuinely new items. The scorer itself is built lazily, so a
   run with nothing new never contacts the backend at all.
+
+The explicit rescore path is separate: it selects scored rows from a fixed seven-day window,
+never fetches feeds, and intentionally scores every selected candidate even when its stored
+profile hash already matches. It shares the same run manager and `ingest_history`; the
+`profile-rescore` trigger distinguishes it from ordinary manual or cron ingest runs.
 
 ## Item lifecycle
 

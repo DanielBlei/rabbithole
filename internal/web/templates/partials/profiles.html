@@ -6,9 +6,11 @@
   <div class="prof__head">
     <span>Active profile</span>
     <strong>{{.ActiveName}}</strong>
+    <button class="prof__rescore" type="button" {{if .RunActive}}disabled{{end}}
+            hx-get="/profiles/rescore" hx-target="#modalTop" hx-swap="innerHTML">rescore recent items</button>
     <button class="prof__new" type="button" hx-get="/profiles/new" hx-target="#profilesSettings" hx-swap="outerHTML">+ new profile</button>
   </div>
-  <p class="prof__note">Profile changes affect the next ingest. Existing scores are not rescored.</p>
+  <p class="prof__note">Profile changes apply automatically to newly scored items. Existing scores stay unchanged until you rescore them.</p>
   {{if .Error}}<p class="prof__error" role="alert">{{.Error}}</p>{{end}}
 
   <div class="prof__grid">
@@ -118,6 +120,30 @@
     <button class="prof-form__save" type="submit">{{if .Adding}}create profile{{else}}save profile{{end}}</button>
   </form>
   {{end}}
+</div>
+{{end}}
+
+{{define "profileConfirmRescore"}}
+<div class="modal">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__frame modal__frame--ask" role="dialog" aria-modal="true" aria-labelledby="profileRescoreTitle">
+    <div class="modal__bar">
+      <span class="modal__title" id="profileRescoreTitle">Rescore recent items</span>
+      <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+    </div>
+    <div class="prof-confirm">
+      <p>Rescore items from the last <strong>{{.WindowDays}} days</strong> using <strong>{{.ProfileName}}</strong>?</p>
+      <p>Existing LLM scores and explanations in this window will be replaced. Your ratings, notes, read state and bookmarks will remain untouched.</p>
+      <p>Switching profiles alone never starts a rescore. This operation may make paid or long-running model calls.</p>
+    </div>
+    <div class="modal__foot prof-confirm__actions">
+      <button type="button" data-modal-close>cancel</button>
+      <form hx-post="/profiles/rescore" hx-target="#modalTop" hx-swap="innerHTML">
+        <input type="hidden" name="window" value="7d">
+        <button class="prof-form__save" type="submit">rescore recent items</button>
+      </form>
+    </div>
+  </div>
 </div>
 {{end}}
 

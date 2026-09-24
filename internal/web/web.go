@@ -145,6 +145,8 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /profiles/{id}", s.handleProfileUpdate)
 	mux.HandleFunc("POST /profiles/{id}/duplicate", s.handleProfileDuplicate)
 	mux.HandleFunc("POST /profiles/{id}/active", s.handleProfileActive)
+	mux.HandleFunc("GET /profiles/rescore", s.handleProfileConfirmRescore)
+	mux.HandleFunc("POST /profiles/rescore", s.handleProfileRescore)
 	mux.HandleFunc("DELETE /profiles/{id}", s.handleProfileDelete)
 	mux.HandleFunc("GET /sources", s.handleSources)
 	mux.HandleFunc("GET /sources/new", s.handleSourceNew)

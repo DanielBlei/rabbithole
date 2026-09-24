@@ -79,6 +79,13 @@ The active profile is resolved once before a run starts. A profile switch during
 is visible to the next run only, so one run cannot mix profile versions between feeds or
 batches.
 
+An explicit **Rescore recent items** action is the bounded exception to ingest dedup. It uses
+the same scorer construction and batching stack, but reads already-scored item metadata from
+SQLite for a fixed seven-day window instead of fetching feeds. Successful replacements update
+only model score/reason/model/profile provenance; failed items keep their previous score.
+Ingest and rescore share the same background manager, history, log capture, cancellation and
+single-flight slot, so they cannot write scores concurrently.
+
 Each step has a knob, all of them in [configuration.md](configuration.md):
 
 | Step | Knobs |

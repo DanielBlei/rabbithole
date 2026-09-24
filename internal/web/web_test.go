@@ -28,6 +28,10 @@ func testIngestManager(t *testing.T, db *store.Store) *ingest.Manager {
 	think := false
 	cfg := &config.Config{}
 	cfg.Inference.Think = &think
+	cfg.Inference.Provider = "heuristic"
+	cfg.Inference.Model = "test-model"
+	cfg.Inference.BatchSize = 1
+	cfg.Inference.MaxParallel = 1
 	m, err := ingest.NewManager(db, cfg, zerolog.InfoLevel)
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)

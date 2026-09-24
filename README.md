@@ -57,7 +57,9 @@ which takes a while on a local model; after that the page fills in.
 
 That ranks against the immutable built-in **Default** profile. Open
 **Settings → Profiles** to create or duplicate one for your own interests; the next ingest
-uses it immediately. For the full setup, see **[docs/quickstart.md](docs/quickstart.md)**.
+uses it immediately. Existing scores stay historical until you explicitly choose
+**Rescore recent items**, which recomputes the last seven days from stored article data.
+For the full setup, see **[docs/quickstart.md](docs/quickstart.md)**.
 
 The first visit asks who can open it: create an account, or leave it open with no login.
 `make serve` binds to loopback only; read [docs/auth.md](docs/auth.md)

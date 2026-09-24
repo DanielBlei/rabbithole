@@ -9,21 +9,27 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/profile"
 	"github.com/DanielBlei/rabbithole/internal/profilemgr"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
-const profileFormBodyLimit = profile.MaxContentBytes*4 + 16*1024
+const (
+	profileFormBodyLimit      = profile.MaxContentBytes*4 + 16*1024
+	profileRescoreWindowValue = "7d"
+)
 
 type profileSettingsData struct {
 	Rows       []profileRowData
 	ActiveName string
 	Form       *profileFormData
 	Error      string
+	RunActive  bool
 }
 
 type profileRowData struct {
@@ -54,6 +60,11 @@ type profileDeleteData struct {
 	Active bool
 }
 
+type profileRescoreData struct {
+	ProfileName string
+	WindowDays  int
+}
+
 func (s *Web) handleProfiles(w http.ResponseWriter, r *http.Request) {
 	s.renderProfiles(w, r, nil)
 }
@@ -64,7 +75,7 @@ func (s *Web) profileSettings(ctx context.Context, form *profileFormData) profil
 		log.Error().Err(err).Msg("list profiles for settings")
 		return profileSettingsData{Error: "profiles unavailable: " + err.Error(), Form: form}
 	}
-	data := profileSettingsData{Form: form}
+	data := profileSettingsData{Form: form, RunActive: s.ing.Status().Running}
 	for _, item := range items {
 		data.Rows = append(data.Rows, profileRowData{
 			ID: item.ID, Name: item.Name, Builtin: item.Builtin, Active: item.Active,
@@ -215,6 +226,35 @@ func (s *Web) handleProfileActive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.renderProfiles(w, r, nil)
+}
+
+func (s *Web) handleProfileConfirmRescore(w http.ResponseWriter, r *http.Request) {
+	active, err := s.profiles.Resolve(r.Context())
+	if err != nil {
+		httpProfileError(w, err)
+		return
+	}
+	s.renderFragment(w, "profileConfirmRescore", profileRescoreData{
+		ProfileName: active.Name,
+		WindowDays:  int(ingest.ProfileRescoreWindow / (24 * time.Hour)),
+	})
+}
+
+func (s *Web) handleProfileRescore(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1024)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid rescore request", http.StatusBadRequest)
+		return
+	}
+	if r.FormValue("window") != profileRescoreWindowValue {
+		http.Error(w, "invalid rescore window", http.StatusBadRequest)
+		return
+	}
+	if err := s.ing.StartRescore(r.Context(), ingest.ProfileRescoreWindow); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.renderIngestModal(w, r, false)
 }
 
 func (s *Web) handleProfileConfirmDelete(w http.ResponseWriter, r *http.Request) {

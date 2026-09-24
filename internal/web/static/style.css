@@ -418,10 +418,12 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
   font-size:1.15rem;color:var(--text-dim);
 }
 .prof__head strong{color:var(--accent);font-weight:600;}
-.prof__new{
-  margin-left:auto;border:0;border-radius:var(--r-full);padding:6px 10px;
+.prof__new,.prof__rescore{
+  border:0;border-radius:var(--r-full);padding:6px 10px;
   background:var(--tint);color:var(--accent);font:inherit;cursor:pointer;
 }
+.prof__rescore{margin-left:auto;}
+.prof__rescore:disabled{opacity:.45;cursor:default;color:var(--text-dim);background:var(--fill);}
 .prof__note{margin:0;color:var(--text-dim);font-size:1.05rem;line-height:1.45;}
 .prof__error,.prof-form__err{margin:0;color:var(--warn);font-size:1.1rem;}
 .prof__grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;}

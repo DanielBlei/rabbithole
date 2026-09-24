@@ -186,6 +186,166 @@ func TestManagerProfileResolutionPerRun(t *testing.T) {
 	run(b.ID, nil)
 }
 
+func TestManagerIngestAndRescoreShareSingleFlight(t *testing.T) {
+	m, ingestRelease := newManagerForTest(t, Outcome{}, nil)
+	ctx := context.Background()
+	if err := m.Start(ctx, store.IngestTriggerManual); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.StartRescore(ctx, ProfileRescoreWindow); err != nil {
+		t.Fatal(err)
+	}
+	runs, _, err := m.db.ListIngestRuns(ctx, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].TriggeredBy != store.IngestTriggerManual {
+		t.Fatalf("rescore started beside ingest: %+v", runs)
+	}
+	close(ingestRelease)
+	waitIdle(t, m)
+
+	rescoreRelease := make(chan struct{})
+	captured := make(chan profile.Snapshot, 1)
+	m.rescore = func(
+		ctx context.Context,
+		_ *config.Config,
+		activeProfile profile.Snapshot,
+		_ *store.Store,
+		_ time.Time,
+		window time.Duration,
+	) (RescoreOutcome, error) {
+		captured <- activeProfile
+		if window != ProfileRescoreWindow {
+			t.Errorf("window = %s, want %s", window, ProfileRescoreWindow)
+		}
+		select {
+		case <-rescoreRelease:
+			return RescoreOutcome{Candidates: 4, Scored: 3, Failed: 1}, nil
+		case <-ctx.Done():
+			return RescoreOutcome{}, ctx.Err()
+		}
+	}
+	if err := m.StartRescore(ctx, ProfileRescoreWindow); err != nil {
+		t.Fatal(err)
+	}
+	if st := m.Status(); !st.Running || st.Kind != RunKindRescore ||
+		st.Profile != profile.DefaultName {
+		t.Fatalf("rescore status = %+v", st)
+	}
+	gotProfile := <-captured
+	if gotProfile.ID != profile.DefaultID {
+		t.Fatalf("rescore snapshot = %+v", gotProfile)
+	}
+	if err := m.Start(ctx, store.IngestTriggerManual); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.StartRescore(ctx, ProfileRescoreWindow); err != nil {
+		t.Fatal(err)
+	}
+	runs, _, err = m.db.ListIngestRuns(ctx, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 || runs[0].TriggeredBy != store.IngestTriggerProfileRescore {
+		t.Fatalf("duplicate/concurrent run rows = %+v", runs)
+	}
+	close(rescoreRelease)
+	waitIdle(t, m)
+
+	last, err := m.db.LastIngestRun(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last.TriggeredBy != store.IngestTriggerProfileRescore ||
+		last.Counts.Fetched != 4 || last.Counts.Scored != 3 || last.Counts.Failed != 1 {
+		t.Fatalf("rescore history = %+v", last)
+	}
+}
+
+func TestManagerRescoreSnapshotSurvivesProfileChange(t *testing.T) {
+	m, _ := newManagerForTest(t, Outcome{}, nil)
+	ctx := context.Background()
+	first, err := m.db.CreateProfile(ctx, "First", "# First")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := m.db.CreateProfile(ctx, "Second", "# Second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.db.SetActiveProfile(ctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	captured := make(chan profile.Snapshot, 1)
+	release := make(chan struct{})
+	m.rescore = func(
+		ctx context.Context,
+		_ *config.Config,
+		activeProfile profile.Snapshot,
+		_ *store.Store,
+		_ time.Time,
+		_ time.Duration,
+	) (RescoreOutcome, error) {
+		captured <- activeProfile
+		select {
+		case <-release:
+			if activeProfile.ID != first.ID || activeProfile.Content != "# First" {
+				t.Errorf("running snapshot changed: %+v", activeProfile)
+			}
+			return RescoreOutcome{}, nil
+		case <-ctx.Done():
+			return RescoreOutcome{}, ctx.Err()
+		}
+	}
+	if err := m.StartRescore(ctx, ProfileRescoreWindow); err != nil {
+		t.Fatal(err)
+	}
+	got := <-captured
+	if _, err := m.db.UpdateProfile(ctx, first.ID, "Edited", "# Edited"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.db.SetActiveProfile(ctx, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != first.ID || got.Hash != profile.ContentHash("# First") {
+		t.Fatalf("captured snapshot = %+v", got)
+	}
+	close(release)
+	waitIdle(t, m)
+}
+
+func TestManagerCancelRescore(t *testing.T) {
+	m, _ := newManagerForTest(t, Outcome{}, nil)
+	m.rescore = func(
+		ctx context.Context,
+		_ *config.Config,
+		_ profile.Snapshot,
+		_ *store.Store,
+		_ time.Time,
+		_ time.Duration,
+	) (RescoreOutcome, error) {
+		<-ctx.Done()
+		return RescoreOutcome{}, ctx.Err()
+	}
+	if err := m.StartRescore(context.Background(), ProfileRescoreWindow); err != nil {
+		t.Fatal(err)
+	}
+	m.Cancel()
+	waitIdle(t, m)
+	last, err := m.db.LastIngestRun(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last.Status != store.IngestStatusCancelled ||
+		last.TriggeredBy != store.IngestTriggerProfileRescore {
+		t.Fatalf("cancelled rescore history = %+v", last)
+	}
+	if !logContains(m, "rescore cancelled") {
+		t.Fatalf("rescore cancellation log = %q", m.Status().Lines)
+	}
+}
+
 // Cancel winds the run down through its context and records it as cancelled.
 func TestManagerCancel(t *testing.T) {
 	m, _ := newManagerForTest(t, Outcome{}, nil)

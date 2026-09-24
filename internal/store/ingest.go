@@ -56,8 +56,9 @@ const (
 
 // Ingest run triggers: who started the run.
 const (
-	IngestTriggerManual = "manual"
-	IngestTriggerCron   = "cron"
+	IngestTriggerManual         = "manual"
+	IngestTriggerCron           = "cron"
+	IngestTriggerProfileRescore = "profile-rescore"
 )
 
 // ErrIngestRunNotFound is returned when no history row matches the given id.
