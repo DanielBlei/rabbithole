@@ -2,17 +2,17 @@
 
 ## Why
 
-`profile.md` decides what scores well, and you write it blind. Change a line and your feed
-changes, but nothing tells you whether it got better or worse. `rabbithole eval benchmark`
-closes that loop: you mark a handful of articles yourself, and it shows you where the model
-disagreed with you.
+Your interest profile decides what scores well, and you write it blind. Change a line and
+your feed changes, but nothing tells you whether it got better or worse.
+`rabbithole eval benchmark` closes that loop: you mark a handful of articles yourself, and
+it shows you where the model disagreed with you.
 
 ## How it works
 
 ```mermaid
 flowchart LR
     G["golden.yaml<br/>articles you marked"] --> S
-    P["profile.md<br/>what you like"] --> S["score them now,<br/>with your model"]
+    P["benchmark profile<br/>what you like"] --> S["score them now,<br/>with your model"]
     S --> R["report:<br/>where it disagreed<br/>with you"]
     R -. "edit, run again" .-> P
 ```
@@ -20,6 +20,11 @@ flowchart LR
 It scores the articles **now**, rather than reading marks recorded earlier. That is the whole
 point: two runs either side of an edit are directly comparable, so you can tell whether the
 edit did anything. Nothing is written to the store and your profile is never rewritten.
+
+The benchmark remains deliberately configuration-driven and read-only: it uses the Markdown
+named by `config.profile`, or the built-in Default when that setting is absent. It does not
+read or mutate the active SQLite profile. To benchmark a local UI profile in v1, copy its raw
+text to a Markdown file and point `profile:` at that file for the benchmark.
 
 ## The set of articles
 
@@ -41,7 +46,7 @@ and replace the examples with articles from your own feeds. One looks like this:
 `expected_llm_score` is the mark **you** would give, 0 to 10. Close is fine: if you said 9
 and the model said 8, nothing is wrong. Two things make the set worth having:
 
-- **You should be able to point at the reason.** `profile.md` says what you like, and the
+- **You should be able to point at the reason.** The benchmark profile says what you like, and the
   scoring guide in the system prompt turns that into a number. If neither explains your
   mark, add the missing line instead of changing the mark.
 - **Include the awkward ones.** Anything can mark the obvious articles. What teaches you
@@ -118,7 +123,7 @@ error stream and the report to the normal one, so `--format json > before.json` 
 ## Claude as a reference ceiling
 
 A benchmark tells you the gap between your model and your marks, but not why the gap is there.
-A high MAE can mean the model is too small, or that `profile.md` is ambiguous, or that one of
+A high MAE can mean the model is too small, or that the profile is ambiguous, or that one of
 your marks is wrong. Those want opposite fixes, and the report cannot tell them apart.
 
 `--provider claude` scores the same set with the Claude Code CLI, on your existing subscription,
@@ -135,7 +140,7 @@ a bigger model would help. A small gap means it would not, and the thing to fix 
 your prompt, or one of your marks.
 
 **Claude is not the answer key.** Your marks are, and Claude is scored against them exactly like
-any other backend. It only ever sees `profile.md` and the system prompt, so it does not know your
+any other backend. It only ever sees the benchmark profile and the system prompt, so it does not know your
 taste any better than your own model does. Read it as a ceiling, not a verdict, and never copy its
 scores into `golden.yaml`: the set would stop measuring whether the model agrees with you and start
 measuring whether it agrees with Claude, and nothing in the report would say so.
@@ -147,7 +152,7 @@ which one you changed:
 
 | | Fingerprint | What it is |
 |---|---|---|
-| `profile.md` | `profile_hash` | what you like. The main lever, and where most edits belong |
+| the benchmark profile | `profile_hash` | what you like. The main lever, and where most edits belong |
 | the system prompt | `prompt_hash` | how a preference becomes a 0-10. Shared by every backend |
 | `golden.yaml` | `benchmark_hash` | your marks, the answer key. Change it least |
 
@@ -198,7 +203,7 @@ Each batch is one fresh, stateless call. Nothing is carried between them:
 ```
 system:  <the system prompt>                    the scoring scale
 user:    READER INTEREST PROFILE:
-         <profile.md>                           your taste
+         <benchmark profile>                    your taste
          ARTICLES (untrusted feed content...):
          1. [Source] Title
             summary

@@ -7,13 +7,13 @@ package config
 import (
 	"fmt"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
+	profiledomain "github.com/DanielBlei/rabbithole/internal/profile"
 	"github.com/DanielBlei/rabbithole/internal/rank"
 )
 
@@ -240,9 +240,6 @@ func (c *Config) validate() error {
 	if c.Inference.Summary != (SummaryConfig{}) && c.Inference.Summary.Model == "" {
 		return fmt.Errorf("inference.summary.model is required when other inference.summary fields are set")
 	}
-	if c.Profile == "" {
-		return fmt.Errorf("profile path is required")
-	}
 	if c.Store.DBPath == "" {
 		return fmt.Errorf("store.db_path is required")
 	}
@@ -252,11 +249,9 @@ func (c *Config) validate() error {
 	return nil
 }
 
-var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
-
 // stripHTMLComments drops <!-- --> blocks, so comments never reach the model
 func stripHTMLComments(md string) string {
-	return strings.TrimSpace(htmlComment.ReplaceAllString(md, ""))
+	return profiledomain.Clean(md)
 }
 
 // loadTrimmedFile reads path and strips HTML comments, so notes to yourself
@@ -271,6 +266,9 @@ func loadTrimmedFile(path string) (string, error) {
 
 // LoadProfile reads the interest-profile markdown referenced by the config.
 func (c *Config) LoadProfile() (string, error) {
+	if c.Profile == "" {
+		return profiledomain.DefaultContent, nil
+	}
 	profile, err := loadTrimmedFile(c.Profile)
 	if err != nil {
 		return "", fmt.Errorf("read profile %q: %w", c.Profile, err)

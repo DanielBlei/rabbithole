@@ -17,6 +17,7 @@ import (
 	zlog "github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/profile"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -31,12 +32,8 @@ func newManagerForTest(t *testing.T, outcome Outcome, runErr error) (*Manager, c
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	profile := filepath.Join(t.TempDir(), "profile.md")
-	if err := os.WriteFile(profile, []byte("# interests"), 0o644); err != nil {
-		t.Fatalf("write profile: %v", err)
-	}
 	think := true
-	cfg := &config.Config{Profile: profile}
+	cfg := &config.Config{}
 	cfg.Inference.Think = &think
 
 	m, err := NewManager(db, cfg, zerolog.InfoLevel)
@@ -44,7 +41,14 @@ func newManagerForTest(t *testing.T, outcome Outcome, runErr error) (*Manager, c
 		t.Fatalf("NewManager: %v", err)
 	}
 	release := make(chan struct{})
-	m.run = func(ctx context.Context, _ *config.Config, _ string, _ *store.Store, _ time.Time, _ Options) (Outcome, error) {
+	m.run = func(
+		ctx context.Context,
+		_ *config.Config,
+		_ profile.Snapshot,
+		_ *store.Store,
+		_ time.Time,
+		_ Options,
+	) (Outcome, error) {
 		select {
 		case <-release:
 			return outcome, runErr
@@ -112,6 +116,74 @@ func TestManagerRunLifecycle(t *testing.T) {
 	if last.Status != store.IngestStatusOK || last.Counts != want {
 		t.Errorf("finished row wrong: %+v", last)
 	}
+}
+
+// The manager resolves one immutable profile snapshot per run. A selection
+// changed while a run is live therefore reaches the next run, not a later feed
+// in the current one.
+func TestManagerProfileResolutionPerRun(t *testing.T) {
+	m, _ := newManagerForTest(t, Outcome{}, nil)
+	captured := make(chan profile.Snapshot, 4)
+	gates := make(chan chan struct{}, 4)
+	m.run = func(
+		ctx context.Context,
+		_ *config.Config,
+		activeProfile profile.Snapshot,
+		_ *store.Store,
+		_ time.Time,
+		_ Options,
+	) (Outcome, error) {
+		captured <- activeProfile
+		gate := <-gates
+		select {
+		case <-gate:
+			return Outcome{}, nil
+		case <-ctx.Done():
+			return Outcome{}, ctx.Err()
+		}
+	}
+
+	run := func(wantID string, whileRunning func()) {
+		t.Helper()
+		gate := make(chan struct{})
+		gates <- gate
+		if err := m.Start(context.Background(), store.IngestTriggerManual); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		got := <-captured
+		if got.ID != wantID {
+			t.Fatalf("run profile = %+v, want ID %q", got, wantID)
+		}
+		if whileRunning != nil {
+			whileRunning()
+			if got.ID != wantID {
+				t.Fatalf("captured profile changed during run: %+v", got)
+			}
+		}
+		close(gate)
+		waitIdle(t, m)
+	}
+
+	// Fresh state uses the application-owned Default.
+	run(profile.DefaultID, nil)
+
+	a, err := m.db.CreateProfile(context.Background(), "A", "# A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := m.db.CreateProfile(context.Background(), "B", "# B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.db.SetActiveProfile(context.Background(), a.ID); err != nil {
+		t.Fatal(err)
+	}
+	run(a.ID, func() {
+		if err := m.db.SetActiveProfile(context.Background(), b.ID); err != nil {
+			t.Fatal(err)
+		}
+	})
+	run(b.ID, nil)
 }
 
 // Cancel winds the run down through its context and records it as cancelled.
@@ -205,9 +277,16 @@ func TestManagerInterruptsStaleRuns(t *testing.T) {
 func TestManagerBufferCapturesDebugRegardlessOfLogLevel(t *testing.T) {
 	m, release := newManagerForTest(t, Outcome{}, nil) // newManagerForTest uses zerolog.InfoLevel
 	orig := m.run
-	m.run = func(ctx context.Context, cfg *config.Config, profile string, db *store.Store, day time.Time, opts Options) (Outcome, error) {
+	m.run = func(
+		ctx context.Context,
+		cfg *config.Config,
+		activeProfile profile.Snapshot,
+		db *store.Store,
+		day time.Time,
+		opts Options,
+	) (Outcome, error) {
 		zerolog.Ctx(ctx).Debug().Msg("debug-level line")
-		return orig(ctx, cfg, profile, db, day, opts)
+		return orig(ctx, cfg, activeProfile, db, day, opts)
 	}
 
 	if err := m.Start(context.Background(), store.IngestTriggerManual); err != nil {
@@ -285,10 +364,17 @@ func TestRunLoggerMirrorsToConsoleOnlyWhenVerbose(t *testing.T) {
 func TestManagerLogsRunContextOnly(t *testing.T) {
 	m, release := newManagerForTest(t, Outcome{}, nil)
 	orig := m.run
-	m.run = func(ctx context.Context, cfg *config.Config, profile string, db *store.Store, day time.Time, opts Options) (Outcome, error) {
+	m.run = func(
+		ctx context.Context,
+		cfg *config.Config,
+		activeProfile profile.Snapshot,
+		db *store.Store,
+		day time.Time,
+		opts Options,
+	) (Outcome, error) {
 		zerolog.Ctx(ctx).Info().Msg("run-scoped line")
 		zlog.Info().Msg("global-scoped line")
-		return orig(ctx, cfg, profile, db, day, opts)
+		return orig(ctx, cfg, activeProfile, db, day, opts)
 	}
 
 	ctx := context.Background()
@@ -341,7 +427,14 @@ func TestManagerShutdownIdleNoop(t *testing.T) {
 // cancellation.
 func TestManagerShutdownTimesOut(t *testing.T) {
 	m, _ := newManagerForTest(t, Outcome{}, nil)
-	m.run = func(ctx context.Context, _ *config.Config, _ string, _ *store.Store, _ time.Time, _ Options) (Outcome, error) {
+	m.run = func(
+		ctx context.Context,
+		_ *config.Config,
+		_ profile.Snapshot,
+		_ *store.Store,
+		_ time.Time,
+		_ Options,
+	) (Outcome, error) {
 		<-make(chan struct{}) // never returns; ignores ctx cancellation
 		return Outcome{}, nil
 	}

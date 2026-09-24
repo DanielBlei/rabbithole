@@ -12,6 +12,7 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/digest"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
+	"github.com/DanielBlei/rabbithole/internal/profilemgr"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -65,12 +66,6 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 		Bool("think", think).
 		Msg("config loaded")
 
-	profile, err := cfg.LoadProfile()
-	if err != nil {
-		return err
-	}
-	log.Debug().Str("path", cfg.Profile).Int("chars", len(profile)).Msg("interest profile loaded")
-
 	db, err := store.Open(cfg.Store.DBPath)
 	if err != nil {
 		return err
@@ -82,8 +77,22 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 	}()
 	log.Debug().Str("db", cfg.Store.DBPath).Msg("store opened")
 
+	profiles := profilemgr.New(db)
+	if err := profiles.BootstrapLegacy(ctx, cfg); err != nil {
+		return err
+	}
+	activeProfile, err := profiles.Resolve(ctx)
+	if err != nil {
+		return err
+	}
+	log.Debug().
+		Str("profile_id", activeProfile.ID).
+		Str("profile_name", activeProfile.Name).
+		Int("chars", len(activeProfile.Content)).
+		Msg("interest profile resolved")
+
 	day := time.Now()
-	outcome, err := ingest.Run(ctx, cfg, profile, db, day, ingest.Options{
+	outcome, err := ingest.Run(ctx, cfg, activeProfile, db, day, ingest.Options{
 		Think:  think,
 		Record: !dryRun,
 	})

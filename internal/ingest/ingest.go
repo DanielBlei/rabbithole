@@ -17,6 +17,7 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/inference"
+	"github.com/DanielBlei/rabbithole/internal/profile"
 	"github.com/DanielBlei/rabbithole/internal/rank"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -50,7 +51,7 @@ type Outcome struct {
 func Run(
 	ctx context.Context,
 	cfg *config.Config,
-	profile string,
+	activeProfile profile.Snapshot,
 	db *store.Store,
 	day time.Time,
 	opts Options,
@@ -181,7 +182,9 @@ func Run(
 			return outcome, err
 		}
 
-		scores := rank.ScoreAll(ctx, s, profile, unseen, cfg.Inference.BatchSize, cfg.Inference.MaxParallel)
+		scores := rank.ScoreAll(
+			ctx, s, activeProfile.Content, unseen, cfg.Inference.BatchSize, cfg.Inference.MaxParallel,
+		)
 		failed := len(unseen) - len(scores)
 		outcome.Failed += failed
 		logger.Info().Str("feed", f.Name).Int("processed", len(scores)).Int("failed", failed).
@@ -189,7 +192,7 @@ func Run(
 		results := rank.Select(unseen, scores)
 
 		if opts.Record {
-			if err := record(ctx, db, unseen, scores, cfg.Inference.Model, day); err != nil {
+			if err := record(ctx, db, unseen, scores, cfg.Inference.Model, activeProfile, day); err != nil {
 				logger.Warn().Str("feed", f.Name).Err(err).Msg("recording feed failed, skipping")
 				continue
 			}
@@ -346,6 +349,7 @@ func record(
 	all []feeds.Item,
 	scores map[string]rank.ItemScore,
 	model string,
+	activeProfile profile.Snapshot,
 	day time.Time,
 ) error {
 	var entries []store.DigestEntry
@@ -355,11 +359,14 @@ func record(
 			continue
 		}
 		entries = append(entries, store.DigestEntry{
-			Item:     it,
-			Score:    sc.Score,
-			Reason:   sc.Reason,
-			Model:    model,
-			Digested: true,
+			Item:        it,
+			Score:       sc.Score,
+			Reason:      sc.Reason,
+			Model:       model,
+			ProfileID:   activeProfile.ID,
+			ProfileName: activeProfile.Name,
+			ProfileHash: activeProfile.Hash,
+			Digested:    true,
 		})
 	}
 	return db.Record(ctx, all, entries, day)

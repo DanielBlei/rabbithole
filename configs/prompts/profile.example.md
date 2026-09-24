@@ -1,8 +1,11 @@
 <!--
-Describe what you want to read about. This file is passed to the model as-is and decides
-what scores well, so replace the example below with your own interests. The headings are a
-suggestion, and plain sentences work too. Saying what you're *less* keen on matters as much
-as saying what you want.
+Optional compatibility/bootstrap profile. The built-in Default now contains the same
+semantic example and a fresh install manages profiles under Settings → Profiles. Point
+`profile:` at a copy of this file only when importing an existing file-based setup.
+
+Describe what you want to read about. The imported content decides what scores well. The
+headings are a suggestion, and plain sentences work too. Saying what you're *less* keen on
+matters as much as saying what you want.
 
 Say what you like, not what it should score. The 0-10 scale lives in the system prompt,
 which reads these headings in order, from what you want most down to what you'd rather

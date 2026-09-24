@@ -107,9 +107,9 @@ type AuditOptions struct {
 	// RatedOnly keeps only rows carrying a user_score, so the report is built
 	// from items you actually judged. A missing user_note is fine.
 	RatedOnly bool
-	// Source and ScoredBy narrow to one feed and one scoring model. ScoredBy
-	// matters because llm_score_model is the only provenance the store keeps,
-	// so a sample spanning models can otherwise mix incomparable rows.
+	// Source and ScoredBy narrow to one feed and one scoring model. Scores also
+	// retain profile provenance, but audit currently filters only model
+	// provenance; a sample spanning models can otherwise mix incomparable rows.
 	Source   string
 	ScoredBy string
 

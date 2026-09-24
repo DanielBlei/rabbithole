@@ -16,6 +16,8 @@ import (
 	zlog "github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/profile"
+	"github.com/DanielBlei/rabbithole/internal/profilemgr"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -29,7 +31,14 @@ const finishTimeout = 5 * time.Second
 
 // runFunc matches Run's signature; Manager calls through it so tests can
 // substitute a stub instead of a real fetch→score→record cycle.
-type runFunc func(context.Context, *config.Config, string, *store.Store, time.Time, Options) (Outcome, error)
+type runFunc func(
+	context.Context,
+	*config.Config,
+	profile.Snapshot,
+	*store.Store,
+	time.Time,
+	Options,
+) (Outcome, error)
 
 // Manager owns manual (and later scheduled) ingest runs inside the serve
 // process: it enforces single-flight — at most one cycle at a time — runs the
@@ -39,6 +48,7 @@ type runFunc func(context.Context, *config.Config, string, *store.Store, time.Ti
 type Manager struct {
 	db       *store.Store
 	cfg      *config.Config
+	profiles *profilemgr.Service
 	run      runFunc
 	logLevel zerolog.Level // --debug also prints the run's lines in the terminal
 
@@ -73,7 +83,9 @@ func NewManager(db *store.Store, cfg *config.Config, logLevel zerolog.Level) (*M
 	if err := db.InterruptStaleIngestRuns(context.Background()); err != nil {
 		return nil, err
 	}
-	return &Manager{db: db, cfg: cfg, run: Run, logLevel: logLevel}, nil
+	return &Manager{
+		db: db, cfg: cfg, profiles: profilemgr.New(db), run: Run, logLevel: logLevel,
+	}, nil
 }
 
 // Start launches a run in the background and returns immediately. If a run is
@@ -87,9 +99,9 @@ func (m *Manager) Start(ctx context.Context, triggeredBy string) error {
 		return nil
 	}
 
-	// Load the profile up front so a bad config fails the triggering request
-	// rather than the background run.
-	profile, err := m.cfg.LoadProfile()
+	// Resolve one immutable snapshot up front. A selection changed while this
+	// run is in flight applies to the next run, never halfway through this one.
+	activeProfile, err := m.profiles.Resolve(ctx)
 	if err != nil {
 		return err
 	}
@@ -102,7 +114,7 @@ func (m *Manager) Start(ctx context.Context, triggeredBy string) error {
 	run := &activeRun{id: id, started: time.Now(), cancel: cancel, done: make(chan struct{})}
 	m.active = run
 	m.buf = newLogBuffer(maxLogLines)
-	go m.execute(runCtx, run, m.buf, profile)
+	go m.execute(runCtx, run, m.buf, activeProfile)
 	return nil
 }
 
@@ -150,12 +162,17 @@ func (m *Manager) Status() Status {
 }
 
 // execute runs one cycle to completion and finalizes its history row.
-func (m *Manager) execute(ctx context.Context, run *activeRun, buf *logBuffer, profile string) {
+func (m *Manager) execute(
+	ctx context.Context,
+	run *activeRun,
+	buf *logBuffer,
+	activeProfile profile.Snapshot,
+) {
 	defer close(run.done)
 
 	runLogger := newRunLogger(buf, m.logLevel)
 	ctx = runLogger.WithContext(ctx)
-	outcome, err := m.run(ctx, m.cfg, profile, m.db, time.Now(), Options{
+	outcome, err := m.run(ctx, m.cfg, activeProfile, m.db, time.Now(), Options{
 		Think:  *m.cfg.Inference.Think,
 		Record: true,
 	})

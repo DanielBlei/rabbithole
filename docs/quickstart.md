@@ -16,11 +16,12 @@ make setup
 |---|---|---|
 | `configs/config.yaml` | How to run: model, scoring, storage, paths | The model, if you don't want the default `qwen3.5:4b` |
 | `configs/feeds.yaml` | The feeds to pull from | Add your own. A name and a URL is the minimum |
-| `configs/prompts/profile.md` | Your interests, which is what drives the ranking | Write what you care about, in your own words |
+| `configs/golden.yaml` | Optional hand-scored evaluation set | Edit only when benchmarking models |
 
-They start as working examples, so you can run first and edit later. `profile.md` is the one
-that matters most. The model is handed it verbatim on every scoring call, so it decides what
-surfaces and what does not.
+They start as working examples, so you can run first and edit later. A fresh database uses
+the immutable built-in **Default** interest profile. In the web UI, open
+**Settings → Profiles**, duplicate Default or create a profile, and select it. Profile
+changes are persisted in SQLite and affect the next ingest without a server restart.
 
 Every field is documented in [configuration.md](configuration.md), including the model-free
 `heuristic` scorer and OpenAI-compatible endpoints if you would rather not run Ollama.
@@ -37,9 +38,9 @@ ollama pull qwen3.5:4b
 CONFIG=./configs/config.yaml make serve
 ```
 
-`CONFIG` matters. Every target defaults to `configs/config.example.yaml`, which ranks against
-a generic profile rather than yours. Set `CONFIG` at the top of the `Makefile` to stop passing
-it each time.
+`CONFIG` matters for the model, database and feed seed path. Every target defaults to
+`configs/config.example.yaml`. Set `CONFIG` at the top of the `Makefile` to stop passing it
+each time.
 
 ## 4. Claim it
 
@@ -64,7 +65,9 @@ The first run has to score every item and takes a while on a local model. After 
 score what is new, because the store remembers what it has seen. The **Maze** page is there
 for tasks, todos and ideas.
 
-Config changes are read at startup, so restart the server after editing any of the three files.
+Configuration-file changes are read at startup, so restart the server after editing
+`config.yaml`. Profile selections and edits are different: they live in SQLite and apply to
+the next ingest immediately. An ingest already running keeps the snapshot it started with.
 
 ## Next
 

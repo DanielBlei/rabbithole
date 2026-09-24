@@ -17,6 +17,7 @@ import (
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/profile"
 	"github.com/DanielBlei/rabbithole/internal/rank"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -81,6 +82,10 @@ func openStore(t *testing.T, cfg *config.Config) *store.Store {
 	return db
 }
 
+func testProfile(content string) profile.Snapshot {
+	return profile.NewSnapshot("test-profile", "Test profile", content, false)
+}
+
 func sourceCounts(t *testing.T, db *store.Store) map[string]int {
 	t.Helper()
 	srcs, err := db.Sources(context.Background())
@@ -109,7 +114,8 @@ func TestRecordPersistsLowAndHighScores(t *testing.T) {
 		"low":  {ID: "low", Score: 1, Reason: "weak match"},
 		"high": {ID: "high", Score: 10, Reason: "strong match"},
 	}
-	if err := record(t.Context(), db, items, scores, "test-model", time.Now()); err != nil {
+	activeProfile := testProfile("# Interests")
+	if err := record(t.Context(), db, items, scores, "test-model", activeProfile, time.Now()); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 
@@ -134,6 +140,12 @@ func TestRecordPersistsLowAndHighScores(t *testing.T) {
 		if got.LLMScoreModel == nil || *got.LLMScoreModel != "test-model" {
 			t.Errorf("%s model = %v, want test-model", want.id, got.LLMScoreModel)
 		}
+		if got.LLMProfileID == nil || *got.LLMProfileID != activeProfile.ID ||
+			got.LLMProfileName == nil || *got.LLMProfileName != activeProfile.Name ||
+			got.LLMProfileHash == nil || *got.LLMProfileHash != activeProfile.Hash {
+			t.Errorf("%s profile provenance = %v/%v/%v, want %+v", want.id,
+				got.LLMProfileID, got.LLMProfileName, got.LLMProfileHash, activeProfile)
+		}
 	}
 }
 
@@ -144,9 +156,9 @@ func TestRunProcessesFeedsPerSourceAndDedups(t *testing.T) {
 	feedB := config.Feed{Name: "Beta", URL: serveRSS(t, feedRSS("Latency guide", "https://x.test/b"))}
 	cfg := testConfig(t, feedA, feedB)
 	db := openStore(t, cfg)
-	profile := "vllm inference latency batching"
+	firstProfile := testProfile("vllm inference latency batching")
 
-	out, err := Run(ctx, cfg, profile, db, time.Now(), Options{Record: true})
+	out, err := Run(ctx, cfg, firstProfile, db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -169,14 +181,25 @@ func TestRunProcessesFeedsPerSourceAndDedups(t *testing.T) {
 		t.Errorf("source counts = %v, want Alpha:1 Beta:1", got)
 	}
 
-	// Second run: every item is already in the store, so the pre-scoring dedup
-	// drops them all and nothing new is processed.
-	out2, err := Run(ctx, cfg, profile, db, time.Now(), Options{Record: true})
+	// Second run: even with a different profile snapshot, every item is already
+	// scored. The pre-scoring dedup drops them all rather than automatically
+	// rescoring them under the new profile.
+	secondProfile := profile.NewSnapshot("other-profile", "Other profile", "unrelated", false)
+	out2, err := Run(ctx, cfg, secondProfile, db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
 	if len(out2.Unseen) != 0 {
 		t.Errorf("second run Unseen = %d, want 0 (all deduped)", len(out2.Unseen))
+	}
+	for _, result := range out.Results {
+		row, err := db.Get(ctx, result.Item.ID)
+		if err != nil {
+			t.Fatalf("Get(%s): %v", result.Item.ID, err)
+		}
+		if row.LLMProfileHash == nil || *row.LLMProfileHash != firstProfile.Hash {
+			t.Errorf("item %s provenance changed after profile switch: %+v", result.Item.ID, row)
+		}
 	}
 }
 
@@ -201,7 +224,7 @@ func TestRunFetchedCountsOnlyItemsWithinAgeWindow(t *testing.T) {
 	cfg.Ingest.Since = config.Duration(24 * time.Hour) // narrow window: only the recent item survives
 	db := openStore(t, cfg)
 
-	out, err := Run(ctx, cfg, "test", db, time.Now(), Options{Record: true})
+	out, err := Run(ctx, cfg, testProfile("test"), db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -220,7 +243,7 @@ func TestRunSkipsFailedFeed(t *testing.T) {
 	cfg := testConfig(t, good, bad)
 	db := openStore(t, cfg)
 
-	out, err := Run(ctx, cfg, "vllm inference", db, time.Now(), Options{Record: true})
+	out, err := Run(ctx, cfg, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("Run should not fail because one feed failed: %v", err)
 	}
@@ -268,7 +291,7 @@ func TestRunSkipsDisabledFeeds(t *testing.T) {
 	}})
 	db := openStore(t, cfg)
 
-	out, err := Run(ctx, cfg, "vllm inference", db, time.Now(), Options{Record: true})
+	out, err := Run(ctx, cfg, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -313,7 +336,7 @@ func TestRunSkipsDeletedFeeds(t *testing.T) {
 		}
 	}
 
-	out, err := Run(ctx, cfg, "vllm inference", db, time.Now(), Options{Record: true})
+	out, err := Run(ctx, cfg, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -380,7 +403,7 @@ func TestRunAppliesPerFeedFilters(t *testing.T) {
 			cfg := testConfigWith(t, c.doc)
 			db := openStore(t, cfg)
 
-			out, err := Run(context.Background(), cfg, "test", db, time.Now(), Options{Record: true})
+			out, err := Run(context.Background(), cfg, testProfile("test"), db, time.Now(), Options{Record: true})
 			if err != nil {
 				t.Fatalf("Run: %v", err)
 			}
@@ -404,7 +427,7 @@ func TestRunCapKeepsNewestItems(t *testing.T) {
 	}})
 	db := openStore(t, cfg)
 
-	out, err := Run(context.Background(), cfg, "test", db, time.Now(), Options{Record: true})
+	out, err := Run(context.Background(), cfg, testProfile("test"), db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -443,7 +466,9 @@ func TestRunRecordsFeedFetchHistory(t *testing.T) {
 			cfg := testConfig(t, good, bad)
 			db := openStore(t, cfg)
 
-			if _, err := Run(ctx, cfg, "vllm inference", db, time.Now(), Options{Record: c.record}); err != nil {
+			if _, err := Run(
+				ctx, cfg, testProfile("vllm inference"), db, time.Now(), Options{Record: c.record},
+			); err != nil {
 				t.Fatalf("Run: %v", err)
 			}
 
@@ -481,7 +506,7 @@ func TestRunAppendsToFeedHistory(t *testing.T) {
 	db := openStore(t, cfg)
 
 	for range 3 {
-		if _, err := Run(ctx, cfg, "test", db, time.Now(), Options{Record: true}); err != nil {
+		if _, err := Run(ctx, cfg, testProfile("test"), db, time.Now(), Options{Record: true}); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
 	}
@@ -513,7 +538,7 @@ func TestRunSkipsUnimplementedFeedTypes(t *testing.T) {
 	}})
 	db := openStore(t, cfg)
 
-	out, err := Run(ctx, cfg, "vllm inference", db, time.Now(), Options{Record: true})
+	out, err := Run(ctx, cfg, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

@@ -190,6 +190,7 @@
       <div class="stg">
         <fieldset class="stg__rail">
           <legend class="stg__legend">Settings section</legend>
+          <label class="stg__tab"><input type="radio" name="stgSect" id="stgProfiles"><span>Profiles</span></label>
           <label class="stg__tab"><input type="radio" name="stgSect" id="stgTime" checked><span>Date &amp; time</span></label>
           <label class="stg__tab"><input type="radio" name="stgSect" id="stgWx"><span>Weather</span></label>
           <label class="stg__tab"><input type="radio" name="stgSect" id="stgTheme"><span>Theme</span></label>
@@ -197,6 +198,7 @@
         </fieldset>
 
         <div class="stg__pane">
+          <section class="stg__sect stg__sect--profiles">{{template "profileSettings" .Chrome.Profiles}}</section>
           <section class="stg__sect stg__sect--time">
             {{/* The hours read the way the dates below do: each tile is the
                  clock as that setting would render it, ticking live, so the

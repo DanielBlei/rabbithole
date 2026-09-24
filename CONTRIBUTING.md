@@ -19,7 +19,7 @@ There is currently only one maintainer, so feel free to nudge a stale thread.
 The test for a change is whether it makes someone's daily reading better. Some things are
 deliberately outside that:
 
-- **Multi-user.** One person, one profile. No accounts or sharing.
+- **Multi-user.** One reader with local profiles. No per-account profiles or sharing.
 - **A hosted service.** Self-hosting is the deployment model.
 
 It runs on your own machine today, with no authentication and a loopback binding. That is the
@@ -35,7 +35,7 @@ question and a good one to argue about.
 ## Getting set up
 
 ```bash
-make setup                            # your own config, feeds and profile
+make setup                            # your own config and feed seed
 export CONFIG=./configs/config.yaml   # targets default to the example config
 make heuristic                        # a full ingest, no model needed
 ```

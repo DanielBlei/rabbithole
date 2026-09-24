@@ -27,7 +27,7 @@
            and nothing more: the gauge above still shows the model's score.
            Re-posting the lit one clears the rating. Icons from Feather (MIT). */}}
       <p class="tg-footnote">
-        {{- if .HasLLMScore}}LLM Score {{.LLMScore}}/10{{if .ScoreModel}} &middot; {{.ScoreModel}}{{end}} &middot; {{end -}}
+        {{- if .HasLLMScore}}LLM Score {{.LLMScore}}/10{{if .ScoreModel}} &middot; {{.ScoreModel}}{{end}}{{if .ScoreProfile}} &middot; profile: {{.ScoreProfile}}{{if .ScoreProfileHash}}@{{.ScoreProfileHash}}{{end}}{{end}} &middot; {{end -}}
         <button type="button" class="act rate rate-up{{if .RatedUp}} is-active{{end}}"
           hx-post="/items/{{.ID}}/rate" hx-vals='{"score":"10"}'
           hx-target="closest .row" hx-swap="outerHTML"

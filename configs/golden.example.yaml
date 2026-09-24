@@ -2,14 +2,14 @@
 #
 # A small pile of articles you have marked yourself. `rabbithole eval benchmark` asks the
 # model to mark the same ones, then shows you where it disagreed with you. That is how
-# you find out whether an edit to profile.md actually helped. See docs/evals.md.
+# you find out whether an edit to the benchmark profile actually helped. See docs/evals.md.
 #
 # expected_llm_score is the mark you would give, 0 to 10. Close is fine: if you said 9
 # and the model said 8, nothing is wrong. Nothing here has to match exactly.
 #
 # Two things to keep in mind when writing your own:
 #
-#   1. You should be able to point at the reason. profile.md says what you like, and the
+#   1. You should be able to point at the reason. The profile says what you like, and the
 #      scoring guide (in the system prompt) turns that into a number. If neither one
 #      explains your mark, add the missing line instead of changing the mark. Always give
 #      the mark you actually believe.

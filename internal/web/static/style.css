@@ -389,6 +389,7 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 /* The column: capped, centred, and the same width in every section so the
    block does not shift under the pointer when the tab changes. */
 .stg__sect{display:none;width:min(100%, var(--stg-col));margin:0 auto;}
+.stg:has(#stgProfiles:checked) .stg__sect--profiles{display:block;width:100%;}
 .stg:has(#stgTime:checked)  .stg__sect--time {display:block;}
 .stg:has(#stgWx:checked)    .stg__sect--wx   {display:block;}
 .stg:has(#stgTheme:checked) .stg__sect--theme{display:block;}
@@ -405,9 +406,74 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .stg__lbl--apart{padding-top:18px;}
 /* The title bar wears the open section as the command it just ran, the way the
    sources dialog wears its counts. */
+.modal__frame--stg:has(#stgProfiles:checked) .stg__cmd::after{content:"profiles";}
 .modal__frame--stg:has(#stgTime:checked)  .stg__cmd::after{content:"date-time";}
 .modal__frame--stg:has(#stgWx:checked)    .stg__cmd::after{content:"weather";}
 .modal__frame--stg:has(#stgTheme:checked) .stg__cmd::after{content:"theme";}
+
+/* --- Settings → Profiles ------------------------------------------------- */
+.prof{display:flex;flex-direction:column;gap:8px;padding:0 4px 8px;}
+.prof__head{
+  display:flex;align-items:center;gap:8px;padding:4px 0 0;
+  font-size:1.15rem;color:var(--text-dim);
+}
+.prof__head strong{color:var(--accent);font-weight:600;}
+.prof__new{
+  margin-left:auto;border:0;border-radius:var(--r-full);padding:6px 10px;
+  background:var(--tint);color:var(--accent);font:inherit;cursor:pointer;
+}
+.prof__note{margin:0;color:var(--text-dim);font-size:1.05rem;line-height:1.45;}
+.prof__error,.prof-form__err{margin:0;color:var(--warn);font-size:1.1rem;}
+.prof__grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;}
+.prof__list{display:flex;flex-direction:column;gap:5px;}
+.prof__row{
+  display:flex;align-items:center;gap:8px;padding:8px 9px;border-radius:var(--r-sm);
+  background:var(--sel-fill);box-shadow:var(--sel-shadow);
+}
+.prof__row.is-active{box-shadow:inset 3px 0 0 var(--accent),var(--sel-shadow);}
+.prof__identity{display:flex;flex:1;min-width:0;flex-direction:column;}
+.prof__identity strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--title);}
+.prof__identity span{font-size:1rem;color:var(--text-dim);}
+.prof__actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px;}
+.prof__actions form{display:contents;}
+.prof__actions button,.prof-form__bar button,.prof-confirm__actions button{
+  border:0;border-radius:var(--r-full);padding:4px 7px;background:var(--fill);
+  color:var(--text-dim);font:inherit;font-size:1rem;cursor:pointer;
+}
+.prof__actions button:hover,.prof__actions button:focus-visible,
+.prof-form__bar button:hover,.prof-form__bar button:focus-visible{color:var(--accent);}
+.prof__danger{color:var(--warn)!important;}
+.prof__editor{min-height:112px;}
+.prof__empty{
+  display:flex;flex-direction:column;gap:4px;padding:14px;border:1px dashed var(--line);
+  border-radius:var(--r-sm);color:var(--text-dim);font-size:1.05rem;
+}
+.prof__empty strong{color:var(--title);}
+.prof-form{padding:10px;border-radius:var(--r-sm);background:var(--sel-fill);box-shadow:var(--sel-shadow);}
+.prof-form__bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;color:var(--title);}
+.prof-form__bar button{font-size:1.6rem;line-height:1;padding:0 4px;background:transparent;}
+.prof-form__ok{margin:0 0 6px;color:var(--score-high);font-size:1.05rem;}
+.prof-form__err{margin-bottom:6px;}
+.prof-field{display:flex;flex-direction:column;gap:4px;margin:0 0 8px;}
+.prof-field > span{color:var(--title);font-size:1.05rem;}
+.prof-field small{color:var(--text-dim);font-weight:400;}
+.prof-field input,.prof-field textarea{
+  width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:7px 8px;background:var(--bg);color:var(--text);font:inherit;font-size:1.1rem;
+  resize:vertical;
+}
+.prof-field input:focus-visible,.prof-field textarea:focus-visible{
+  outline:1px solid var(--accent);outline-offset:1px;border-color:var(--accent-dim);
+}
+.prof-field input:disabled,.prof-field textarea:read-only{opacity:.78;}
+.prof-form__mode{display:inline-block;margin:0 8px 8px 0;color:var(--accent-dim);font-size:1.05rem;}
+.prof-form__save{
+  border:0;border-radius:var(--r-full);padding:7px 12px;background:var(--tint);
+  color:var(--accent);font:inherit;cursor:pointer;
+}
+.prof-confirm{padding:18px;color:var(--text);}
+.prof-confirm p{margin:0 0 9px;}
+.prof-confirm__actions{display:flex;justify-content:flex-end;gap:8px;}
 
 /* --- Settings → Date format ----------------------------------------------- */
 /* The six date styles are choices, not a scale, and a slider showed you only
