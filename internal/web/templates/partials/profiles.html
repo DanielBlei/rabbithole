@@ -1,0 +1,144 @@
+{{/* SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+     SPDX-License-Identifier: Apache-2.0 */}}
+
+{{define "profileSettings"}}
+<div class="prof" id="profilesSettings">
+  <div class="prof__head">
+    <span>Active profile</span>
+    <strong>{{.ActiveName}}</strong>
+    <button class="prof__new" type="button" hx-get="/profiles/new" hx-target="#profilesSettings" hx-swap="outerHTML">+ new profile</button>
+  </div>
+  <p class="prof__note">Profile changes affect the next ingest. Existing scores are not rescored.</p>
+  {{if .Error}}<p class="prof__error" role="alert">{{.Error}}</p>{{end}}
+
+  <div class="prof__grid">
+    <div class="prof__list" aria-label="Interest profiles">
+      {{range .Rows}}
+      <article class="prof__row{{if .Active}} is-active{{end}}">
+        <div class="prof__identity">
+          <strong>{{.Name}}</strong>
+          <span>{{if .Builtin}}built-in · immutable{{else}}local{{end}}{{if .Active}} · active{{end}}</span>
+        </div>
+        <div class="prof__actions">
+          {{if not .Active}}
+          <form hx-post="/profiles/{{.ID}}/active" hx-target="#profilesSettings" hx-swap="outerHTML">
+            <button type="submit">use</button>
+          </form>
+          {{end}}
+          <button type="button" hx-get="/profiles/{{.ID}}/edit" hx-target="#profilesSettings" hx-swap="outerHTML">{{if .Builtin}}view{{else}}edit{{end}}</button>
+          <form hx-post="/profiles/{{.ID}}/duplicate" hx-target="#profilesSettings" hx-swap="outerHTML">
+            <button type="submit">duplicate</button>
+          </form>
+          {{if not .Builtin}}
+          <button class="prof__danger" type="button"
+                  hx-get="/profiles/{{.ID}}/confirm-delete" hx-target="#modalTop" hx-swap="innerHTML">delete</button>
+          {{end}}
+        </div>
+      </article>
+      {{end}}
+    </div>
+
+    <div class="prof__editor">
+      {{if .Form}}
+        {{template "profileForm" .Form}}
+      {{else}}
+        <div class="prof__empty">
+          <strong>Choose a profile to inspect or edit.</strong>
+          <span>Default is always available and can be duplicated into an editable local profile.</span>
+        </div>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "profileForm"}}
+<div class="prof-form">
+  <div class="prof-form__bar">
+    <strong>{{if .Adding}}New profile{{else}}{{if .Builtin}}Built-in profile{{else}}Edit profile{{end}}{{end}}</strong>
+    <button type="button" hx-get="/profiles" hx-target="#profilesSettings" hx-swap="outerHTML" aria-label="Close profile editor">&times;</button>
+  </div>
+  {{if .Notice}}<p class="prof-form__ok" role="status">{{.Notice}}</p>{{end}}
+  {{if .Err}}<p class="prof-form__err" role="alert">{{.Err}}</p>{{end}}
+
+  {{if .Builtin}}
+  <label class="prof-field">
+    <span>Profile name</span>
+    <input type="text" value="{{.Name}}" disabled>
+  </label>
+  <label class="prof-field">
+    <span>Effective profile text</span>
+    <textarea rows="16" readonly>{{.Content}}</textarea>
+  </label>
+  <p class="prof__note">Default is application-owned. Duplicate it to make an editable copy.</p>
+  <form hx-post="/profiles/{{.ID}}/duplicate" hx-target="#profilesSettings" hx-swap="outerHTML">
+    <button class="prof-form__save" type="submit">duplicate Default</button>
+  </form>
+  {{else}}
+  <form method="post" action="{{if .Adding}}/profiles{{else}}/profiles/{{.ID}}{{end}}"
+        hx-post="{{if .Adding}}/profiles{{else}}/profiles/{{.ID}}{{end}}"
+        hx-target="#profilesSettings" hx-swap="outerHTML">
+    <input type="hidden" name="mode" value="{{.Mode}}">
+    <label class="prof-field">
+      <span>Profile name</span>
+      <input type="text" name="name" value="{{.Name}}" maxlength="120" required autofocus>
+    </label>
+
+    {{if eq .Mode "raw"}}
+    <label class="prof-field">
+      <span>Profile text <small>Advanced Markdown</small></span>
+      <textarea name="content" rows="16" maxlength="131072" required>{{.Content}}</textarea>
+    </label>
+    {{if .CanStructure}}
+    <a class="prof-form__mode" href="#" hx-get="/profiles/{{.ID}}/edit?mode=structured"
+       hx-target="#profilesSettings" hx-swap="outerHTML">use friendly editor</a>
+    {{else if .Adding}}
+    <a class="prof-form__mode" href="#" hx-get="/profiles/new"
+       hx-target="#profilesSettings" hx-swap="outerHTML">use friendly editor</a>
+    {{else}}
+    <p class="prof__note">This Markdown is not in the canonical friendly-editor format, so raw mode preserves it without loss.</p>
+    {{end}}
+    {{else}}
+    <label class="prof-field">
+      <span>I'm interested in</span>
+      <textarea name="interested" rows="5" maxlength="131072">{{.Interested}}</textarea>
+    </label>
+    <label class="prof-field">
+      <span>I'm less interested in</span>
+      <textarea name="less" rows="4" maxlength="131072">{{.Less}}</textarea>
+    </label>
+    <label class="prof-field">
+      <span>Additional context</span>
+      <textarea name="context" rows="4" maxlength="131072">{{.Context}}</textarea>
+    </label>
+    <a class="prof-form__mode" href="#" hx-get="{{if .Adding}}/profiles/new?mode=raw{{else}}/profiles/{{.ID}}/edit?mode=raw{{end}}"
+       hx-target="#profilesSettings" hx-swap="outerHTML">advanced raw Markdown</a>
+    {{end}}
+
+    <button class="prof-form__save" type="submit">{{if .Adding}}create profile{{else}}save profile{{end}}</button>
+  </form>
+  {{end}}
+</div>
+{{end}}
+
+{{define "profileConfirmDelete"}}
+<div class="modal">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__frame modal__frame--ask" role="dialog" aria-modal="true" aria-labelledby="profileDeleteTitle">
+    <div class="modal__bar">
+      <span class="modal__title" id="profileDeleteTitle">Delete profile</span>
+      <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+    </div>
+    <div class="prof-confirm">
+      <p>Delete <strong>{{.Name}}</strong>?</p>
+      {{if .Active}}<p>The built-in Default will become active.</p>{{end}}
+      <p>This does not change scores already recorded with this profile.</p>
+    </div>
+    <div class="modal__foot prof-confirm__actions">
+      <button type="button" data-modal-close>cancel</button>
+      <button class="prof__danger" type="button" hx-delete="/profiles/{{.ID}}"
+              hx-target="#profilesSettings" hx-swap="outerHTML">delete profile</button>
+    </div>
+  </div>
+</div>
+{{end}}

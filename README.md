@@ -55,8 +55,9 @@ make serve               # runs on the shipped example config
 Open <http://localhost:8080> and hit ingest. The first run fetches the feeds and scores them,
 which takes a while on a local model; after that the page fills in.
 
-That ranks against an example profile. For a feed ranked against your own interests, see the
-full guide: **[docs/quickstart.md](docs/quickstart.md)**.
+That ranks against the immutable built-in **Default** profile. Open
+**Settings → Profiles** to create or duplicate one for your own interests; the next ingest
+uses it immediately. For the full setup, see **[docs/quickstart.md](docs/quickstart.md)**.
 
 The first visit asks who can open it: create an account, or leave it open with no login.
 `make serve` binds to loopback only; read [docs/auth.md](docs/auth.md)

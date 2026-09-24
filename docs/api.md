@@ -43,6 +43,9 @@ Response:
       "llm_score": 8,
       "llm_score_reason": "...",
       "llm_score_model": "qwen3.5:4b",
+      "llm_profile_id": "profile-...",
+      "llm_profile_name": "Systems",
+      "llm_profile_hash": "4bcf...",
       "user_score": null,
       "published_at": "2026-01-01T00:00:00Z"
     }
@@ -51,8 +54,9 @@ Response:
 }
 ```
 
-`llm_score`, `llm_score_reason`, `llm_score_model`, `user_score` and `published_at` are
-omitted when unset.
+`llm_score`, `llm_score_reason`, `llm_score_model`, the three `llm_profile_*` provenance
+fields, `user_score` and `published_at` are omitted when unset. Rows scored before profile
+provenance was added remain readable and simply omit the profile fields.
 
 ## GET /api/sources
 

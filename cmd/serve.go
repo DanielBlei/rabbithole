@@ -20,6 +20,7 @@ import (
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
+	"github.com/DanielBlei/rabbithole/internal/profilemgr"
 	"github.com/DanielBlei/rabbithole/internal/server"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -259,6 +260,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}()
 	log.Debug().Str("db", cfg.Store.DBPath).Msg("store opened")
+
+	// A legacy profile path is a one-time bootstrap source. Validation still
+	// runs on every boot, but an existing web selection is never overwritten.
+	if err := profilemgr.New(db).BootstrapLegacy(ctx, cfg); err != nil {
+		return err
+	}
 
 	// Feeds live in the store; the feeds file only seeds ones it has never seen.
 	// Running this every boot means adding an entry to the file is enough to

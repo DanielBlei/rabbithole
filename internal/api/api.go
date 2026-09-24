@@ -61,6 +61,9 @@ type Item struct {
 	LLMScore       *int       `json:"llm_score,omitempty"`
 	LLMScoreReason *string    `json:"llm_score_reason,omitempty"`
 	LLMScoreModel  *string    `json:"llm_score_model,omitempty"`
+	LLMProfileID   *string    `json:"llm_profile_id,omitempty"`
+	LLMProfileName *string    `json:"llm_profile_name,omitempty"`
+	LLMProfileHash *string    `json:"llm_profile_hash,omitempty"`
 	UserScore      *int       `json:"user_score,omitempty"`
 	PublishedAt    *time.Time `json:"published_at,omitempty"`
 }
@@ -75,6 +78,9 @@ func fromItemRow(r store.ItemRow) Item {
 		LLMScore:       r.LLMScore,
 		LLMScoreReason: r.LLMScoreReason,
 		LLMScoreModel:  r.LLMScoreModel,
+		LLMProfileID:   r.LLMProfileID,
+		LLMProfileName: r.LLMProfileName,
+		LLMProfileHash: r.LLMProfileHash,
 		UserScore:      r.UserScore,
 		PublishedAt:    r.PublishedAt,
 	}

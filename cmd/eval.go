@@ -77,7 +77,7 @@ func init() {
 		Use:   "benchmark [golden-file]",
 		Short: "Score a labelled golden dataset with the current profile and prompt, and report the gap",
 		Long: "Loads a golden dataset — articles you scored by hand — re-scores every sample with " +
-			"your current profile.md and system prompt, and reports how far the model landed from " +
+			"your configured or built-in profile and system prompt, and reports how far the model landed from " +
 			"your scores. Because it re-scores rather than reading stored values, two runs either " +
 			"side of a profile edit are directly comparable.\n\n" +
 			"Defaults to " + defaultBenchmarkPath + ". Copy configs/golden.example.yaml to start " +
@@ -133,7 +133,7 @@ func init() {
 		StringVar(&auditSince, "since", "", "only items recorded within this long ago, e.g. 30d, 12h (default: unbounded)")
 	auditCmd.Flags().StringVar(&auditSource, "source", "", "only items from this source")
 	auditCmd.Flags().
-		StringVar(&auditScoredBy, "scored-by", "", "only items scored by this model; llm_score_model is the only provenance stored, so a mixed sample can compare rows scored under different configs")
+		StringVar(&auditScoredBy, "scored-by", "", "only items scored by this model; scores also retain profile provenance, but this filter selects the model field")
 	auditCmd.Flags().StringVar(&auditFormat, "format", string(eval.FormatText), "report format (text|markdown|json)")
 	auditCmd.Flags().StringVar(&auditOutput, "output-path", "", "write the report here (default: stdout)")
 	auditCmd.Flags().

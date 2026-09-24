@@ -26,7 +26,23 @@ erDiagram
         TEXT link UK
         TEXT source "feed name"
         INTEGER llm_score "model-owned"
+        TEXT llm_profile_id "score provenance"
         TEXT status "user-owned"
+    }
+    profiles {
+        TEXT id PK
+        TEXT name
+        TEXT content
+        TIMESTAMP updated_at
+    }
+    profile_state {
+        INTEGER singleton PK "always 1"
+        TEXT active_profile_id
+    }
+    profile_imports {
+        TEXT source PK
+        TEXT profile_id
+        TIMESTAMP imported_at
     }
     feeds {
         TEXT id PK "sha256(url)[:12], frozen"
@@ -70,6 +86,8 @@ erDiagram
     items }o..o{ feed_fetches : "same feed, by name/url"
     feeds }o..o{ feed_fetches : "by id, no constraint"
     feeds }o..o{ items : "by name"
+    profiles }o..o{ items : "historical id, no FK"
+    profile_state }o..o| profiles : "active local id or built-in"
 ```
 
 Solid lines are real foreign keys. Dotted lines are conventions the application maintains,
@@ -82,6 +100,7 @@ Three groups, largely independent:
 | **Feed config** | `feeds`, `feed_defaults` | The feed sources, seeded at startup |
 | **Feed pipeline** | `items`, `feed_fetches` | `internal/ingest`                   |
 | **Run history** | `ingest_history`, `ingest_run_logs` | `internal/ingest`'s run manager     |
+| **Interest profiles** | `profiles`, `profile_state`, `profile_imports` | Settings UI, CLI/server bootstrap |
 | **Maze boards** | `todos`, `ideas` | The web UI only                     |
 
 ## items
@@ -101,6 +120,9 @@ The core table: one row per article ever seen, whether or not it was scored.
 | `llm_score` | INTEGER | 0–10; NULL means seen but not yet scored |
 | `llm_score_reason` | TEXT | The model's rationale |
 | `llm_score_model` | TEXT | Model that produced the score, captured at scoring time |
+| `llm_profile_id` | TEXT | Stable profile identity used for this score; NULL on historical rows |
+| `llm_profile_name` | TEXT | Display name captured at scoring time |
+| `llm_profile_hash` | TEXT | SHA-256 of the exact comment-stripped profile text used |
 | `digested_on` | DATE | Run day the item's score was produced |
 | `status` | TEXT | `unread` \| `read` \| `skipped` |
 | `user_score` | INTEGER | 0–10, your own rating; outranks `llm_score` in sorting |
@@ -113,14 +135,46 @@ Indexes: `digested_on`, `created_at`, `bookmarked`.
 **Ownership.** The columns split in two, and the split is enforced by the write paths rather
 than by the schema:
 
-- **Model-owned** — `llm_score`, `llm_score_reason`, `llm_score_model`, `digested_on`. Only
-  `Record` writes these.
+- **Model-owned** — `llm_score`, `llm_score_reason`, `llm_score_model`, the three
+  `llm_profile_*` columns and `digested_on`. Only `Record` writes these.
 - **User-owned** — `status`, `user_score`, `user_note`, `bookmarked`. Only `UpdateUserState`
   writes these, and it is the single mutation path shared by the CLI and the HTTP handlers.
 
 `Record`'s upsert touches only the model-owned columns and is guarded by
 `WHERE excluded.llm_score IS NOT NULL`, so a re-ingest can never blank a real score with
 NULL, and re-seeing an article never resets your own state on it.
+
+Profile provenance is historical metadata, not a live join. Renaming, editing, switching or
+deleting a local profile does not rewrite scores already produced with it. The hash
+distinguishes two versions that share one stable profile ID. Rows from before schema version 4
+keep NULL provenance and remain readable.
+
+## profiles and profile_state
+
+`profiles` holds mutable local profiles:
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | TEXT PK | Stable random ID, or deterministic `legacy-*` ID for config bootstrap |
+| `name` | TEXT | Non-blank display name |
+| `content` | TEXT | Canonical or arbitrary Markdown |
+| `created_at` | TIMESTAMP | First insert |
+| `updated_at` | TIMESTAMP | Last edit |
+
+The built-in `builtin-default` profile is deliberately **not** a row. Its identity and content
+belong to the application binary, so a database write cannot mutate or delete it. The schema
+also rejects that reserved ID in `profiles`.
+
+`profile_state` is one optional singleton row naming the active profile. No row means the
+built-in Default. Its value may name Default or an existing local profile. Setting a local
+profile validates that it exists; deleting the active local profile and switching the row to
+Default happen in one transaction.
+
+An explicitly configured legacy Markdown file is validated on every process start and
+inserted under an ID derived from its absolute path. `profile_imports` records the absolute
+source path independently of the mutable profile row, making the bootstrap one-time and
+non-overwriting even if the imported profile is later deleted. It becomes active only on that
+first import and only if `profile_state` has never been set.
 
 **Dedup.** `ScoredLinks` treats only a link with a non-NULL `llm_score` as done. A row
 recorded without a score is reported as absent so the next run retries it — a scoring
@@ -324,7 +378,7 @@ sequenceDiagram
         else
             I->>L: score batch (profile + items)
             L-->>I: score, reason per item
-            I->>DB: Record(items, scores, day)
+            I->>DB: Record(items, scores + profile provenance, day)
             Note right of DB: one tx per feed
         end
     end
@@ -383,24 +437,24 @@ an `items.feed_id` column is the real fix and the natural next step.
 
 ## Schema version
 
-Each table's DDL lives beside its feature (`todos.go`, `ideas.go`, …) and is listed in
-`allSchemas`. On a database with no tables, `Open` applies them all and records
-`schemaVersion` in SQLite's `user_version`. On an existing one it compares the two and
-returns `ErrSchemaVersion` on a mismatch, naming the file rather than touching it.
+Each table's DDL lives beside its feature (`todos.go`, `ideas.go`, `profiles.go`, …) and is
+listed in `allSchemas`. On a database with no tables, `Open` applies them all and records
+`schemaVersion` in SQLite's `user_version`.
 
-Changing the schema therefore means editing the `CREATE TABLE` block and raising
-`schemaVersion`. Existing databases are then refused until they are replaced.
+Schema version 4 upgrades version 3 transactionally: it creates the profile tables and adds
+the three nullable provenance columns to `items`, then advances `user_version`. Other unknown
+versions still return `ErrSchemaVersion`, naming the file rather than touching it. Independent
+additive tables may still be created on every open without a version bump where older code has
+no dependency on them.
 
-A new table that nothing older depends on is the exception. It goes in `additiveSchemas`
-instead, whose `CREATE TABLE IF NOT EXISTS` runs on every open, so existing databases gain it
-without a version bump. `auth` was the first.
+Changing an owned live-state schema means editing the `CREATE TABLE` block, adding an ordered
+transactional migration from the previous version, and raising `schemaVersion`. Databases with
+recognized older versions are upgraded in place; unknown versions are refused without being
+modified.
 
-That used to be cheap: everything could be rebuilt from `feeds.yaml`. It is less so now that
-the feed set lives here. A feed added, retuned or deleted on the Sources section exists nowhere
-else, and the seed file cannot bring it back. That is what the Sources section's **export** is
-for — save it before replacing a database. Upgrading in place instead, most likely with an
-ordered list of migrations, is the real answer, and is a question for the first change that
-has to keep existing data.
+A new table that nothing older depends on may instead go in `additiveSchemas`, whose
+`CREATE TABLE IF NOT EXISTS` runs on every open. This is reserved for independent features
+that do not require a coordinated backfill or versioned column change; `auth` was the first.
 
 ## Known gaps
 

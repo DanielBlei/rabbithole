@@ -6,11 +6,13 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
+	profiledomain "github.com/DanielBlei/rabbithole/internal/profile"
 	"github.com/DanielBlei/rabbithole/internal/rank"
 )
 
@@ -57,6 +59,7 @@ func writeConfig(t *testing.T, body string) string {
 
 // baseFeeds is the required-fields-only config the duration/think tests build on.
 const baseFeeds = "profile: ./p.md\nstore:\n  db_path: ./test.db\n"
+const baseWithoutProfile = "store:\n  db_path: ./test.db\n"
 
 // minimalFeeds is the smallest valid feeds file.
 const minimalFeeds = "feeds:\n  - name: x\n    url: http://x\n"
@@ -77,6 +80,23 @@ func TestLoadSinceDaysAndHours(t *testing.T) {
 		if cfg.Ingest.Since.Std() != tc.want {
 			t.Errorf("since=%q -> %s, want %s", tc.since, cfg.Ingest.Since, tc.want)
 		}
+	}
+}
+
+func TestLoadAllowsNoConfiguredProfile(t *testing.T) {
+	cfg, err := Load(writeConfig(t, baseWithoutProfile))
+	if err != nil {
+		t.Fatalf("Load without profile: %v", err)
+	}
+	if cfg.Profile != "" {
+		t.Fatalf("Profile = %q, want empty", cfg.Profile)
+	}
+	got, err := cfg.LoadProfile()
+	if err != nil {
+		t.Fatalf("LoadProfile without path: %v", err)
+	}
+	if got != profiledomain.DefaultContent {
+		t.Fatalf("LoadProfile without path did not return built-in Default")
 	}
 }
 
@@ -156,6 +176,27 @@ func TestLoadProfileRejectsAnEmptyProfile(t *testing.T) {
 				t.Fatalf("LoadProfile() error = %v", err)
 			}
 		})
+	}
+}
+
+func TestLoadProfileCompatibilityPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy.md")
+	if err := os.WriteFile(path, []byte("<!-- private -->\n# Legacy\n- local models"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := (&Config{Profile: path}).LoadProfile()
+	if err != nil {
+		t.Fatalf("LoadProfile: %v", err)
+	}
+	if got != "# Legacy\n- local models" {
+		t.Fatalf("LoadProfile = %q", got)
+	}
+
+	missing := filepath.Join(dir, "missing.md")
+	if _, err := (&Config{Profile: missing}).LoadProfile(); err == nil ||
+		!strings.Contains(err.Error(), "read profile") {
+		t.Fatalf("missing LoadProfile error = %v", err)
 	}
 }
 

@@ -23,6 +23,7 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/httplog"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
+	"github.com/DanielBlei/rabbithole/internal/profilemgr"
 	"github.com/DanielBlei/rabbithole/internal/rank"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -81,11 +82,12 @@ const (
 
 // Web renders the HTML frontend over the same store the JSON API uses.
 type Web struct {
-	db      *store.Store
-	cfg     *config.Config
-	user    string // shell-prompt name: cfg.User, or the OS user when blank
-	cfgPath string // config file path, read on demand by the config viewer
-	ing     *ingest.Manager
+	db       *store.Store
+	cfg      *config.Config
+	user     string // shell-prompt name: cfg.User, or the OS user when blank
+	cfgPath  string // config file path, read on demand by the config viewer
+	ing      *ingest.Manager
+	profiles *profilemgr.Service
 
 	sessions *sessionStore // logged-in browsers, in memory: a restart logs everyone out
 	limiter  *loginLimiter
@@ -100,6 +102,7 @@ type Web struct {
 func New(db *store.Store, cfg *config.Config, cfgPath string, ing *ingest.Manager) *Web {
 	return &Web{
 		db: db, cfg: cfg, user: promptUser(cfg.User), cfgPath: cfgPath, ing: ing,
+		profiles: profilemgr.New(db),
 		sessions: newSessionStore(), limiter: newLoginLimiter(),
 		hashing: make(chan struct{}, hashSlots), trusted: DefaultTrustedProxies,
 	}
@@ -134,6 +137,15 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /setup", s.handleSetup)
 	mux.HandleFunc("POST /account/remember", s.handleRemember)
 	mux.HandleFunc("POST /account/everywhere", s.handleEverywhere)
+	mux.HandleFunc("GET /profiles", s.handleProfiles)
+	mux.HandleFunc("GET /profiles/new", s.handleProfileNew)
+	mux.HandleFunc("GET /profiles/{id}/edit", s.handleProfileEdit)
+	mux.HandleFunc("GET /profiles/{id}/confirm-delete", s.handleProfileConfirmDelete)
+	mux.HandleFunc("POST /profiles", s.handleProfileCreate)
+	mux.HandleFunc("POST /profiles/{id}", s.handleProfileUpdate)
+	mux.HandleFunc("POST /profiles/{id}/duplicate", s.handleProfileDuplicate)
+	mux.HandleFunc("POST /profiles/{id}/active", s.handleProfileActive)
+	mux.HandleFunc("DELETE /profiles/{id}", s.handleProfileDelete)
 	mux.HandleFunc("GET /sources", s.handleSources)
 	mux.HandleFunc("GET /sources/new", s.handleSourceNew)
 	mux.HandleFunc("GET /sources/defaults", s.handleSourceDefaults)
@@ -354,9 +366,11 @@ type rowData struct {
 	ReasonHTML template.HTML // Reason rendered to sanitised HTML for display
 	// LLM-specific attribution for the "why" footnote, kept separate from Score
 	// (which is the effective score — user's rating wins over the model's).
-	HasLLMScore bool
-	LLMScore    int
-	ScoreModel  string
+	HasLLMScore      bool
+	LLMScore         int
+	ScoreModel       string
+	ScoreProfile     string
+	ScoreProfileHash string
 	// The user's own rating, recorded but not yet scoring anything: it lights a
 	// thumb and nothing else. Either one re-posted clears it.
 	RatedUp   bool
@@ -1092,6 +1106,8 @@ func toRow(row store.ItemRow) rowData {
 		rd.HasLLMScore = true
 		rd.LLMScore = *row.LLMScore
 		rd.ScoreModel = strOf(row.LLMScoreModel)
+		rd.ScoreProfile = strOf(row.LLMProfileName)
+		rd.ScoreProfileHash = shortHash(strOf(row.LLMProfileHash))
 	}
 	if row.UserScore != nil {
 		rd.RatedUp = *row.UserScore == rateUp
@@ -1105,6 +1121,13 @@ func toRow(row store.ItemRow) rowData {
 		rd.NoteHTML = renderMarkdown(rd.Note)
 	}
 	return rd
+}
+
+func shortHash(hash string) string {
+	if len(hash) > 12 {
+		return hash[:12]
+	}
+	return hash
 }
 
 // score returns the 0-10 score the page shows and whether the item was scored

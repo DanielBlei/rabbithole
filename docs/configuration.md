@@ -6,11 +6,11 @@ Files under `configs/`:
 |---|---|
 | `config.yaml` | How to run — model, scoring, storage, paths |
 | `feeds.yaml` | Feeds to seed the store with on first run — see [Feeds](#feeds) |
-| `prompts/profile.md` | The interest profile used for ranking |
+| `prompts/profile.example.md` | Optional example/legacy import source; live profiles are in SQLite |
 | `prompts/system.md` | Optional [system prompt](#system-prompt) override; omit to use the built-in default |
 
-`profile.md` and `system.md` live in `configs/prompts/`, since both are text handed to the
-model rather than run configuration.
+The system prompt is still file/config owned. Interest profiles are application data managed
+under **Settings → Profiles** and persisted in SQLite.
 
 ## Getting started
 
@@ -18,21 +18,20 @@ model rather than run configuration.
 make setup   # copies the *.example.* templates for any file that is missing
 ```
 
-The templates ship pointing at the example profile and feed list so a fresh checkout runs
-without further edits. Once you have your own, update `configs/config.yaml` accordingly:
+The templates ship pointing at the example feed list. A fresh checkout needs no profile file:
+it uses the immutable built-in **Default**. Once you have your own feed seed, update
+`configs/config.yaml` accordingly:
 
 ```yaml
-profile: ./configs/prompts/profile.md
 ingest:
   feeds: ./configs/feeds.yaml
 ```
 
-> **Note:** until those paths are changed, edits to `configs/prompts/profile.md` and
-> `configs/feeds.yaml` have no effect — the application reads the example files.
+Create, duplicate, edit and select profiles from **Settings → Profiles**. Those changes take
+effect on the next ingest without restarting the server.
 
-`config.yaml` and `profile.md` are read once at startup; changes made while the server is
-running are not picked up, so restart it. Feeds are the exception — they live in the
-database and are edited from the **Sources** page, taking effect immediately. The loaded
+`config.yaml` and a system-prompt override are read at startup, so restart after changing
+them. Feeds and profiles live in the database and take effect on the next ingest. The loaded
 configuration can be inspected from the web UI under the gear menu (View config).
 
 ## config.yaml
@@ -42,7 +41,7 @@ All fields are optional unless marked required.
 | Field | Description | Default                           |
 |---|---|-----------------------------------|
 | `user` | Name shown in the web UI's shell prompt | OS login name                     |
-| `profile` | Path to the interest profile | **required**                      |
+| `profile` | Optional legacy Markdown profile to import at boot | built-in Default |
 | `inference.provider` | `ollama` \| `vllm` \| `heuristic` | `ollama`                          |
 | `inference.host` | Inference server URL | `http://localhost:11434`          |
 | `inference.model` | Model name | `qwen3.5:4b`                      |
@@ -265,17 +264,57 @@ https://medium.com/feed/@<username>
 
 ## Interest profile
 
-Free-form markdown describing the subject matter of interest; `configs/prompts/profile.example.md`
-is a starting point. It is passed to the model verbatim with every batch of articles and is
-the primary influence on how items are scored.
+Profiles are first-class local application data. The effective profile is free-form Markdown
+passed with every scoring batch and is the primary influence on how items are scored.
+
+A fresh database has an application-owned **Default** profile:
+
+- its stable identity and content are built into the binary;
+- it can be selected and duplicated;
+- it cannot be edited or deleted;
+- it does not require a writable `profile.md`.
+
+Local profiles live in SQLite and are managed under **Settings → Profiles**. The friendly
+editor has **I'm interested in**, **I'm less interested in**, and **Additional context**
+fields. It deterministically renders Markdown. Profiles that do not match that canonical
+format open in Advanced/raw mode, which preserves arbitrary Markdown instead of attempting a
+lossy conversion.
+
+The active profile is resolved once at the start of each ingest run. Switching or editing a
+profile therefore affects the next run immediately, without restarting `serve`; a run already
+in progress keeps its original immutable snapshot for every feed and batch. Existing scores
+are never automatically invalidated or rescored.
 
 HTML comments (`<!-- ... -->`) are removed before the profile reaches the model, so notes to
-yourself can be kept in the file without being read as interests.
+yourself can be kept in raw Markdown without being read as interests.
+
+### Backward compatibility: `config.profile`
+
+An existing configuration may still contain:
+
+```yaml
+profile: ./configs/prompts/profile.md
+```
+
+At startup the file is read, HTML comments are stripped, and unreadable or semantically empty
+files remain errors. Its cleaned contents are imported into a deterministic local profile:
+
+- the same configured path does not create duplicates on later starts;
+- on a database with no persisted active selection, the imported profile becomes active, so
+  an existing file-based setup keeps its old scoring behavior;
+- once an active profile has been selected in the UI, later restarts do not overwrite that
+  choice merely because `profile:` remains configured;
+- the import is a bootstrap, not synchronization. Later edits to the Markdown file do not
+  overwrite the local profile. Edit the local copy in Settings, or change/remove `profile:`
+  deliberately.
+
+CLI `ingest` uses the same SQLite active profile and the same bootstrap rule as `serve`. With
+no configured file and no persisted selection, both use Default.
 
 > **Recommendation:** be specific, and state exclusions as well as interests. "Kubernetes
 > operators, KubeVirt, Go internals — not funding rounds or product launches" ranks
 > considerably better than "AI and infrastructure". When results are consistently
-> off-target, revise this file before changing the model.
+> off-target, revise the active profile before changing the model.
 
 ## System prompt
 

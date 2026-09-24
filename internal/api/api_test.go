@@ -127,7 +127,10 @@ func TestHandleListItems(t *testing.T) {
 		{ID: "a", Source: "S1", Title: "A", Link: "https://x/a"},
 		{ID: "b", Source: "S1", Title: "B", Link: "https://x/b"},
 	}
-	digested := []store.DigestEntry{{Item: items[0], Score: 8, Reason: "solid writeup"}}
+	digested := []store.DigestEntry{{
+		Item: items[0], Score: 8, Reason: "solid writeup",
+		ProfileID: "profile-systems", ProfileName: "Systems", ProfileHash: "abc123",
+	}}
 	if err := s.db.Record(ctx, items, digested, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
@@ -148,14 +151,19 @@ func TestHandleListItems(t *testing.T) {
 	if resp.Window.After == nil || resp.Window.Before == nil {
 		t.Error("window.after/before should be set on the default request")
 	}
-	var got *string
+	var got *Item
 	for _, it := range resp.Items {
 		if it.ID == "a" {
-			got = it.LLMScoreReason
+			got = &it
 		}
 	}
-	if got == nil || *got != "solid writeup" {
-		t.Errorf("item a's LLMScoreReason = %v, want %q", got, "solid writeup")
+	if got == nil || got.LLMScoreReason == nil || *got.LLMScoreReason != "solid writeup" {
+		t.Errorf("item a = %+v, want LLMScoreReason %q", got, "solid writeup")
+	}
+	if got == nil || got.LLMProfileID == nil || *got.LLMProfileID != "profile-systems" ||
+		got.LLMProfileName == nil || *got.LLMProfileName != "Systems" ||
+		got.LLMProfileHash == nil || *got.LLMProfileHash != "abc123" {
+		t.Errorf("item a profile provenance = %+v", got)
 	}
 }
 

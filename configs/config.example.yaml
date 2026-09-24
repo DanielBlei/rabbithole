@@ -2,7 +2,7 @@
 # Every field and its default: docs/configuration.md
 
 # user:                                         # web UI shell prompt; unset uses your OS login name
-profile: ./configs/prompts/profile.example.md   # what you're interested in, driving the ranking
+# profile: ./configs/prompts/profile.example.md # optional legacy/bootstrap import; otherwise Settings → Profiles
 
 inference:
   provider: ollama              # ollama | vllm | heuristic (keywords, no model)
