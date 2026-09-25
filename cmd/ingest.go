@@ -70,7 +70,7 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 	}
 	log.Debug().Str("path", cfg.Profile).Int("chars", len(profile)).Msg("interest profile loaded")
 
-	db, err := openStore(ctx, cfg)
+	db, err := openStore(ctx, cfg, false)
 	if err != nil {
 		return err
 	}

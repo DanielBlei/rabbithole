@@ -80,6 +80,12 @@ func setupTestSchema(dsn string) (string, func(), error) {
 	return parsed.String(), cleanup, nil
 }
 
+// onPostgres reports whether this run is pointed at Postgres. The behaviour the
+// two engines cannot share — the single-writer guard, for one — is pinned here
+// rather than skipped silently, so a passing SQLite run cannot be mistaken for
+// coverage of it.
+func onPostgres() bool { return testPGDSN != "" }
+
 // openTestStore opens a throwaway store, closed on cleanup. Every test in this
 // package goes through it, so pointing the suite at a second engine is one
 // change here rather than one per test.
@@ -90,7 +96,7 @@ func setupTestSchema(dsn string) (string, func(), error) {
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	if testPGDSN != "" {
-		db, err := openPostgres(t.Context(), testPGDSN, "test")
+		db, err := openPostgres(t.Context(), testPGDSN, "test", pgOptions{})
 		if err != nil {
 			t.Fatalf("openPostgres: %v", err)
 		}

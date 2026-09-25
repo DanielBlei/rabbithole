@@ -4,6 +4,7 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -86,6 +87,82 @@ func questionMarkInsideQuotes(line string) bool {
 		}
 	}
 	return false
+}
+
+// TestAdditiveTablesNameTheirOwnTable holds the additive DDL to its existence
+// check: initSchema skips the create when a table of that name is already there,
+// so an entry naming the wrong table would quietly never be created. The DDL is a
+// compile-time constant, so both engines are checked whatever this run uses.
+func TestAdditiveTablesNameTheirOwnTable(t *testing.T) {
+	firstTable := regexp.MustCompile(`CREATE TABLE IF NOT EXISTS (\w+)`)
+	for _, d := range []dialect{sqliteDialect{}, postgresDialect{}} {
+		for _, a := range d.additiveTables() {
+			got := firstTable.FindStringSubmatch(a.ddl)
+			if got == nil {
+				t.Errorf("%s: additive DDL for %q creates no table\n%s", d.name(), a.table, a.ddl)
+				continue
+			}
+			if got[1] != a.table {
+				t.Errorf("%s: additive entry for %q creates %q", d.name(), a.table, got[1])
+			}
+		}
+	}
+}
+
+// TestSingleWriterGuardRefusesASecondServer is the one thing about this store
+// that cannot be left to convention: a second server reaching the same database
+// marks the first one's running ingest as failed at startup, doubles the model
+// spend of a run, and halves the login rate limiter. Postgres-only, because
+// SQLite has nothing to lock on.
+func TestSingleWriterGuardRefusesASecondServer(t *testing.T) {
+	if !onPostgres() {
+		t.Skip("the guard is a Postgres advisory lock; run the suite under RABBITHOLE_TEST_POSTGRES")
+	}
+	ctx := t.Context()
+
+	serving, err := openPostgres(ctx, testPGDSN, "test", pgOptions{exclusive: true})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	t.Cleanup(func() { _ = serving.Close() })
+
+	_, err = openPostgres(ctx, testPGDSN, "test", pgOptions{exclusive: true})
+	if !errors.Is(err, ErrStoreInUse) {
+		t.Fatalf("second open = %v, want ErrStoreInUse", err)
+	}
+
+	// The guard has to be given up, not just noticed: after the server exits —
+	// crash included, since the lock dies with its session — the next one starts.
+	if err := serving.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	restarted, err := openPostgres(ctx, testPGDSN, "test", pgOptions{exclusive: true})
+	if err != nil {
+		t.Fatalf("open after the holder closed: %v", err)
+	}
+	t.Cleanup(func() { _ = restarted.Close() })
+}
+
+// TestOpenFromDoesNotClaimTheGuard pins the other half of the rule: a one-shot
+// CLI command must still run while a server holds the guard, or `items list`
+// would fail on the machine that is serving the UI.
+func TestOpenFromDoesNotClaimTheGuard(t *testing.T) {
+	if !onPostgres() {
+		t.Skip("the guard is a Postgres advisory lock; run the suite under RABBITHOLE_TEST_POSTGRES")
+	}
+	ctx := t.Context()
+
+	serving, err := openPostgres(ctx, testPGDSN, "test", pgOptions{exclusive: true})
+	if err != nil {
+		t.Fatalf("serve open: %v", err)
+	}
+	defer func() { _ = serving.Close() }()
+
+	cli, err := openPostgres(ctx, testPGDSN, "test", pgOptions{})
+	if err != nil {
+		t.Fatalf("a plain open must not need the guard: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
 }
 
 // packageFiles lists the package's non-test Go sources.
