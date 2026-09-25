@@ -5,7 +5,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -178,6 +180,16 @@ type IngestConfig struct {
 type StoreConfig struct {
 	DBPath string `yaml:"db_path"` // sqlite database path
 	URL    string `yaml:"url"`     // postgres connection url; the password comes from DBPasswordEnv
+
+	// MaxConns caps the Postgres pool. The default is already small enough for a
+	// hosted free tier; this is for going lower when a database is shared with
+	// other applications, not for going high.
+	MaxConns int `yaml:"max_conns"`
+
+	// ConnMaxLifetime is how long one pooled connection may live. Lower it when
+	// something in front of the database recycles server connections; see
+	// docs/configuration.md. Zero keeps the default.
+	ConnMaxLifetime Duration `yaml:"conn_max_lifetime"`
 }
 
 // DBPasswordEnv supplies the Postgres password. It is kept out of the config
@@ -185,9 +197,20 @@ type StoreConfig struct {
 // copies the file around.
 const DBPasswordEnv = "RABBITHOLE_DB_PASSWORD"
 
-// defaultSSLMode is applied when the URL names none. Anything weaker has to be
-// asked for: require alone encrypts without checking who answered.
-const defaultSSLMode = "verify-full"
+// defaultSSLMode is applied when the URL names none. It encrypts without
+// verifying the certificate, which is the one mode that works out of the box on
+// the hosted databases the docs point people at: Supabase signs its database
+// certificate with its own CA, so verify-full cannot connect until the operator
+// supplies that bundle. verify-full stays the right answer and is one URL
+// parameter away; openStore warns when this default leaves a session unverified
+// over anything but loopback, so the weaker default is loud rather than silent.
+const defaultSSLMode = "require"
+
+// sslVerifyFull and sslVerifyCA are the two modes that check who answered.
+const (
+	sslVerifyFull = "verify-full"
+	sslVerifyCA   = "verify-ca"
+)
 
 // IsPostgres reports whether the store is configured for Postgres.
 func (s StoreConfig) IsPostgres() bool { return s.URL != "" }
@@ -199,14 +222,49 @@ type Postgres struct {
 	DSN   string
 	Label string
 
-	// PasswordFromURL records that the password was written into the config
-	// file rather than supplied by DBPasswordEnv, which callers warn about.
-	PasswordFromURL bool
+	// PasswordInConfigFile records that store.url carries a password, in either
+	// of the two forms the drivers take. It stays true when DBPasswordEnv
+	// overrides the value, because what deserves a warning is a secret sitting in
+	// a file that gets copied around and shown in the config viewer — not which
+	// of the two sources won.
+	PasswordInConfigFile bool
 
 	// HasPassword is false when neither source supplied one, which is legal
 	// (a server can trust the client) but is the likeliest reason a connection
 	// is refused, so callers say so when one is.
 	HasPassword bool
+
+	// SSLMode is the mode that will actually be used, after the default is
+	// applied, and Loopback says whether the host is reached over the machine's
+	// own loopback. Together they let a caller warn about the weak modes without
+	// reparsing the DSN: sslmode=require encrypts but does not verify the server,
+	// and this store carries the auth signing key, so an intercepted session leaks
+	// more than the rows. Over loopback nobody but this machine can intercept it.
+	SSLMode  string
+	Loopback bool
+}
+
+// TLSVerified reports whether the server's certificate gets checked. False is
+// not automatically wrong — it is what makes a Supabase or RDS install work on
+// the first try — but it is a gap the operator should know they are running
+// with, so callers say so.
+func (p Postgres) TLSVerified() bool {
+	return p.SSLMode == sslVerifyFull || p.SSLMode == sslVerifyCA
+}
+
+// TLSEncrypted reports whether the connection is encrypted at all. sslmode
+// values below `require` fall back to plain text, which is a different warning
+// than unverified encryption and should not be dressed up as the same one.
+// `prefer` belongs with them rather than above them: it asks for TLS and then
+// falls back without a word when the server declines, so nothing about the
+// session is guaranteed even though the operator did ask for encryption.
+func (p Postgres) TLSEncrypted() bool {
+	switch p.SSLMode {
+	case "disable", "allow", "prefer":
+		return false
+	default:
+		return true
+	}
 }
 
 // ResolvePostgres builds the connection from store.url plus DBPasswordEnv. The
@@ -215,7 +273,15 @@ type Postgres struct {
 func (s StoreConfig) ResolvePostgres() (Postgres, error) {
 	u, err := url.Parse(s.URL)
 	if err != nil {
-		return Postgres{}, fmt.Errorf("store.url is not a valid url: %w", err)
+		// url.Error quotes the whole url it failed on, which here may hold a
+		// password — and a mistyped DSN is the first thing a new install gets
+		// wrong, so this text reaches a terminal and a journal. Report the reason
+		// alone; the label built below is what is safe to repeat.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			return Postgres{}, fmt.Errorf("store.url is not a valid url: %v", urlErr.Err)
+		}
+		return Postgres{}, fmt.Errorf("store.url is not a valid url: %v", err)
 	}
 	switch u.Scheme {
 	case "postgres", "postgresql":
@@ -236,10 +302,13 @@ func (s StoreConfig) ResolvePostgres() (Postgres, error) {
 		u.RawQuery = q.Encode()
 	}
 
+	// The file's secret is worth reporting whatever happens to it next, so this
+	// is captured before the environment is allowed to override it.
+	inConfigFile := hasInURL
+
 	password := inURL
 	if env := os.Getenv(DBPasswordEnv); env != "" {
 		password = env
-		hasInURL = false
 	}
 	// url.UserPassword escapes, so a password holding @ / # or ? cannot
 	// corrupt the DSN the way string concatenation would.
@@ -254,6 +323,8 @@ func (s StoreConfig) ResolvePostgres() (Postgres, error) {
 		q.Set("sslmode", defaultSSLMode)
 		u.RawQuery = q.Encode()
 	}
+	sslMode := q.Get("sslmode")
+	loopback := loopbackHost(u.Hostname())
 
 	labelURL := *u
 	if user != "" {
@@ -262,11 +333,24 @@ func (s StoreConfig) ResolvePostgres() (Postgres, error) {
 		labelURL.User = nil
 	}
 	return Postgres{
-		DSN:             u.String(),
-		Label:           labelURL.String(),
-		PasswordFromURL: hasInURL,
-		HasPassword:     password != "",
+		DSN:                  u.String(),
+		Label:                labelURL.String(),
+		PasswordInConfigFile: inConfigFile,
+		HasPassword:          password != "",
+		SSLMode:              sslMode,
+		Loopback:             loopback,
 	}, nil
+}
+
+// loopbackHost reports whether the database is reached over the machine's own
+// loopback, where intercepting the connection already needs a shell on it.
+// Everything else — a container network, another host on the LAN, a hosted
+// database — is a path someone could be sitting on.
+func loopbackHost(host string) bool {
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return host == "localhost"
 }
 
 // Defaults (Ollama on localhost).
@@ -338,10 +422,20 @@ func (c *Config) validate() error {
 	case c.Store.DBPath != "" && c.Store.URL != "":
 		return fmt.Errorf("store has both db_path and url; keep the one for the engine you want")
 	}
+	if c.Store.MaxConns < 0 {
+		return fmt.Errorf("store.max_conns must not be negative, got %d", c.Store.MaxConns)
+	}
+	if c.Store.ConnMaxLifetime < 0 {
+		return fmt.Errorf("store.conn_max_lifetime must not be negative, got %s", c.Store.ConnMaxLifetime)
+	}
 	if c.Store.IsPostgres() {
 		if _, err := c.Store.ResolvePostgres(); err != nil {
 			return err
 		}
+	} else if c.Store.MaxConns != 0 || c.Store.ConnMaxLifetime != 0 {
+		// Naming them beside a sqlite path would otherwise look like it did
+		// something: there is no pool to shape, only the pragmas in its DSN.
+		return fmt.Errorf("store.max_conns and store.conn_max_lifetime apply to store.url, not db_path")
 	}
 	if c.Ingest.Since < 0 {
 		return fmt.Errorf("since must be positive, got %s", c.Ingest.Since)

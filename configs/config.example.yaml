@@ -35,6 +35,8 @@ store:
   db_path: ./data/rabbithole.db   # sqlite, the local default
 
   # Postgres instead, to reach one store from more than one machine. Set either
-  # db_path or url, never both. The password comes from RABBITHOLE_DB_PASSWORD
-  # (see .env.example); sslmode defaults to verify-full.
+  # db_path or url, never both; the password comes from RABBITHOLE_DB_PASSWORD (.env).
   # url: postgres://rabbithole@db.example.com:5432/rabbithole
+  #
+  # The same, also verifying the server rather than only encrypting to it:
+  # url: postgres://rabbit@db.example.com:5432/rabbithole?sslmode=verify-full&sslrootcert=/etc/ssl/ca.pem

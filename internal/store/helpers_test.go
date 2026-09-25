@@ -5,11 +5,14 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -18,12 +21,23 @@ import (
 // well as SQLite. `make test-pg` sets it from scripts/dev-postgres.sh.
 const testPostgresEnv = "RABBITHOLE_TEST_POSTGRES"
 
-// testPGSchema is the Postgres schema the suite owns. Created once by TestMain
-// and dropped at the end, it is the counterpart to SQLite's t.TempDir(): it
-// keeps a test run from colliding with whatever else lives in the database.
-const testPGSchema = "rabbithole_test_suite"
+// testPGSchemaName is the Postgres schema a single run owns, named per run
+// rather than per suite. It is the counterpart to SQLite's t.TempDir(): it keeps
+// a run from colliding with whatever else lives in the database. A fixed name
+// would have the suite `DROP SCHEMA … CASCADE` a name it did not create, which
+// is exactly what two runs against one server — or a leftover from an interrupted
+// run — do to each other.
+func testPGSchemaName() string {
+	var raw [4]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		// The pid alone still separates two live runs; the random half only
+		// covers two runs that reuse a pid after one of them dies.
+		return "rabbithole_test_" + strconv.Itoa(os.Getpid())
+	}
+	return "rabbithole_test_" + strconv.Itoa(os.Getpid()) + "_" + hex.EncodeToString(raw[:])
+}
 
-// testPGDSN is the DSN with search_path pointed at testPGSchema, empty when
+// testPGDSN is the DSN with search_path pointed at this run's schema, empty when
 // the suite is running on SQLite alone.
 var testPGDSN string
 
@@ -43,9 +57,11 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// setupTestSchema gives the run its own Postgres schema and returns a DSN
-// scoped to it. search_path travels as a connect parameter rather than a SET,
-// which would land on one pooled connection and miss the rest.
+// setupTestSchema gives this run its own Postgres schema and returns a DSN
+// scoped to it, along with a cleanup that drops only what this run made. The
+// name is quoted rather than interpolated, since it is an identifier and DDL
+// takes no bound parameters. search_path travels as a connect parameter rather
+// than a SET, which would land on one pooled connection and miss the rest.
 func setupTestSchema(dsn string) (string, func(), error) {
 	admin, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -53,11 +69,16 @@ func setupTestSchema(dsn string) (string, func(), error) {
 	}
 	defer func() { _ = admin.Close() }()
 
+	name := testPGSchemaName()
+	quoted := pq(name)
+
 	ctx := context.Background()
-	if _, err := admin.ExecContext(ctx, "DROP SCHEMA IF EXISTS "+testPGSchema+" CASCADE"); err != nil {
+	// Nothing should own a name this random, but a run that was killed mid-flight
+	// can leave its schema behind, and this is the moment to collect our own.
+	if _, err := admin.ExecContext(ctx, "DROP SCHEMA IF EXISTS "+quoted+" CASCADE"); err != nil {
 		return "", nil, fmt.Errorf("drop stale schema: %w", err)
 	}
-	if _, err := admin.ExecContext(ctx, "CREATE SCHEMA "+testPGSchema); err != nil {
+	if _, err := admin.ExecContext(ctx, "CREATE SCHEMA "+quoted); err != nil {
 		return "", nil, fmt.Errorf("create schema: %w", err)
 	}
 
@@ -66,7 +87,7 @@ func setupTestSchema(dsn string) (string, func(), error) {
 		return "", nil, fmt.Errorf("parse dsn: %w", err)
 	}
 	q := parsed.Query()
-	q.Set("search_path", testPGSchema)
+	q.Set("search_path", name)
 	parsed.RawQuery = q.Encode()
 
 	cleanup := func() {
@@ -75,10 +96,16 @@ func setupTestSchema(dsn string) (string, func(), error) {
 			return
 		}
 		defer func() { _ = db.Close() }()
-		_, _ = db.ExecContext(context.Background(), "DROP SCHEMA IF EXISTS "+testPGSchema+" CASCADE")
+		_, _ = db.ExecContext(context.Background(), "DROP SCHEMA IF EXISTS "+quoted+" CASCADE")
 	}
 	return parsed.String(), cleanup, nil
 }
+
+// onPostgres reports whether this run is pointed at Postgres. The behaviour the
+// two engines cannot share — the single-writer guard, for one — is pinned here
+// rather than skipped silently, so a passing SQLite run cannot be mistaken for
+// coverage of it.
+func onPostgres() bool { return testPGDSN != "" }
 
 // openTestStore opens a throwaway store, closed on cleanup. Every test and
 // benchmark in this package goes through it, so pointing the suite at a second
@@ -90,7 +117,7 @@ func setupTestSchema(dsn string) (string, func(), error) {
 func openTestStore(t testing.TB) *Store {
 	t.Helper()
 	if testPGDSN != "" {
-		db, err := openPostgres(t.Context(), testPGDSN, "test")
+		db, err := openPostgres(t.Context(), testPGDSN, "test", pgOptions{})
 		if err != nil {
 			t.Fatalf("openPostgres: %v", err)
 		}

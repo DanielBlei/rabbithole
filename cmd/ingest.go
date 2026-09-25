@@ -65,7 +65,7 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 		Bool("think", think).
 		Msg("config loaded")
 
-	db, err := openStore(ctx, cfg)
+	db, err := openStore(ctx, cfg, false)
 	if err != nil {
 		return err
 	}

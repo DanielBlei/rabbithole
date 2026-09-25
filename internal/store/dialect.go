@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"strconv"
 	"strings"
 	"time"
@@ -37,11 +38,19 @@ type dialect interface {
 	// answers in its own terms, since neither has a portable way to ask.
 	isFresh(ctx context.Context, db *sql.DB) (bool, error)
 
-	// schemas is the DDL for a new database, and additiveSchemas the tables
-	// added since schemaVersion last moved, created if missing on every open.
-	// Each entry is executed on its own.
+	// tableExists reports whether the database already holds a table, resolved
+	// the way that engine resolves an unqualified name. It gates the additive DDL:
+	// Postgres checks a role's rights on the schema before it ever notices
+	// IF NOT EXISTS, so creating a table that is already there needs CREATE
+	// anyway — which would lock a DML-only runtime role out of a database that is
+	// fully set up.
+	tableExists(ctx context.Context, db *sql.DB, table string) (bool, error)
+
+	// schemas is the DDL for a new database, and additiveTables the tables added
+	// since schemaVersion last moved, created only where they are missing. Each
+	// entry is executed on its own.
 	schemas() []string
-	additiveSchemas() []string
+	additiveTables() []additive
 
 	// uniqueViolation reports which unique index an error came from, and ""
 	// when it is not a uniqueness failure. It exists because a check inside a
@@ -60,6 +69,15 @@ type dialect interface {
 	// equivalent for, so the two record the same number in different places.
 	readVersion(ctx context.Context, db *sql.DB) (int, error)
 	stampVersion(ctx context.Context, db *sql.DB, version int) error
+}
+
+// additive is one table added since schemaVersion last moved: the DDL that
+// creates it, and the name to look for before running that DDL. The two are kept
+// together so an entry cannot claim to guard a table it does not create, which
+// TestAdditiveTablesNameTheirOwnTable checks.
+type additive struct {
+	table string
+	ddl   string
 }
 
 // sqliteDialect is the form every query in this package is written in, so its
@@ -85,6 +103,15 @@ func (sqliteDialect) isFresh(ctx context.Context, db *sql.DB) (bool, error) {
 	return tables == 0, nil
 }
 
+func (sqliteDialect) tableExists(ctx context.Context, db *sql.DB, table string) (bool, error) {
+	var n int
+	if err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&n); err != nil {
+		return false, fmt.Errorf("inspect database: %w", err)
+	}
+	return n > 0, nil
+}
+
 func (sqliteDialect) schemas() []string {
 	return []string{
 		schema, todoSchema, ideaSchema, ingestSchema, ingestLogSchema,
@@ -92,7 +119,9 @@ func (sqliteDialect) schemas() []string {
 	}
 }
 
-func (sqliteDialect) additiveSchemas() []string { return []string{authSchema} }
+func (sqliteDialect) additiveTables() []additive {
+	return []additive{{table: "auth", ddl: authSchema}}
+}
 
 // migrateV3 adds local profiles and nullable provenance columns. It is one
 // transaction so an interrupted upgrade cannot expose a half-migrated store.
@@ -191,6 +220,10 @@ func (postgresDialect) isFresh(ctx context.Context, db *sql.DB) (bool, error) {
 	return !exists, nil
 }
 
+func (postgresDialect) tableExists(ctx context.Context, db *sql.DB, table string) (bool, error) {
+	return pgTableExists(ctx, db, table)
+}
+
 func (postgresDialect) schemas() []string {
 	return []string{
 		schemaVersionPG, schemaPG, todoSchemaPG, ideaSchemaPG,
@@ -200,7 +233,9 @@ func (postgresDialect) schemas() []string {
 	}
 }
 
-func (postgresDialect) additiveSchemas() []string { return []string{authSchemaPG} }
+func (postgresDialect) additiveTables() []additive {
+	return []additive{{table: "auth", ddl: authSchemaPG}}
+}
 
 // migrateV3 refuses rather than translating: Postgres arrived with the current
 // schema version, so a version 3 database under this engine is a database this
@@ -250,30 +285,58 @@ func (postgresDialect) stampVersion(ctx context.Context, db *sql.DB, version int
 	return nil
 }
 
-// Pool limits for Postgres. SQLite gets none: its concurrency is already shaped
+// Pool defaults for Postgres. SQLite gets none: its concurrency is already shaped
 // by the WAL and busy_timeout pragmas in its DSN. A hosted Postgres caps
 // connections per database, and a pooler in front of it caps them again, so the
-// store stays well inside a free tier's budget. ConnMaxLifetime matters most:
-// poolers recycle server connections underneath us, and a handle held forever
-// eventually talks to something that has gone away.
+// default stays well inside a free tier's budget; store.max_conns and
+// store.conn_max_lifetime are there to go lower, not higher. ConnMaxLifetime
+// matters most: poolers recycle server connections underneath us, and a handle
+// held forever eventually talks to something that has gone away.
 const (
-	pgMaxOpenConns    = 10
-	pgMaxIdleConns    = 5
-	pgConnMaxLifetime = 30 * time.Minute
-	pgConnMaxIdleTime = 5 * time.Minute
+	pgDefaultMaxConns        = 10
+	pgDefaultMaxIdleConns    = 5
+	pgDefaultConnMaxLifetime = 30 * time.Minute
+	pgDefaultConnMaxIdleTime = 5 * time.Minute
 )
+
+// pgOptions are the per-open knobs of a Postgres store. Every zero value means
+// "take the default", so a caller with no opinion passes the zero struct.
+type pgOptions struct {
+	maxConns        int
+	connMaxLifetime time.Duration
+	connMaxIdleTime time.Duration
+
+	// exclusive claims the single-writer guard for the life of the Store.
+	// Only `serve` asks for it: one-shot CLI commands have to keep working while
+	// a server is up, and it is a second server that does the damage.
+	exclusive bool
+}
 
 // openPostgres connects to dsn and brings the schema up to date. label names
 // the database in errors and must never carry the password.
-func openPostgres(ctx context.Context, dsn, label string) (*Store, error) {
+func openPostgres(ctx context.Context, dsn, label string, opts pgOptions) (*Store, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}
-	db.SetMaxOpenConns(pgMaxOpenConns)
-	db.SetMaxIdleConns(pgMaxIdleConns)
-	db.SetConnMaxLifetime(pgConnMaxLifetime)
-	db.SetConnMaxIdleTime(pgConnMaxIdleTime)
+	maxConns := opts.maxConns
+	if maxConns <= 0 {
+		maxConns = pgDefaultMaxConns
+	}
+	if opts.exclusive {
+		// The guard connection is held for the life of the process and is claimed
+		// before any DDL, so it is counted apart from the queries: a pool sized to
+		// `store.max_conns: 1` would otherwise leave initSchema waiting on a
+		// connection that is never given back, and serve would hang at startup.
+		maxConns++
+	}
+	idleConns := min(pgDefaultMaxIdleConns, maxConns)
+	connMaxLifetime := orDefault(opts.connMaxLifetime, pgDefaultConnMaxLifetime)
+	connMaxIdleTime := orDefault(opts.connMaxIdleTime, pgDefaultConnMaxIdleTime)
+	db.SetMaxOpenConns(maxConns)
+	db.SetMaxIdleConns(idleConns)
+	db.SetConnMaxLifetime(connMaxLifetime)
+	db.SetConnMaxIdleTime(connMaxIdleTime)
 
 	// sql.Open is lazy, so without this the first failure would surface from
 	// whichever query happened to run first rather than from opening the store.
@@ -281,12 +344,104 @@ func openPostgres(ctx context.Context, dsn, label string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("connect to postgres at %s: %w", label, err)
 	}
+
 	d := postgresDialect{}
+
+	// Claimed before any DDL, so a second server is refused without having
+	// touched the database, and only one process is ever creating tables.
+	s := &Store{db: db, d: d}
+	if opts.exclusive {
+		if s.writer, err = claimSingleWriter(ctx, db, label); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	}
 	if err := initSchema(ctx, db, d, label); err != nil {
+		releaseWriter(s.writer)
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{db: db, d: d}, nil
+	return s, nil
+}
+
+func orDefault(v, fallback time.Duration) time.Duration {
+	if v <= 0 {
+		return fallback
+	}
+	return v
+}
+
+// ErrStoreInUse is returned when the single-writer guard is already held, which
+// means another rabbithole is serving the same store right now.
+var ErrStoreInUse = errors.New("another rabbithole is already serving this store")
+
+// singleWriter is the Postgres session advisory lock standing in for the
+// single-writer rule, together with the one connection carrying it. A session
+// lock belongs to a backend, so it must be taken on a connection held out of the
+// pool for the life of the process; on a pooled handle it would be released the
+// moment the query that took it returned.
+type singleWriter struct {
+	conn *sql.Conn
+	key  int64
+}
+
+// claimSingleWriter refuses a second server instead of letting it flip the
+// first one's running ingest to error at startup.
+//
+// This is a startup guard, not a lease. If something in front of the database
+// drops the connection later, the lock leaves with the session and nothing
+// re-takes it; what it does guarantee is that two `serve` processes cannot both
+// get as far as reconciling ingest runs.
+func claimSingleWriter(ctx context.Context, db *sql.DB, label string) (*singleWriter, error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reserve the single-writer guard: %w", err)
+	}
+	key, err := storeKey(ctx, conn)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	var held bool
+	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", key).Scan(&held); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("claim the single-writer guard: %w", err)
+	}
+	if !held {
+		_ = conn.Close()
+		return nil, fmt.Errorf("%w: %s — machines take turns, see docs/store.md", ErrStoreInUse, label)
+	}
+	return &singleWriter{conn: conn, key: key}, nil
+}
+
+// storeKey names the set of tables this store points at — the database and the
+// schema, not the server — so two installs on one Postgres host, or one database
+// used by two installs in two schemas, do not block each other. Only processes
+// reaching the same tables collide, which is the case the guard is for.
+func storeKey(ctx context.Context, conn *sql.Conn) (int64, error) {
+	var database, schema string
+	if err := conn.QueryRowContext(ctx,
+		"SELECT current_database(), current_schema()").Scan(&database, &schema); err != nil {
+		return 0, fmt.Errorf("identify the store: %w", err)
+	}
+	h := fnv.New64a()
+	// hash.Hash.Write never returns an error.
+	_, _ = h.Write([]byte(database))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(schema))
+	return int64(h.Sum64()), nil
+}
+
+// releaseWriter gives the guard back. Closing the connection ends the session,
+// which drops the lock anyway, so nothing is reported: the caller is on its way
+// out and the close error is the one worth hearing.
+func releaseWriter(w *singleWriter) {
+	if w == nil {
+		return
+	}
+	// context.Background: Close runs once the context that opened the store is gone.
+	_, _ = w.conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", w.key)
+	_ = w.conn.Close()
 }
 
 // pgTableExists resolves the name against the connection's search_path, so it

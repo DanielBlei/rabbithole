@@ -37,8 +37,28 @@ runtime() {
 
 RUNTIME="$(runtime)"
 
+# Percent-encode what goes into the DSN's userinfo. A password holding `#`, `/`
+# or `@` would otherwise land in the URL as syntax instead of as the credential
+# the container was handed, and `make test-pg` would then connect with the wrong
+# password — or fail to parse at all — after `up` reported success. ASCII-only on
+# purpose, which is what a throwaway dev credential is.
+urlencode() {
+	local data="$1" out="" i char
+	for (( i=0; i<${#data}; i++ )); do
+		char="${data:i:1}"
+		case "$char" in
+			[A-Za-z0-9._~-]) out+="$char" ;;
+			*) out+="$(printf '%%%02X' "'$char")" ;;
+		esac
+	done
+	printf '%s' "$out"
+}
+
 dsn() {
-	echo "postgres://${PG_USER}:${PG_PASSWORD}@127.0.0.1:${PG_PORT}/${PG_DB}?sslmode=disable"
+	local user pass
+	user="$(urlencode "$PG_USER")"
+	pass="$(urlencode "$PG_PASSWORD")"
+	echo "postgres://${user}:${pass}@127.0.0.1:${PG_PORT}/${PG_DB}?sslmode=disable"
 }
 
 running() {

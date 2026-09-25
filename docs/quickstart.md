@@ -28,6 +28,10 @@ recomputes already-stored items from the last seven days.
 Every field is documented in [configuration.md](configuration.md), including the model-free
 `heuristic` scorer and OpenAI-compatible endpoints if you would rather not run Ollama.
 
+State lands in a SQLite file under `data/`, and there is nothing else to set up. To run one
+store that more than one machine can reach, set `store.url` to a Postgres connection in place of
+`store.db_path`; see [configuration.md](configuration.md#store).
+
 ## 2. Pull the model
 
 ```sh

@@ -455,8 +455,10 @@ func TestResolvePostgres(t *testing.T) {
 		if !strings.Contains(pg.DSN, "from-env") || strings.Contains(pg.DSN, "from-url") {
 			t.Errorf("DSN = %q, want the environment's password", pg.DSN)
 		}
-		if pg.PasswordFromURL {
-			t.Error("PasswordFromURL = true, want false when the environment supplied it")
+		// Overriding the value does not remove the secret from the file, which is
+		// the thing the caller warns about.
+		if !pg.PasswordInConfigFile {
+			t.Error("PasswordInConfigFile = false, want true; store.url still holds one")
 		}
 	})
 
@@ -468,8 +470,8 @@ func TestResolvePostgres(t *testing.T) {
 		if !strings.Contains(pg.DSN, "from-url") {
 			t.Errorf("DSN = %q, want the url's password", pg.DSN)
 		}
-		if !pg.PasswordFromURL {
-			t.Error("PasswordFromURL = false, want true so the caller can warn")
+		if !pg.PasswordInConfigFile {
+			t.Error("PasswordInConfigFile = false, want true so the caller can warn")
 		}
 	})
 
@@ -506,13 +508,13 @@ func TestResolvePostgres(t *testing.T) {
 		}
 	})
 
-	t.Run("sslmode defaults to verify-full but is never overridden", func(t *testing.T) {
+	t.Run("sslmode defaults to require but is never overridden", func(t *testing.T) {
 		pg, err := StoreConfig{URL: "postgres://rabbit@db.host/rabbithole"}.ResolvePostgres()
 		if err != nil {
 			t.Fatalf("ResolvePostgres: %v", err)
 		}
-		if !strings.Contains(pg.DSN, "sslmode=verify-full") {
-			t.Errorf("DSN = %q, want sslmode=verify-full applied", pg.DSN)
+		if !strings.Contains(pg.DSN, "sslmode=require") {
+			t.Errorf("DSN = %q, want sslmode=require applied", pg.DSN)
 		}
 		pg, err = StoreConfig{URL: "postgres://rabbit@db.host/rabbithole?sslmode=disable"}.ResolvePostgres()
 		if err != nil {
@@ -524,6 +526,48 @@ func TestResolvePostgres(t *testing.T) {
 	})
 }
 
+// The default leaves the server unverified, so the caller has to be able to say
+// so — and has to know when it would only be noise: over loopback nobody but
+// this machine can hear the connection at all.
+func TestResolvePostgresTLSFlags(t *testing.T) {
+	cases := []struct {
+		url       string
+		mode      string
+		loopback  bool
+		verified  bool
+		encrypted bool
+	}{
+		// The default, on a hosted database: encrypted, unverified, not loopback.
+		{"postgres://rabbit@db.example.com/rabbithole", "require", false, false, true},
+		// The hardening the warning asks for.
+		{"postgres://rabbit@db.example.com/rabbithole?sslmode=verify-full", "verify-full", false, true, true},
+		{"postgres://rabbit@db.example.com/rabbithole?sslmode=verify-ca", "verify-ca", false, true, true},
+		// Plain text, which is a different warning than an unverified one.
+		{"postgres://rabbit@db.example.com/rabbithole?sslmode=disable", "disable", false, false, false},
+		// `prefer` asks for TLS and falls back the moment the server declines, so
+		// it cannot be reported as encrypted: the operator has to hear that.
+		{"postgres://rabbit@db.example.com/rabbithole?sslmode=prefer", "prefer", false, false, false},
+		{"postgres://rabbit@db.example.com/rabbithole?sslmode=allow", "allow", false, false, false},
+		// Local development: same weak modes, nothing to warn about.
+		{"postgres://rabbit@127.0.0.1:5433/rabbithole?sslmode=disable", "disable", true, false, false},
+		{"postgres://rabbit@localhost/rabbithole", "require", true, false, true},
+		{"postgres://rabbit@[::1]/rabbithole", "require", true, false, true},
+	}
+	for _, tc := range cases {
+		pg, err := StoreConfig{URL: tc.url}.ResolvePostgres()
+		if err != nil {
+			t.Fatalf("%s: ResolvePostgres: %v", tc.url, err)
+		}
+		if pg.SSLMode != tc.mode || pg.Loopback != tc.loopback ||
+			pg.TLSVerified() != tc.verified || pg.TLSEncrypted() != tc.encrypted {
+			t.Errorf("%s: got mode=%q loopback=%v verified=%v encrypted=%v, "+
+				"want mode=%q loopback=%v verified=%v encrypted=%v",
+				tc.url, pg.SSLMode, pg.Loopback, pg.TLSVerified(), pg.TLSEncrypted(),
+				tc.mode, tc.loopback, tc.verified, tc.encrypted)
+		}
+	}
+}
+
 // The drivers accept the password as a query parameter as well as in the
 // userinfo. It has to be treated the same either way, or it slips past both
 // the environment override and the warning the caller prints.
@@ -533,8 +577,8 @@ func TestResolvePostgresPasswordAsQueryParameter(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ResolvePostgres: %v", err)
 		}
-		if !pg.PasswordFromURL {
-			t.Error("PasswordFromURL = false, want true so the caller warns")
+		if !pg.PasswordInConfigFile {
+			t.Error("PasswordInConfigFile = false, want true so the caller warns")
 		}
 		u, err := url.Parse(pg.DSN)
 		if err != nil {
@@ -560,8 +604,65 @@ func TestResolvePostgresPasswordAsQueryParameter(t *testing.T) {
 		if strings.Contains(pg.DSN, "from-url") {
 			t.Errorf("DSN = %q, want the environment's password", pg.DSN)
 		}
-		if pg.PasswordFromURL {
-			t.Error("PasswordFromURL = true, want false when the environment supplied it")
+		if !pg.PasswordInConfigFile {
+			t.Error("PasswordInConfigFile = false, want true; the file still holds a secret")
 		}
 	})
+}
+
+// A mistyped DSN is the first thing a new install gets wrong, and the failure is
+// printed to a terminal and a journal. url.Error quotes the whole url it failed
+// on, so the password has to come out before the message goes anywhere.
+func TestResolvePostgresRefusesToEchoThePassword(t *testing.T) {
+	for _, raw := range []string{
+		"postgres://rabbit:***@db.host:notaport/rabbithole",
+		"postgres://rabbit:***@%zz/db",
+		"http://rabbit:***@db.host/rabbithole",
+	} {
+		_, err := StoreConfig{URL: raw}.ResolvePostgres()
+		if err == nil {
+			t.Fatalf("%q: want an error", raw)
+		}
+		if strings.Contains(err.Error(), "***") {
+			t.Errorf("%q: error leaks the password: %v", raw, err)
+		}
+		if !strings.Contains(err.Error(), "store.url") {
+			t.Errorf("%q: error should name the setting: %v", raw, err)
+		}
+	}
+}
+
+// The pool knobs exist because a hosted database caps connections and nothing
+// else lets you fit inside the cap; they shape a Postgres pool and nothing
+// else, so setting them beside a sqlite path is a mistake worth naming.
+func TestValidateStorePoolKnobs(t *testing.T) {
+	base := func() Config {
+		return Config{
+			Profile:   "p",
+			Inference: InferenceConfig{Provider: "heuristic"},
+			Store:     StoreConfig{URL: "postgres://rabbit@db.host/rabbithole"},
+		}
+	}
+
+	ok := base()
+	ok.Store.MaxConns = 4
+	ok.Store.ConnMaxLifetime = Duration(time.Minute)
+	if err := ok.validate(); err != nil {
+		t.Errorf("tuned pool rejected: %v", err)
+	}
+
+	negative := base()
+	negative.Store.MaxConns = -1
+	if err := negative.validate(); err == nil {
+		t.Error("a negative max_conns was accepted")
+	}
+
+	sqlite := Config{
+		Profile:   "p",
+		Inference: InferenceConfig{Provider: "heuristic"},
+		Store:     StoreConfig{DBPath: "./x.db", MaxConns: 4},
+	}
+	if err := sqlite.validate(); err == nil {
+		t.Error("max_conns beside db_path was accepted as if it did something")
+	}
 }

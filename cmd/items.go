@@ -135,7 +135,10 @@ func init() {
 // command goes through it so the redaction and the warning below cannot be
 // forgotten at one call site: cfg.Store.URL carries the password, so it is the
 // resolved Label that reaches a log line or an error, never the DSN.
-func openStore(ctx context.Context, cfg *config.Config) (*store.Store, error) {
+//
+// exclusive claims the single-writer guard, which only `serve` passes: a
+// one-shot command has to work while a server is up.
+func openStore(ctx context.Context, cfg *config.Config, exclusive bool) (*store.Store, error) {
 	label := cfg.Store.DBPath
 	var pg config.Postgres
 	if cfg.Store.IsPostgres() {
@@ -144,20 +147,61 @@ func openStore(ctx context.Context, cfg *config.Config) (*store.Store, error) {
 			return nil, err
 		}
 		label = pg.Label
-		if pg.PasswordFromURL {
+		if pg.PasswordInConfigFile {
 			log.Warn().Msgf("store.url carries a password; %s keeps it out of the config file"+
 				" and out of the web config viewer", config.DBPasswordEnv)
 		}
+		warnTLS(pg)
 	}
-	db, err := store.OpenFrom(ctx, cfg.Store)
+	var err error
+	var db *store.Store
+	if exclusive {
+		db, err = store.OpenExclusive(ctx, cfg.Store)
+	} else {
+		db, err = store.OpenFrom(ctx, cfg.Store)
+	}
 	if err != nil {
-		if cfg.Store.IsPostgres() && !pg.HasPassword {
+		if cfg.Store.IsPostgres() && !pg.HasPassword && !errors.Is(err, store.ErrStoreInUse) {
 			return nil, fmt.Errorf("%w (no password given: set %s)", err, config.DBPasswordEnv)
 		}
 		return nil, err
 	}
 	log.Debug().Str("db", label).Msg("store opened")
 	return db, nil
+}
+
+// warnTLS says out loud what the sslmode leaves unguarded, on any host whose
+// network path is not this machine's own. The default is sslmode=require, which
+// encrypts without verifying the server — right for the hosted databases the
+// docs recommend and impossible to avoid on Supabase without its CA bundle — so
+// the trade-off is stated per boot instead of being either a silent default or a
+// startup wall.
+//
+// Worth the noise: this connection carries the auth row's signing_key, and that
+// key signs the "stay signed in" cookies. Someone who can impersonate the
+// database can read it and mint cookies that never expire.
+func warnTLS(pg config.Postgres) {
+	if pg.Loopback || pg.TLSVerified() {
+		return
+	}
+	if !pg.TLSEncrypted() {
+		// Three modes land here and they are not the same mistake: `disable` and
+		// `allow` never ask for TLS, while `prefer` asks and gives up silently when
+		// the server declines. The exposure is identical, so the warning names the
+		// configured mode rather than leaving it to the reader to look up.
+		why := "does not encrypt"
+		if pg.SSLMode == "prefer" {
+			why = "falls back to plain text whenever the server declines TLS"
+		}
+		log.Warn().Msgf("store.url sets sslmode=%s, which %s: your items and your login hash"+
+			" can cross the network in plain text."+
+			" docs/configuration.md has the sslmode table", pg.SSLMode, why)
+		return
+	}
+	log.Warn().Msgf("store.url uses sslmode=%s: the connection is encrypted but the server is not"+
+		" verified, so anyone on the path to %s could impersonate it and read the signing key that"+
+		" backs the stay-signed-in cookies. Set sslmode=verify-full with sslrootcert pointing at"+
+		" your provider's certificate authority to close this.", pg.SSLMode, pg.Label)
 }
 
 // withStore opens the configured store, runs fn, and closes it. The loaded
@@ -168,7 +212,7 @@ func withStore(cmd *cobra.Command, fn func(ctx context.Context, db *store.Store,
 	if err != nil {
 		return err
 	}
-	db, err := openStore(cmd.Context(), cfg)
+	db, err := openStore(cmd.Context(), cfg, false)
 	if err != nil {
 		return err
 	}

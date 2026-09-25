@@ -56,6 +56,8 @@ All fields are optional unless marked required.
 | `ingest.digest_dir` | Output directory for `ingest --markdown` | none — required by that flag      |
 | `store.db_path` | SQLite database file | one of `db_path`/`url` required   |
 | `store.url` | Postgres connection URL, instead of `db_path` | one of `db_path`/`url` required   |
+| `store.max_conns` | Postgres pool ceiling | `10`                              |
+| `store.conn_max_lifetime` | How long one pooled connection may live | `30m`             |
 
 Durations accept a `d` (days) suffix in addition to the standard `h`, `m` and `s` — for
 example `14d`, `168h`, `1h30m`.
@@ -279,10 +281,12 @@ SQLite is the right answer for one machine and needs nothing installed. Postgres
 reaching the same store from more than one machine, and is what to use with a hosted
 database such as Supabase, RDS or Cloud SQL.
 
-**One process at a time.** Whichever engine you choose, only one `rabbithole serve` may
-point at a store at a time. Machines take turns. A second server reaching the same database
-marks the first one's running ingest as failed, because interrupted runs are reconciled at
-startup (see [store](store.md#one-writer-at-a-time)).
+**One process at a time.** Whichever engine you choose, only one `rabbithole serve` may point at
+a store at a time; machines take turns. On Postgres the second server is refused at startup
+(`another rabbithole is already serving this store`) instead of being left to mark the first
+one's running ingest as failed; on SQLite nothing enforces it. One-shot commands (`items`,
+`auth`, `ingest`) place no claim, so they still run while the server is up. See
+[store](store.md#one-writer-at-a-time).
 
 ### The password
 
@@ -298,22 +302,108 @@ export RABBITHOLE_DB_PASSWORD=...
 
 A URL that already carries a password still works, in either form the drivers accept
 (`postgres://user:pw@host/db` or `?password=pw`), and the environment variable overrides it
-when both are set. Expect a warning at startup in that case: a password in `store.url` lives
-in the config file, which is the thing the variable exists to avoid. The config viewer shows
-`$RABBITHOLE_DB_PASSWORD` in its place rather than the value.
+when both are set. Either way expect a warning at startup: a password in `store.url` lives in
+the config file whatever ends up being used, which is the thing the variable exists to avoid.
+The config viewer shows `$RABBITHOLE_DB_PASSWORD` in place of the value, and a connection error
+names the database without it — including when the URL is malformed enough that it could not
+be parsed, whose message would otherwise repeat the whole thing.
+
+A password is not required: a server that trusts this client can be reached without one. The
+error says so when a connection is refused and no password came from either place.
 
 ### TLS
 
-`sslmode` defaults to **`verify-full`** when the URL does not name one, which both encrypts
-the connection and checks that the server is who it claims to be. Weaker modes have to be
-asked for explicitly:
+`sslmode` defaults to **`require`** when the URL does not name one: the connection is
+encrypted, but the server's certificate is not checked. That is a deliberate trade, and it is
+worth understanding rather than accepting — `verify-full` is the setting you actually want.
 
-| Mode | Meaning |
-|---|---|
-| `verify-full` | Encrypted, certificate and hostname verified. The default |
-| `verify-ca` | Encrypted, certificate verified, hostname not |
-| `require` | Encrypted, but nothing is verified, so it can be intercepted |
-| `disable` | Not encrypted. Only sensible over a loopback connection |
+| Mode | Encrypted | Server verified | Notes |
+|---|---|---|---|
+| `verify-full` | yes | certificate **and** hostname | The right answer; needs your provider's CA unless it has a public one |
+| `verify-ca` | yes | certificate | Hostname unchecked, so any valid cert from that CA passes |
+| `require` | yes | **no** | The default. Anyone on the path can impersonate the database |
+| `prefer` | not guaranteed | no | Asks for TLS and falls back to plain text when the server declines it |
+| `allow` | no, then yes | no | Starts in plain text |
+| `disable` | no | no | Only sensible over loopback |
+
+**Why not `verify-full` by default.** Supabase signs its database certificate with its own
+"Supabase Intermediate" CA rather than a public one, so `verify-full` cannot complete a
+handshake at all until you point the client at that CA — measured against a live project, both
+`verify-full` and `verify-ca` fail there out of the box while `require` connects. A default that
+refuses to start on the database the docs recommend is a default people work around by deleting
+the setting entirely, which lands them somewhere worse and unlogged.
+
+**What the weaker default costs.** With no certificate check, an attacker positioned between you
+and the database can terminate your TLS with a certificate of their own making and read what
+passes. This store carries the login's argon2 hash and the `signing_key` that HMACs the "stay
+signed in" cookies, so an intercepted session is not only a row leak — it can be enough to mint
+cookies that keep working. Loopback is exempt from all of this, which is why local Postgres needs
+no certificates at all.
+
+**What the app does about it.** Every start against a non-loopback host whose mode does not
+verify says so in a warning, naming the mode and what it leaves open — including `prefer`, whose
+fallback is silent at the protocol level and so would otherwise go unnoticed. The default is loud
+rather than silent. Nothing is ever downgraded behind your back: an explicit `sslmode` is always
+respected, and at the default (`require`) a server that will not do TLS is refused rather than
+accepted in plain text. `prefer` is the one mode that does fall back, which is why it is not
+recommended.
+
+**Hardening it.** Point the client at your provider's CA bundle — Supabase publishes it with its
+connection documentation, RDS and Cloud SQL each publish theirs — and ask for verification:
+
+```yaml
+store:
+  url: postgres://you@db.example.com:5432/rabbithole?sslmode=verify-full&sslrootcert=/etc/ssl/certs/provider-ca.pem
+```
+
+Some providers also want `search_path` when you keep the tables somewhere other than `public`
+(`?search_path=rabbithole`), which the store passes through to the session untouched.
+
+### Connection pool
+
+Postgres is reached through a pool. `serve` keeps one connection apart from that pool for the
+single-writer guard — it is held for the life of the process, so queries are never waiting on
+it — which makes `store.max_conns` the number the queries get. SQLite needs none of this: its
+concurrency is already shaped by the pragmas in its own connection string.
+
+| Field | Default | What it is |
+|---|---|---|
+| `store.max_conns` | `10` | Connections the queries may hold at once (`serve` adds one for its guard) |
+| `store.conn_max_lifetime` | `30m` | Age at which a pooled connection is retired |
+
+A hosted database caps connections per role and per database, and a free tier shares that cap
+with everything else using the database, so these are there to go **down**, not up. The lifetime
+is the one that matters against a hosted database, where something in front recycles server
+connections underneath a handle held open forever.
+
+### Behind a pooler
+
+PgBouncer and the poolers hosted databases ship with can run in **transaction** mode, which
+hands each query a different server connection. Prepared statements do not survive that, and the
+driver caches them by default, so add one parameter and it stops using them:
+
+```yaml
+store:
+  url: postgres://you@db.example.com:5432/rabbithole?default_query_exec_mode=simple_protocol
+```
+
+The store suite is run against this mode as well, so it is a supported path rather than a
+workaround someone hoped would do.
+
+### Privileges
+
+Setting a database up and running it are two different amounts of access, and the app does not
+ask for the first one after the first time.
+
+- **Once, with a role that can create:** the tables and indexes, on the first start against an
+  empty database, or whenever a new release adds a table.
+- **Thereafter, with a role that can only read and write:** `SELECT`, `INSERT`, `UPDATE`,
+  `DELETE` on the tables is enough. Each start looks for the tables it might have to add and
+  leaves the ones it finds alone, rather than running a create that Postgres would refuse before
+  it noticed the table was already there.
+
+So a managed deployment can migrate with an admin role and run with a DML-only one. Running one
+role that can do both is equally fine, which is what a single-machine install does.
 
 ## Interest profile
 

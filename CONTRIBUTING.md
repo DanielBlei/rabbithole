@@ -68,8 +68,10 @@ make test-pg   # the store suite against it
 make pg-down   # stop it and drop its data
 ```
 
-This is opt-in and never part of `make check`. The container is disposable: it keeps no volume,
-and `make pg-down` removes it.
+This is opt-in locally and never part of `make check`, but CI runs it: the store suite goes
+against Postgres 17 on every push, in both exec modes the driver offers, so a split between the
+engines fails a build rather than waiting for a reviewer to notice. The container is disposable:
+it keeps no volume, and `make pg-down` removes it.
 
 Fork PRs need a maintainer to approve the workflow run before checks start, so expect the
 checks to sit idle for a bit on your first contribution.

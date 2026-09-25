@@ -43,13 +43,35 @@ ideas, and the feed set, which the Sources page can add to, retune and delete. S
   `rabbithole auth reset` and `rabbithole auth disable` write the database directly. A reset
   sets the new password at once, never leaving the instance unclaimed again.
 
-Two more things worth knowing:
+Three more things worth knowing:
 
 - **`serve` refuses plain HTTP on any address but loopback.** To reach it from another
   machine, give it a certificate (`--tls-cert`, `--tls-key`), put it behind a reverse proxy
   that handles TLS, or use a VPN or an SSH tunnel. The open internet is still not a target.
 - **`inference.api_key` sits in the config in plain text**, so its file permissions are yours
   to set.
+- **A Postgres store takes its password from `RABBITHOLE_DB_PASSWORD`, not from the config
+  file**, so the credential stays out of anything that copies `config.yaml` around. A password
+  written into `store.url` anyway still works, and is expected at startup: the config viewer
+  prints `$RABBITHOLE_DB_PASSWORD` where the value would be, the environment variable overrides
+  it, and connection errors name the database without it.
+- **A Postgres connection encrypts by default but does not verify the server**, because that is
+  the only mode that reaches Supabase and RDS on the first try (`sslmode=require`). Anyone who
+  can sit between you and the database can impersonate it, and what crosses includes the
+  `signing_key` behind the "stay signed in" cookies. Every start against a non-loopback host
+  warns about this rather than accepting it quietly; `sslmode=verify-full` with `sslrootcert`
+  set to your provider's CA closes it, and the database's own access control is part of your
+  trusted boundary either way. See [docs/configuration.md](docs/configuration.md#tls).
+
+## One server per store
+
+Only one `rabbithole serve` may point at a store at a time, whichever engine you use, and this
+one is worth knowing about because it is a security property as much as a tidy one. The login
+rate limiter is per process, so a second server reaching the same database doubles how many
+passwords an attacker can try at once; sessions live in memory, so each server keeps its own.
+On Postgres the second server is refused at startup by an advisory lock rather than being left
+to interfere; on SQLite nothing enforces it, so it stays a rule you keep. See
+[docs/store.md](docs/store.md#one-writer-at-a-time).
 
 ## Untrusted content
 
