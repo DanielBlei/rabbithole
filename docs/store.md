@@ -581,7 +581,11 @@ that is never created and never complained about.
 
 Which leaves two kinds of database role: one that can create, needed once per release that
 changes the schema, and one that can only read and write, which is enough to run everything after
-that.
+that. Both of them also need `USAGE` on the schema the tables live in. That grant is separate
+from the table grants, and a role without it is not told permission denied — it is told the table
+does not exist, since a schema it cannot enter has no visible contents — which reads like a
+missing migration rather than a missing grant. `public` grants it to everyone already; a schema
+of your own does not.
 
 ## Known gaps
 

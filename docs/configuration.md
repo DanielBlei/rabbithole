@@ -340,13 +340,15 @@ signed in" cookies, so an intercepted session is not only a row leak — it can 
 cookies that keep working. Loopback is exempt from all of this, which is why local Postgres needs
 no certificates at all.
 
-**What the app does about it.** Every start against a non-loopback host whose mode does not
-verify says so in a warning, naming the mode and what it leaves open — including `prefer`, whose
-fallback is silent at the protocol level and so would otherwise go unnoticed. The default is loud
-rather than silent. Nothing is ever downgraded behind your back: an explicit `sslmode` is always
-respected, and at the default (`require`) a server that will not do TLS is refused rather than
-accepted in plain text. `prefer` is the one mode that does fall back, which is why it is not
-recommended.
+**What the app does about it.** `serve` reports the connection it made at every boot — engine,
+database, `sslmode`, and `encrypted` / `verified` / `loopback` as fields — so what the mode
+actually bought is in the log rather than assumed. It is **stated, not warned about**: the default
+is a documented trade, and a warning about it every start reads as alarm, which trains you to skim
+past the lines that do mean something. The argument belongs here, where you read it once. Nothing
+is ever downgraded behind your back: an explicit `sslmode` is always respected, and at the default
+(`require`) a server that will not do TLS is refused rather than accepted in plain text. `prefer`
+is the one mode that does fall back, which is why it is not recommended — and `encrypted=false` on
+that boot line is how you notice you are running it.
 
 **Hardening it.** Point the client at your provider's CA bundle — Supabase publishes it with its
 connection documentation, RDS and Cloud SQL each publish theirs — and ask for verification:
@@ -396,11 +398,21 @@ Setting a database up and running it are two different amounts of access, and th
 ask for the first one after the first time.
 
 - **Once, with a role that can create:** the tables and indexes, on the first start against an
-  empty database, or whenever a new release adds a table.
+  empty database, or whenever a new release adds a table. Tables in a schema of your own need
+  `CREATE` **and** `USAGE` on that schema too.
 - **Thereafter, with a role that can only read and write:** `SELECT`, `INSERT`, `UPDATE`,
-  `DELETE` on the tables is enough. Each start looks for the tables it might have to add and
-  leaves the ones it finds alone, rather than running a create that Postgres would refuse before
-  it noticed the table was already there.
+  `DELETE` on the tables, plus `USAGE` on the schema holding them, is enough. Each start looks
+  for the tables it might have to add and leaves the ones it finds alone, rather than running a
+  create that Postgres would refuse before it noticed the table was already there.
+
+`USAGE` on the schema is its own grant, and forgetting it is the one privileges mistake that
+looks like something else: a role that cannot enter a schema is not told permission denied, it is
+told `relation "items" does not exist`, because the names inside are invisible to it. So the
+grant looks complete, the tables are there, and every query claims they are not. The store's own
+lookup inherits it: the freshness check asks `to_regclass` for `items`, gets NULL for a table it
+cannot see, takes the populated database for an empty one and runs its creates — which come back
+`no schema has been selected to create in`. Only `public` is spared, since it grants `USAGE` to
+every role already; put the tables anywhere else and the grant is part of the setup.
 
 So a managed deployment can migrate with an admin role and run with a DML-only one. Running one
 role that can do both is equally fine, which is what a single-machine install does.
