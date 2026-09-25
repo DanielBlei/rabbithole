@@ -250,7 +250,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	log.Debug().Str("config", configPath).Str("addr", serveAddr).Msg("config loaded")
 
-	db, err := openStore(ctx, cfg)
+	// `serve` is the process that owns the store: it reconciles interrupted ingest
+	// runs at startup and holds the sessions, so two of them reaching the same
+	// database would undo each other. Ask for the single-writer guard, which
+	// Postgres enforces and SQLite has nothing to enforce it with.
+	db, err := openStore(ctx, cfg, true)
 	if err != nil {
 		return err
 	}
@@ -259,7 +263,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			log.Warn().Err(err).Msg("db close failed")
 		}
 	}()
-	log.Debug().Str("db", cfg.Store.DBPath).Msg("store opened")
 
 	// A legacy profile path is a one-time bootstrap source. Validation still
 	// runs on every boot, but an existing web selection is never overwritten.

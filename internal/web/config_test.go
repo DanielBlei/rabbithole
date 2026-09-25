@@ -162,6 +162,21 @@ func TestRedactSecrets(t *testing.T) {
 			`  url: postgres://rabbit@db.host/rabbithole?password=hunter2&sslmode=require`,
 			`  url: postgres://rabbit@db.host/rabbithole?password=` + dbPasswordHint + `&sslmode=require`,
 		},
+		// The password may itself contain an `@`, and the authority's separator is
+		// the *last* one — so redaction has to run through it, not stop at the
+		// first character that looks like one.
+		{
+			"password containing an at sign",
+			`  url: postgres://rabbit:p@ss@db.host/rabbithole`,
+			`  url: postgres://rabbit:` + dbPasswordHint + `@db.host/rabbithole`,
+		},
+		// ResolvePostgres reads the parameter through url.Query, which decodes
+		// keys, so an encoded key names a password just as well as a plain one.
+		{
+			"password parameter with an encoded key",
+			`  url: postgres://rabbit@db.host/rabbithole?pass%77ord=hunter2&sslmode=require`,
+			`  url: postgres://rabbit@db.host/rabbithole?pass%77ord=` + dbPasswordHint + `&sslmode=require`,
+		},
 		{
 			"password parameter not first",
 			`url: postgres://rabbit@h/db?sslmode=require&password=hunter2`,

@@ -5,7 +5,7 @@
 ```mermaid
 flowchart LR
     CFG[configured sources] --> DISP[source-type dispatcher]
-    PROF["active profile snapshot<br/>built-in or SQLite"] --> RUN
+    PROF["active profile snapshot<br/>built-in or stored"] --> RUN
 
     DISP --> RSS[RSS / Atom]
     DISP --> ACAD[Academic]
@@ -23,7 +23,7 @@ flowchart LR
 
     CLI["ingest<br/>(CLI)"] --> RUN
     WEB["serve<br/>(ingest button)"] --> RUN
-    RUN[one run:<br/>fetch, filter, score, record] --> DB[(SQLite store)]
+    RUN[one run:<br/>fetch, filter, score, record] --> DB[(SQLite or Postgres)]
     RUN -. "--markdown" .-> MD[markdown digest]
     DB --> UI[web UI]
     DB --> API[JSON API]
@@ -34,7 +34,8 @@ flowchart LR
 can write the result as a markdown digest, while `serve` exposes the store over HTTP and can
 trigger the same cycle in the background (see [docs/api.md](api.md)). State (seen items,
 scores, digest history, local profiles, active-profile selection and user status/notes)
-lives in a local SQLite file, so re-runs only score genuinely new items.
+lives in the store — a local SQLite file by default, or Postgres when `store.url` names a
+database — so re-runs only score genuinely new items.
 
 Everything `serve` exposes, the JSON API included, sits behind one login (see
 [auth.md](auth.md)). The credentials live in the store's `auth` table; sessions live only in
@@ -81,7 +82,7 @@ batches.
 
 An explicit **Rescore recent items** action is the bounded exception to ingest dedup. It uses
 the same scorer construction and batching stack, but reads already-scored item metadata from
-SQLite for a fixed seven-day window instead of fetching feeds. Successful replacements update
+the store for a fixed seven-day window instead of fetching feeds. Successful replacements update
 only model score/reason/model/profile provenance; failed items keep their previous score.
 Ingest and rescore share the same background manager, history, log capture, cancellation and
 single-flight slot, so they cannot write scores concurrently.
@@ -106,7 +107,7 @@ ordinary pages without a feed remains on the roadmap below.
 cmd/                  cobra CLI (root, ingest, serve, auth, items, eval)
 internal/config       YAML config and legacy profile-file loading
 internal/profile      built-in Default, profile text validation/editor format and hashing
-internal/profilemgr   built-in + SQLite composition, legacy bootstrap and active resolution
+internal/profilemgr   built-in + stored composition, legacy bootstrap and active resolution
 internal/ingest       source dispatch -> fetch -> filter -> score -> record cycle, plus the background run manager
 internal/feeds        RSS/Atom normalization plus academic providers (arXiv, Crossref, Semantic Scholar)
 internal/rank         Scorer interface, prompt/JSON parsing, batching, selection, heuristic
@@ -133,5 +134,3 @@ scripts/              a throwaway Postgres for running the store tests; not used
   summary a feed chose to publish about it.
 - **Scheduling & delivery** — systemd timer or cron to run ingest unattended, plus email,
   push or an output feed so the digest reaches you instead of waiting to be opened.
-- **Postgres** — one store reachable from more than one of your machines, instead of each
-  process owning a local file. Still one reader (see [store.md](store.md)).

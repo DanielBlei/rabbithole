@@ -36,7 +36,7 @@ instead of leaving that to review.
 ## One writer at a time
 
 Only one `rabbithole serve` may point at a store, on either engine. Machines take turns. Four
-things depend on it, and none is enforced in code:
+things depend on it:
 
 - **Ingest runs are reconciled at startup.** `InterruptStaleIngestRuns` flips every `running`
   row to `error`, which is right after a crash and wrong if another server is mid-run. Fixing
@@ -48,16 +48,41 @@ things depend on it, and none is enforced in code:
   processes correctly.
 - **The login rate limiter is per process**, so lockout could be sidestepped via the second one.
 
+On Postgres the last one is not left to convention: `serve` takes a session advisory lock at
+startup (`claimSingleWriter`) and a second server comes back with `ErrStoreInUse` rather than
+quietly interfering with the first. Three details make the lock worth having:
+
+- It is held on a connection taken out of the pool for the life of the process, because a session
+  lock belongs to a backend; on a pooled handle it would be gone the moment the query that took
+  it returned.
+- Its key is a hash of `current_database()` and `current_schema()`, not a constant. Two installs
+  on one server, or one database shared by two installs in two schemas, are different stores and
+  must not block each other; only processes reaching the same tables do.
+- It is claimed before any DDL, so only one process is ever creating tables.
+
+What it is **not** is a lease. If something in front of the database drops that connection later,
+the lock leaves with the session and nothing re-takes it. It guarantees two servers cannot both
+get as far as reconciling ingest runs, which is the damage that matters; keeping that guarantee
+for hours would mean the owner-and-heartbeat schema change above. SQLite has nothing to lock on,
+so the rule there is still one you keep.
+
+One-shot commands (`items`, `auth`, `ingest`) open through `OpenFrom` and take no claim, so they
+keep working while a server holds the guard — which is the point: the machine serving the UI is
+also the machine you run `items prune` on.
+
 Two concurrent requests inside one server are fine and are handled: the feed conflict probe is
 a check-then-act, and on Postgres the loser comes back as `ErrFeedNameTaken` rather than a raw
 constraint error, so the Sources page still shows it against the field.
 
 ## Postgres connections
 
-The pool is capped in `dialect.go` rather than in config, since nothing has needed tuning:
-10 open, 5 idle, a 30 minute lifetime and a 5 minute idle timeout. The lifetime is the one
-that matters against a hosted database, where a pooler recycles server connections underneath
-a handle held open forever.
+The pool defaults to 10 open, 5 idle, a 30 minute lifetime and a 5 minute idle timeout.
+`store.max_conns` and `store.conn_max_lifetime` move the first and the third; they exist to go
+down, since a hosted database caps connections per role and a free tier shares that cap with
+everything else using it. The lifetime is the one that matters against a hosted database, where
+a pooler recycles server connections underneath a handle held open forever. `serve` keeps one
+connection for the single-writer guard on top of that pool, held for the life of the process, so
+the queries never wait on it and `store.max_conns` is what they get.
 
 Timestamps are `TIMESTAMPTZ`, which resolves to microseconds, where SQLite stores the
 nanosecond text layout below. Nothing in the feed pipeline works at that scale, but two
@@ -533,26 +558,30 @@ is kept differs, since `PRAGMA user_version` has no Postgres equivalent and a `s
 table stands in.
 
 Schema version 4 adds the profile tables and the three nullable provenance columns on `items`.
-On SQLite that is an in-place upgrade from version 3, run in one transaction; a Postgres
-database was never version 3, so it is only ever created at 4. Other unknown versions return
-`ErrSchemaVersion`. Independent additive tables may still be created on every open without a
-version bump where older code has no dependency on them.
+On SQLite that is an in-place upgrade from version 3, run in one transaction; a Postgres database
+was never version 3, so its upgrade for that version is a refusal naming the number it expects.
 
 The freshness check asks after a table the application owns rather than after the version
 record, so a Postgres database holding these tables but no version row is refused instead of
 being stamped over whatever is in it.
 
-Changing the schema therefore means editing **both** `CREATE TABLE` blocks and raising
-`schemaVersion`. Existing databases are then refused until they are upgraded or replaced.
+Changing an owned live-state schema therefore means editing **both** `CREATE TABLE` blocks,
+adding an ordered transactional migration from the previous version, and raising `schemaVersion`.
+Databases with recognized older versions are upgraded in place; unknown versions are refused
+without being modified.
 
-Changing an owned live-state schema means editing the `CREATE TABLE` block, adding an ordered
-transactional migration from the previous version, and raising `schemaVersion`. Databases with
-recognized older versions are upgraded in place; unknown versions are refused without being
-modified.
+A new table that nothing older depends on is the exception. It goes in `additiveTables`
+instead, whose DDL runs on every open — after a `tableExists` check, not on the strength of
+`IF NOT EXISTS` alone. Postgres checks a role's rights on the schema before it notices the table
+is already there, so an unconditional create would need `CREATE` on every start and rule out a
+DML-only runtime role, which is how a hosted database is normally set up. `auth` was the first
+such table; `additiveTables` entries carry the name they check alongside the DDL they run, and
+`TestAdditiveTablesNameTheirOwnTable` keeps the two honest, since a mismatch would mean a table
+that is never created and never complained about.
 
-A new table that nothing older depends on may instead go in `additiveSchemas`, whose
-`CREATE TABLE IF NOT EXISTS` runs on every open. This is reserved for independent features
-that do not require a coordinated backfill or versioned column change; `auth` was the first.
+Which leaves two kinds of database role: one that can create, needed once per release that
+changes the schema, and one that can only read and write, which is enough to run everything after
+that.
 
 ## Known gaps
 

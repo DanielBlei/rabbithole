@@ -18,7 +18,7 @@ where you put down tasks or todos, throw ideas at the board before they get away
 eye on the weather.
 
 It runs on your own machine: one binary with the UI inside it, no dependency hell, and state in a local SQLite
-file.
+file — or in Postgres, when one store has to be reachable from more than one machine.
 
 <p align="center">
   <img src="docs/img/feed-page.png" alt="The Feed page: items ranked by score, each with a one-line reason" width="900">
@@ -33,6 +33,8 @@ file.
 - [Ollama](https://ollama.com) running locally (the default)
 - or any OpenAI-compatible endpoint, such as [vLLM](https://docs.vllm.ai)
 - or nothing, with the built-in `heuristic` scorer
+- optionally, Postgres (14 or newer) in place of the SQLite file, if one store has to serve more
+  than one machine
 
 ## Install
 
@@ -75,7 +77,7 @@ and [SECURITY.md](SECURITY.md) before exposing it to anything else.
 - [docs/architecture.md](docs/architecture.md): how the pieces fit together, and what is
   planned next
 - [docs/evals.md](docs/evals.md): checking whether the model actually agrees with your profile
-- [docs/store.md](docs/store.md): the SQLite schema and item lifecycle
+- [docs/store.md](docs/store.md): the schema and item lifecycle, on either engine
 
 ## Getting help
 

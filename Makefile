@@ -20,6 +20,16 @@ LDFLAGS  := -X github.com/DanielBlei/rabbithole/cmd.version=$(VERSION)
 -include .env
 export RABBITHOLE_DB_PASSWORD
 
+# …but read the password back out of the file as text. make parses .env as a
+# makefile, not as an environment file: `ab$cd` comes out as `abd`, because `$c`
+# is a variable reference, and everything after a `#` is a comment. Both fail as
+# an authentication error against a live database, with nothing pointing at the
+# cause. Everything else in .env is a make knob (CONFIG, ADDR) and stays with the
+# include above.
+ifneq ($(wildcard .env),)
+RABBITHOLE_DB_PASSWORD := $(shell sed -n 's/^RABBITHOLE_DB_PASSWORD=//p' .env | tail -n 1 | tr -d '\r')
+endif
+
 .DEFAULT_GOAL := help
 
 ##@ General
@@ -166,7 +176,7 @@ pg-down: ## Stop the throwaway Postgres and drop its data
 .PHONY: test-pg
 test-pg: ## Run the store suite against the throwaway Postgres
 	@./scripts/dev-postgres.sh status >/dev/null || { echo "not running; start it with 'make pg-up'" >&2; exit 1; }
-	@RABBITHOLE_TEST_POSTGRES="$$(./scripts/dev-postgres.sh dsn)" go test ./internal/store/...
+	@RABBITHOLE_TEST_POSTGRES="$$(./scripts/dev-postgres.sh dsn)" go test -count=1 ./internal/store/...
 
 ##@ Quality
 

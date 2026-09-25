@@ -98,11 +98,16 @@ CREATE TABLE IF NOT EXISTS schema_version (
 // interest profiles and score provenance. Version 3 upgrades in place.
 const schemaVersion = 4
 
-// Each engine's DDL is listed in its dialect: schemas() for a new database,
-// additiveSchemas() for tables added since schemaVersion last moved, which are
-// created if missing on every open so an existing database gains them without
-// being recreated. Only new tables that nothing older depends on belong in the
-// additive list; changing an existing table still means a schemaVersion bump.
+// Each engine's DDL is listed in its dialect: schemas() for a new database, and
+// additiveTables() for tables added since schemaVersion last moved, which are
+// created only where they are missing so an existing database gains them without
+// being recreated. The existence check comes first rather than leaning on
+// IF NOT EXISTS, because Postgres checks a role's rights on the schema before it
+// looks at whether the table is already there: an unconditional pass would
+// require CREATE on every open, which rules out a DML-only runtime role — the way
+// a hosted database is normally set up. Only new tables that nothing older
+// depends on belong in the additive list; changing an existing table still means
+// a schemaVersion bump.
 
 // Status values for the items.status column. llm_score/llm_score_reason are
 // the model's verdict, written by the daily run; status/user_score/user_note
@@ -189,14 +194,33 @@ func sqlTimeOrNull(t time.Time) any {
 }
 
 // Store is an item store. d spells the queries for whichever engine db holds.
+// writer is the single-writer guard, held on Postgres by `serve` and nil
+// everywhere else.
 type Store struct {
-	db *sql.DB
-	d  dialect
+	db     *sql.DB
+	d      dialect
+	writer *singleWriter
 }
 
 // OpenFrom opens whichever engine the config names: a db_path means SQLite, a
 // url means Postgres. config.Load has already rejected setting both or neither.
+// It places no claim on the store, so any number of processes may hold one —
+// which is what lets a CLI command run while a server is up.
 func OpenFrom(ctx context.Context, cfg config.StoreConfig) (*Store, error) {
+	return openFrom(ctx, cfg, false)
+}
+
+// OpenExclusive is OpenFrom plus the single-writer guard, for the long-lived
+// process that owns the store. On Postgres it takes an advisory lock held for the
+// life of the Store and refuses to open while another server holds it, rather
+// than starting and reconciling that server's running ingest away. SQLite has no
+// equivalent to lock, so the rule there stays the convention docs/store.md
+// describes.
+func OpenExclusive(ctx context.Context, cfg config.StoreConfig) (*Store, error) {
+	return openFrom(ctx, cfg, true)
+}
+
+func openFrom(ctx context.Context, cfg config.StoreConfig, exclusive bool) (*Store, error) {
 	if !cfg.IsPostgres() {
 		return Open(cfg.DBPath)
 	}
@@ -204,7 +228,12 @@ func OpenFrom(ctx context.Context, cfg config.StoreConfig) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return openPostgres(ctx, pg.DSN, pg.Label)
+	opts := pgOptions{
+		maxConns:        cfg.MaxConns,
+		connMaxLifetime: cfg.ConnMaxLifetime.Std(),
+		exclusive:       exclusive,
+	}
+	return openPostgres(ctx, pg.DSN, pg.Label, opts)
 }
 
 // Open opens the SQLite database at path, creating it when it does not exist yet.
@@ -228,8 +257,8 @@ func Open(path string) (*Store, error) {
 
 // initSchema creates every table on a new database and stamps it with schemaVersion.
 // An existing database is checked against that version and rejected on a mismatch.
-// Either way, additiveSchemas are then created if missing. label names the
-// database in errors, and must not carry a password.
+// Either way, the additive tables are then created where they are missing. label
+// names the database in errors, and must not carry a password.
 func initSchema(ctx context.Context, db *sql.DB, d dialect, label string) error {
 	fresh, err := d.isFresh(ctx, db)
 	if err != nil {
@@ -260,16 +289,27 @@ func initSchema(ctx context.Context, db *sql.DB, d dialect, label string) error 
 			return err
 		}
 	}
-	for _, stmt := range d.additiveSchemas() {
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("create additive schema: %w", err)
+	for _, t := range d.additiveTables() {
+		exists, err := d.tableExists(ctx, db, t.table)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, t.ddl); err != nil {
+			return fmt.Errorf("create additive table %s: %w", t.table, err)
 		}
 	}
 	return nil
 }
 
-// Close releases the database handle.
-func (s *Store) Close() error { return s.db.Close() }
+// Close releases the database handle, giving up the single-writer guard first
+// while the connection carrying it can still be reached.
+func (s *Store) Close() error {
+	releaseWriter(s.writer)
+	return s.db.Close()
+}
 
 // Ping reports whether the database is still reachable, for the readiness check.
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }

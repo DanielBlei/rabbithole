@@ -77,6 +77,53 @@ jobs:
       - name: Render the eval reports
         run: make eval-smoke
 
+  # The store runs on two engines and the SQL is written once, so every split
+  # between them is invisible on the other. The UTC normalisation and the NULL
+  # ordering this branch fixed were both found by a reviewer rather than by a
+  # machine; this job is what finds the next one.
+  test-postgres:
+    name: test (postgres, ${{ matrix.exec-mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # How statements reach the server. cache_statement is pgx's default and
+        # prepares once per connection; simple_protocol never prepares, which is
+        # what a pooler in transaction mode requires. The second one is what a
+        # hosted deployment reaches for, so it is not left untested.
+        exec-mode: [cache_statement, simple_protocol]
+    services:
+      # The same major scripts/dev-postgres.sh runs the suite against.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: rabbithole
+          POSTGRES_PASSWORD: rabbithole
+          POSTGRES_DB: rabbithole
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready --username rabbithole --dbname rabbithole"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # The suite gives itself a schema to own (rabbithole_test_suite), so one
+      # job cannot disturb anything else in the database, and TRUNCATE between
+      # tests stands in for SQLite's fresh temp file.
+      - name: Test the store against Postgres
+        env:
+          # Quoted: the query string holds a '&', which YAML would otherwise
+          # have to be taken literally by luck of not starting the scalar.
+          RABBITHOLE_TEST_POSTGRES: "postgres://rabbithole:rabbithole@127.0.0.1:5432/rabbithole?sslmode=disable&default_query_exec_mode=${{ matrix.exec-mode }}"
+        run: go test -count=1 ./internal/store/...
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
