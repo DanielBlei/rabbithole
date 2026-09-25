@@ -378,7 +378,11 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Warn().Err(err).Msg("db close failed")
+		}
+	}()
 
 	filter := store.ListFilter{
 		RatedOnly: opts.RatedOnly,
@@ -538,10 +542,4 @@ func resolveJudgeScorer(
 		return nil, fmt.Errorf("backend validation: %w", err)
 	}
 	return c, nil
-}
-
-// errNotImplemented marks a subcommand whose flags are wired but whose body is
-// not written yet, so the shell can be exercised without pretending to work.
-func errNotImplemented(what string) error {
-	return fmt.Errorf("%s: not implemented yet; flags are wired and validated, the report is not built", what)
 }
