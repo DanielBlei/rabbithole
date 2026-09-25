@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
@@ -151,7 +152,6 @@ func openStore(ctx context.Context, cfg *config.Config, exclusive bool) (*store.
 			log.Warn().Msgf("store.url carries a password; %s keeps it out of the config file"+
 				" and out of the web config viewer", config.DBPasswordEnv)
 		}
-		warnTLS(pg)
 	}
 	var err error
 	var db *store.Store
@@ -166,42 +166,41 @@ func openStore(ctx context.Context, cfg *config.Config, exclusive bool) (*store.
 		}
 		return nil, err
 	}
-	log.Debug().Str("db", label).Msg("store opened")
+	logStoreConnected(cfg, label, exclusive, pg)
 	return db, nil
 }
 
-// warnTLS says out loud what the sslmode leaves unguarded, on any host whose
-// network path is not this machine's own. The default is sslmode=require, which
-// encrypts without verifying the server — right for the hosted databases the
-// docs recommend and impossible to avoid on Supabase without its CA bundle — so
-// the trade-off is stated per boot instead of being either a silent default or a
-// startup wall.
+// logStoreConnected says which store this process opened and on what terms: the
+// engine, the target, and on Postgres the sslmode with what that mode actually
+// delivers, as fields rather than as prose. `serve` says it at info, since boot is
+// where an operator checks the settings took effect; one-shot commands say it at
+// debug so `items list` stays quiet.
 //
-// Worth the noise: this connection carries the auth row's signing_key, and that
-// key signs the "stay signed in" cookies. Someone who can impersonate the
-// database can read it and mint cookies that never expire.
-func warnTLS(pg config.Postgres) {
-	if pg.Loopback || pg.TLSVerified() {
-		return
+// Stated, not warned about. What each sslmode costs is argued once in
+// docs/configuration.md#tls, and repeating it every boot reads as alarm about the
+// documented default — `require`, the only mode Supabase and RDS reach on the first
+// try — which trains people to ignore the lines that do mean something. The two
+// booleans still carry the whole fact: over loopback `verified:false` is nobody
+// else's reach, and `encrypted:false` is visible to anyone reading the line.
+func logStoreConnected(cfg *config.Config, label string, exclusive bool, pg config.Postgres) {
+	level := zerolog.DebugLevel
+	if exclusive {
+		// Only `serve` opens exclusively, and its boot log is the confirmation.
+		level = zerolog.InfoLevel
 	}
-	if !pg.TLSEncrypted() {
-		// Three modes land here and they are not the same mistake: `disable` and
-		// `allow` never ask for TLS, while `prefer` asks and gives up silently when
-		// the server declines. The exposure is identical, so the warning names the
-		// configured mode rather than leaving it to the reader to look up.
-		why := "does not encrypt"
-		if pg.SSLMode == "prefer" {
-			why = "falls back to plain text whenever the server declines TLS"
-		}
-		log.Warn().Msgf("store.url sets sslmode=%s, which %s: your items and your login hash"+
-			" can cross the network in plain text."+
-			" docs/configuration.md has the sslmode table", pg.SSLMode, why)
-		return
+	engine := "sqlite"
+	if cfg.Store.IsPostgres() {
+		engine = "postgres"
 	}
-	log.Warn().Msgf("store.url uses sslmode=%s: the connection is encrypted but the server is not"+
-		" verified, so anyone on the path to %s could impersonate it and read the signing key that"+
-		" backs the stay-signed-in cookies. Set sslmode=verify-full with sslrootcert pointing at"+
-		" your provider's certificate authority to close this.", pg.SSLMode, pg.Label)
+	event := log.WithLevel(level).Str("engine", engine).Str("store", label)
+	if cfg.Store.IsPostgres() {
+		event = event.
+			Str("sslmode", pg.SSLMode).
+			Bool("encrypted", pg.TLSEncrypted()).
+			Bool("verified", pg.TLSVerified()).
+			Bool("loopback", pg.Loopback)
+	}
+	event.Msg("store connected")
 }
 
 // withStore opens the configured store, runs fn, and closes it. The loaded

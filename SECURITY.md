@@ -58,8 +58,9 @@ Three more things worth knowing:
 - **A Postgres connection encrypts by default but does not verify the server**, because that is
   the only mode that reaches Supabase and RDS on the first try (`sslmode=require`). Anyone who
   can sit between you and the database can impersonate it, and what crosses includes the
-  `signing_key` behind the "stay signed in" cookies. Every start against a non-loopback host
-  warns about this rather than accepting it quietly; `sslmode=verify-full` with `sslrootcert`
+  `signing_key` behind the "stay signed in" cookies. Every `serve` boot states the connection it
+  made — engine, database, `sslmode`, and whether the server's identity was verified — so the
+  setting is visible in the log rather than assumed; `sslmode=verify-full` with `sslrootcert`
   set to your provider's CA closes it, and the database's own access control is part of your
   trusted boundary either way. See [docs/configuration.md](docs/configuration.md#tls).
 

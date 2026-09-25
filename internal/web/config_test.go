@@ -142,6 +142,13 @@ func TestRedactSecrets(t *testing.T) {
 			`  url: postgres://rabbit@db.host:5432/rabbithole`,
 			`  url: postgres://rabbit@db.host:5432/rabbithole`,
 		},
+		// No userinfo at all: the `:` here belongs to the port, and a redactor
+		// that read it as the user/password split would mask the port away.
+		{
+			"host and port only, nothing to redact",
+			`  url: postgres://db.host:5432/rabbithole`,
+			`  url: postgres://db.host:5432/rabbithole`,
+		},
 		// A Postgres password names the variable it belongs in rather than
 		// showing dots, so the viewer is one more place that says where to
 		// put it.
