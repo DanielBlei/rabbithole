@@ -30,6 +30,11 @@ const (
 	offChoice     = "off"
 )
 
+// sourceTypes are the kinds the detail form offers: the ones ingest can fetch.
+// Blog and news are declared in config but only skipped by ingest, so they stay
+// out until they work.
+var sourceTypes = []config.FeedType{config.FeedTypeRSS, config.FeedTypeAcademic}
+
 // sourcesData is the Sources dialog model: the whole feed set as rows on the
 // left, one feed's editable settings on the right.
 type sourcesData struct {
@@ -93,6 +98,8 @@ type feedDetail struct {
 	Name    string
 	URL     string
 	Deleted bool
+	// Type is the feed's kind, resolved: an unset type shows as rss.
+	Type string
 
 	// Own values, blank when the feed takes the default.
 	EnabledChoice string
@@ -119,6 +126,22 @@ type feedDetail struct {
 	// itself; Notice stays put, which is what a caveat like a half-done rename
 	// needs. A plain "saved" only has to be seen once.
 	Flash *flashData
+}
+
+// TypeChoices is what the type picker offers. A feed seeded with a kind the
+// form doesn't offer keeps it as an extra choice, so saving it doesn't quietly
+// turn it into RSS.
+func (d *feedDetail) TypeChoices() []string {
+	out := make([]string, 0, len(sourceTypes)+1)
+	known := false
+	for _, t := range sourceTypes {
+		out = append(out, string(t))
+		known = known || string(t) == d.Type
+	}
+	if !known && d.Type != "" {
+		out = append(out, d.Type)
+	}
+	return out
 }
 
 // flashData is one self-clearing confirmation: the outcome in a word, over the
@@ -170,7 +193,11 @@ func (s *Web) handleSourceSelect(w http.ResponseWriter, r *http.Request) {
 
 // handleSourceNew opens the add-a-feed form in the detail pane.
 func (s *Web) handleSourceNew(w http.ResponseWriter, r *http.Request) {
-	s.renderSourcesBody(w, r, "", &feedDetail{Adding: true, EnabledChoice: inheritChoice})
+	s.renderSourcesBody(w, r, "", &feedDetail{
+		Adding:        true,
+		EnabledChoice: inheritChoice,
+		Type:          string(config.FeedTypeRSS),
+	})
 }
 
 // handleSourceAdd creates a feed. A failure re-renders the form with the
@@ -182,7 +209,7 @@ func (s *Web) handleSourceNew(w http.ResponseWriter, r *http.Request) {
 // one. The new feed is in the list beside it either way, and the notice names
 // what was added.
 func (s *Web) handleSourceAdd(w http.ResponseWriter, r *http.Request) {
-	feed, err := feedFromForm(r)
+	feed, err := feedFromForm(r, "")
 	if err != nil {
 		s.renderSourcesBody(w, r, "", addFormWithError(r, err))
 		return
@@ -199,6 +226,7 @@ func (s *Web) handleSourceAdd(w http.ResponseWriter, r *http.Request) {
 	s.renderSourcesBody(w, r, "", &feedDetail{
 		Adding:        true,
 		EnabledChoice: inheritChoice,
+		Type:          string(config.FeedTypeRSS),
 		Flash:         &flashData{Verb: "added", Cmd: "feed add", Name: feed.Name},
 	})
 }
@@ -216,7 +244,7 @@ func (s *Web) handleSourceSave(w http.ResponseWriter, r *http.Request) {
 		httpFeedError(w, err)
 		return
 	}
-	feed, err := feedFromForm(r)
+	feed, err := feedFromForm(r, previous.Type)
 	if err != nil {
 		s.renderSourcesBody(w, r, id, editFormWithError(r, id, err))
 		return
@@ -524,6 +552,7 @@ func (s *Web) detailFor(ctx context.Context, id string, defaults config.FeedDefa
 		ID:            own.ID,
 		Name:          own.Name,
 		URL:           own.URL,
+		Type:          string(resolvedType(own.Type)),
 		EnabledChoice: enabledChoice(own.Enabled),
 		Tags:          own.Tags,
 		TagsValue:     strings.Join(own.Tags, ","),
@@ -616,13 +645,19 @@ func (s *Web) defaultsForm(d config.FeedDefaults, errMsg string) defaultsData {
 }
 
 // feedFromForm reads the detail form. A blank field means "inherit", which is a
-// nil pointer here and a NULL in the store — not a zero value.
-func feedFromForm(r *http.Request) (config.Feed, error) {
+// nil pointer here and a NULL in the store — not a zero value. keep is the
+// type the feed already has, empty when adding.
+func feedFromForm(r *http.Request, keep config.FeedType) (config.Feed, error) {
 	feed := config.Feed{
 		Name: strings.TrimSpace(r.FormValue("name")),
 		URL:  strings.TrimSpace(r.FormValue("url")),
 		Tags: splitCommaList(r.FormValue("tags")),
 	}
+	typ, err := typeFromForm(config.FeedType(r.FormValue("type")), keep)
+	if err != nil {
+		return feed, err
+	}
+	feed.Type = typ
 	switch r.FormValue("enabled") {
 	case onChoice:
 		on := true
@@ -649,8 +684,38 @@ func feedFromForm(r *http.Request) (config.Feed, error) {
 	return feed, nil
 }
 
+// typeFromForm maps the posted type onto what the store keeps. RSS is stored
+// as unset, so feeds added here read back like every feed from before types
+// existed, unless the feed already said rss explicitly, which is kept so its
+// export doesn't change. A type the form doesn't offer is only accepted when
+// it is the one the feed already has.
+func typeFromForm(posted, keep config.FeedType) (config.FeedType, error) {
+	switch {
+	case resolvedType(posted) == config.FeedTypeRSS && resolvedType(keep) == config.FeedTypeRSS:
+		return keep, nil
+	case resolvedType(posted) == config.FeedTypeRSS:
+		return "", nil
+	case posted == keep:
+		return keep, nil
+	}
+	for _, t := range sourceTypes {
+		if posted == t {
+			return t, nil
+		}
+	}
+	return "", fmt.Errorf("type %q can't be fetched yet: pick one of rss, academic", posted)
+}
+
+// resolvedType is t with unset read as rss, the way the cascade resolves it.
+func resolvedType(t config.FeedType) config.FeedType {
+	if t == "" {
+		return config.FeedTypeRSS
+	}
+	return t
+}
+
 func defaultsFromForm(r *http.Request) (config.FeedDefaults, error) {
-	feed, err := feedFromForm(r)
+	feed, err := feedFromForm(r, "")
 	if err != nil {
 		return config.FeedDefaults{}, err
 	}
@@ -669,6 +734,7 @@ func addFormWithError(r *http.Request, err error) *feedDetail {
 		Adding:        true,
 		Name:          r.FormValue("name"),
 		URL:           r.FormValue("url"),
+		Type:          string(resolvedType(config.FeedType(r.FormValue("type")))),
 		EnabledChoice: r.FormValue("enabled"),
 		Since:         r.FormValue("since"),
 		MaxItems:      r.FormValue("max_items"),
