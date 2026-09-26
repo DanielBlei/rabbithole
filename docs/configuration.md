@@ -51,7 +51,7 @@ All fields are optional unless marked required.
 | `inference.batch_size` | Articles per scoring request | `1`                               |
 | `inference.max_parallel` | Scoring requests in flight | `1`                               |
 | `inference.model_tuning.*` | Decoding limits — see below | see below                         |
-| `ingest.since` | Lookback window for new items | `7d`                              |
+| `ingest.since` | Fallback lookback window, used when neither the feed nor the [feed defaults](#feeds) set `since` | `7d`                              |
 | `ingest.feeds` | Path to the feed seed file | `feeds.yaml` beside `config.yaml` |
 | `ingest.digest_dir` | Output directory for `ingest --markdown` | none — required by that flag      |
 | `store.db_path` | SQLite database file | one of `db_path`/`url` required   |

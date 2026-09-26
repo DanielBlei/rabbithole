@@ -97,11 +97,7 @@ clean-feeds: ## Delete every feed item from the store, keeping todos, ideas and 
 ##@ ingest
 
 .PHONY: ingest
-ingest: config-hint ## Fetch, rank, record, and write today's markdown ingest (uses CONFIG, NO_THINK=1 to disable thinking)
-	go run . ingest --config $(CONFIG) --markdown $(THINK_FLAG)
-
-.PHONY: db-only
-db-only: config-hint ## Fetch, rank, and record to the store only (no markdown file)
+ingest: config-hint ## Fetch, rank, and record to the store (uses CONFIG, NO_THINK=1 to disable thinking)
 	go run . ingest --config $(CONFIG) $(THINK_FLAG)
 
 .PHONY: dry-run
@@ -110,7 +106,7 @@ dry-run: config-hint ## Print the ingest to stdout without writing files or reco
 
 .PHONY: heuristic
 heuristic: config-hint ## Offline ingest with the model-free keyword scorer (no Ollama needed)
-	go run . ingest --config $(CONFIG) --provider heuristic --markdown $(THINK_FLAG)
+	go run . ingest --config $(CONFIG) --provider heuristic $(THINK_FLAG)
 
 ##@ Eval
 
