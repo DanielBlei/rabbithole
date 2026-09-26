@@ -179,8 +179,10 @@ feeds:
 
 ### Academic sources
 
-Set `type: academic` to use an academic provider. The URL host selects arXiv,
-Crossref or Semantic Scholar, and its query parameters define the saved search.
+Set `type: academic` in the seed file, or pick **academic** as the type when adding a feed
+on the Sources popup, to use an academic provider. The URL host selects arXiv, Crossref or
+Semantic Scholar, and its query parameters define the saved search. The popup offers only the
+types ingest can fetch, `rss` and `academic`.
 
 Supported search parameters include `q`, `query`, `search_query` and
 `query.bibliographic`. Optional filters are `publisher`, `journal`, `issn`,

@@ -21,7 +21,7 @@
   // you'd actually remember about a feed.
   function matches(row, q) {
     if (!q) return true;
-    var hay = [row.dataset.name, row.dataset.url, row.dataset.tags].join(' ').toLowerCase();
+    var hay = [row.dataset.name, row.dataset.url, row.dataset.tags, row.dataset.type].join(' ').toLowerCase();
     return hay.indexOf(q) !== -1;
   }
 

@@ -30,6 +30,15 @@
              autocomplete="off" spellcheck="false">
     </label>
 
+    {{/* Above the url because it decides what the url means: a feed, or a
+         saved search on an academic provider. Only kinds ingest can fetch. */}}
+    <div class="sdet__f">
+      <span class="sdet__lbl">type</span>
+      <div class="sdet__tri" role="group" aria-label="Type">
+        {{range .TypeChoices}}<label class="sdet__opt"><input type="radio" name="type" value="{{.}}" {{if eq . $.Type}}checked{{end}}><span>{{.}}</span></label>{{end}}
+      </div>
+    </div>
+
     {{/* Deliberately not type="url": the browser would reject a scheme-less
          address before it could be sent, and the server fills https in for you.
          Plain http is accepted but flagged under the field — a feed that only

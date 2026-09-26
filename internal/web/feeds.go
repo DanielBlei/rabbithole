@@ -34,6 +34,7 @@ type feedRowData struct {
 	Name string
 	URL  string
 	Host string // URL's host — the compact label under the feed name
+	Type string // resolved kind; the row badges anything but rss
 
 	Enabled bool
 	Deleted bool
@@ -72,6 +73,7 @@ func toFeedRow(f config.ResolvedFeed, h store.FeedHealth, now time.Time) feedRow
 		Name:     f.Name,
 		URL:      f.URL,
 		Host:     hostOf(f.URL),
+		Type:     string(f.Type),
 		Enabled:  f.Enabled,
 		Since:    shortDur(f.Since),
 		Cap:      capLabel(f.MaxItems),

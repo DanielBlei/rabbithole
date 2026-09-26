@@ -36,10 +36,10 @@ const (
 	// value of FeedType resolves to this — see resolveFeed — so every feed file
 	// written before FeedType existed keeps working unchanged.
 	FeedTypeRSS FeedType = "rss"
-	// FeedTypeBlog, FeedTypeNews and FeedTypeAcademic are declared but not yet
-	// implemented: ingest logs and skips feeds of these types rather than
-	// fetching them. They exist now so feed files can name a future source kind
-	// ahead of its ingest support landing.
+	// FeedTypeAcademic is a saved search on an academic provider (arXiv,
+	// Crossref, Semantic Scholar). FeedTypeBlog and FeedTypeNews are declared
+	// but not yet implemented: ingest logs and skips feeds of these types rather
+	// than fetching them, so feed files can name them ahead of their support.
 	FeedTypeBlog     FeedType = "blog"
 	FeedTypeNews     FeedType = "news"
 	FeedTypeAcademic FeedType = "academic"

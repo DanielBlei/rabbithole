@@ -2280,6 +2280,7 @@ button.modal__act{border:0;font:inherit;}
 .srow__dot--never{background:var(--caution);opacity:.7;}
 .srow__dot--off{background:none;box-shadow:inset 0 0 0 1px var(--text-dim);}
 .srow__streak{flex:0 0 auto;color:var(--warn);opacity:.8;font-size:1.1rem;}
+.srow__kind{flex:0 0 auto;font-size:1rem;padding:0 7px;}
 
 .srow__tg{
   flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;

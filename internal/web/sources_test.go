@@ -831,3 +831,106 @@ func TestSourcesMissingFeedIs404(t *testing.T) {
 		t.Errorf("status = %d, want 404; body=%s", rec.Code, rec.Body)
 	}
 }
+
+// An academic search can be created from the page, badges its row, and RSS
+// stays stored as unset so it reads back like every feed from a seed file.
+func TestSourcesAddPicksType(t *testing.T) {
+	w, db := sourcesTestWeb(t, config.FeedsDoc{})
+	body := postForm(t, w, "/sources", url.Values{
+		"name": {"arXiv RAG"}, "url": {"https://export.arxiv.org/api/query?search_query=all:rag"},
+		"type": {"academic"},
+	})
+	postForm(t, w, "/sources", url.Values{
+		"name": {"Blog"}, "url": {"https://blog.test/feed"}, "type": {"rss"},
+	})
+
+	if got := mustFeed(t, db, "arXiv RAG").Type; got != config.FeedTypeAcademic {
+		t.Errorf("academic add stored type %q", got)
+	}
+	if got := mustFeed(t, db, "Blog").Type; got != "" {
+		t.Errorf("rss add stored type %q, want unset", got)
+	}
+	if !strings.Contains(body, `srow__kind">academic<`) {
+		t.Errorf("the academic row carries no badge; body=%s", body)
+	}
+	if strings.Contains(get(t, w, "/sources"), `srow__kind">rss<`) {
+		t.Error("an rss row was badged, but rss is the default")
+	}
+	if out := get(t, w, "/sources/export"); strings.Contains(out, "type: rss") {
+		t.Errorf("an rss feed added from the page exported a type; body=%s", out)
+	}
+}
+
+// The form only offers kinds ingest can fetch, and the server holds that line
+// against a hand-crafted post too.
+func TestSourcesAddRejectsUnfetchableType(t *testing.T) {
+	w, db := sourcesTestWeb(t, config.FeedsDoc{})
+	form := get(t, w, "/sources/new")
+	for _, typ := range []string{"rss", "academic"} {
+		if !strings.Contains(form, `name="type" value="`+typ+`"`) {
+			t.Errorf("the add form does not offer %s; body=%s", typ, form)
+		}
+	}
+	if strings.Contains(form, `value="blog"`) || strings.Contains(form, `value="news"`) {
+		t.Errorf("the add form offers a type ingest skips; body=%s", form)
+	}
+
+	out := postForm(t, w, "/sources", url.Values{
+		"name": {"Blog"}, "url": {"https://blog.test/feed"}, "type": {"blog"},
+	})
+	if !strings.Contains(out, "can&#39;t be fetched yet") {
+		t.Errorf("an unfetchable type was not rejected inline; body=%s", out)
+	}
+	if len(mustFeeds(t, db)) != 0 {
+		t.Errorf("a rejected feed was stored: %+v", mustFeeds(t, db))
+	}
+}
+
+// Editing keeps the kind a feed already has: an academic search stays one, an
+// explicit rss stays in the export, and a seeded kind the form doesn't offer
+// is shown and kept rather than quietly turned into RSS.
+func TestSourcesSaveKeepsType(t *testing.T) {
+	w, db := sourcesTestWeb(t, config.FeedsDoc{Feeds: []config.Feed{
+		{Name: "arXiv", URL: "https://export.arxiv.org/api/query?search_query=all:rag", Type: config.FeedTypeAcademic},
+		{Name: "Explicit", URL: "https://explicit.test/feed", Type: config.FeedTypeRSS},
+		{Name: "Later", URL: "https://later.test/feed", Type: config.FeedTypeBlog},
+	}})
+
+	for _, c := range []struct {
+		name, url, posted string
+		want              config.FeedType
+	}{
+		{"arXiv", "https://export.arxiv.org/api/query?search_query=all:rag", "academic", config.FeedTypeAcademic},
+		{"Explicit", "https://explicit.test/feed", "rss", config.FeedTypeRSS},
+		{"Later", "https://later.test/feed", "blog", config.FeedTypeBlog},
+	} {
+		id := feedID(t, db, c.name)
+		if pane := get(t, w, "/sources/"+id); !strings.Contains(pane, `value="`+c.posted+`" checked`) {
+			t.Errorf("%s: the pane does not show its type checked; body=%s", c.name, pane)
+		}
+		postForm(t, w, "/sources/"+id, url.Values{
+			"name": {c.name}, "url": {c.url}, "type": {c.posted}, "tags": {"kept"}, "since": {"3d"},
+		})
+		if got := mustFeed(t, db, c.name).Type; got != c.want {
+			t.Errorf("%s: save left type %q, want %q", c.name, got, c.want)
+		}
+	}
+
+	// Switching is allowed both ways.
+	id := feedID(t, db, "arXiv")
+	postForm(t, w, "/sources/"+id, url.Values{
+		"name": {"arXiv"}, "url": {"https://export.arxiv.org/api/query?search_query=all:rag"}, "type": {"rss"},
+	})
+	if got := mustFeed(t, db, "arXiv").Type; got != "" {
+		t.Errorf("switching to rss stored %q, want unset", got)
+	}
+}
+
+func mustFeed(t *testing.T, db *store.Store, name string) config.Feed {
+	t.Helper()
+	f, err := db.FeedByID(t.Context(), feedID(t, db, name))
+	if err != nil {
+		t.Fatalf("FeedByID: %v", err)
+	}
+	return f
+}
