@@ -14,7 +14,7 @@ body:
     id: repro
     attributes:
       label: Steps to reproduce
-      description: The command you ran. Please redact `inference.api_key`.
+      description: The command you ran. Please redact `inference.api_key` and any database password.
       render: shell
     validations:
       required: true
@@ -32,10 +32,19 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: store
+    attributes:
+      label: Store
+      options:
+        - sqlite (store.db_path)
+        - postgres (store.url)
+        - not sure
+
   - type: input
     id: env
     attributes:
       label: Environment
-      description: OS, `go version`, and the commit you are on.
+      description: OS, and `rabbithole --version` (or the commit, if built from source).
     validations:
       required: true

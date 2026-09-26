@@ -113,8 +113,8 @@ func init() {
 	auditCmd := &cobra.Command{
 		Use:   "audit",
 		Short: "Report on the scores already in the store, and what your ratings say about them",
-		Long: "Reads recorded scores and your own ratings, and reports which sources earn their " +
-			"slot, where the model disagreed with your thumbs, and how scores are distributed. " +
+		Long: "Reads recorded scores beside your own ratings, and reports how closely they agree " +
+			"and how scores are distributed. " +
 			"Reads historical values rather than re-scoring, so it describes what happened " +
 			"rather than testing a change. No model is contacted and nothing is written.",
 		Args:   cobra.NoArgs,

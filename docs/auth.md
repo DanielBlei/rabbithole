@@ -4,6 +4,10 @@
 no accounts. The login exists so that reaching the port is not the same as reaching your
 notes, ideas and feeds.
 
+> **In short.** First run: open the app and choose **Create an account** or **Leave it open**.
+> Forgot the password: run `rabbithole auth reset` on the server. Reaching it from another
+> device: see [Reaching it from another machine](#reaching-it-from-another-machine).
+
 ## First run
 
 Nobody has claimed a fresh database yet, so there is nothing to log in to and no login is

@@ -43,7 +43,7 @@ ideas, and the feed set, which the Sources page can add to, retune and delete. S
   `rabbithole auth reset` and `rabbithole auth disable` write the database directly. A reset
   sets the new password at once, never leaving the instance unclaimed again.
 
-Three more things worth knowing:
+A few more things worth knowing:
 
 - **`serve` refuses plain HTTP on any address but loopback.** To reach it from another
   machine, give it a certificate (`--tls-cert`, `--tls-key`), put it behind a reverse proxy
@@ -52,7 +52,7 @@ Three more things worth knowing:
   to set.
 - **A Postgres store takes its password from `RABBITHOLE_DB_PASSWORD`, not from the config
   file**, so the credential stays out of anything that copies `config.yaml` around. A password
-  written into `store.url` anyway still works, and is expected at startup: the config viewer
+  written into `store.url` anyway still works, and is warned about at startup: the config viewer
   prints `$RABBITHOLE_DB_PASSWORD` where the value would be, the environment variable overrides
   it, and connection errors name the database without it.
 - **A Postgres connection encrypts by default but does not verify the server**, because that is
@@ -85,7 +85,7 @@ and are edited from the Sources page; `feeds.yaml` seeds new ones at startup. Tr
 something only you write.
 
 A feed URL is taken as given, apart from filling in a missing `https://`. An `http://` feed
-is fetched over plain http and flagged as insecure on the Sources page — the request is
+is fetched over plain http and flagged as insecure on the Sources page: the request is
 readable in transit, so anyone on the network can see which feed you asked for.
 
 Feed content also reaches the model: a title or summary could be written by the feed's author
@@ -99,7 +99,9 @@ kept to one line so a fake article can't be smuggled in through a title. See
 
 ## What leaves your machine
 
-The server talks to your feeds and your inference host, nothing else. Fonts ship inside the
+The server talks to your sources (feed hosts, and the arXiv, Crossref and Semantic Scholar APIs
+for academic sources), your inference host, and your Postgres server if `store.url` names one;
+nothing else. Fonts ship inside the
 binary, so no page load reaches a CDN.
 
 The exception is the Maze weather widget, on by default. The browser calls Open-Meteo with

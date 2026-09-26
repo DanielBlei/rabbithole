@@ -5,7 +5,9 @@
 Your interest profile decides what scores well, and you write it blind. Change a line and
 your feed changes, but nothing tells you whether it got better or worse.
 `rabbithole eval benchmark` closes that loop: you mark a handful of articles yourself, and
-it shows you where the model disagreed with you.
+it shows you where the model disagreed with you. `rabbithole eval audit` asks the other
+question: across the items you already rated in your real feed, how often did the recorded
+score agree with you?
 
 ## How it works
 
@@ -23,7 +25,7 @@ edit did anything. Nothing is written to the store and your profile is never rew
 
 The benchmark remains deliberately configuration-driven and read-only: it uses the Markdown
 named by `config.profile`, or the built-in Default when that setting is absent. It does not
-read or mutate the active SQLite profile. To benchmark a local UI profile in v1, copy its raw
+read or mutate the active profile in the store. To benchmark a local UI profile in v1, copy its raw
 text to a Markdown file and point `profile:` at that file for the benchmark.
 
 ## The set of articles
@@ -354,16 +356,37 @@ INPUTS     profile 07377fd54469 · prompt 351a9edc8435 · benchmark 070506edf6e0
 Two reports only mean something side by side when two of the three match. Otherwise a
 number that moved proves nothing about the change you think you made.
 
-## Later: `eval audit`
+## Auditing your real feed: `eval audit`
 
-`benchmark` asks *did my edit help*, on articles you curated. `audit` will ask *what
-actually happened*, reading the marks already recorded for your real feed: which sources
-earn their slot, where the model disagreed with your thumbs, how marks are spread.
+`benchmark` asks *did my edit help*, on articles you curated. `audit` asks *what actually
+happened*: it reads the scores already recorded in the store, sets them beside your own
+ratings, and prints the same report as the benchmark. No model is contacted and nothing is
+written.
 
-It is not built yet and is hidden from `--help`. Two things it will have to get right:
+Only items that carry both a model score and your rating count. Ratings come from the thumbs in
+the why panel (a thumb records 10 or 0) or from `rabbithole items rate` (any value from 0 to 10).
+Thumbs alone make the agreement numbers coarse, so rate a few items by hand for a finer
+picture.
 
-- **A source's average mark is the wrong measure.** A busy feed averaging 3 with five
-  articles at 9 is worth keeping, and the average says drop it.
-- **Only the model name is recorded** against an item, not the provider or the settings. An
-  audit spanning rows marked under different configurations can blame the profile for a
-  configuration change.
+```sh
+rabbithole eval audit                          # 10 random rated items
+rabbithole eval audit --all --since 30d        # every rated item from the last month
+rabbithole eval audit --source "arXiv RAG research" --show-why
+rabbithole eval audit --all --format markdown --output-path audit.md
+```
+
+| Flag | What it does |
+|---|---|
+| `--limit N` | Sample size (default 10) |
+| `--all` | Use every matching item instead of a sample |
+| `--seed N` | Repeat the same random draw |
+| `--newest` | Take the latest items instead of a random sample; biased toward whichever feeds ran last |
+| `--since 30d` | Only items recorded within this window |
+| `--source NAME` | Only items from one source |
+| `--scored-by MODEL` | Only items scored by one model |
+| `--format`, `--output-path`, `--show-why` | As for `benchmark` |
+
+Each score records the model and the profile it was made with, but not the provider or its
+decoding settings. When you changed configuration along the way, keep one configuration's rows
+together with `--scored-by` and `--since`, or the report can blame the profile for a
+configuration change.

@@ -46,9 +46,11 @@ func buildVersion() string {
 
 var rootCmd = &cobra.Command{
 	Use:   "rabbithole",
-	Short: "Personal RSS reading assistant: ranks feeds against your interests",
-	Long: "The Rabbit Hole fetches your RSS/Atom feeds, scores each new item against an " +
-		"interest profile using an LLM, and writes a daily markdown digest of what to read.",
+	Short: "Ranks what to read from your feeds and paper searches, against your interests",
+	Long: "The Rabbit Hole pulls new items from your sources (RSS and Atom feeds, and saved " +
+		"searches on arXiv, Crossref and Semantic Scholar), scores each against your interest " +
+		"profile with an LLM or the model-free heuristic scorer, and ranks them in a web UI. " +
+		"Run `serve` for the UI; `ingest` runs one cycle from the terminal.",
 	Version:       buildVersion(),
 	SilenceErrors: true,
 	SilenceUsage:  true,
