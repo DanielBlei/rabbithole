@@ -22,11 +22,10 @@ deliberately outside that:
 - **Multi-user.** One reader with local profiles. No per-account profiles or sharing.
 - **A hosted service.** Self-hosting is the deployment model.
 
-It runs on your own machine today, with no authentication and a loopback binding. That is the
-current state rather than a fixed position: whether it should be reachable from another
-device is genuinely open, and auth would follow that decision rather than lead it.
-[SECURITY.md](SECURITY.md) has the details, and is also where to report a vulnerability
-rather than in a public issue.
+It is self-hosted. `serve` binds to loopback by default, puts the UI and API behind a single
+login, and refuses plain HTTP on any other address. [docs/auth.md](docs/auth.md) covers the
+login; [SECURITY.md](SECURITY.md) covers the threat model, and is where to report a
+vulnerability rather than in a public issue.
 
 One thing is genuinely undecided: whether this grows into a full self-hosted reader or stays
 a focused triage engine. If your idea leans on that answer, say so in the issue. It is a live
@@ -52,9 +51,12 @@ make check   # golangci-lint + go test -race + build
 ```
 
 `make check` runs the same gate CI does, so a green run locally is a green run on the PR. It
-needs [golangci-lint](https://golangci-lint.run/welcome/install/) — CI pins v2.12.2, so
+needs [golangci-lint](https://golangci-lint.run/welcome/install/); CI pins v2.12.2, so
 matching that locally avoids a surprise. The linter also reports formatting, and
 `make lint-fix` autofixes most of what it finds, formatting included.
+
+CI also runs on Linux and macOS and enforces 75% total test coverage; `make cover` shows where
+you stand. `make bench` runs the ranking and store benchmarks locally.
 
 Add tests for new behaviour, and update the page under `docs/` your change makes wrong.
 
@@ -82,6 +84,9 @@ checks to sit idle for a bit on your first contribution.
 ## Commits
 
 `type(scope): imperative summary`, then a line or two on why the change exists.
+
+Releases are cut from `v*` tags. GoReleaser builds the binaries and writes the release notes
+from commit subjects, grouped by `feat` and `fix`, so the subject line is what users read.
 
 Sign off your commits with `git commit -s`. That line certifies you wrote the code, or
 otherwise have the right to contribute it under the project's license. It is the

@@ -34,8 +34,8 @@ flowchart LR
 can write the result as a markdown digest, while `serve` exposes the store over HTTP and can
 trigger the same cycle in the background (see [docs/api.md](api.md)). State (seen items,
 scores, digest history, local profiles, active-profile selection and user status/notes)
-lives in the store — a local SQLite file by default, or Postgres when `store.url` names a
-database — so re-runs only score genuinely new items.
+lives in the store (a local SQLite file by default, or Postgres when `store.url` names a
+database), so re-runs only score genuinely new items.
 
 Everything `serve` exposes, the JSON API included, sits behind one login (see
 [auth.md](auth.md)). The credentials live in the store's `auth` table; sessions live only in
@@ -122,15 +122,20 @@ internal/server       composition root for serve: mounts api + web behind the lo
 internal/api          JSON API route set (/api/*)
 internal/web          server-rendered htmx UI, the login gate and sessions, templates and static assets
 internal/httplog      HTTP access-log middleware
+internal/httpgzip     response compression middleware
+internal/eval         eval benchmark and eval audit: datasets, metrics and reports
+internal/claude       Claude CLI scorer, reachable only from eval benchmark
 internal/logger       zerolog setup for --debug/--trace
 scripts/              a throwaway Postgres for running the store tests; not used at runtime
 ```
 
 ## Roadmap
 
-- **Adaptive ranking** — feed `status`/`user_score`/`user_note` history (recorded via
+- **More source types**: `blog` and `news` (reserved in the feed schema, skipped by ingest
+  today), including ordinary pages that publish no feed.
+- **Adaptive ranking**: feed `status`/`user_score`/`user_note` history (recorded via
   `items` or the API) back into the scoring prompt as liked/disliked examples.
-- **Full-text crawl** — fetch the article page and score the piece itself, rather than the
+- **Full-text crawl**: fetch the article page and score the piece itself, rather than the
   summary a feed chose to publish about it.
-- **Scheduling & delivery** — systemd timer or cron to run ingest unattended, plus email,
+- **Scheduling & delivery**: systemd timer or cron to run ingest unattended, plus email,
   push or an output feed so the digest reaches you instead of waiting to be opened.

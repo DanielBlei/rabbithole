@@ -4,13 +4,13 @@ Files under `configs/`:
 
 | File | Contents |
 |---|---|
-| `config.yaml` | How to run — model, scoring, storage, paths |
-| `feeds.yaml` | Feeds to seed the store with on first run — see [Feeds](#feeds) |
-| `prompts/profile.example.md` | Optional example/legacy import source; live profiles are in SQLite |
+| `config.yaml` | How to run: model, scoring, storage, paths |
+| `feeds.yaml` | Sources to seed the store with on first run; see [Feeds](#feeds) |
+| `prompts/profile.example.md` | Optional example/legacy import source; live profiles are in the store |
 | `prompts/system.md` | Optional [system prompt](#system-prompt) override; omit to use the built-in default |
 
 The system prompt is still file/config owned. Interest profiles are application data managed
-under **Settings → Profiles** and persisted in SQLite.
+under **Settings → Profiles** and persisted in the store (SQLite or Postgres).
 
 ## Getting started
 
@@ -114,10 +114,15 @@ and `reason_max_chars` is enforced rather than merely requested.
 
 ## Feeds
 
+A source (a "feed" throughout the UI and this page) is anything ingest reads: an RSS or Atom
+feed (`type: rss`, the default), or a saved search on arXiv, Crossref or Semantic Scholar
+(`type: academic`, see [Academic sources](#academic-sources)). `blog` and `news` are reserved
+for source types still to come and are skipped by ingest for now.
+
 Feeds live in the database and are managed from the **Sources** page (side menu → Sources,
 or the gear menu → Edit sources). You can add, edit, enable, disable and delete feeds there,
-edit the set-wide defaults, and search the list. Changes take effect on the next ingest run —
-no restart.
+pick each one's type, edit the set-wide defaults, and search the list. Changes take effect on
+the next ingest run, with no restart.
 
 `configs/feeds.yaml` is a **seed file**, not the live configuration. On every `serve`
 startup, any feed in it the database has never seen is added; everything else is left as it
@@ -127,11 +132,11 @@ feeds it added.
 So both routes work, and neither undoes the other:
 
 - Adding an entry to the file and restarting picks it up.
-- Disabling, retuning or deleting a feed on the Sources popup survives every restart. That is
+- Disabling, retuning or deleting a feed on the Sources section survives every restart. That is
   why deleting hides a feed rather than dropping it — the database has to remember it, or
   the next restart would add it back from the file.
 
-The **export** button on the Sources popup gives you the current set in this same YAML shape.
+The **export** button on the Sources section gives you the current set in this same YAML shape.
 Copy it over `configs/feeds.yaml` to reproduce the set on another install.
 
 ### Feed URLs
@@ -145,7 +150,8 @@ between can see which feed you asked for.
 
 ### The seed file's shape
 
-A `defaults:` block followed by the feed list. Any RSS or Atom URL is accepted.
+A `defaults:` block followed by the feed list. Any RSS or Atom URL works as `type: rss`;
+academic searches are described under [Academic sources](#academic-sources).
 
 ```yaml
 defaults:
@@ -170,7 +176,7 @@ feeds:
 | Field | Description | Default |
 |---|---|---|
 | `name` | Display name; also the source items are stored under | **required, unique** |
-| `url` | RSS or Atom URL; a missing scheme becomes `https://` | **required, unique** |
+| `url` | RSS or Atom URL, or an academic search URL for `type: academic`; a missing scheme becomes `https://` | **required, unique** |
 | `type` | Source kind: `rss`, `blog`, `news` or `academic`. RSS and academic are implemented; blog and news are not yet implemented | `rss` |
 | `enabled` | `false` retains the feed but never fetches it | `true` |
 | `since` | Lookback window for this feed | defaults, then `ingest.since` |
@@ -180,9 +186,22 @@ feeds:
 ### Academic sources
 
 Set `type: academic` in the seed file, or pick **academic** as the type when adding a feed
-on the Sources popup, to use an academic provider. The URL host selects arXiv, Crossref or
-Semantic Scholar, and its query parameters define the saved search. The popup offers only the
+on the Sources section, to use an academic provider. The URL host selects arXiv, Crossref or
+Semantic Scholar, and its query parameters define the saved search. The section offers only the
 types ingest can fetch, `rss` and `academic`.
+
+| Provider | Example URL |
+|---|---|
+| arXiv | `https://arxiv.org/search?q=agentic+coding` |
+| Crossref | `https://api.crossref.org/works?q=llm&publisher=ACM` |
+| Semantic Scholar | `https://www.semanticscholar.org/search?q=code+agents&min_citations=5` |
+
+```yaml
+  - name: arXiv RAG research
+    type: academic
+    url: https://arxiv.org/search?q=retrieval+augmented+generation
+    tags: [Research]
+```
 
 Supported search parameters include `q`, `query`, `search_query` and
 `query.bibliographic`. Optional filters are `publisher`, `journal`, `issn`,
@@ -282,6 +301,10 @@ store:
 SQLite is the right answer for one machine and needs nothing installed. Postgres is for
 reaching the same store from more than one machine, and is what to use with a hosted
 database such as Supabase, RDS or Cloud SQL.
+
+**Which one?** Start with `db_path`. Switch to `store.url` only when a second machine needs the
+same store, or you already run a hosted Postgres. The subsections below on the password, TLS,
+pooling and privileges apply only to Postgres.
 
 **One process at a time.** Whichever engine you choose, only one `rabbithole serve` may point at
 a store at a time; machines take turns. On Postgres the second server is refused at startup
@@ -431,7 +454,7 @@ A fresh database has an application-owned **Default** profile:
 - it cannot be edited or deleted;
 - it does not require a writable `profile.md`.
 
-Local profiles live in SQLite and are managed under **Settings → Profiles**. The friendly
+Local profiles live in the store and are managed under **Settings → Profiles**. The friendly
 editor has **I'm interested in**, **I'm less interested in**, and **Additional context**
 fields. It deterministically renders Markdown. Profiles that do not match that canonical
 format open in Advanced/raw mode, which preserves arbitrary Markdown instead of attempting a
@@ -446,7 +469,7 @@ To update existing feed rows intentionally, use **Settings → Profiles → Resc
 items**. After confirmation, the application:
 
 - snapshots the currently active profile once;
-- loads already-scored items from the last seven days from SQLite, without refetching feeds;
+- loads already-scored items from the last seven days from the store, without refetching feeds;
 - scores them with the configured provider, model, system prompt, thinking, batch and
   parallelism settings;
 - replaces successful LLM scores, explanations, model attribution and profile provenance;
@@ -479,7 +502,7 @@ files remain errors. Its cleaned contents are imported into a deterministic loca
   overwrite the local profile. Edit the local copy in Settings, or change/remove `profile:`
   deliberately.
 
-CLI `ingest` uses the same SQLite active profile and the same bootstrap rule as `serve`. With
+CLI `ingest` uses the same stored active profile and the same bootstrap rule as `serve`. With
 no configured file and no persisted selection, both use Default.
 
 > **Recommendation:** be specific, and state exclusions as well as interests. "Kubernetes

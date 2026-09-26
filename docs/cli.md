@@ -170,8 +170,8 @@ which database gets emptied.
 Two things to know. Pruning inside the ingest window costs a re-fetch and a re-score: the
 next run sees the link as new, because deduplication keys on links that are still stored.
 Items from feeds that publish no date are always re-fetched while they remain in the feed.
-And the database file does not shrink — SQLite reuses the freed pages, but reclaiming the
-space on disk means running `VACUUM` yourself with the server stopped.
+And on SQLite the database file does not shrink: SQLite reuses the freed pages, but reclaiming
+the space on disk means running `VACUUM` yourself with the server stopped.
 
 These commands use the same store method as the HTTP handlers, so changes made here appear
 in the web UI on refresh.

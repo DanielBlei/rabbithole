@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Two things are out of scope: multi-user support (one person, one profile) and a
+        Two things are out of scope: multi-user support (one reader, local profiles) and a
         hosted service (self-hosting is the deployment model).
 
   - type: textarea

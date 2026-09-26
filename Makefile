@@ -43,12 +43,12 @@ help: ## Display this help.
 config-hint:
 	@case "$(CONFIG)" in *example*) \
 	  printf '\033[33m▌\033[0m\n'; \
-	  printf '\033[33m▌\033[0m Running on \033[36m$(CONFIG)\033[0m —> the shipped defaults.\n'; \
+	  printf '\033[33m▌\033[0m Running on \033[36m$(CONFIG)\033[0m -> the shipped defaults.\n'; \
 	  printf '\033[33m▌\033[0m\n'; \
 	  printf '\033[33m▌\033[0m The Rabbit Hole ranks what it reads against your interests.\n'; \
 	  printf '\033[33m▌\033[0m\n'; \
 	  printf '\033[33m▌\033[0m   1. \033[36mmake setup\033[0m            your own config and feeds\n'; \
-	  printf '\033[33m▌\033[0m   2. \033[36mconfigs/feeds.yaml\033[0m    the RSS feeds to pull from\n'; \
+	  printf '\033[33m▌\033[0m   2. \033[36mconfigs/feeds.yaml\033[0m    your sources (RSS, academic)\n'; \
 	  printf '\033[33m▌\033[0m   3. \033[36mSettings → Profiles\033[0m       what you care about, in your words\n'; \
 	  printf '\033[33m▌\033[0m\n'; \
 	  printf '\033[33m▌\033[0m Then: \033[36mCONFIG=./configs/config.yaml make serve\033[0m (or edit CONFIG in the Makefile)\n'; \

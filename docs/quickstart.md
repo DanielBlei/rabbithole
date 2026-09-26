@@ -1,6 +1,8 @@
 # Quickstart
 
-From a clean checkout to a ranked feed. Everything runs locally.
+From a clean checkout to a ranked feed. Everything runs locally. Using a release binary
+instead? The [README](../README.md#release-binary) has the one-file config it needs; pull a
+model (step 2) unless you chose `heuristic`, then pick up at step 4.
 
 ## 1. Set up the config
 
@@ -15,13 +17,13 @@ make setup
 | File | What it does | What to change |
 |---|---|---|
 | `configs/config.yaml` | How to run: model, scoring, storage, paths | The model, if you don't want the default `qwen3.5:4b` |
-| `configs/feeds.yaml` | The feeds to pull from | Add your own. A name and a URL is the minimum |
+| `configs/feeds.yaml` | The sources to pull from: RSS/Atom feeds, and `type: academic` searches on arXiv, Crossref or Semantic Scholar | Add your own here, or later from the Sources popup. A name and a URL is the minimum |
 | `configs/golden.yaml` | Optional hand-scored evaluation set | Edit only when benchmarking models |
 
 They start as working examples, so you can run first and edit later. A fresh database uses
 the immutable built-in **Default** interest profile. In the web UI, open
 **Settings → Profiles**, duplicate Default or create a profile, and select it. Profile
-changes are persisted in SQLite and affect newly scored items without a server restart.
+changes are stored in the database and affect newly scored items without a server restart.
 Existing scores stay unchanged unless you explicitly confirm **Rescore recent items**, which
 recomputes already-stored items from the last seven days.
 
@@ -64,7 +66,9 @@ Forgot the password? On the machine running it, `rabbithole auth reset` sets a n
 > Already ingested on the example config? Run `make clean-feeds` first to remove them.
 
 Hit ingest in the web UI. Nothing is fetched until you do. This is the step
-that pulls your feeds and scores them.
+that pulls your sources and scores them. Add or change sources any time from the **Sources**
+popup: an RSS or Atom URL, or pick **academic** for a paper search. They apply on the next
+ingest.
 
 The first run has to score every item and takes a while on a local model. After that the
 **Feed** page fills in, best first, each item with a line on why it is there. Later runs only
@@ -72,7 +76,7 @@ score what is new, because the store remembers what it has seen. The **Maze** pa
 for tasks, todos and ideas.
 
 Configuration-file changes are read at startup, so restart the server after editing
-`config.yaml`. Profile selections and edits are different: they live in SQLite and apply to
+`config.yaml`. Profile selections and edits are different: they live in the store and apply to
 the next ingest immediately. An ingest already running keeps the snapshot it started with.
 Switching alone does not rewrite the existing feed. Use **Settings → Profiles → Rescore
 recent items** when you intentionally want the last seven days recomputed; it uses stored

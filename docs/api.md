@@ -1,7 +1,8 @@
 # HTTP API
 
-`rabbithole serve` exposes the same data and operations as the `items` CLI (see
-[docs/cli.md](cli.md)) over JSON.
+`rabbithole serve` exposes a small JSON API for reading items and marking them seen, hidden or
+unread. Rating, notes and bookmarks are in the web UI and the `items` CLI (see
+[docs/cli.md](cli.md)); sources, profiles and ingest runs are managed from the web UI.
 
 The API sits behind the web UI's login ([docs/auth.md](auth.md)). A request needs the
 session cookie a browser gets from logging in; without one it gets `401 unauthorized` (with
