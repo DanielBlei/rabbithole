@@ -1,8 +1,9 @@
 # The Rabbit Hole feed list. Copy to configs/feeds.yaml and edit.
 #
-# This is a seed file, not the live feed set. Feeds live in the database and are managed from the Sources page;
-# on every startup, anything here the store has never seen is added, and everything else is ignored.
-# Nothing writes back to this file — use the Sources page's export to get the live set out.
+# This is a seed file, not the live feed set. Feeds live in the database and are
+# managed from the Sources page; on every startup, anything here the store has
+# never seen is added, and everything else is ignored.
+# Nothing writes back to this file: use the Sources page's export to get the live set out.
 #
 # RSS is the default when `type` is omitted. Academic sources use
 # `type: academic`; blog and news are not yet implemented.
@@ -11,62 +12,43 @@
 
 # Applied to any feed that doesn't set the knob itself.
 defaults:
-  since: 7d       # ignore items older than this; accepts d/h/m (7d, 168h, 90m)
-  max_items: 25   # cap for the number of items per feed, some may return hundreds; omit to remove cap
+  since: 14d      # ignore items older than this; accepts d/h/m (14d, 336h, 90m)
+  max_items: 25   # items per feed per run, some return hundreds; omit for no cap
 
 feeds:
   # Minimum: a unique name and a URL. The rest falls through to defaults.
+  #
+  # A feed is identified by its URL: renaming keeps its history, changing the URL
+  # starts a new feed. Names must be unique; items are filed under the name.
   - name: Red Hat Emerging Tech
     url: https://next.redhat.com/feed/
-    tags:
-      - Red Hat
-      - Infra
+    tags: [Open Source, Infra]
 
   - name: Hugging Face blog
     url: https://huggingface.co/blog/feed.xml
-    tags:
-      - AI
-      - Research
+    tags: [AI, Open Source]
 
-  - name: arXiv — cs.AI
-    url: https://rss.arxiv.org/rss/cs.AI
-    tags:
-      - AI
-      - Research
-      - Papers
-
-  # Academic saved search; the host selects the provider.
-  - name: arXiv — RAG research
+  # Academic saved search; the host selects the provider (shapes below).
+  - name: "arXiv: RAG research"
     type: academic
-    url: https://export.arxiv.org/api/query?search_query=all:%22retrieval%20augmented%20generation%22
+    url: https://arxiv.org/search?q=retrieval+augmented+generation
     tags: [AI, Research, Papers]
 
-  - name: Medium — AI
+  - name: "Medium: AI"
     url: https://medium.com/feed/tag/artificial-intelligence
-    since: 2d     # override the default window for one feed
-    max_items: 10 # High volume: retrieve only small number of items
-    tags:
-      - AI
-      - Medium
+    since: 2d      # override the default window for one feed
+    max_items: 10  # high volume: keep only a few items per run
+    enabled: false # kept but never fetched; switch on from the Sources page
+    tags: [AI, Medium]
 
-  - name: Medium — LLMs
-    url: https://medium.com/feed/tag/large-language-models
-    max_items: 10 # High volume: retrieve only small number of items
-    tags:
-      - AI
-      - Medium
-
-  # Parked: kept here with its history, never fetched. Flip to true to resume.
-  - name: Medium — ML
-    url: https://medium.com/feed/tag/machine-learning
-    enabled: false
-    tags:
-      - AI
-      - Medium
-
-# A feed is identified by its URL — renaming keeps its history, changing the URL
-# starts a new feed. Names must be unique; items are filed under the name.
-#
 # Medium URL shapes:
 #   https://medium.com/feed/tag/<tag>
 #   https://medium.com/feed/@<username>
+#
+# Academic URL shapes (type: academic). The host picks the provider, `q` is the
+# search, and each provider honours its own filters, for example:
+#   https://arxiv.org/search?q=<words>
+#       plain words search every field; arXiv syntax passes through
+#       (q=cat:cs.CL, q=ti:agents+AND+au:smith)
+#   https://api.crossref.org/works?q=<words>&publisher=<name>&journal=<title>&issn=<issn>
+#   https://www.semanticscholar.org/search?q=<words>&min_citations=<n>&open_access=true

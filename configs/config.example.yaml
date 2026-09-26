@@ -16,19 +16,15 @@ inference:
   batch_size: 1                 # articles per scoring request (lower helps smaller models focus)
   max_parallel: 1               # requests in flight; keep at 1 for Ollama, it queues anyway
 
-  # Decoding limits. Omit the block, or any field, to take the defaults below.
+  # Decoding limits. Token budgets and the length of the "why" can be tuned too;
+  # see docs/configuration.md#inferencemodel_tuning.
   model_tuning:
     num_ctx: 8192               # input window; unset lets Ollama silently truncate long prompts
-    max_tokens: 0               # whole reply; 0 sizes it from the three below
-    tokens_per_item: 1024       # per article in a batch
-    tokens_overhead: 512        # threshold for the JSON score response
-    tokens_thinking: 2048       # thinking allowance when think is on
-    reason_max_chars: 512       # threshold for the "why" behind a model's score
 
 ingest:
-  since: 7d                             # how far back to look; accepts d/h/m (7d, 168h, 90m)
-  feeds: ./configs/feeds.example.yaml   # sources to pull from
-  digest_dir: ./data/digests            # output for markdown report, `ingest` CLI usage only
+  # Optional seed file, read at startup to bulk-add sources.
+  # Sources can also be added and managed from the Sources page.
+  feeds: ./configs/feeds.example.yaml
 
 store:
   db_path: ./data/rabbithole.db   # sqlite, the local default

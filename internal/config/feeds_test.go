@@ -557,6 +557,7 @@ func TestFeedsExampleFileLoads(t *testing.T) {
 	// assert the shapes it's meant to teach are actually present.
 	var (
 		parked      int
+		academic    int
 		withCap     int
 		withSince   int
 		withTags    int
@@ -565,6 +566,9 @@ func TestFeedsExampleFileLoads(t *testing.T) {
 	for _, f := range resolved {
 		if !f.Enabled {
 			parked++
+		}
+		if f.Type == FeedTypeAcademic {
+			academic++
 		}
 		if f.MaxItemsFrom == OriginFeed {
 			withCap++
@@ -581,6 +585,9 @@ func TestFeedsExampleFileLoads(t *testing.T) {
 	}
 	if parked == 0 {
 		t.Error("example should demonstrate a parked feed (enabled: false)")
+	}
+	if academic == 0 {
+		t.Error("example should demonstrate an academic source (type: academic)")
 	}
 	if withCap == 0 || withSince == 0 {
 		t.Error("example should demonstrate per-feed since and max_items overrides")
