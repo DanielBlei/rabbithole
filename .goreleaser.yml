@@ -18,8 +18,21 @@ builds:
 archives:
   - formats:
       - tar.gz
+    # Listing files replaces the default LICENSE/README globs, so they stay
+    # listed. The examples keep their configs/ path; scripts/install.sh reads
+    # them from there for the starter config.
+    files:
+      - LICENSE
+      - README.md
+      - configs/config.example.yaml
+      - configs/feeds.example.yaml
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+# A tag with a suffix (v0.2.0-rc.1) publishes as a pre-release, which GitHub
+# never marks Latest, so testing a release does not change what users install.
+release:
+  prerelease: auto
 
 checksum:
   name_template: checksums.txt

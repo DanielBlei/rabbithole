@@ -1,8 +1,8 @@
 # Quickstart
 
 From a clean checkout to a ranked feed. Everything runs locally. Using a release binary
-instead? The [README](../README.md#release-binary) has the one-file config it needs; pull a
-model (step 2) unless you chose `heuristic`, then pick up at step 4.
+instead? The [README](../README.md#release-binary) has a one-line installer that also writes a
+starter config; pull a model (step 2), then pick up at step 4.
 
 ## 1. Set up the config
 

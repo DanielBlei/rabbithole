@@ -126,7 +126,7 @@ internal/httpgzip     response compression middleware
 internal/eval         eval benchmark and eval audit: datasets, metrics and reports
 internal/claude       Claude CLI scorer, reachable only from eval benchmark
 internal/logger       zerolog setup for --debug/--trace
-scripts/              a throwaway Postgres for running the store tests; not used at runtime
+scripts/              install.sh (the release installer) and a throwaway Postgres for the store tests
 ```
 
 ## Roadmap

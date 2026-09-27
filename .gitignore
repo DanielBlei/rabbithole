@@ -29,6 +29,9 @@ CLAUDE.md
 # Project data (sqlite db + generated digests)
 /data
 
+# GoReleaser output (snapshot builds)
+/dist/
+
 # Personal config: the real files, never the tracked *.example.* templates.
 /configs/config.yaml
 /configs/feeds.yaml
