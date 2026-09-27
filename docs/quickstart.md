@@ -17,7 +17,7 @@ make setup
 | File | What it does | What to change |
 |---|---|---|
 | `configs/config.yaml` | How to run: model, scoring, storage, paths | The model, if you don't want the default `qwen3.5:4b` |
-| `configs/feeds.yaml` | The sources to pull from: RSS/Atom feeds, and `type: academic` searches on arXiv, Crossref or Semantic Scholar | Add your own here, or later from the Sources popup. A name and a URL is the minimum |
+| `configs/feeds.yaml` | The sources to pull from: RSS/Atom feeds, and `type: academic` searches on arXiv, Crossref or Semantic Scholar | Add your own here, or later from the Sources page. A name and a URL is the minimum |
 | `configs/golden.yaml` | Optional hand-scored evaluation set | Edit only when benchmarking models |
 
 They start as working examples, so you can run first and edit later. A fresh database uses

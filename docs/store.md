@@ -313,7 +313,7 @@ pruned link its feed still lists returns on the next run, rescored from scratch,
 
 ## feeds and feed_defaults
 
-The configured feed set — what to fetch and how. Written by the Sources section; `feeds.yaml`
+The configured feed set — what to fetch and how. Written by the Sources page; `feeds.yaml`
 only seeds feeds the store has never seen (see
 [configuration](configuration.md#feeds)).
 
@@ -363,7 +363,7 @@ Append-only log of every feed fetch attempt, one row per feed per run.
 
 Indexed on `(feed_id, fetched_at DESC, id DESC)`, which is exactly what the health query
 walks. `FeedHealthByID` aggregates this into the status dot, failure streak, last success
-and recent-attempt strip on the Sources section.
+and recent-attempt strip on the Sources page.
 
 Keying on `feed_id` rather than the name is why renaming a feed keeps its history. The ID
 is minted from the URL when the feed is first stored and then frozen on the row, so editing
@@ -606,6 +606,6 @@ of your own does not.
   from splitting a feed's items into two sources.
 - **Deleted feed rows accumulate.** Nothing collects them, and each one goes on holding its
   name and URL against reuse. That is deliberate — it is what stops a re-seed from
-  resurrecting a feed you removed — and it can be undone: the Sources section lists deleted
+  resurrecting a feed you removed — and it can be undone: the Sources page lists deleted
   feeds under the state filter's `deleted` option with a restore button, and adding the same
   URL again undeletes the row rather than failing.
