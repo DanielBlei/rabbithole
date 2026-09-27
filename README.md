@@ -58,25 +58,15 @@ to look for. See [docs/configuration.md](docs/configuration.md#academic-sources)
 
 ### Release binary
 
-Download the archive for your platform (Linux or macOS, amd64 or arm64) from the
-[Releases page](https://github.com/DanielBlei/rabbithole/releases), check it against
-`checksums.txt`, and unpack it. The binary needs one small config file, at
-`configs/config.yaml` next to where you run it:
-
-```yaml
-store:
-  db_path: ./data/rabbithole.db
-# inference:
-#   provider: heuristic   # uncomment to try it without a model
-```
+Linux or macOS:
 
 ```bash
-./rabbithole serve
+curl -fsSL https://raw.githubusercontent.com/DanielBlei/rabbithole/main/scripts/install.sh | sh
 ```
 
-Then open <http://localhost:8080>. Everything else has a default. For a starter list of
-sources and every option spelled out, copy the examples from the repo's [configs/](configs)
-folder.
+It installs the latest release and can copy the default configs into a `rabbithole/` folder
+where you run it. Archives are also on the
+[Releases page](https://github.com/DanielBlei/rabbithole/releases).
 
 ### From source
 
@@ -86,8 +76,8 @@ cd rabbithole
 make build
 ```
 
-`go install github.com/DanielBlei/rabbithole@latest` gives the same binary; it needs the same
-one-file config.
+`go install github.com/DanielBlei/rabbithole@latest` gives the same binary; copy a config from
+[configs/](configs) (`make setup` does it in a checkout).
 
 ## Quickstart
 

@@ -138,3 +138,47 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12.2
+
+      # Preinstalled on ubuntu-latest; not part of make check.
+      - name: Shellcheck
+        run: shellcheck scripts/*.sh
+
+  # Builds a snapshot release for this runner and installs it with
+  # scripts/install.sh, the way a user would. The only coverage of the
+  # installer on macOS (bash 3.2, BSD tools, shasum); ubuntu's sh is dash.
+  install:
+    name: install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build a snapshot release
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --snapshot --clean --single-target
+
+      - name: Install it with the script
+        run: |
+          ver="$(jq -r .version dist/metadata.json)"
+          mkdir -p "$RUNNER_TEMP/srv/v$ver" "$RUNNER_TEMP/work"
+          cp dist/*.tar.gz dist/checksums.txt "$RUNNER_TEMP/srv/v$ver/"
+          cd "$RUNNER_TEMP/work"
+          RABBITHOLE_BASE_URL="file://$RUNNER_TEMP/srv" sh "$GITHUB_WORKSPACE/scripts/install.sh" \
+            --version "v$ver" --dir "$RUNNER_TEMP/bin" --yes
+          "$RUNNER_TEMP/bin/rabbithole" --version
+          grep "^  db_path: '/" rabbithole/config.yaml
+          grep "^  feeds: '/" rabbithole/config.yaml
+          test -f rabbithole/feeds.yaml
