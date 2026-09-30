@@ -143,8 +143,9 @@ jobs:
       - name: Shellcheck
         run: shellcheck scripts/*.sh
 
-  # Builds a snapshot release for this runner and installs it with
-  # scripts/install.sh, the way a user would. The only coverage of the
+  # Builds a snapshot release (every target: `release` has no --single-target)
+  # and installs this runner's archive with scripts/install.sh, the way a user
+  # would. The only coverage of the
   # installer on macOS (bash 3.2, BSD tools, shasum); ubuntu's sh is dash.
   install:
     name: install (${{ matrix.os }})
@@ -168,7 +169,7 @@ jobs:
         with:
           distribution: goreleaser
           version: '~> v2'
-          args: release --snapshot --clean --single-target
+          args: release --snapshot --clean
 
       - name: Install it with the script
         run: |
