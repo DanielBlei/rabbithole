@@ -4,8 +4,16 @@
   var dialog = document.getElementById('welcomeModal');
   if (!dialog) return;
 
+  // Resolves true only on the 204 the server answers a recorded step with —
+  // fetch rejects on network failure but not on a 500, so the status is read
+  // rather than trusted. A step that fails to record is asked about again next
+  // load; the dismissal below refuses to close on it instead.
   function record(step){
-    fetch('/welcome/' + step, {method: 'POST'}).catch(function(){ /* asked again next load */ });
+    return fetch('/welcome/' + step, {method: 'POST'}).then(function(r){
+      return r.status === 204;
+    }).catch(function(){
+      return false;
+    });
   }
   dialog.hidden = false;
 
@@ -15,8 +23,14 @@
     button.classList.add('is-done');
     record(button.dataset.welcomeStep);
   });
-  // The ×, the backdrop, Escape and "got it" all close through modal.js.
+  // The ×, the backdrop, Escape and "got it" all close through modal.js. The
+  // dismissal is held until the server confirms it, so a failed write cannot
+  // close the welcome and bring it back on the next page.
   document.addEventListener('modal:beforeclose', function(e){
-    if (e.detail.layer === dialog) record('dismissed');
+    if (e.detail.layer !== dialog) return;
+    e.preventDefault();
+    record('dismissed').then(function(ok){
+      if (ok) e.detail.proceed();
+    });
   });
 })();
