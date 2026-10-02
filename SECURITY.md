@@ -104,7 +104,7 @@ for academic sources), your inference host, and your Postgres server if `store.u
 nothing else. Fonts ship inside the
 binary, so no page load reaches a CDN.
 
-The exception is the Maze weather widget, on by default. The browser calls Open-Meteo with
+The exception is the weather widget, on by default for the Feed and the Maze. The browser calls Open-Meteo with
 your coordinates for the forecast and pollen, and their geocoding endpoint when you search for
 a city. Coordinates come from the browser's location prompt or that search, stay in
 `localStorage`, and never reach the server. Decline the prompt and nothing is requested; it is

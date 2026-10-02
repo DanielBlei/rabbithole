@@ -28,10 +28,8 @@
   // one choice for how, two for where, rather than a single list of every
   // combination of the two.
   //
-  // Defaults per key, because they are not all '1': the widget has always been
-  // the Maze's, and turning it on over the feed you came to read should be
-  // something you ask for.
-  var DEFAULTS = {show:'1', showPollen:'1', time24:'1', feed:'0', maze:'1'};
+  // Both pages show the widget out of the box; each switch turns its page off.
+  var DEFAULTS = {show:'1', showPollen:'1', time24:'1', feed:'1', maze:'1'};
   // The switches that mean "show something", and so read as off whenever
   // Weather itself is off. The rest are formats and keep saying what they are.
   var RIDES = {showPollen:1, feed:1, maze:1};

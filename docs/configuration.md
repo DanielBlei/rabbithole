@@ -539,15 +539,17 @@ The built-in prompt already tells the model that article titles/summaries are da
 instructions — worth keeping if you write your own override. See
 [SECURITY.md](../SECURITY.md#untrusted-content) for why that matters.
 
-## The Maze weather widget
+## The weather widget
 
-The Maze page carries a weather and pollen read-out. None of it lives in the config files:
-every setting is in the browser, under Settings → Weather.
+The Feed and Maze pages carry a weather and pollen read-out, on by default. None of it lives in
+the config files: every setting is in the browser, under Settings → Weather.
 
 | Setting | What it does |
 |---|---|
 | Weather, Pollen | Show or hide each. Weather off means no location prompt and no requests |
-| Layout | Sub-bar (the default), inline chip, or either rail; the rails show the full read-out |
+| Pages | Show it on the Feed, the Maze, or both (the default) |
+| Layout | Sub-bar (the default), inline, or full |
+| Side menu | Off (the default), or a read-out at the top or bottom of the side menu |
 | Units | °C or °F |
 | Hours | 24-hour or AM/PM, matching the clock |
 | Location | Type a city, or press "Use my location" |
