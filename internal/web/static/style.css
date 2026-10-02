@@ -369,13 +369,31 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .rsz--s{bottom:0;}
 .rsz--e{right:0;}
 .rsz--w{left:0;}
-.rsz--ne,.rsz--nw,.rsz--se,.rsz--sw{width:12px;height:12px;}
+.rsz--ne,.rsz--nw,.rsz--se,.rsz--sw{width:18px;height:18px;}
 .rsz--ne{top:0;right:0;cursor:nesw-resize;}
 .rsz--sw{bottom:0;left:0;cursor:nesw-resize;}
 .rsz--nw{top:0;left:0;cursor:nwse-resize;}
 .rsz--se{bottom:0;right:0;cursor:nwse-resize;}
+/* The one visible cue: a faint grip, set in from the rounded corner. */
+.rsz--se::after{
+  content:"";position:absolute;right:6px;bottom:6px;width:9px;height:9px;
+  background:linear-gradient(135deg,transparent 46%,var(--text-dim) 46% 56%,transparent 56% 72%,var(--text-dim) 72% 82%,transparent 82%);
+  opacity:.45;transition:opacity .14s var(--ease);
+}
+.rsz--se:hover::after{opacity:1;}
 /* On a narrow window the dialog already takes the width there is. */
 @media (max-width:760px){ .rsz{display:none;} }
+/* On a phone the tab column would leave the section a sliver, so the tabs
+   become a scrolling row above it. */
+@media (max-width:600px){
+  .stg{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);}
+  .stg .stg__rail{
+    flex-direction:row;overflow-x:auto;scrollbar-width:none;padding:8px;gap:4px;
+    border-right:0;border-bottom:1px solid var(--hairline);
+  }
+  .stg .stg__tab span{padding:6px 10px;white-space:nowrap;}
+  .stg__rail .stg__tab--acct{margin-top:0;padding-top:0;border-top:0;}
+}
 .stg__rail{
   display:flex;flex-direction:column;gap:2px;min-width:0;min-height:0;
   margin:0;padding:10px 8px;border:0;border-right:1px solid var(--hairline);
