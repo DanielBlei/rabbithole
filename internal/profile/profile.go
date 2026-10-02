@@ -32,8 +32,7 @@ const (
 // independent of a writable runtime profile file.
 const DefaultContent = `# Reading interest profile
 
-I'm an AI enthusiast. Score articles by how interesting they'd be to me, and for keeping up
-with where things are going.
+I'm an AI enthusiast. Score articles by how interesting they'd be to me, and for keeping up with where things are going.
 
 ## Interested
 - Running open-source language models, ideally on my own machine
@@ -56,8 +55,7 @@ with where things are going.
 - Listicles and clickbait ("X will change everything")
 - Business and strategy takes with no technical content
 
-Prefer depth and substance over popularity. A beginner tutorial stays a beginner tutorial
-even on a topic I like.`
+Prefer depth and substance over popularity. A beginner tutorial stays a beginner tutorial even on a topic I like.`
 
 var (
 	htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
