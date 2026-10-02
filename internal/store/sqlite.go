@@ -300,6 +300,11 @@ func initSchema(ctx context.Context, db *sql.DB, d dialect, label string) error 
 		if _, err := db.ExecContext(ctx, t.ddl); err != nil {
 			return fmt.Errorf("create additive table %s: %w", t.table, err)
 		}
+		if !fresh && t.upgradeSeed != "" {
+			if _, err := db.ExecContext(ctx, d.rebind(t.upgradeSeed), sqlTime(time.Now())); err != nil {
+				return fmt.Errorf("seed additive table %s: %w", t.table, err)
+			}
+		}
 	}
 	return nil
 }

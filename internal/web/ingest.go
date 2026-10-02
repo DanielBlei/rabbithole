@@ -111,7 +111,9 @@ type chromeData struct {
 	Chip     ingestChipData
 	IngDot   string              // ingest status dot: err | warn | run | "" (healthy — no dot)
 	IngSub   string              // ingest subline shown inside the open side menu
-	IngNever bool                // no run has ever been recorded — gates the first-run hint
+	IngNever bool                // no run has ever been recorded
+	FirstRun bool                // no run, no items and the welcome not dismissed — gates the welcome dialog
+	Welcome  map[string]bool     // welcome steps already taken, by store.Onboarding* name
 	Running  bool                // a run is live — the ingWatch fragment polls while true
 	OOB      bool                // render the fragments with hx-swap-oob
 	Account  accountData         // Settings → Account; empty Mode when no gate ran
@@ -123,7 +125,52 @@ func (s *Web) chrome(ctx context.Context) chromeData {
 	c := s.ingestChrome(ctx)
 	c.Account = accountView(authFrom(ctx), "")
 	c.Profiles = s.profileSettings(ctx, nil)
+	if c.IngNever {
+		c.FirstRun, c.Welcome = s.welcome(ctx)
+	}
 	return c
+}
+
+// welcome reports whether to greet a first run, and the steps already taken.
+// A CLI ingest stores items without recording a run, so finding items retires
+// the welcome for good. Any failure skips the welcome rather than the page.
+func (s *Web) welcome(ctx context.Context) (bool, map[string]bool) {
+	done, err := s.db.OnboardingDone(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("reading the welcome steps")
+		return false, nil
+	}
+	if done[store.OnboardingDismissed] {
+		return false, nil
+	}
+	n, err := s.db.Count(ctx, store.ListFilter{})
+	if err != nil {
+		log.Warn().Err(err).Msg("counting items for the welcome dialog")
+		return false, nil
+	}
+	if n > 0 {
+		if err := s.db.MarkOnboarding(ctx, store.OnboardingDismissed); err != nil {
+			log.Warn().Err(err).Msg("retiring the welcome")
+		}
+		return false, nil
+	}
+	return true, done
+}
+
+// handleWelcomeStep records a welcome step, or its dismissal, so the server
+// remembers it for every browser.
+func (s *Web) handleWelcomeStep(w http.ResponseWriter, r *http.Request) {
+	step := r.PathValue("step")
+	if !store.ValidOnboardingStep(step) {
+		http.Error(w, "unknown step", http.StatusBadRequest)
+		return
+	}
+	if err := s.db.MarkOnboarding(r.Context(), step); err != nil {
+		log.Error().Err(err).Str("step", step).Msg("record welcome step")
+		http.Error(w, "could not record the step", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ingestChrome is the ingest half of the chrome. A history read failure only
@@ -296,9 +343,10 @@ func (s *Web) handleIngestChrome(w http.ResponseWriter, r *http.Request) {
 	s.writeIngestChrome(w, r.Context())
 }
 
-// writeIngestChrome appends the four OOB chrome fragments to a response.
+// writeIngestChrome appends the four OOB chrome fragments to a response. They
+// read only the ingest half, so the page-only lookups are skipped.
 func (s *Web) writeIngestChrome(w http.ResponseWriter, ctx context.Context) {
-	c := s.chrome(ctx)
+	c := s.ingestChrome(ctx)
 	c.OOB = true
 	chip := c.Chip
 	chip.OOB = true
