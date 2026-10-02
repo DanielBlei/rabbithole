@@ -52,7 +52,7 @@
   } else if (mode === 'top' || mode === 'bottom' || mode.indexOf('rail') === 0){
     mode = 'full';
   }
-  var onFeed = on && feed === '1', onMaze = on && maze !== '0';
+  var onFeed = on && feed !== '0', onMaze = on && maze !== '0';
   if (on && (onFeed || onMaze)){
     document.documentElement.setAttribute('data-wx-shape', mode);
     if (onFeed) document.documentElement.setAttribute('data-wx-feed', '1');
