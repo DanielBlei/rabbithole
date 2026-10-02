@@ -359,6 +359,23 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
   display:grid;grid-template-columns:180px minmax(0,1fr);
   height:528px;min-height:0;flex:1 1 auto;
 }
+/* Drag handles along every edge and corner (static/js/resize.js). Once dragged,
+   the frame is pinned where it stands and the inline size wins over 84vh. */
+.modal__frame--stg.is-sized{position:fixed;max-height:none;}
+.rsz{position:absolute;z-index:2;}
+.rsz--n,.rsz--s{left:10px;right:10px;height:6px;cursor:ns-resize;}
+.rsz--e,.rsz--w{top:10px;bottom:10px;width:6px;cursor:ew-resize;}
+.rsz--n{top:0;}
+.rsz--s{bottom:0;}
+.rsz--e{right:0;}
+.rsz--w{left:0;}
+.rsz--ne,.rsz--nw,.rsz--se,.rsz--sw{width:12px;height:12px;}
+.rsz--ne{top:0;right:0;cursor:nesw-resize;}
+.rsz--sw{bottom:0;left:0;cursor:nesw-resize;}
+.rsz--nw{top:0;left:0;cursor:nwse-resize;}
+.rsz--se{bottom:0;right:0;cursor:nwse-resize;}
+/* On a narrow window the dialog already takes the width there is. */
+@media (max-width:760px){ .rsz{display:none;} }
 .stg__rail{
   display:flex;flex-direction:column;gap:2px;min-width:0;min-height:0;
   margin:0;padding:10px 8px;border:0;border-right:1px solid var(--hairline);
@@ -415,7 +432,7 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .prof{display:flex;flex-direction:column;gap:8px;padding:0 4px 8px;}
 .prof__head{
   display:flex;align-items:center;gap:8px;padding:4px 0 0;
-  font-size:1.15rem;color:var(--text-dim);
+  font-size:1.3rem;color:var(--text-dim);
 }
 .prof__head strong{color:var(--accent);font-weight:600;}
 .prof__new,.prof__rescore{
@@ -424,8 +441,8 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 }
 .prof__rescore{margin-left:auto;}
 .prof__rescore:disabled{opacity:.45;cursor:default;color:var(--text-dim);background:var(--fill);}
-.prof__note{margin:0;color:var(--text-dim);font-size:1.05rem;line-height:1.45;}
-.prof__error,.prof-form__err{margin:0;color:var(--warn);font-size:1.1rem;}
+.prof__note{margin:0;color:var(--text-dim);font-size:1.2rem;line-height:1.45;}
+.prof__error,.prof-form__err{margin:0;color:var(--warn);font-size:1.25rem;}
 .prof__grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;}
 .prof__list{display:flex;flex-direction:column;gap:5px;}
 .prof__row{
@@ -435,12 +452,13 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .prof__row.is-active{box-shadow:inset 3px 0 0 var(--accent),var(--sel-shadow);}
 .prof__identity{display:flex;flex:1;min-width:0;flex-direction:column;}
 .prof__identity strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--title);}
-.prof__identity span{font-size:1rem;color:var(--text-dim);}
+.prof__identity strong{font-size:1.3rem;}
+.prof__identity span{font-size:1.15rem;color:var(--text-dim);}
 .prof__actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px;}
 .prof__actions form{display:contents;}
 .prof__actions button,.prof-form__bar button,.prof-confirm__actions button{
   border:0;border-radius:var(--r-full);padding:4px 7px;background:var(--fill);
-  color:var(--text-dim);font:inherit;font-size:1rem;cursor:pointer;
+  color:var(--text-dim);font:inherit;font-size:1.15rem;cursor:pointer;
 }
 .prof__actions button:hover,.prof__actions button:focus-visible,
 .prof-form__bar button:hover,.prof-form__bar button:focus-visible{color:var(--accent);}
@@ -454,26 +472,34 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .prof-form{padding:10px;border-radius:var(--r-sm);background:var(--sel-fill);box-shadow:var(--sel-shadow);}
 .prof-form__bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;color:var(--title);}
 .prof-form__bar button{font-size:1.6rem;line-height:1;padding:0 4px;background:transparent;}
-.prof-form__ok{margin:0 0 6px;color:var(--score-high);font-size:1.05rem;}
+.prof-form__ok{margin:0 0 6px;color:var(--score-high);font-size:1.2rem;}
 .prof-form__err{margin-bottom:6px;}
-.prof-field{display:flex;flex-direction:column;gap:4px;margin:0 0 8px;}
-.prof-field > span{color:var(--title);font-size:1.05rem;}
+.prof-field{display:flex;flex-direction:column;gap:5px;margin:0 0 10px;}
+.prof-field > span{color:var(--title);font-size:1.3rem;}
 .prof-field small{color:var(--text-dim);font-weight:400;}
+/* The writing surface reads at the body size the Theme settings pick. */
 .prof-field input,.prof-field textarea{
   width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:var(--r-sm);
-  padding:7px 8px;background:var(--bg);color:var(--text);font:inherit;font-size:1.1rem;
-  resize:vertical;
+  padding:8px 10px;background:var(--bg);color:var(--text);font:inherit;
+  font-size:var(--fs-body);line-height:1.5;resize:vertical;
 }
 .prof-field input:focus-visible,.prof-field textarea:focus-visible{
   outline:1px solid var(--accent);outline-offset:1px;border-color:var(--accent-dim);
 }
 .prof-field input:disabled,.prof-field textarea:read-only{opacity:.78;}
-.prof-form__mode{display:inline-block;margin:0 8px 8px 0;color:var(--accent-dim);font-size:1.05rem;}
+.prof-form__mode{display:inline-block;margin:0 8px 8px 0;color:var(--accent-dim);font-size:1.2rem;}
 .prof-form__save{
-  border:0;border-radius:var(--r-full);padding:7px 12px;background:var(--tint);
-  color:var(--accent);font:inherit;cursor:pointer;
+  border:0;border-radius:var(--r-full);padding:8px 16px;background:var(--tint);
+  color:var(--accent);font:inherit;font-size:1.3rem;cursor:pointer;
 }
-.prof-confirm{padding:18px;color:var(--text);}
+/* Save stays in reach however long the profile runs. */
+.prof-form__foot{
+  position:sticky;bottom:-16px;z-index:1;display:flex;justify-content:flex-end;
+  margin:0 -10px -10px;padding:10px;border-top:1px solid var(--hairline);
+  background:var(--e3-fill);border-radius:0 0 var(--r-sm) var(--r-sm);
+  -webkit-backdrop-filter:var(--e3-blur);backdrop-filter:var(--e3-blur);
+}
+.prof-confirm{padding:18px;color:var(--text);font-size:1.3rem;line-height:1.5;}
 .prof-confirm p{margin:0 0 9px;}
 .prof-confirm__actions{display:flex;justify-content:flex-end;gap:8px;}
 

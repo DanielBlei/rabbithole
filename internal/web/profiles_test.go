@@ -167,6 +167,10 @@ func TestProfileCreateEditSelectAndDuplicate(t *testing.T) {
 	if !strings.Contains(body, "profile created") || !strings.Contains(body, "Systems") {
 		t.Fatalf("create response = %s", body)
 	}
+	// Save sits in the sticky footer, so it stays visible on a long profile.
+	if !strings.Contains(body, `<div class="prof-form__foot">`) || !strings.Contains(body, "save profile") {
+		t.Errorf("editor missing the save footer; body=%s", body)
+	}
 	locals, err := w.db.ListProfiles(t.Context())
 	if err != nil || len(locals) != 1 {
 		t.Fatalf("ListProfiles = %+v, %v", locals, err)

@@ -117,7 +117,9 @@
        hx-target="#profilesSettings" hx-swap="outerHTML">advanced raw Markdown</a>
     {{end}}
 
-    <button class="prof-form__save" type="submit">{{if .Adding}}create profile{{else}}save profile{{end}}</button>
+    <div class="prof-form__foot">
+      <button class="prof-form__save" type="submit">{{if .Adding}}create profile{{else}}save profile{{end}}</button>
+    </div>
   </form>
   {{end}}
 </div>

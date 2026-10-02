@@ -84,9 +84,19 @@
   });
 
   // Closes one layer at a time, so the runner survives its own child dialog.
+  // A listener can hold the close with preventDefault and finish it later
+  // through detail.proceed (the profile editor asks about unsaved changes).
   function dismiss(){
     var layer = top();
     if (!layer) return;
+    var ask = new CustomEvent('modal:beforeclose', {
+      cancelable: true,
+      detail: {layer: layer.el, proceed: function(){ close(layer); }}
+    });
+    if (!document.dispatchEvent(ask)) return;
+    close(layer);
+  }
+  function close(layer){
     var hadIngest = !!layer.el.querySelector('#ingestBody');
     layer.close();
     // Closing the runner also closes its update channel (the body poll), so
