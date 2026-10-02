@@ -71,25 +71,6 @@
        The tab, the menu's ingest item and the ingWatch poller are standalone
        templates so ingest responses can re-render them out-of-band. -->
   {{template "navTab" .Chrome}}
-  {{/* First-run hint: while the menu is away the drawer is the only route to
-       the ingest runner and nothing on screen advertises it, so before the
-       first run ever the feed points at the tab once. Not a fragment — once a
-       run is recorded the server stops rendering it; until then
-       static/js/feed.js shows it a single time and remembers the dismissal.
-       Rendered whatever the menu is doing, since the server cannot know: it is
-       the stylesheet and feed.js that drop it when the menu is docked and the
-       `$ ingest` command inside is already saying so. */}}
-  {{if and (eq .Active "feed") .Chrome.IngNever}}
-  <div class="navhint" id="navHint" role="note" hidden>
-    <button class="navhint__x" type="button" aria-label="Dismiss">&times;</button>
-    {{/* The marker is the one the pages in the menu wear, so the card reads as
-         a line of the thing it is pointing at. Naming the three commands beats
-         naming the container: what is behind the tab is the answer, not that a
-         tab has something behind it. */}}
-    <div class="navhint__hd"><span class="navhint__mk" aria-hidden="true">&#10095;</span>more in here</div>
-    <div class="navhint__sub">ingest &middot; sources &middot; settings</div>
-  </div>
-  {{end}}
   <div class="nav-hot" id="navHot" aria-hidden="true"></div>
   <nav class="navrail" id="navRail" aria-label="Pages">
     {{/* The menu crosses the topbar, and that band of it was empty glass. It
@@ -167,6 +148,42 @@
   <div id="modal"></div>
   <!-- Second layer: dialogs opened from inside another one stack here. -->
   <div id="modalTop"></div>
+
+  {{/* First run: nothing ingested, nothing stored and not yet dismissed. The
+       bottom modal layer, so each step opens over it and returns to it. The
+       server keeps the ticks and the dismissal; static/js/welcome.js opens it
+       and reports each step. */}}
+  {{if and (or (eq .Active "feed") (eq .Active "maze")) .Chrome.FirstRun}}
+  <div class="modal modal--welcome" id="welcomeModal" hidden>
+    <div class="modal__backdrop" data-modal-close></div>
+    <div class="modal__frame modal__frame--welcome" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle">
+      <div class="modal__bar">
+        <span class="modal__title" id="welcomeTitle"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~</span><span class="sh">$&nbsp;</span><span class="pane__cmd">welcome</span><span class="blink">_</span></span>
+        <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+      </div>
+      <div class="ask">
+        <p class="ask__lead">Nothing has been ingested yet.</p>
+        <p class="ask__sub">A few places worth a look before your first feed. <span class="welcome__opt">All optional.</span></p>
+        <ul class="welcome__steps">
+          <li><button class="welcome__step{{if index .Chrome.Welcome "sources"}} is-done{{end}}" type="button" data-welcome-step="sources"
+                      hx-get="/sources" hx-target="#modal" hx-swap="innerHTML">
+            <span class="welcome__txt">Check your sources<small>the feeds that get read</small></span>
+            <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></button></li>
+          <li><button class="welcome__step{{if index .Chrome.Welcome "profile"}} is-done{{end}}" type="button" data-welcome-step="profile" data-stg-open="profiles">
+            <span class="welcome__txt">Check your profile<small>what gets ranked up and down</small></span>
+            <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></button></li>
+          <li><button class="welcome__step{{if index .Chrome.Welcome "ingest"}} is-done{{end}}" type="button" data-welcome-step="ingest"
+                      hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML">
+            <span class="welcome__txt">Run your first ingest<small>fetch, score and fill the feed</small></span>
+            <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></button></li>
+        </ul>
+      </div>
+      <div class="modal__foot welcome__foot">
+        <button class="prof-form__save" type="button" data-modal-close>got it</button>
+      </div>
+    </div>
+  </div>
+  {{end}}
 
   {{/* Settings, in the same frame Config, Sources and Ingest use. Two reasons
        it is rendered here rather than fetched like those three:
@@ -451,6 +468,7 @@
   <script src="/static/js/modal.js" defer></script>
   <script src="/static/js/resize.js" defer></script>
   <script src="/static/js/profiles.js" defer></script>
+  <script src="/static/js/welcome.js" defer></script>
   <script src="/static/js/ingest.js" defer></script>
   <script src="/static/js/clock.js" defer></script>
   <script src="/static/js/weather.js" defer></script>

@@ -455,6 +455,18 @@ everywhere: a new `gen`, nothing else) voids them along with every in-memory ses
 password also brings a new key. It is conditional on the `gen` the caller's session was checked
 against, so a password reset that lands first wins and the retire gets `ErrAuthChanged`.
 
+## onboarding
+
+The first-run welcome's progress: one row per `step` (`sources`, `profile`, `ingest`, or
+`dismissed` for the welcome itself) with the `done_at` it was first taken. Written by the web UI
+as the user works through the welcome; marking a step again keeps the first row. The welcome
+shows while no ingest has run, no items are stored and no `dismissed` row exists, so a new
+database greets its user again whatever the browser remembers.
+
+The welcome is for new installs only. A database that existed before the table gets it with the
+`dismissed` row already in place, and the first time the web UI finds stored items without a
+recorded run (a CLI ingest), it writes that row too.
+
 ## An ingest run, end to end
 
 ```mermaid
@@ -575,9 +587,9 @@ instead, whose DDL runs on every open — after a `tableExists` check, not on th
 `IF NOT EXISTS` alone. Postgres checks a role's rights on the schema before it notices the table
 is already there, so an unconditional create would need `CREATE` on every start and rule out a
 DML-only runtime role, which is how a hosted database is normally set up. `auth` was the first
-such table; `additiveTables` entries carry the name they check alongside the DDL they run, and
-`TestAdditiveTablesNameTheirOwnTable` keeps the two honest, since a mismatch would mean a table
-that is never created and never complained about.
+such table and `onboarding` the second; `additiveTables` entries carry the name they check
+alongside the DDL they run, and `TestAdditiveTablesNameTheirOwnTable` keeps the two honest, since
+a mismatch would mean a table that is never created and never complained about.
 
 Which leaves two kinds of database role: one that can create, needed once per release that
 changes the schema, and one that can only read and write, which is enough to run everything after

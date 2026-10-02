@@ -476,7 +476,7 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 .prof__actions form{display:contents;}
 .prof__actions button,.prof-form__bar button,.prof-confirm__actions button{
   border:0;border-radius:var(--r-full);padding:4px 7px;background:var(--fill);
-  color:var(--text-dim);font:inherit;font-size:1.15rem;cursor:pointer;
+  color:var(--text);font:inherit;font-size:1.15rem;cursor:pointer;
 }
 .prof__actions button:hover,.prof__actions button:focus-visible,
 .prof-form__bar button:hover,.prof-form__bar button:focus-visible{color:var(--accent);}
@@ -488,7 +488,7 @@ body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(
 }
 .prof__empty strong{color:var(--title);}
 .prof-form{padding:10px;border-radius:var(--r-sm);background:var(--sel-fill);box-shadow:var(--sel-shadow);}
-.prof-form__bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;color:var(--title);}
+.prof-form__bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;color:var(--title);font-size:1.3rem;}
 .prof-form__bar button{font-size:1.6rem;line-height:1;padding:0 4px;background:transparent;}
 .prof-form__ok{margin:0 0 6px;color:var(--score-high);font-size:1.2rem;}
 .prof-form__err{margin-bottom:6px;}
@@ -1726,14 +1726,8 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
    however it is set, and the setting is waiting again when the window grows. */
 @media (min-width:1680px){
   :root:not([data-rail="off"]) .navrail{transform:none;}
-  /* Nothing to summon when it is already there — and nothing to point at
-     either: the hint's caret aims at the tab, and the open column would cover
-     the card anyway. The `$ ingest` row inside carries first run instead, amber
-     with a dot, which is the same news in the menu's own voice.
-     static/js/feed.js makes the matching call, so the hint is not marked seen
-     by a boot that never showed it. */
+  /* Nothing to summon when it is already there. */
   :root:not([data-rail="off"]) .nav-hot,
-  :root:not([data-rail="off"]) .navhint,
   :root:not([data-rail="off"]) .navtab{display:none;}
 }
 
@@ -1945,53 +1939,6 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
 .navtab--run span{background:var(--accent);}
 .navtab--run{animation:ing-pulse 1.1s ease-in-out infinite;}
 body.nav-open .navtab{opacity:0;pointer-events:none;}
-/* While the first-run hint is up the tab breathes an amber halo, so the bubble
-   and the thing it points at read as one object. */
-.navtab--hint{animation:navtab-halo 2.2s ease-in-out infinite;}
-@keyframes navtab-halo{
-  0%,100%{box-shadow:0 0 0 0 rgba(255,203,107,.30);}
-  50%{box-shadow:0 0 14px 3px rgba(255,203,107,.30);}
-}
-
-/* First-run hint: a small floating card beside the edge tab, in the same
-   surface recipe as the menu it points at. Non-modal on purpose — it never
-   blocks the page, and the first click anywhere retires it for good. */
-.navhint{
-  position:fixed;left:34px;top:50%;transform:translateY(-50%) translateX(-6px);z-index:var(--z-navrail);
-  background:var(--e2-fill);border:1px solid var(--e2-line);border-radius:var(--r-md);
-  -webkit-backdrop-filter:var(--e2-blur);
-  backdrop-filter:var(--e2-blur);
-  box-shadow:0 1px 2px rgba(0,0,0,.30), 0 12px 28px rgba(0,0,0,.38);
-  padding:11px 34px 11px 14px;max-width:24rem;
-  opacity:0;pointer-events:none;transition:opacity .22s ease,transform .22s ease;
-}
-.navhint--on{opacity:1;pointer-events:auto;transform:translateY(-50%) translateX(0);}
-/* Caret pointing back at the tab, drawn from the card's own border colours. */
-.navhint::before{
-  content:'';position:absolute;left:-6px;top:50%;margin-top:-6px;
-  width:10px;height:10px;background:var(--e2-fill);
-  border-left:1px solid var(--e2-line);border-bottom:1px solid var(--e2-line);
-  transform:rotate(45deg);
-}
-.navhint__hd{font-size:1.3rem;color:var(--caution);white-space:nowrap;}
-/* Set in from the text the way the menu sets its own marker in, so the two
-   line up if the eye goes from one to the other. */
-.navhint__mk{display:inline-block;width:1.1em;opacity:.55;}
-.navhint__sub{margin-top:3px;font-size:1.2rem;color:var(--text-dim);white-space:nowrap;}
-.navhint__x{
-  position:absolute;top:6px;right:8px;background:none;border:0;cursor:pointer;
-  color:var(--text-dim);font-family:inherit;font-size:1.4rem;line-height:1;padding:2px 4px;
-}
-.navhint__x:hover{color:var(--accent);}
-.navhint__x:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
-@media (prefers-reduced-motion: reduce){
-  .navtab--hint{animation:none;box-shadow:0 0 10px rgba(255,203,107,.22);}
-  .navhint{transition:none;}
-}
-/* A floating card beside the edge is a lot of page to give up when there is
-   this little of it, and the zero-state's own `run ingest` button is already
-   the shorter route on a narrow screen. */
-@media (max-width: 720px){ .navhint{display:none;} }
 
 /* --- Ingest: ambient topbar chip ---------------------------------------- */
 /* Only the states that want attention: amber until the first run ever, pulsing
@@ -2025,6 +1972,38 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 .ask__name{color:var(--accent);}
 .ask__sub{margin:0;font-size:1.2rem;line-height:1.6;color:var(--text-dim);}
 .ask__sub em{color:var(--text);font-style:normal;}
+
+/* --- First-run welcome --------------------------------------------------- */
+/* Under settings and the htmx dialogs, so a step opens over it. */
+.modal--welcome{z-index:calc(var(--z-modal) - 2);}
+.modal__frame--welcome{width:min(560px,94vw);}
+.welcome__steps{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:8px;}
+.welcome__step{
+  display:flex;align-items:center;gap:14px;width:100%;padding:12px 14px;
+  border:0;border-radius:var(--r-sm);background:var(--sel-fill);box-shadow:var(--sel-shadow);
+  color:var(--title);font:inherit;font-size:1.4rem;text-align:left;cursor:pointer;
+  transition:background .14s var(--ease),transform .14s var(--ease);
+}
+.welcome__step:hover{background:var(--fill-hover);}
+.welcome__step:active{transform:scale(.99);}
+.welcome__step:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
+.welcome__opt{color:var(--text-dim);opacity:.75;font-style:italic;}
+.welcome__txt{flex:1;display:flex;flex-direction:column;gap:3px;}
+.welcome__txt small{font-size:1.2rem;color:var(--text-dim);}
+/* A way in, not a box to fill: the arrow until the step is opened, then a
+   quiet tick in its place. */
+.welcome__mark{
+  flex:none;width:1.6rem;text-align:center;line-height:1;
+  color:var(--text-dim);transition:transform .14s var(--ease),color .14s var(--ease);
+}
+.welcome__mark::after{content:"\203A";font-size:1.8rem;}
+.welcome__step:hover .welcome__mark{color:var(--accent);transform:translateX(2px);}
+.welcome__step.is-done .welcome__mark{color:var(--accent);opacity:.8;transform:none;}
+.welcome__step.is-done .welcome__mark::after{content:"\2713";font-size:1.3rem;}
+/* The tick, said to a screen reader. */
+.welcome__state{display:none;}
+.welcome__step.is-done .welcome__state{display:block;position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
+.welcome__foot{display:flex;justify-content:flex-end;}
 .ask__foot{display:flex;justify-content:flex-end;gap:9px;margin-top:4px;}
 
 /* Sources is wider than the runner: it carries two columns, not a log. Its
@@ -3804,12 +3783,15 @@ button.modal__act{border:0;font:inherit;}
 :root[data-theme="minimal"] .modal__frame--stg .modal__title::before{content:"Settings";}
 :root[data-theme="minimal"] .modal__frame--ingest .modal__title::before{content:"Ingest";}
 :root[data-theme="minimal"] .modal__frame--sources .modal__title::before{content:"Sources";}
+:root[data-theme="minimal"] .modal__frame--welcome .modal__title::before{content:"Welcome";}
 /* Their paths were the title; now the ::before is, and "~" or "~/sources" said
    twice is just noise. */
 :root[data-theme="minimal"] .modal__frame--stg .modal__title .pane__path,
 :root[data-theme="minimal"] .modal__frame--ingest .modal__title .pane__path,
 :root[data-theme="minimal"] .modal__frame--ingest .modal__title .pane__cmd,
-:root[data-theme="minimal"] .modal__frame--sources .modal__title .modal__path{display:none;}
+:root[data-theme="minimal"] .modal__frame--sources .modal__title .modal__path,
+:root[data-theme="minimal"] .modal__frame--welcome .modal__title .pane__path,
+:root[data-theme="minimal"] .modal__frame--welcome .modal__title .pane__cmd{display:none;}
 
 /* --- maze -----------------------------------------------------------------
    The boards follow the feed: the segmented control flattens to underlined

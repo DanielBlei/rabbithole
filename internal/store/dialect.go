@@ -75,9 +75,14 @@ type dialect interface {
 // creates it, and the name to look for before running that DDL. The two are kept
 // together so an entry cannot claim to guard a table it does not create, which
 // TestAdditiveTablesNameTheirOwnTable checks.
+//
+// upgradeSeed, when set, runs once after the table is created in a database
+// that already held data, with the current time as its one argument. A fresh
+// database starts with the table empty.
 type additive struct {
-	table string
-	ddl   string
+	table       string
+	ddl         string
+	upgradeSeed string
 }
 
 // sqliteDialect is the form every query in this package is written in, so its
@@ -120,7 +125,10 @@ func (sqliteDialect) schemas() []string {
 }
 
 func (sqliteDialect) additiveTables() []additive {
-	return []additive{{table: "auth", ddl: authSchema}}
+	return []additive{
+		{table: "auth", ddl: authSchema},
+		{table: "onboarding", ddl: onboardingSchema, upgradeSeed: onboardingUpgradeSeed},
+	}
 }
 
 // migrateV3 adds local profiles and nullable provenance columns. It is one
@@ -234,7 +242,10 @@ func (postgresDialect) schemas() []string {
 }
 
 func (postgresDialect) additiveTables() []additive {
-	return []additive{{table: "auth", ddl: authSchemaPG}}
+	return []additive{
+		{table: "auth", ddl: authSchemaPG},
+		{table: "onboarding", ddl: onboardingSchema, upgradeSeed: onboardingUpgradeSeed},
+	}
 }
 
 // migrateV3 refuses rather than translating: Postgres arrived with the current

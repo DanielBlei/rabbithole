@@ -197,15 +197,14 @@ func newEmptyWeb(t *testing.T) *Web {
 }
 
 // A never-ingested store lands on the first-run zero-state: the ingest chip and
-// the side-menu hint both show, and the pane offers the runner rather than an
-// empty page.
+// the amber edge tab show, and the pane offers the runner rather than an empty
+// page.
 func TestFeedZeroStateNeverIngested(t *testing.T) {
 	body := get(t, newEmptyWeb(t), "/feed")
 
 	for _, want := range []string{
 		"ingest never ran", // topbar chip
-		`id="navHint"`,     // one-time pointer at the side menu
-		"navtab--warn",     // the edge tab it points at, amber
+		"navtab--warn",     // the side menu's edge tab, amber
 		"Nothing has been ingested yet",
 		"run ingest",
 		`class="filter filter--source"`, // the bar keeps its shape with no sources
@@ -243,10 +242,96 @@ func TestFeedZeroStateAfterEmptyRun(t *testing.T) {
 	if !strings.Contains(body, "The last run came back empty") {
 		t.Errorf("post-run empty feed missing the dry wording; body=%s", body)
 	}
-	// The run cleared the first-run chrome, so neither the chip nor the hint
+	// The run cleared the first-run chrome, so neither the chip nor the welcome
 	// should still be nagging.
-	if strings.Contains(body, "ingest never ran") || strings.Contains(body, `id="navHint"`) {
+	if strings.Contains(body, "ingest never ran") || strings.Contains(body, `id="welcomeModal"`) {
 		t.Error("first-run chrome should clear once a run is recorded")
+	}
+}
+
+// The welcome dialog greets a store with no run and no items, on both pages,
+// until it is dismissed. Items stored by a CLI ingest, which records no run,
+// are not a first run. Steps already taken render ticked.
+func TestWelcomeDialog(t *testing.T) {
+	withRun := func(t *testing.T) *Web {
+		t.Helper()
+		w := newEmptyWeb(t)
+		id, err := w.db.StartIngestRun(context.Background(), store.IngestTriggerManual)
+		if err != nil {
+			t.Fatalf("StartIngestRun: %v", err)
+		}
+		if err := w.db.FinishIngestRun(context.Background(), id, store.IngestStatusOK, store.IngestCounts{}, ""); err != nil {
+			t.Fatalf("FinishIngestRun: %v", err)
+		}
+		return w
+	}
+	emptyWith := func(steps ...string) func(t *testing.T) *Web {
+		return func(t *testing.T) *Web {
+			w := newEmptyWeb(t)
+			for _, step := range steps {
+				if code := postFormCode(w, "/welcome/"+step, nil); code != http.StatusNoContent {
+					t.Fatalf("POST /welcome/%s = %d, want 204", step, code)
+				}
+			}
+			return w
+		}
+	}
+	tests := []struct {
+		name    string
+		web     func(t *testing.T) *Web
+		path    string
+		welcome bool
+		ticked  string
+	}{
+		{name: "feed, nothing ingested", web: newEmptyWeb, path: "/feed", welcome: true},
+		{name: "maze, nothing ingested", web: newEmptyWeb, path: "/maze", welcome: true},
+		{name: "a taken step renders ticked", web: emptyWith(store.OnboardingSources), path: "/feed", welcome: true, ticked: "sources"},
+		{name: "dismissed", web: emptyWith(store.OnboardingDismissed), path: "/feed"},
+		{name: "feed, run recorded", web: withRun, path: "/feed"},
+		{name: "maze, run recorded", web: withRun, path: "/maze"},
+		{name: "feed, items without a run", web: newTestWeb, path: "/feed"},
+		{name: "items once seen keep it away", web: func(t *testing.T) *Web {
+			w := newTestWeb(t)
+			get(t, w, "/feed")
+			if _, err := w.db.PruneItems(context.Background(), store.PruneFilter{All: true, IncludeSaved: true}); err != nil {
+				t.Fatalf("PruneItems: %v", err)
+			}
+			return w
+		}, path: "/feed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := get(t, tt.web(t), tt.path)
+			if got := strings.Contains(body, `id="welcomeModal"`); got != tt.welcome {
+				t.Fatalf("welcome rendered = %v, want %v", got, tt.welcome)
+			}
+			if !tt.welcome {
+				return
+			}
+			for _, want := range []string{`hx-get="/sources"`, `data-stg-open="profiles"`, `hx-get="/ingest"`} {
+				if !strings.Contains(body, want) {
+					t.Errorf("welcome missing step %q", want)
+				}
+			}
+			ticks := strings.Count(body, "welcome__step is-done")
+			want := 0
+			if tt.ticked != "" {
+				want = 1
+				if !strings.Contains(body, `welcome__step is-done" type="button" data-welcome-step="`+tt.ticked+`"`) {
+					t.Errorf("step %q not rendered ticked", tt.ticked)
+				}
+			}
+			if ticks != want {
+				t.Errorf("ticked steps = %d, want %d", ticks, want)
+			}
+		})
+	}
+}
+
+// Only the welcome's own steps can be recorded.
+func TestWelcomeStepRejectsUnknown(t *testing.T) {
+	if code := postFormCode(newEmptyWeb(t), "/welcome/elsewhere", nil); code != http.StatusBadRequest {
+		t.Errorf("POST /welcome/elsewhere = %d, want 400", code)
 	}
 }
 

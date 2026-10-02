@@ -1,7 +1,7 @@
-// The modal layers, bottom to top: the settings dialog, then #modal for the
-// base htmx dialog, then #modalTop for one stacked over it (the runner and
-// settings both open config/feeds there). This owns dismissal, the page scroll
-// lock, and keeping focus inside the topmost open frame.
+// The modal layers, bottom to top: the first-run welcome, the settings dialog,
+// then #modal for the base htmx dialog, then #modalTop for one stacked over it
+// (the runner and settings both open config/feeds there). This owns dismissal,
+// the page scroll lock, and keeping focus inside the topmost open frame.
 //
 // The two htmx layers are containers htmx swaps a fragment into, so they are
 // open when they have a child and close by being emptied. Settings is rendered
@@ -28,6 +28,7 @@
     };
   }
   var layers = [
+    staticLayer('welcomeModal'),
     staticLayer('settingsModal'),
     htmxLayer('modal'),
     htmxLayer('modalTop')
