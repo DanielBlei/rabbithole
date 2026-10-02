@@ -153,6 +153,32 @@ func (sqliteDialect) migrateV3(ctx context.Context, db *sql.DB) error {
 	return tx.Commit()
 }
 
+// execAdditive creates one additive table and, on an upgrade, runs its seed —
+// in a single transaction, so a seed that fails cannot leave the table created
+// and empty: the next open would see the table and skip both statements, and a
+// database upgraded from before the welcome would greet its long-time user as
+// a first run.
+//
+// It works on a raw *sql.DB like initSchema does, before a Store exists, which
+// is why it lives here beside migrateV3 rather than going through the Store's
+// own wrappers.
+func execAdditive(ctx context.Context, db *sql.DB, d dialect, t additive, fresh bool) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin additive table %s: %w", t.table, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, t.ddl); err != nil {
+		return fmt.Errorf("create additive table %s: %w", t.table, err)
+	}
+	if !fresh && t.upgradeSeed != "" {
+		if _, err := tx.ExecContext(ctx, d.rebind(t.upgradeSeed), sqlTime(time.Now())); err != nil {
+			return fmt.Errorf("seed additive table %s: %w", t.table, err)
+		}
+	}
+	return tx.Commit()
+}
+
 // uniqueViolation reads the column out of modernc's message, which reads
 // "constraint failed: UNIQUE constraint failed: feeds.name (2067)". The
 // trailing code is the SQLite result code and is cut off.

@@ -138,24 +138,24 @@ serve: config-hint ## Serve the web UI and items API over HTTP (uses CONFIG, ADD
 
 .PHONY: test
 test: ## Run the test suite
-	go test $(PKG)
+	@RABBITHOLE_DB_PASSWORD= go test $(PKG)
 
 .PHONY: test-v
 test-v: ## Run the test suite verbosely
-	go test -v $(PKG)
+	@RABBITHOLE_DB_PASSWORD= go test -v $(PKG)
 
 .PHONY: test-race
 test-race: ## Run tests with the race detector
-	go test -race $(PKG)
+	@RABBITHOLE_DB_PASSWORD= go test -race $(PKG)
 
 .PHONY: bench
 bench: ## Run ranking and store benchmarks
-	go test -bench=. -benchmem ./internal/rank ./internal/store
+	@RABBITHOLE_DB_PASSWORD= go test -bench=. -benchmem ./internal/rank ./internal/store
 
 .PHONY: cover
 cover: ## Run tests and open an HTML coverage report
-	go test -coverprofile=coverage.out $(PKG)
-	go tool cover -html=coverage.out
+	@RABBITHOLE_DB_PASSWORD= go test -coverprofile=coverage.out $(PKG)
+	@RABBITHOLE_DB_PASSWORD= go tool cover -html=coverage.out
 
 # The suite runs on SQLite by default and needs nothing installed. These three
 # run the same tests a second time against Postgres, which is opt-in: `check`

@@ -105,8 +105,9 @@ nothing else. Fonts ship inside the
 binary, so no page load reaches a CDN.
 
 The exception is the weather widget, on by default for the Feed and the Maze. The browser calls Open-Meteo with
-your coordinates for the forecast and pollen, and their geocoding endpoint when you search for
-a city. Coordinates come from the browser's location prompt or that search, stay in
+your coordinates for the forecast and pollen, and their geocoding endpoint when you search for a
+city. When you allow the browser's location prompt, the coordinates are also sent to
+BigDataCloud to name the place they fall in. Coordinates come from the browser's location prompt or that search, stay in
 `localStorage`, and never reach the server. Decline the prompt and nothing is requested; it is
 asked once, not on every visit. Switching the widget off in Settings → Weather stops all of
 it. See `internal/web/static/js/weather.js`.

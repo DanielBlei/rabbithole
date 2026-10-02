@@ -257,8 +257,9 @@ func Open(path string) (*Store, error) {
 
 // initSchema creates every table on a new database and stamps it with schemaVersion.
 // An existing database is checked against that version and rejected on a mismatch.
-// Either way, the additive tables are then created where they are missing. label
-// names the database in errors, and must not carry a password.
+// Either way, the additive tables are then created where they are missing, each
+// together with its upgrade seed in one transaction. label names the database in
+// errors, and must not carry a password.
 func initSchema(ctx context.Context, db *sql.DB, d dialect, label string) error {
 	fresh, err := d.isFresh(ctx, db)
 	if err != nil {
@@ -289,6 +290,10 @@ func initSchema(ctx context.Context, db *sql.DB, d dialect, label string) error 
 			return err
 		}
 	}
+	// One transaction per table, so a seed that fails cannot leave the table
+	// created and empty: the next open would see the table and skip both
+	// statements, and a database upgraded from before the welcome would greet
+	// its long-time user as a first run.
 	for _, t := range d.additiveTables() {
 		exists, err := d.tableExists(ctx, db, t.table)
 		if err != nil {
@@ -297,13 +302,8 @@ func initSchema(ctx context.Context, db *sql.DB, d dialect, label string) error 
 		if exists {
 			continue
 		}
-		if _, err := db.ExecContext(ctx, t.ddl); err != nil {
-			return fmt.Errorf("create additive table %s: %w", t.table, err)
-		}
-		if !fresh && t.upgradeSeed != "" {
-			if _, err := db.ExecContext(ctx, d.rebind(t.upgradeSeed), sqlTime(time.Now())); err != nil {
-				return fmt.Errorf("seed additive table %s: %w", t.table, err)
-			}
+		if err := execAdditive(ctx, db, d, t, fresh); err != nil {
+			return err
 		}
 	}
 	return nil

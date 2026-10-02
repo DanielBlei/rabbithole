@@ -260,7 +260,13 @@ func TestWelcomeDialog(t *testing.T) {
 		if err != nil {
 			t.Fatalf("StartIngestRun: %v", err)
 		}
-		if err := w.db.FinishIngestRun(context.Background(), id, store.IngestStatusOK, store.IngestCounts{}, ""); err != nil {
+		if err := w.db.FinishIngestRun(
+			context.Background(),
+			id,
+			store.IngestStatusOK,
+			store.IngestCounts{},
+			"",
+		); err != nil {
 			t.Fatalf("FinishIngestRun: %v", err)
 		}
 		return w
@@ -285,7 +291,13 @@ func TestWelcomeDialog(t *testing.T) {
 	}{
 		{name: "feed, nothing ingested", web: newEmptyWeb, path: "/feed", welcome: true},
 		{name: "maze, nothing ingested", web: newEmptyWeb, path: "/maze", welcome: true},
-		{name: "a taken step renders ticked", web: emptyWith(store.OnboardingSources), path: "/feed", welcome: true, ticked: "sources"},
+		{
+			name:    "a taken step renders ticked",
+			web:     emptyWith(store.OnboardingSources),
+			path:    "/feed",
+			welcome: true,
+			ticked:  "sources",
+		},
 		{name: "dismissed", web: emptyWith(store.OnboardingDismissed), path: "/feed"},
 		{name: "feed, run recorded", web: withRun, path: "/feed"},
 		{name: "maze, run recorded", web: withRun, path: "/maze"},
@@ -293,7 +305,10 @@ func TestWelcomeDialog(t *testing.T) {
 		{name: "items once seen keep it away", web: func(t *testing.T) *Web {
 			w := newTestWeb(t)
 			get(t, w, "/feed")
-			if _, err := w.db.PruneItems(context.Background(), store.PruneFilter{All: true, IncludeSaved: true}); err != nil {
+			if _, err := w.db.PruneItems(
+				context.Background(),
+				store.PruneFilter{All: true, IncludeSaved: true},
+			); err != nil {
 				t.Fatalf("PruneItems: %v", err)
 			}
 			return w

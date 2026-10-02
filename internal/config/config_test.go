@@ -446,6 +446,12 @@ func TestValidateStoreNeedsExactlyOneTarget(t *testing.T) {
 }
 
 func TestResolvePostgres(t *testing.T) {
+	// The Makefile exports RABBITHOLE_DB_PASSWORD from .env so targets that
+	// run the binary see it, which means tests inherit a real password unless
+	// they pin the variable themselves. Empty is the "no override" state the
+	// subtests below start from; the ones that want a value set their own.
+	t.Setenv(DBPasswordEnv, "")
+
 	t.Run("the environment beats a password in the url", func(t *testing.T) {
 		t.Setenv(DBPasswordEnv, "from-env")
 		pg, err := StoreConfig{URL: "postgres://rabbit:from-url@db.host:5432/rabbithole"}.ResolvePostgres()
@@ -572,6 +578,11 @@ func TestResolvePostgresTLSFlags(t *testing.T) {
 // userinfo. It has to be treated the same either way, or it slips past both
 // the environment override and the warning the caller prints.
 func TestResolvePostgresPasswordAsQueryParameter(t *testing.T) {
+	// See TestResolvePostgres: a password exported into the environment (the
+	// Makefile does this from .env) would otherwise override the query
+	// parameter these subtests are exercising.
+	t.Setenv(DBPasswordEnv, "")
+
 	t.Run("used and flagged", func(t *testing.T) {
 		pg, err := StoreConfig{URL: "postgres://rabbit@db.host/rabbithole?password=hunter2"}.ResolvePostgres()
 		if err != nil {
