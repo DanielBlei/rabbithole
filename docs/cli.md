@@ -37,7 +37,7 @@ them in the store.
 | Flag | Description |
 |---|---|
 | `--dry-run` | Print the digest to stdout without writing files or recording items. Feed health is still recorded. |
-| `--provider` | Override the configured provider for this run (`ollama`, `vllm`, `heuristic`) |
+| `--provider` | Override the configured provider for this run (`ollama`, `openai`, `vllm`, `heuristic`) |
 | `--no-think` | Disable model reasoning for this run, for models without a thinking mode or for a faster pass |
 | `--markdown` | Also write `YYYY-MM-DD.md` to `ingest.digest_dir`; fails if that setting is empty |
 

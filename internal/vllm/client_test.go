@@ -67,7 +67,7 @@ func TestValidate(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, "")
+			c, err := New(VLLM, srv.URL, "llama3", "", false, "medium", rank.ModelTuning{}, "")
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -102,7 +102,7 @@ func TestProbeRequestShape(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, "")
+	c, err := New(VLLM, srv.URL, "llama3", "", false, "medium", rank.ModelTuning{}, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -147,11 +147,11 @@ func TestProbeRetry(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, "")
+			c, err := New(VLLM, srv.URL, "llama3", "", false, "medium", rank.ModelTuning{}, "")
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
-			if err := c.probeModelWithRetry(t.Context()); err == nil {
+			if err := c.probeModelWithRetry(t.Context(), ""); err == nil {
 				t.Fatal("probeModelWithRetry() error = nil, want non-nil")
 			}
 			if calls != tc.wantCalls {
@@ -177,7 +177,7 @@ func TestListModelNames(t *testing.T) {
 		{
 			name:       "server error surfaces as error",
 			statusCode: http.StatusServiceUnavailable,
-			wantErr:    "vLLM /v1/models returned",
+			wantErr:    "vllm /v1/models returned",
 		},
 	}
 	for _, tt := range tests {
@@ -192,7 +192,7 @@ func TestListModelNames(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, "")
+			c, err := New(VLLM, srv.URL, "llama3", "", false, "medium", rank.ModelTuning{}, "")
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -241,7 +241,7 @@ func TestScoreSurfacesFinishReasonOnParseFailure(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, "")
+			c, err := New(VLLM, srv.URL, "llama3", "", false, "medium", rank.ModelTuning{}, "")
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -266,7 +266,7 @@ func TestScoreSalvagesTruncatedResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, "")
+	c, err := New(VLLM, srv.URL, "llama3", "", false, "medium", rank.ModelTuning{}, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -296,7 +296,7 @@ func TestScoreRequestConstrainsOutput(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, "")
+	c, err := New(VLLM, srv.URL, "llama3", "", false, "medium", rank.ModelTuning{}, "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -313,22 +313,25 @@ func TestScoreRequestConstrainsOutput(t *testing.T) {
 	if want := (rank.ModelTuning{}).Budget(len(items), false); got.MaxTokens != want {
 		t.Errorf("max_tokens = %d, want %d", got.MaxTokens, want)
 	}
-	if got.ReasoningEffort != "low" {
-		t.Errorf("reasoning_effort = %q, want %q (think off)", got.ReasoningEffort, "low")
-	}
 }
 
-func TestScoreReasoningEffortFollowsThink(t *testing.T) {
+func TestScoreFlavorDialect(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		think bool
-		want  string
+		name          string
+		flavor        Flavor
+		think         bool
+		wantTokens    string // the token cap field that must be present
+		absentTokens  string // and the one that must not
+		wantEffort    any    // nil means the field is absent
+		wantKwargsOff bool   // chat_template_kwargs.enable_thinking == false
 	}{
-		{"think on sends no reasoning_effort", true, ""},
-		{"think off asks for low effort", false, "low"},
+		{"openai think on", OpenAI, true, "max_completion_tokens", "max_tokens", "medium", false},
+		{"openai think off", OpenAI, false, "max_completion_tokens", "max_tokens", "low", false},
+		{"vllm think on", VLLM, true, "max_tokens", "max_completion_tokens", nil, false},
+		{"vllm think off", VLLM, false, "max_tokens", "max_completion_tokens", nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var got chatRequest
+			var got map[string]any
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_ = json.NewDecoder(r.Body).Decode(&got)
 				w.Header().Set("Content-Type", "application/json")
@@ -338,17 +341,162 @@ func TestScoreReasoningEffortFollowsThink(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3", "", tc.think, rank.ModelTuning{}, "")
+			c, err := New(tc.flavor, srv.URL, "llama3", "", tc.think, "medium", rank.ModelTuning{}, "")
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
 			if _, err := c.Score(t.Context(), "profile", []feeds.Item{{ID: "a", Title: "A"}}); err != nil {
 				t.Fatalf("Score() error = %v", err)
 			}
-			if got.ReasoningEffort != tc.want {
-				t.Fatalf("reasoning_effort = %q, want %q", got.ReasoningEffort, tc.want)
+			if _, ok := got[tc.wantTokens]; !ok {
+				t.Errorf("%s missing from request", tc.wantTokens)
+			}
+			if _, ok := got[tc.absentTokens]; ok {
+				t.Errorf("%s present, want absent", tc.absentTokens)
+			}
+			effort, ok := got["reasoning_effort"]
+			if tc.wantEffort == nil && ok || tc.wantEffort != nil && effort != tc.wantEffort {
+				t.Errorf("reasoning_effort = %v, want %v", effort, tc.wantEffort)
+			}
+			kwargs, _ := got["chat_template_kwargs"].(map[string]any)
+			if off := kwargs["enable_thinking"] == false; off != tc.wantKwargsOff {
+				t.Errorf("chat_template_kwargs = %v, want enable_thinking=false: %v", kwargs, tc.wantKwargsOff)
 			}
 		})
+	}
+}
+
+func TestResolveEffort(t *testing.T) {
+	withFastValidateRetry(t)
+
+	for _, tc := range []struct {
+		name     string
+		think    bool
+		effort   string
+		accepts  func(effort string) int // probe status for a reasoning_effort ("" = field absent)
+		want     string                  // reasoning_effort Score then sends; "" = absent
+		wantErr  bool
+		wantSeen []string
+	}{
+		{
+			name:  "think off takes none when the model accepts it",
+			think: false, effort: "medium",
+			accepts:  func(string) int { return http.StatusOK },
+			want:     "none",
+			wantSeen: []string{"none"},
+		},
+		{
+			name:  "think off walks down to the lowest accepted",
+			think: false, effort: "medium",
+			accepts:  only("low"),
+			want:     "low",
+			wantSeen: []string{"none", "minimal", "low"},
+		},
+		{
+			name:  "think off omits the field when no effort is accepted",
+			think: false, effort: "medium",
+			accepts:  only(""),
+			want:     "",
+			wantSeen: []string{"none", "minimal", "low", ""},
+		},
+		{
+			name:  "think on keeps the configured effort",
+			think: true, effort: "high",
+			accepts:  func(string) int { return http.StatusOK },
+			want:     "high",
+			wantSeen: []string{"high"},
+		},
+		{
+			name:  "think on omits an effort the model rejects",
+			think: true, effort: "xhigh",
+			accepts:  only(""),
+			want:     "",
+			wantSeen: []string{"xhigh", ""},
+		},
+		{
+			name:  "auth failure fails validation",
+			think: false, effort: "medium",
+			accepts:  func(string) int { return http.StatusUnauthorized },
+			wantErr:  true,
+			wantSeen: []string{"none"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var seen []string
+			var scored map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.Method == http.MethodGet {
+					_, _ = w.Write([]byte(`{"data":[{"id":"gpt"}]}`))
+					return
+				}
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if _, scoring := body["response_format"]; scoring {
+					scored = body
+					_, _ = w.Write([]byte(
+						`{"choices":[{"message":{"content":"{\"scores\":[{\"index\":1,\"score\":9,\"reason\":\"x\"}]}"},"finish_reason":"stop"}]}`,
+					))
+					return
+				}
+				effort, _ := body["reasoning_effort"].(string)
+				seen = append(seen, effort)
+				w.WriteHeader(tc.accepts(effort))
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer srv.Close()
+
+			c, err := New(OpenAI, srv.URL, "gpt", "", tc.think, tc.effort, rank.ModelTuning{}, "")
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			err = c.Validate(t.Context())
+			if !slices.Equal(seen, tc.wantSeen) {
+				t.Errorf("probed efforts = %q, want %q", seen, tc.wantSeen)
+			}
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("Validate() error = nil, want non-nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+			if _, err := c.Score(t.Context(), "profile", []feeds.Item{{ID: "a", Title: "A"}}); err != nil {
+				t.Fatalf("Score() error = %v", err)
+			}
+			got, ok := scored["reasoning_effort"]
+			if tc.want == "" && ok || tc.want != "" && got != tc.want {
+				t.Errorf("Score reasoning_effort = %v, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// only accepts exactly the given reasoning_effort and rejects the rest with a 400.
+func only(accepted string) func(string) int {
+	return func(effort string) int {
+		if effort == accepted {
+			return http.StatusOK
+		}
+		return http.StatusBadRequest
+	}
+}
+
+func TestErrorsNameTheFlavor(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	c, err := New(OpenAI, srv.URL, "gpt", "", true, "medium", rank.ModelTuning{}, "")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	_, err = c.Score(t.Context(), "profile", []feeds.Item{{ID: "a", Title: "A"}})
+	if err == nil || !strings.HasPrefix(err.Error(), "openai chat returned 400") {
+		t.Fatalf("Score() error = %v, want it to name the openai provider", err)
 	}
 }
 
@@ -375,7 +523,7 @@ func TestScoreOmitsSystemMessageWhenPromptEmpty(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, tc.systemPrompt)
+			c, err := New(VLLM, srv.URL, "llama3", "", false, "medium", rank.ModelTuning{}, tc.systemPrompt)
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}

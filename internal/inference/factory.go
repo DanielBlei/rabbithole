@@ -48,12 +48,16 @@ func build(ctx context.Context, cfg config.InferenceConfig, think bool, systemPr
 	switch cfg.Provider {
 	case "ollama":
 		s, err = ollama.New(cfg.Host, cfg.Model, cfg.APIKey, think, cfg.ModelTuning, systemPrompt)
+	case "openai":
+		s, err = vllm.New(vllm.OpenAI, cfg.Host, cfg.Model, cfg.APIKey,
+			think, cfg.Effort, cfg.ModelTuning, systemPrompt)
 	case "vllm":
-		s, err = vllm.New(cfg.Host, cfg.Model, cfg.APIKey, think, cfg.ModelTuning, systemPrompt)
+		s, err = vllm.New(vllm.VLLM, cfg.Host, cfg.Model, cfg.APIKey,
+			think, cfg.Effort, cfg.ModelTuning, systemPrompt)
 	case "heuristic":
 		s = rank.NewHeuristic()
 	default:
-		return nil, fmt.Errorf("unknown provider %q, must be ollama, vllm or heuristic", cfg.Provider)
+		return nil, fmt.Errorf("unknown provider %q, must be ollama, openai, vllm or heuristic", cfg.Provider)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("backend init: %w", err)

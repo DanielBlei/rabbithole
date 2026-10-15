@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -105,11 +106,12 @@ type Config struct {
 
 // InferenceConfig configures the scoring backend (the model and how to reach it).
 type InferenceConfig struct {
-	Provider string `yaml:"provider"` // ollama | vllm | heuristic
+	Provider string `yaml:"provider"` // ollama | openai | vllm | heuristic
 	Host     string `yaml:"host"`     // inference server URL
 	Model    string `yaml:"model"`    // chat model name
 	APIKey   string `yaml:"api_key"`  // optional bearer token
 	Think    *bool  `yaml:"think"`    // model reasoning during scoring; defaults true when not set in the config
+	Effort   string `yaml:"effort"`   // openai reasoning_effort while thinking: low | medium | high | xhigh
 
 	// SystemPrompt: unset takes inference's built-in default, a path overrides it, false sends none.
 	SystemPrompt SystemPromptSetting `yaml:"system_prompt"`
@@ -143,6 +145,7 @@ type SummaryConfig struct {
 	Model    string `yaml:"model"`
 	APIKey   string `yaml:"api_key"`
 	Think    *bool  `yaml:"think"`
+	Effort   string `yaml:"effort"`
 }
 
 // SystemPromptSetting is the inference.system_prompt config value: a path, false (disabled),
@@ -369,7 +372,12 @@ const (
 	defaultBatchSize   = 1
 	defaultMaxParallel = 1
 	defaultSince       = 7 * 24 * time.Hour
+	defaultEffort      = "medium"
 )
+
+// efforts are the reasoning_effort levels inference.effort accepts. Lower ones
+// belong to think: false, which probes the model's own lowest.
+var efforts = []string{"low", "medium", "high", "xhigh"}
 
 // Load reads and validates the config at path, applying defaults for unset fields.
 func Load(path string) (*Config, error) {
@@ -405,6 +413,9 @@ func (c *Config) applyDefaults() {
 		t := true
 		c.Inference.Think = &t
 	}
+	if c.Inference.Effort == "" {
+		c.Inference.Effort = defaultEffort
+	}
 	if c.Inference.BatchSize <= 0 {
 		c.Inference.BatchSize = defaultBatchSize
 	}
@@ -420,9 +431,17 @@ func (c *Config) validate() error {
 	// "claude" is deliberately absent: it is an eval-only reference scorer,
 	// reachable through `eval benchmark --provider claude` and nowhere else.
 	switch c.Inference.Provider {
-	case "ollama", "vllm", "heuristic":
+	case "ollama", "openai", "vllm", "heuristic":
 	default:
-		return fmt.Errorf("invalid provider %q, must be ollama, vllm or heuristic", c.Inference.Provider)
+		return fmt.Errorf("invalid provider %q, must be ollama, openai, vllm or heuristic", c.Inference.Provider)
+	}
+	for field, effort := range map[string]string{
+		"inference.effort":         c.Inference.Effort,
+		"inference.summary.effort": c.Inference.Summary.Effort,
+	} {
+		if effort != "" && !slices.Contains(efforts, effort) {
+			return fmt.Errorf("%s %q, must be one of %s", field, effort, strings.Join(efforts, ", "))
+		}
 	}
 	if c.Inference.Summary != (SummaryConfig{}) && c.Inference.Summary.Model == "" {
 		return fmt.Errorf("inference.summary.model is required when other inference.summary fields are set")
@@ -571,7 +590,7 @@ func (c *InferenceConfig) LoadSystemPrompt() (string, error) {
 }
 
 // ResolveSummary returns the effective InferenceConfig for summarization
-// tasks: c with Provider/Host/Model/APIKey/Think overridden by any set
+// tasks: c with Provider/Host/Model/APIKey/Think/Effort overridden by any set
 // Summary fields. ModelTuning and SystemPrompt always come from c.
 func (c InferenceConfig) ResolveSummary() InferenceConfig {
 	resolved := c
@@ -589,6 +608,9 @@ func (c InferenceConfig) ResolveSummary() InferenceConfig {
 	}
 	if c.Summary.Think != nil {
 		resolved.Think = c.Summary.Think
+	}
+	if c.Summary.Effort != "" {
+		resolved.Effort = c.Summary.Effort
 	}
 	return resolved
 }

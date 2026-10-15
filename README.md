@@ -6,7 +6,7 @@
   <a href="https://github.com/DanielBlei/rabbithole/actions/workflows/ci.yml"><img src="https://github.com/DanielBlei/rabbithole/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="go.mod"><img src="https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white" alt="Go 1.26+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
-  <img src="https://img.shields.io/badge/backends-Ollama%20%7C%20vLLM%20%7C%20heuristic-informational" alt="Backends: Ollama, vLLM, heuristic">
+  <img src="https://img.shields.io/badge/backends-Ollama%20%7C%20OpenAI%20%7C%20vLLM%20%7C%20heuristic-informational" alt="Backends: Ollama, OpenAI, vLLM, heuristic">
   <a href="#what-it-reads"><img src="https://img.shields.io/badge/sources-RSS%2FAtom%20%7C%20arXiv%20%7C%20Crossref%20%7C%20Semantic%20Scholar-informational" alt="Sources: RSS/Atom, arXiv, Crossref, Semantic Scholar"></a>
 </p>
 
@@ -48,7 +48,8 @@ to look for. See [docs/configuration.md](docs/configuration.md#academic-sources)
 
 - A scorer, one of:
   - [Ollama](https://ollama.com) running locally (the default)
-  - any OpenAI-compatible endpoint, such as [vLLM](https://docs.vllm.ai)
+  - OpenAI or any OpenAI-compatible gateway
+  - a [vLLM](https://docs.vllm.ai) server
   - nothing, with the built-in `heuristic` scorer
 - optionally, Postgres (14 or newer) in place of the SQLite file, if one store has to serve more
   than one machine

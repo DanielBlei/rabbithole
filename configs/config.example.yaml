@@ -4,10 +4,11 @@
 # user: rabbit                  # web UI shell prompt customization; unset uses your OS login name
 
 inference:
-  provider: ollama              # ollama | vllm | heuristic (keywords, no model)
+  provider: ollama              # ollama | openai | vllm | heuristic (keywords, no model)
   host: http://localhost:11434
   model: qwen3.5:4b             # gemma4:26b | qwen3.6:35b | etc
   think: false                  # model reasoning before scoring; default true
+  # effort: medium              # openai only: low | medium | high | xhigh while thinking
   # api_key: $RABBITHOLE_KEY    # bearer token, if your endpoint needs one: a $KEY reference or the literal value
 
   # system_prompt: ./configs/prompts/system.example.md   # model instructions; omit to use the built-in default

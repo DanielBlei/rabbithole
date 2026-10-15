@@ -32,7 +32,7 @@ func init() {
 	ingestCmd.Flags().
 		BoolVar(&dryRun, "dry-run", false, "print the digest to stdout; do not write files or record items")
 	ingestCmd.Flags().
-		StringVar(&providerOverride, "provider", "", "override the configured provider (ollama|vllm|heuristic)")
+		StringVar(&providerOverride, "provider", "", "override the configured provider (ollama|openai|vllm|heuristic)")
 	ingestCmd.Flags().
 		BoolVar(&noThink, "no-think", false, "override config to disable model reasoning/thinking for this run (use for models without thinking support)")
 	ingestCmd.Flags().

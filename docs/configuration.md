@@ -42,11 +42,12 @@ All fields are optional unless marked required.
 |---|---|-----------------------------------|
 | `user` | Name shown in the web UI's shell prompt | OS login name                     |
 | `profile` | Optional legacy Markdown profile to import at boot | built-in Default |
-| `inference.provider` | `ollama` \| `vllm` \| `heuristic` | `ollama`                          |
+| `inference.provider` | `ollama` \| `openai` \| `vllm` \| `heuristic` | `ollama`                          |
 | `inference.host` | Inference server URL | `http://localhost:11434`          |
 | `inference.model` | Model name | `qwen3.5:4b`                      |
 | `inference.api_key` | Bearer token, or a leading `$NAME`/`${NAME}` environment reference (see note below) | none                              |
 | `inference.think` | Allow model reasoning before scoring, with fallback | `true`                            |
+| `inference.effort` | `openai` only: `reasoning_effort` while thinking, `low` \| `medium` \| `high` \| `xhigh` | `medium`                          |
 | `inference.system_prompt` | Path to a system-prompt override, or `false` to send none — see below | built-in                          |
 | `inference.batch_size` | Articles per scoring request | `1`                               |
 | `inference.max_parallel` | Scoring requests in flight | `1`                               |
@@ -65,9 +66,13 @@ example `14d`, `168h`, `1h30m`.
 **Providers**
 
 - `ollama` — a local Ollama server; the default.
-- `vllm` — an OpenAI-compatible endpoint: vLLM proper, or a gateway that speaks its API.
-  When the model is missing from `/v1/models`, validation falls back to a minimal chat
-  request — gateways sometimes route models their catalog doesn't list.
+- `openai` — OpenAI, or any hosted gateway that speaks its chat-completions API. Sends
+  `max_completion_tokens`, which OpenAI's reasoning models require in place of `max_tokens`.
+- `vllm` — a vLLM server. Same client as `openai`, in vLLM's dialect: `max_tokens`, and
+  thinking switched off through the chat template (see below).
+
+Both check the model against `/v1/models`. When it is missing there, validation falls back to
+a minimal chat request, since gateways sometimes route models their catalog doesn't list.
 - `heuristic` — keyword matching with no model involved. Suitable for offline use and for
   testing feed and filter changes without inference latency.
 
@@ -76,11 +81,23 @@ example `14d`, `168h`, `1h30m`.
 Not every model has a reasoning mode. On Ollama, `think: true` is probed once at startup: a
 model that rejects it falls back to `think: false` with a warning, rather than failing every
 scoring request. Any other error during the probe leaves thinking on, so a transient problem
-is not mistaken for a missing feature. vLLM has no such probe — `think` is passed through as
-set, and `think: false` sends `reasoning_effort: "low"`, the gentlest value in the OpenAI
-enum. Some reasoning models (GLM 5.3 among them) only reduce thinking at that setting
-rather than switching it off, and a gateway strict enough to reject unknown request fields
-will fail the request outright.
+is not mistaken for a missing feature.
+
+On `vllm`, `think: false` sends `chat_template_kwargs: {"enable_thinking": false}`, which
+switches thinking off for models whose chat template has that switch (Qwen3 and similar).
+Other templates ignore it.
+
+On `openai`, the reasoning level is probed once at startup with one-token requests:
+
+- `think: true` sends `inference.effort`. A model that rejects that level, or takes no
+  `reasoning_effort` at all, gets the field left out, with a warning naming the server's reply.
+- `think: false` ignores `inference.effort` and sends the lowest level the model accepts,
+  trying `none` (gpt-5.1 and later, which switches reasoning off), then `minimal` (gpt-5), then
+  `low`. A model that takes none of them gets the field left out.
+
+An auth or unknown-model reply fails startup, and a probe that keeps timing out keeps the
+plain choice (`inference.effort`, or `low`). Reasoning tokens count against
+`max_completion_tokens`, so raise `model_tuning.tokens_thinking` for `high` and `xhigh`.
 
 > **Note:** `api_key` is stored in plaintext. The web UI's config viewer masks it, but the
 > file itself is unprotected — keep `configs/config.yaml` out of version control (it is
