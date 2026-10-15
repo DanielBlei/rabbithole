@@ -179,6 +179,20 @@ func TestParseScores(t *testing.T) {
 			},
 		},
 		{
+			name:  "entry without a score is dropped, not read as 0",
+			raw:   `{"scores":[{"index":1,"reason":"Deep dive."},{"index":2,"score":4,"reason":"Some overlap."}]}`,
+			items: testItems(),
+			want: map[string]ItemScore{
+				"b": {ID: "b", Score: 4, Reason: "Some overlap."},
+			},
+		},
+		{
+			name:    "only unusable scores errors so the item is re-asked",
+			raw:     `{"scores":[{"index":1,"score":"high","reason":"Deep dive."}]}`,
+			items:   testItems(),
+			wantErr: []string{"no usable score", "1 without one"},
+		},
+		{
 			name:    "no JSON object in response",
 			raw:     "no json here",
 			items:   testItems(),

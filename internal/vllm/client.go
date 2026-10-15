@@ -29,7 +29,7 @@ import (
 const (
 	listTimeout = 30 * time.Second
 	chatTimeout = 3 * time.Minute
-	// probeTimeout is short: the probe asks for one token, not a scoring budget.
+	// probeTimeout bounds the probe, which sends no output cap.
 	probeTimeout = 30 * time.Second
 )
 
@@ -62,13 +62,14 @@ type modelsResponse struct {
 	} `json:"data"`
 }
 
-// probeRequest omits response_format: some servers reject an empty one.
+// probeRequest omits response_format (some servers reject an empty one) and
+// any output cap: a 1-token cap 400s on reasoning models, whose thinking
+// spends it before any visible token.
 type probeRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-	Stream   bool          `json:"stream"`
-	tokenCap
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	Model           string        `json:"model"`
+	Messages        []chatMessage `json:"messages"`
+	Stream          bool          `json:"stream"`
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
 }
 
 // lowestEfforts is the think-off ladder: none (gpt-5.1+), minimal (gpt-5),
@@ -123,7 +124,7 @@ func (c *Client) probeModelWithRetry(ctx context.Context, effort string) error {
 	return last
 }
 
-// probeModel posts a one-token chat completion; only a 200 accepts the model
+// probeModel posts a minimal chat completion; only a 200 accepts the model
 // (and the effort, when one is given).
 func (c *Client) probeModel(ctx context.Context, effort string) error {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
@@ -131,9 +132,8 @@ func (c *Client) probeModel(ctx context.Context, effort string) error {
 
 	body, err := json.Marshal(probeRequest{
 		Model:           c.model,
-		Messages:        []chatMessage{{Role: "user", Content: "ok"}},
+		Messages:        []chatMessage{{Role: "user", Content: "Hi, how are you?"}},
 		Stream:          false,
-		tokenCap:        c.tokenCap(1),
 		ReasoningEffort: effort,
 	})
 	if err != nil {

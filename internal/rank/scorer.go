@@ -203,6 +203,7 @@ type scoreEntry struct {
 	Index  int
 	Score  float64 // some models emit fractional scores despite the int 0-10 prompt
 	Reason string
+	scored bool // Score was present and numeric
 }
 
 // UnmarshalJSON reads an entry leniently, for models that ignore the schema.
@@ -214,9 +215,10 @@ func (e *scoreEntry) UnmarshalJSON(b []byte) error {
 	for k, v := range fields {
 		switch normalizeKey(k) {
 		case "index":
-			e.Index = int(math.Round(asNumber(v)))
+			n, _ := asNumber(v)
+			e.Index = int(math.Round(n))
 		case "score":
-			e.Score = asNumber(v)
+			e.Score, e.scored = asNumber(v)
 		case "reason":
 			e.Reason = asText(v)
 		}
@@ -235,14 +237,14 @@ func normalizeKey(k string) string {
 	return b.String()
 }
 
-// asNumber reads a JSON number or a quoted one ("9"); anything else is 0.
-func asNumber(v json.RawMessage) float64 {
+// asNumber reads a JSON number or a quoted one ("9"); ok is false for anything else.
+func asNumber(v json.RawMessage) (float64, bool) {
 	s := strings.Trim(strings.TrimSpace(string(v)), `"`)
 	f, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, false
 	}
-	return f
+	return f, true
 }
 
 // asText reads a JSON string, or joins a list of them; anything else is empty.
@@ -296,8 +298,14 @@ func ParseScores(raw string, items []feeds.Item) ([]ItemScore, error) {
 	}
 	out := make([]ItemScore, 0, len(parsed.Scores))
 	indices := make([]int, len(parsed.Scores))
+	unscored := 0
 	for i, s := range parsed.Scores {
 		indices[i] = s.Index
+		// A verdict without a usable score is dropped, never read as 0, so it gets re-asked.
+		if !s.scored {
+			unscored++
+			continue
+		}
 		idx := s.Index - 1
 		switch {
 		case len(items) == 1:
@@ -313,6 +321,10 @@ func ParseScores(raw string, items []feeds.Item) ([]ItemScore, error) {
 		})
 	}
 	if len(out) == 0 {
+		if unscored > 0 {
+			return nil, fmt.Errorf("no usable score in response (%d without one): raw=%q",
+				unscored, truncate(jsonStr, 200))
+		}
 		return nil, fmt.Errorf("no valid scores mapped from response: got indices %v, want 1-%d", indices, len(items))
 	}
 	return out, nil
