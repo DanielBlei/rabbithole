@@ -64,12 +64,14 @@ var (
 	// the separator is: in `rabbit:p@ss@db.host` the password is `p@ss`, which is
 	// also how net/url splits it. A match that stopped at the first `@` would
 	// print the rest of the password.
-	// A password starting with '$' is an environment reference and stays visible.
-	urlPasswordRE = regexp.MustCompile(`([a-z][a-z0-9+.-]*://[^/?#\s:@]*):[^/?#\s$][^/?#\s]*@`)
+	urlPasswordRE = regexp.MustCompile(`([a-z][a-z0-9+.-]*://[^/?#\s:@]*:)([^/?#\s]*)@`)
 	// urlTokenRE picks a URL out of a line so its query can be decoded rather
 	// than pattern-matched; see redactEncodedPasswordParams.
 	urlTokenRE       = regexp.MustCompile(`[a-z][a-z0-9+.-]*://[^\s#"']*`)
-	urlPasswordParam = regexp.MustCompile(`([?&]password=)[^\s&#$][^\s&#]*`)
+	urlPasswordParam = regexp.MustCompile(`([?&]password=)([^\s&#]+)`)
+	// envRefRE is a whole password that is a $NAME or ${NAME} reference: only a
+	// variable name, so in a Postgres URL it stays visible.
+	envRefRE = regexp.MustCompile(`^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})$`)
 )
 
 // dbPasswordHint stands in for the store's password rather than a row of dots,
@@ -80,19 +82,28 @@ const dbPasswordHint = "$" + config.DBPasswordEnv
 // redactURLPasswords hides credentials embedded in a URL, keeping the scheme,
 // user and host so the line still says what it connects to. A Postgres URL
 // names the environment variable instead of masking, since that is the only
-// place its password is meant to live.
+// place its password is meant to live. It is also the only URL whose password
+// is resolved as a $NAME reference, so only there does a reference stay visible.
 func redactURLPasswords(line string) string {
-	mask := redactedMask
+	mask, keepRefs := redactedMask, false
 	if strings.Contains(line, "postgres://") || strings.Contains(line, "postgresql://") {
-		mask = dbPasswordHint
+		mask, keepRefs = dbPasswordHint, true
 	}
-	line = redactEncodedPasswordParams(line, mask)
-	// $ opens a capture reference in a replacement, and the hint starts with
-	// one, so it has to be escaped or it expands to nothing. The decoder above
-	// writes the mask as text and takes it unescaped.
-	mask = strings.ReplaceAll(mask, "$", "$$")
-	line = urlPasswordRE.ReplaceAllString(line, "${1}:"+mask+"@")
-	return urlPasswordParam.ReplaceAllString(line, "${1}"+mask)
+	line = redactEncodedPasswordParams(line, mask, keepRefs)
+	line = maskPasswords(urlPasswordRE, line, mask, "@", keepRefs)
+	return maskPasswords(urlPasswordParam, line, mask, "", keepRefs)
+}
+
+// maskPasswords replaces the password (re's second group) with mask, keeping
+// the first group and suffix. With keepRefs, a $NAME reference is left as is.
+func maskPasswords(re *regexp.Regexp, line, mask, suffix string, keepRefs bool) string {
+	return re.ReplaceAllStringFunc(line, func(match string) string {
+		m := re.FindStringSubmatch(match)
+		if keepRefs && envRefRE.MatchString(m[2]) {
+			return match
+		}
+		return m[1] + mask + suffix
+	})
 }
 
 // redactEncodedPasswordParams masks the value of any query parameter whose key
@@ -100,7 +111,7 @@ func redactURLPasswords(line string) string {
 // url.Query, which decodes keys, so `?pass%77ord=hunter2` is a password as far
 // as the connection is concerned — and no regex over the raw text can know it.
 // The key's own bytes are left as written: the line is redacted, not rewritten.
-func redactEncodedPasswordParams(line, mask string) string {
+func redactEncodedPasswordParams(line, mask string, keepRefs bool) string {
 	return urlTokenRE.ReplaceAllStringFunc(line, func(token string) string {
 		head, query, found := strings.Cut(token, "?")
 		if !found || query == "" {
@@ -109,7 +120,7 @@ func redactEncodedPasswordParams(line, mask string) string {
 		pairs := strings.Split(query, "&")
 		for i, pair := range pairs {
 			key, value, ok := strings.Cut(pair, "=")
-			if !ok || strings.HasPrefix(value, "$") {
+			if !ok || keepRefs && envRefRE.MatchString(value) {
 				continue
 			}
 			decoded, err := url.QueryUnescape(key)

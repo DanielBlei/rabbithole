@@ -196,6 +196,16 @@ func TestRedactSecrets(t *testing.T) {
 			`url: postgres://rabbit@h/db?password=${PG_PASS}&sslmode=require`,
 		},
 		{
+			"literal dollar password in userinfo is masked",
+			`endpoint: https://user:$ecret@example.com/v1`,
+			`endpoint: https://user:` + redactedMask + `@example.com/v1`,
+		},
+		{
+			"literal dollar password parameter is masked",
+			`url: postgres://rabbit@h/db?password=$3cret!&sslmode=require`,
+			`url: postgres://rabbit@h/db?password=` + dbPasswordHint + `&sslmode=require`,
+		},
+		{
 			"password parameter not first",
 			`url: postgres://rabbit@h/db?sslmode=require&password=hunter2`,
 			`url: postgres://rabbit@h/db?sslmode=require&password=` + dbPasswordHint,

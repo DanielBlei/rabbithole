@@ -16,12 +16,14 @@ import (
 )
 
 // minReasonLetters is the fewest letters a real rationale has; junk like ":"
-// or ":0" has none, while "Off topic." or a short CJK reason clears it.
+// or ":0" has none, while "Off topic." clears it. A CJK character counts twice,
+// since two of them ("相关") already make a word.
 const minReasonLetters = 3
 
 // jsonDebris are fragments of the verdict's own JSON that only end up inside a
-// reason when the model lost track of where it was in the output.
-var jsonDebris = []string{"}]", "]}", `{"`, `"index"`, `"score"`}
+// reason when the model lost track of where it was in the output. Keys are
+// matched with their colon, so prose that mentions a "score" is not debris.
+var jsonDebris = []string{"}]", "]}", `{"`, `"index":`, `"score":`, `"reason":`}
 
 // degenerateReason names the rule a reason breaks, or returns "" for a usable one.
 func degenerateReason(reason string) string {
@@ -32,7 +34,10 @@ func degenerateReason(reason string) string {
 	}
 	letters := 0
 	for _, r := range reason {
-		if unicode.IsLetter(r) {
+		switch {
+		case unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul):
+			letters += 2
+		case unicode.IsLetter(r):
 			letters++
 		}
 	}
