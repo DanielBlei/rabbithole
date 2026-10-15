@@ -222,6 +222,45 @@ func TestLoadThinkDefaultsAndOverride(t *testing.T) {
 	}
 }
 
+func TestLoadEffort(t *testing.T) {
+	for _, tc := range []struct {
+		body        string
+		want        string
+		wantSummary string
+		wantErr     string
+	}{
+		{body: "", want: "medium"},
+		{body: "inference:\n  effort: xhigh\n", want: "xhigh"},
+		{
+			body: "inference:\n  effort: low\n  summary:\n    model: m\n    effort: high\n",
+			want: "low", wantSummary: "high",
+		},
+		{body: "inference:\n  effort: none\n", wantErr: `inference.effort "none"`},
+		{body: "inference:\n  summary:\n    model: m\n    effort: max\n", wantErr: `inference.summary.effort "max"`},
+	} {
+		cfg, err := Load(writeConfig(t, baseFeeds+tc.body))
+		if tc.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("Load(%q) error = %v, want containing %q", tc.body, err, tc.wantErr)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("Load(%q): %v", tc.body, err)
+		}
+		if cfg.Inference.Effort != tc.want {
+			t.Errorf("Load(%q) effort = %q, want %q", tc.body, cfg.Inference.Effort, tc.want)
+		}
+		wantSummary := tc.wantSummary
+		if wantSummary == "" {
+			wantSummary = tc.want
+		}
+		if got := cfg.Inference.ResolveSummary().Effort; got != wantSummary {
+			t.Errorf("Load(%q) summary effort = %q, want %q", tc.body, got, wantSummary)
+		}
+	}
+}
+
 func TestStripHTMLComments(t *testing.T) {
 	for _, tc := range []struct {
 		name string

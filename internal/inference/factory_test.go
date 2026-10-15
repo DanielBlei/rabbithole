@@ -36,17 +36,19 @@ func TestResolve(t *testing.T) {
 		}
 	})
 
-	t.Run("vllm dispatches and validates against the real model list shape", func(t *testing.T) {
-		host := serveJSON(t, `{"data":[{"id":"llama3"}]}`)
-		cfg := config.InferenceConfig{Provider: "vllm", Host: host, Model: "llama3"}
-		s, err := Resolve(t.Context(), cfg, false, "be nice")
-		if err != nil {
-			t.Fatalf("Resolve() error = %v", err)
-		}
-		if s == nil {
-			t.Fatal("Resolve() scorer = nil, want a scorer")
-		}
-	})
+	for _, provider := range []string{"openai", "vllm"} {
+		t.Run(provider+" dispatches and validates against the real model list shape", func(t *testing.T) {
+			host := serveJSON(t, `{"data":[{"id":"llama3"}]}`)
+			cfg := config.InferenceConfig{Provider: provider, Host: host, Model: "llama3"}
+			s, err := Resolve(t.Context(), cfg, false, "be nice")
+			if err != nil {
+				t.Fatalf("Resolve() error = %v", err)
+			}
+			if s == nil {
+				t.Fatal("Resolve() scorer = nil, want a scorer")
+			}
+		})
+	}
 
 	t.Run("heuristic never dials out", func(t *testing.T) {
 		cfg := config.InferenceConfig{Provider: "heuristic", Host: "http://127.0.0.1:1"}

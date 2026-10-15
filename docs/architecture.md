@@ -111,9 +111,9 @@ internal/profilemgr   built-in + stored composition, legacy bootstrap and active
 internal/ingest       source dispatch -> fetch -> filter -> score -> record cycle, plus the background run manager
 internal/feeds        RSS/Atom normalization plus academic providers (arXiv, Crossref, Semantic Scholar)
 internal/rank         Scorer interface, prompt/JSON parsing, batching, selection, heuristic
-internal/inference    provider factory (ollama | vllm | heuristic)
+internal/inference    provider factory (ollama | openai | vllm | heuristic)
 internal/ollama       Ollama JSON-mode client
-internal/vllm         OpenAI-compatible JSON-mode client
+internal/vllm         OpenAI-compatible JSON-mode client, in openai and vllm flavors
 internal/httpclient   shared HTTP transport (bearer auth injection)
 internal/retry        exponential backoff for a still-starting-up inference server
 internal/digest       markdown renderer

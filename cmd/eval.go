@@ -94,7 +94,7 @@ func init() {
 	benchmarkCmd.Flags().
 		IntVar(&benchLimit, "limit", 0, "score only the first N samples, in file order; a quick pass while iterating, not a representative sample (default: every sample)")
 	benchmarkCmd.Flags().
-		StringVar(&benchProvider, "provider", "", "override the configured provider (ollama|vllm|heuristic)")
+		StringVar(&benchProvider, "provider", "", "override the configured provider (ollama|openai|vllm|heuristic)")
 	benchmarkCmd.Flags().StringVar(&benchHost, "host", "", "override the configured backend host")
 	benchmarkCmd.Flags().
 		StringVar(&benchModel, "model", "", "override the configured model, e.g. to benchmark a bigger one than you ingest with")
