@@ -107,6 +107,99 @@ func TestLoadSinceInvalid(t *testing.T) {
 	}
 }
 
+// unsetEnv unsets name for the subtest; t.Setenv cannot express "unset".
+func unsetEnv(t *testing.T, name string) {
+	t.Helper()
+	orig, had := os.LookupEnv(name)
+	if err := os.Unsetenv(name); err != nil {
+		t.Fatalf("unset %s: %v", name, err)
+	}
+	t.Cleanup(func() {
+		if had {
+			if err := os.Setenv(name, orig); err != nil {
+				t.Errorf("restore %s: %v", name, err)
+			}
+		}
+	})
+}
+
+func TestLoadAPIKeyEnvRef(t *testing.T) {
+	const keyVar = "RABBITHOLE_TEST_API_KEY"
+	tests := []struct {
+		name    string
+		apiKey  string
+		env     string // "" leaves keyVar unset; "set" and "empty" control it
+		want    string // resolved key on success
+		wantErr string // substring; empty means success
+	}{
+		{name: "bare name resolves", apiKey: "$" + keyVar, env: "set", want: "sk-test-live"},
+		{name: "braced name resolves", apiKey: "${" + keyVar + "}", env: "set", want: "sk-test-live"},
+		{
+			name:    "unset variable errors",
+			apiKey:  "$" + keyVar,
+			env:     "unset",
+			wantErr: "$" + keyVar + " is not set or empty",
+		},
+		{
+			name:    "empty variable errors",
+			apiKey:  "$" + keyVar,
+			env:     "empty",
+			wantErr: "$" + keyVar + " is not set or empty",
+		},
+		{name: "mid-string dollar errors", apiKey: "sk-$SUFFIX", wantErr: "only allowed as a leading $NAME"},
+		{name: "second dollar in name errors", apiKey: "$A$B", wantErr: "not a single $NAME"},
+		{name: "dollar alone errors", apiKey: "$", wantErr: "not a single $NAME"},
+		{name: "unterminated brace errors", apiKey: "${NAME", wantErr: "not a well-formed ${NAME}"},
+		{name: "literal key passes through", apiKey: "sk-literal-abc123", want: "sk-literal-abc123"},
+		{name: "empty value stays empty", apiKey: "", want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			switch tc.env {
+			case "set":
+				t.Setenv(keyVar, "sk-test-live")
+			case "empty":
+				t.Setenv(keyVar, "")
+			case "unset":
+				unsetEnv(t, keyVar)
+			}
+			body := baseWithoutProfile + "inference:\n  provider: vllm\n  api_key: " + tc.apiKey + "\n"
+			cfg, err := Load(writeConfig(t, body))
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Load() error = %v, want containing %q", err, tc.wantErr)
+				}
+				// A non-reference value may be a real key, so errors must not echo it.
+				if !strings.HasPrefix(tc.apiKey, "$") && strings.Contains(err.Error(), tc.apiKey) {
+					t.Errorf("Load() error echoes the api_key value: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v, want nil", err)
+			}
+			if cfg.Inference.APIKey != tc.want {
+				t.Fatalf("api_key = %q, want %q", cfg.Inference.APIKey, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadSummaryAPIKeyEnvRef(t *testing.T) {
+	t.Setenv("RABBITHOLE_TEST_SUMMARY_KEY", "sk-summary-live")
+	body := baseWithoutProfile + "inference:\n" +
+		"  api_key: $RABBITHOLE_TEST_SUMMARY_KEY\n" +
+		"  summary:\n    model: other-model\n    api_key: ${RABBITHOLE_TEST_SUMMARY_KEY}\n"
+	cfg, err := Load(writeConfig(t, body))
+	if err != nil {
+		t.Fatalf("Load() error = %v, want nil", err)
+	}
+	if cfg.Inference.APIKey != "sk-summary-live" || cfg.Inference.Summary.APIKey != "sk-summary-live" {
+		t.Fatalf("api keys = %q / %q, want both sk-summary-live",
+			cfg.Inference.APIKey, cfg.Inference.Summary.APIKey)
+	}
+}
+
 func TestLoadThinkDefaultsAndOverride(t *testing.T) {
 	for _, tc := range []struct {
 		think string
