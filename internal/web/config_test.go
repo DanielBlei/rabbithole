@@ -186,6 +186,16 @@ func TestRedactSecrets(t *testing.T) {
 			`  url: postgres://rabbit@db.host/rabbithole?pass%77ord=` + dbPasswordHint + `&sslmode=require`,
 		},
 		{
+			"env reference in userinfo stays visible",
+			`url: postgres://rabbit:$PG_PASS@h/db`,
+			`url: postgres://rabbit:$PG_PASS@h/db`,
+		},
+		{
+			"env reference as a query parameter stays visible",
+			`url: postgres://rabbit@h/db?password=${PG_PASS}&sslmode=require`,
+			`url: postgres://rabbit@h/db?password=${PG_PASS}&sslmode=require`,
+		},
+		{
 			"password parameter not first",
 			`url: postgres://rabbit@h/db?sslmode=require&password=hunter2`,
 			`url: postgres://rabbit@h/db?sslmode=require&password=` + dbPasswordHint,

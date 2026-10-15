@@ -308,7 +308,7 @@ is rejected at startup.
 ```yaml
 store:
   db_path: ./data/rabbithole.db   # SQLite, the local default
-  # url: postgres://rabbithole@db.example.com:5432/rabbithole
+  # url: postgres://rabbithole:$RABBITHOLE_DB_PASSWORD@db.example.com:5432/rabbithole
 ```
 
 SQLite is the right answer for one machine and needs nothing installed. Postgres is for
@@ -328,22 +328,26 @@ one's running ingest as failed; on SQLite nothing enforces it. One-shot commands
 
 ### The password
 
-It comes from the `RABBITHOLE_DB_PASSWORD` environment variable, not the config file, which
-keeps it out of anything that copies `config.yaml` around and out of the web UI's config
-viewer. `.env.example` is a starting point; nothing reads `.env` automatically, so source it
-from your shell or point a systemd unit at it with `EnvironmentFile=`. The `make` targets
-that run the binary do pick up `./.env`.
+Write it in `store.url` as an environment reference, so the file holds only the variable's
+name, the same `$NAME` or `${NAME}` form `inference.api_key` takes:
 
-```bash
-export RABBITHOLE_DB_PASSWORD=...
+```yaml
+store:
+  url: postgres://rabbithole:$RABBITHOLE_DB_PASSWORD@db.example.com:5432/rabbithole
 ```
 
-A URL that already carries a password still works, in either form the drivers accept
-(`postgres://user:pw@host/db` or `?password=pw`), and the environment variable overrides it
-when both are set. Either way expect a warning at startup: a password in `store.url` lives in
-the config file whatever ends up being used, which is the thing the variable exists to avoid.
-The config viewer shows `$RABBITHOLE_DB_PASSWORD` in place of the value, and a connection error
-names the database without it — including when the URL is malformed enough that it could not
+Any variable name works, and `?password=$NAME` does too. An unset or empty variable fails at
+startup with its name in the error. The config viewer shows the reference as written.
+
+Setting `RABBITHOLE_DB_PASSWORD` in the environment overrides whatever `store.url` holds, so a
+URL with no password at all works too. `.env.example` is a starting point; nothing reads `.env`
+automatically, so source it from your shell or point a systemd unit at it with
+`EnvironmentFile=`. The `make` targets that run the binary do pick up `./.env`.
+
+A literal password in the URL also works, in either form the drivers accept
+(`postgres://user:pw@host/db` or `?password=pw`), but expect a warning at startup: it lives in
+the config file whatever ends up being used. The config viewer shows `$RABBITHOLE_DB_PASSWORD`
+in place of the value, and a connection error names the database without it — including when the URL is malformed enough that it could not
 be parsed, whose message would otherwise repeat the whole thing.
 
 A password is not required: a server that trusts this client can be reached without one. The

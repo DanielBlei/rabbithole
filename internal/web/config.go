@@ -64,11 +64,12 @@ var (
 	// the separator is: in `rabbit:p@ss@db.host` the password is `p@ss`, which is
 	// also how net/url splits it. A match that stopped at the first `@` would
 	// print the rest of the password.
-	urlPasswordRE = regexp.MustCompile(`([a-z][a-z0-9+.-]*://[^/?#\s:@]*):[^/?#\s]*@`)
+	// A password starting with '$' is an environment reference and stays visible.
+	urlPasswordRE = regexp.MustCompile(`([a-z][a-z0-9+.-]*://[^/?#\s:@]*):[^/?#\s$][^/?#\s]*@`)
 	// urlTokenRE picks a URL out of a line so its query can be decoded rather
 	// than pattern-matched; see redactEncodedPasswordParams.
 	urlTokenRE       = regexp.MustCompile(`[a-z][a-z0-9+.-]*://[^\s#"']*`)
-	urlPasswordParam = regexp.MustCompile(`([?&]password=)[^\s&#]+`)
+	urlPasswordParam = regexp.MustCompile(`([?&]password=)[^\s&#$][^\s&#]*`)
 )
 
 // dbPasswordHint stands in for the store's password rather than a row of dots,
@@ -107,8 +108,8 @@ func redactEncodedPasswordParams(line, mask string) string {
 		}
 		pairs := strings.Split(query, "&")
 		for i, pair := range pairs {
-			key, _, ok := strings.Cut(pair, "=")
-			if !ok {
+			key, value, ok := strings.Cut(pair, "=")
+			if !ok || strings.HasPrefix(value, "$") {
 				continue
 			}
 			decoded, err := url.QueryUnescape(key)
