@@ -88,7 +88,7 @@ func New(host, model, apiKey string, think bool, tuning rank.ModelTuning, system
 // let every scoring request fail we fall back to think-off here.
 func (c *Client) Validate(ctx context.Context) error {
 	if err := c.validator.Validate(ctx, normalize(c.model),
-		fmt.Sprintf("run: ollama pull %s", c.model), c.listModelNames); err != nil {
+		fmt.Sprintf("run: ollama pull %s", c.model), c.listModelNames, nil); err != nil {
 		return err
 	}
 	c.thinkOnce.Do(func() {

@@ -39,10 +39,13 @@ func NewValidator(name string, attempts int, backoff time.Duration) *Validator {
 
 // Validate confirms model is present among list's results. hint is appended
 // to the error when the backend is reachable but model isn't found there.
+// fallback, when not nil, runs once in that case and its success counts as
+// validation; its error is appended to the not-found error.
 func (v *Validator) Validate(
 	ctx context.Context,
 	model, hint string,
 	list func(ctx context.Context) ([]string, error),
+	fallback func(ctx context.Context) error,
 ) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -71,5 +74,13 @@ func (v *Validator) Validate(
 		v.ok = true
 		return nil
 	}
-	return fmt.Errorf("model %q not found on %s (%s)", model, v.name, hint)
+	notFound := fmt.Errorf("model %q not found on %s (%s)", model, v.name, hint)
+	if fallback == nil {
+		return notFound
+	}
+	if err := fallback(ctx); err != nil {
+		return fmt.Errorf("%w; %w", notFound, err)
+	}
+	v.ok = true
+	return nil
 }

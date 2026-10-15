@@ -27,6 +27,8 @@ import (
 const (
 	listTimeout = 30 * time.Second
 	chatTimeout = 3 * time.Minute
+	// probeTimeout is short: the probe asks for one token, not a scoring budget.
+	probeTimeout = 30 * time.Second
 )
 
 // validateAttempts/validateBackoff bound how long Validate waits for the
@@ -40,6 +42,80 @@ type modelsResponse struct {
 	Data []struct {
 		ID string `json:"id"`
 	} `json:"data"`
+}
+
+// probeRequest omits response_format: some servers reject an empty one.
+type probeRequest struct {
+	Model     string        `json:"model"`
+	Messages  []chatMessage `json:"messages"`
+	Stream    bool          `json:"stream"`
+	MaxTokens int           `json:"max_tokens"`
+}
+
+// probeError carries a non-200 chat-probe response.
+type probeError struct {
+	status int
+	body   []byte
+}
+
+func (e *probeError) Error() string {
+	return fmt.Sprintf("HTTP %d: %s", e.status, e.body)
+}
+
+func (e *probeError) transient() bool {
+	switch e.status {
+	case http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return true
+	}
+	return e.status < 400 || e.status >= 500
+}
+
+// probeModelWithRetry retries transient failures; any other 4xx is a verdict.
+func (c *Client) probeModelWithRetry(ctx context.Context) error {
+	var last error
+	_ = retry.Do(ctx, validateAttempts, validateBackoff, func() error {
+		last = c.probeModel(ctx)
+		if p, ok := last.(*probeError); ok && !p.transient() {
+			return nil // stop retrying; last still holds the error
+		}
+		return last
+	}, func(attempt int, err error, delay time.Duration) {
+		zerolog.Ctx(ctx).Debug().Str("backend", "vllm").Int("attempt", attempt).Err(err).
+			Str("retry_in", delay.String()).Msg("vllm: chat probe failed, retrying")
+	})
+	return last
+}
+
+// probeModel posts a one-token chat completion; only a 200 accepts the model.
+func (c *Client) probeModel(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+
+	body, err := json.Marshal(probeRequest{
+		Model:     c.model,
+		Messages:  []chatMessage{{Role: "user", Content: "ok"}},
+		Stream:    false,
+		MaxTokens: 1,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal probe request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.host+"/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("build probe request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return fmt.Errorf("connect for chat probe: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return &probeError{status: resp.StatusCode, body: bytes.TrimSpace(msg)}
+	}
+	return nil
 }
 
 // Client scores items via /v1/chat/completions in JSON mode.
@@ -76,10 +152,21 @@ func New(host, model, apiKey string, think bool, tuning rank.ModelTuning, system
 
 // Validate confirms the server is reachable and the model is loaded.
 // Connectivity is retried with backoff since the server may still be
-// starting up; a model that's reachable but not loaded fails immediately.
+// starting up. A model missing from /v1/models is accepted if a chat probe
+// succeeds, since gateways can route models their catalog doesn't list.
 func (c *Client) Validate(ctx context.Context) error {
 	return c.validator.Validate(ctx, c.model,
-		fmt.Sprintf("load it in vLLM at %s", c.host), c.listModelNames)
+		fmt.Sprintf("not listed by /v1/models at %s", c.host), c.listModelNames,
+		func(ctx context.Context) error {
+			if err := c.probeModelWithRetry(ctx); err != nil {
+				return fmt.Errorf("chat probe: %w", err)
+			}
+			zerolog.Ctx(ctx).Warn().
+				Str("model", c.model).
+				Str("host", c.host).
+				Msg("vllm: model not in /v1/models catalog; accepted via chat probe")
+			return nil
+		})
 }
 
 func (c *Client) listModelNames(ctx context.Context) ([]string, error) {
@@ -110,12 +197,12 @@ func (c *Client) listModelNames(ctx context.Context) ([]string, error) {
 }
 
 type chatRequest struct {
-	Model            string         `json:"model"`
-	Messages         []chatMessage  `json:"messages"`
-	Stream           bool           `json:"stream"`
-	MaxTokens        int            `json:"max_tokens"`
-	ResponseFormat   responseFormat `json:"response_format"`
-	IncludeReasoning *bool          `json:"include_reasoning,omitempty"`
+	Model           string         `json:"model"`
+	Messages        []chatMessage  `json:"messages"`
+	Stream          bool           `json:"stream"`
+	MaxTokens       int            `json:"max_tokens"`
+	ResponseFormat  responseFormat `json:"response_format"`
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
 }
 
 type chatMessage struct {
@@ -168,11 +255,9 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 			},
 		},
 	}
-	// Disable reasoning only if explicitly requested. Servers that don't
-	// recognize the field ignore it.
+	// "low" is the lowest reasoning_effort in the OpenAI enum.
 	if !c.think {
-		off := false
-		reqBody.IncludeReasoning = &off
+		reqBody.ReasoningEffort = "low"
 	}
 	body, err := json.Marshal(reqBody)
 	if err != nil {

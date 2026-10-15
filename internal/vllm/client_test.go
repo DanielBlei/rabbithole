@@ -5,6 +5,7 @@ package vllm
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -30,18 +31,39 @@ func TestValidate(t *testing.T) {
 	withFastValidateRetry(t)
 
 	tests := []struct {
-		name    string
-		body    string
-		wantErr bool
+		name       string
+		models     string
+		probeCode  int // chat-probe response status; 0 means 200
+		wantErr    bool
+		wantErrTxt string
 	}{
-		{name: "model present succeeds", body: `{"data":[{"id":"llama3"}]}`},
-		{name: "model missing fails", body: `{"data":[{"id":"other"}]}`, wantErr: true},
+		{name: "model present succeeds", models: `{"data":[{"id":"llama3"}]}`},
+		{name: "model missing accepted via chat probe", models: `{"data":[{"id":"other"}]}`},
+		{
+			name:       "model missing and probe rejected fails",
+			models:     `{"data":[{"id":"other"}]}`,
+			probeCode:  http.StatusNotFound,
+			wantErr:    true,
+			wantErrTxt: "chat probe",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(tt.body))
+				switch r.Method + " " + r.URL.Path {
+				case http.MethodGet + " /v1/models":
+					_, _ = w.Write([]byte(tt.models))
+				case http.MethodPost + " /v1/chat/completions":
+					if tt.probeCode != 0 {
+						w.WriteHeader(tt.probeCode)
+						_, _ = w.Write([]byte(`{"error":{"message":"model not found"}}`))
+						return
+					}
+					_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
 			}))
 			defer srv.Close()
 
@@ -55,6 +77,85 @@ func TestValidate(t *testing.T) {
 			}
 			if !tt.wantErr && err != nil {
 				t.Fatalf("Validate() error = %v, want nil", err)
+			}
+			if tt.wantErrTxt != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErrTxt)) {
+				t.Fatalf("Validate() error = %v, want containing %q", err, tt.wantErrTxt)
+			}
+		})
+	}
+}
+
+func TestProbeRequestShape(t *testing.T) {
+	withFastValidateRetry(t)
+
+	var raw map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case http.MethodPost + " /v1/chat/completions":
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &raw)
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+		default:
+			_, _ = w.Write([]byte(`{"data":[{"id":"other"}]}`))
+		}
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, "")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := c.Validate(t.Context()); err != nil {
+		t.Fatalf("Validate() error = %v, want nil (probe should accept)", err)
+	}
+	if raw == nil {
+		t.Fatal("no chat probe was sent")
+	}
+	if raw["model"] != "llama3" {
+		t.Errorf("probe model = %v, want llama3", raw["model"])
+	}
+	if raw["max_tokens"] != float64(1) {
+		t.Errorf("probe max_tokens = %v, want 1", raw["max_tokens"])
+	}
+	if raw["stream"] != false {
+		t.Errorf("probe stream = %v, want false", raw["stream"])
+	}
+	if _, ok := raw["response_format"]; ok {
+		t.Error("probe request carries response_format; the minimal probe must not")
+	}
+}
+
+func TestProbeRetry(t *testing.T) {
+	withFastValidateRetry(t)
+
+	for _, tc := range []struct {
+		name      string
+		status    int
+		wantCalls int
+	}{
+		{"not found fails fast", http.StatusNotFound, 1},
+		{"unauthorized fails fast", http.StatusUnauthorized, 1},
+		{"rate limited retries", http.StatusTooManyRequests, 3},
+		{"server error retries", http.StatusServiceUnavailable, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls int
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				w.WriteHeader(tc.status)
+			}))
+			defer srv.Close()
+
+			c, err := New(srv.URL, "llama3", "", false, rank.ModelTuning{}, "")
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			if err := c.probeModelWithRetry(t.Context()); err == nil {
+				t.Fatal("probeModelWithRetry() error = nil, want non-nil")
+			}
+			if calls != tc.wantCalls {
+				t.Fatalf("probe calls = %d, want %d", calls, tc.wantCalls)
 			}
 		})
 	}
@@ -211,6 +312,43 @@ func TestScoreRequestConstrainsOutput(t *testing.T) {
 	}
 	if want := (rank.ModelTuning{}).Budget(len(items), false); got.MaxTokens != want {
 		t.Errorf("max_tokens = %d, want %d", got.MaxTokens, want)
+	}
+	if got.ReasoningEffort != "low" {
+		t.Errorf("reasoning_effort = %q, want %q (think off)", got.ReasoningEffort, "low")
+	}
+}
+
+func TestScoreReasoningEffortFollowsThink(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		think bool
+		want  string
+	}{
+		{"think on sends no reasoning_effort", true, ""},
+		{"think off asks for low effort", false, "low"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got chatRequest
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&got)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(
+					`{"choices":[{"message":{"content":"{\"scores\":[{\"index\":1,\"score\":9,\"reason\":\"x\"}]}"},"finish_reason":"stop"}],"usage":{"completion_tokens":9}}`,
+				))
+			}))
+			defer srv.Close()
+
+			c, err := New(srv.URL, "llama3", "", tc.think, rank.ModelTuning{}, "")
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			if _, err := c.Score(t.Context(), "profile", []feeds.Item{{ID: "a", Title: "A"}}); err != nil {
+				t.Fatalf("Score() error = %v", err)
+			}
+			if got.ReasoningEffort != tc.want {
+				t.Fatalf("reasoning_effort = %q, want %q", got.ReasoningEffort, tc.want)
+			}
+		})
 	}
 }
 

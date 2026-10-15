@@ -373,6 +373,9 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	if err := cfg.expandAPIKeys(); err != nil {
+		return nil, err
+	}
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -441,6 +444,53 @@ func (c *Config) validate() error {
 		return fmt.Errorf("since must be positive, got %s", c.Ingest.Since)
 	}
 	return nil
+}
+
+// expandAPIKeys resolves a leading $NAME or ${NAME} in the api_key fields from
+// the environment. Any other '$', or an unset or empty variable, fails the load.
+func (c *Config) expandAPIKeys() error {
+	fields := []struct {
+		name string
+		key  *string
+	}{
+		{"inference.api_key", &c.Inference.APIKey},
+		{"inference.summary.api_key", &c.Inference.Summary.APIKey},
+	}
+	for _, f := range fields {
+		expanded, err := expandEnvRef(f.name, *f.key)
+		if err != nil {
+			return err
+		}
+		*f.key = expanded
+	}
+	return nil
+}
+
+// expandEnvRef resolves one api_key value. Errors never include the value.
+func expandEnvRef(field, value string) (string, error) {
+	if !strings.Contains(value, "$") {
+		return value, nil
+	}
+	var name string
+	switch {
+	case !strings.HasPrefix(value, "$"):
+		return "", fmt.Errorf("%s: a '$' is only allowed as a leading $NAME or ${NAME} reference", field)
+	case strings.HasPrefix(value, "${"):
+		if !strings.HasSuffix(value, "}") || len(value) < 4 {
+			return "", fmt.Errorf("%s: reference is not a well-formed ${NAME}", field)
+		}
+		name = value[2 : len(value)-1]
+	default:
+		name = value[1:]
+	}
+	if name == "" || strings.Contains(name, "$") {
+		return "", fmt.Errorf("%s: reference is not a single $NAME or ${NAME}", field)
+	}
+	resolved, ok := os.LookupEnv(name)
+	if !ok || resolved == "" {
+		return "", fmt.Errorf("%s: $%s is not set or empty", field, name)
+	}
+	return resolved, nil
 }
 
 // stripHTMLComments drops <!-- --> blocks, so comments never reach the model

@@ -128,6 +128,7 @@ func TestRedactSecrets(t *testing.T) {
 		{"client_secret", `client_secret: shh`, "client_secret: " + redactedMask},
 		{"list item", `  - token: xyz`, "  - token: " + redactedMask},
 		{"comment kept", `api_key: abc # note`, "api_key: " + redactedMask + " # note"},
+		{"env reference", `api_key: $ENMAAS_KEY`, "api_key: " + redactedMask},
 		// Nothing to hide: an unset value stays legible.
 		{"empty quoted", `api_key: ""`, `api_key: ""`},
 		{"empty", `api_key:`, `api_key:`},

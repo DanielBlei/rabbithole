@@ -45,7 +45,7 @@ All fields are optional unless marked required.
 | `inference.provider` | `ollama` \| `vllm` \| `heuristic` | `ollama`                          |
 | `inference.host` | Inference server URL | `http://localhost:11434`          |
 | `inference.model` | Model name | `qwen3.5:4b`                      |
-| `inference.api_key` | Bearer token, where the endpoint requires one | none                              |
+| `inference.api_key` | Bearer token, or a leading `$NAME`/`${NAME}` environment reference (see note below) | none                              |
 | `inference.think` | Allow model reasoning before scoring, with fallback | `true`                            |
 | `inference.system_prompt` | Path to a system-prompt override, or `false` to send none — see below | built-in                          |
 | `inference.batch_size` | Articles per scoring request | `1`                               |
@@ -65,7 +65,9 @@ example `14d`, `168h`, `1h30m`.
 **Providers**
 
 - `ollama` — a local Ollama server; the default.
-- `vllm` — an OpenAI-compatible vLLM endpoint.
+- `vllm` — an OpenAI-compatible endpoint: vLLM proper, or a gateway that speaks its API.
+  When the model is missing from `/v1/models`, validation falls back to a minimal chat
+  request — gateways sometimes route models their catalog doesn't list.
 - `heuristic` — keyword matching with no model involved. Suitable for offline use and for
   testing feed and filter changes without inference latency.
 
@@ -75,11 +77,22 @@ Not every model has a reasoning mode. On Ollama, `think: true` is probed once at
 model that rejects it falls back to `think: false` with a warning, rather than failing every
 scoring request. Any other error during the probe leaves thinking on, so a transient problem
 is not mistaken for a missing feature. vLLM has no such probe — `think` is passed through as
-set.
+set, and `think: false` sends `reasoning_effort: "low"`, the gentlest value in the OpenAI
+enum. Some reasoning models (GLM 5.3 among them) only reduce thinking at that setting
+rather than switching it off, and a gateway strict enough to reject unknown request fields
+will fail the request outright.
 
 > **Note:** `api_key` is stored in plaintext. The web UI's config viewer masks it, but the
 > file itself is unprotected — keep `configs/config.yaml` out of version control (it is
 > gitignored by default).
+>
+> A leading `$NAME` or `${NAME}` reference keeps the token out of the file entirely: it is
+> resolved from the environment when the config is loaded (`inference.api_key` and
+> `inference.summary.api_key` only), and a referenced variable that is unset or empty — or
+> a `$` anywhere else in the value — fails the load with an error naming the field, because
+> every silent alternative surfaces later as an unexplained 401. There is no escape syntax
+> yet, so a key that genuinely begins with `$` cannot be written as a literal. The resolved
+> value is never logged.
 
 ### inference.model_tuning
 
