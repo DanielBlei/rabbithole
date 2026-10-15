@@ -323,6 +323,31 @@ func TestScoreRequestConstrainsOutput(t *testing.T) {
 	}
 }
 
+func TestScoreUnconstrainedSendsNoResponseFormat(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(
+			`{"choices":[{"message":{"content":"{\"scores\":[{\"index\":1,\"score\":9,\"reason\":\"x\"}]}"},"finish_reason":"stop"}]}`,
+		))
+	}))
+	defer srv.Close()
+
+	for _, flavor := range []Flavor{OpenAI, VLLM} {
+		c, err := New(flavor, srv.URL, "llama3", "", true, "medium", rank.ModelTuning{Unconstrained: true}, "")
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		if _, err := c.Score(t.Context(), "profile", []feeds.Item{{ID: "a", Title: "A"}}); err != nil {
+			t.Fatalf("%s Score() error = %v", flavor, err)
+		}
+		if _, ok := got["response_format"]; ok {
+			t.Errorf("%s request carries response_format, want none when unconstrained", flavor)
+		}
+	}
+}
+
 func TestScoreFlavorDialect(t *testing.T) {
 	for _, tc := range []struct {
 		name          string

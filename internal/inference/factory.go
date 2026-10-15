@@ -8,6 +8,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/rs/zerolog"
+
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/ollama"
 	"github.com/DanielBlei/rabbithole/internal/rank"
@@ -45,15 +47,25 @@ func build(ctx context.Context, cfg config.InferenceConfig, think bool, systemPr
 		s   rank.Scorer
 		err error
 	)
+	tuning := cfg.ModelTuning
+	if cfg.StructuredOutput != nil && !*cfg.StructuredOutput && cfg.Provider != "heuristic" {
+		tuning.Unconstrained = true
+		logger := zerolog.Ctx(ctx)
+		logger.Debug().Str("provider", cfg.Provider).Msg("structured output off: the system prompt sets the JSON shape")
+		if systemPrompt == "" {
+			logger.Warn().Str("provider", cfg.Provider).
+				Msg("structured_output is false and no system prompt is sent: nothing asks the model for the JSON shape")
+		}
+	}
 	switch cfg.Provider {
 	case "ollama":
-		s, err = ollama.New(cfg.Host, cfg.Model, cfg.APIKey, think, cfg.ModelTuning, systemPrompt)
+		s, err = ollama.New(cfg.Host, cfg.Model, cfg.APIKey, think, tuning, systemPrompt)
 	case "openai":
 		s, err = vllm.New(vllm.OpenAI, cfg.Host, cfg.Model, cfg.APIKey,
-			think, cfg.Effort, cfg.ModelTuning, systemPrompt)
+			think, cfg.Effort, tuning, systemPrompt)
 	case "vllm":
 		s, err = vllm.New(vllm.VLLM, cfg.Host, cfg.Model, cfg.APIKey,
-			think, cfg.Effort, cfg.ModelTuning, systemPrompt)
+			think, cfg.Effort, tuning, systemPrompt)
 	case "heuristic":
 		s = rank.NewHeuristic()
 	default:

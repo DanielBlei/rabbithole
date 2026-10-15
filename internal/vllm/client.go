@@ -313,9 +313,9 @@ type chatRequest struct {
 	Messages []chatMessage `json:"messages"`
 	Stream   bool          `json:"stream"`
 	tokenCap
-	ResponseFormat     responseFormat `json:"response_format"`
-	ReasoningEffort    string         `json:"reasoning_effort,omitempty"`
-	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
+	ResponseFormat     *responseFormat `json:"response_format,omitempty"`
+	ReasoningEffort    string          `json:"reasoning_effort,omitempty"`
+	ChatTemplateKwargs map[string]any  `json:"chat_template_kwargs,omitempty"`
 }
 
 type chatMessage struct {
@@ -359,14 +359,16 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 		Stream:   false,
 		tokenCap: c.tokenCap(budget),
 		Messages: messages,
-		ResponseFormat: responseFormat{
+	}
+	if !c.tuning.Unconstrained {
+		reqBody.ResponseFormat = &responseFormat{
 			Type: "json_schema",
 			JSONSchema: &jsonSchema{
 				Name:   "scores",
 				Strict: true,
 				Schema: json.RawMessage(c.tuning.Schema()),
 			},
-		},
+		}
 	}
 	switch {
 	case c.flavor == OpenAI:

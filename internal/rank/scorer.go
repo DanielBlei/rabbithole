@@ -134,6 +134,9 @@ type ModelTuning struct {
 	TokensOverhead int `yaml:"tokens_overhead"`  // JSON scaffolding
 	TokensThinking int `yaml:"tokens_thinking"`  // added when think is on
 	ReasonMaxChars int `yaml:"reason_max_chars"` // max characters for the reason in the model's JSON response; schema-enforced
+
+	// Unconstrained omits the schema from requests; set from inference.structured_output.
+	Unconstrained bool `yaml:"-"`
 }
 
 // Normalize returns t with every unset field replaced by its default.

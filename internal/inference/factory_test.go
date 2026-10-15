@@ -4,12 +4,14 @@
 package inference
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
 
 // serveJSON starts a test server that always answers body, regardless of path.
@@ -109,4 +111,34 @@ func TestResolve(t *testing.T) {
 			t.Fatalf("Resolve() error = %v, want it to mention summary model", err)
 		}
 	})
+}
+
+func TestResolveHonoursStructuredOutput(t *testing.T) {
+	for _, structured := range []bool{true, false} {
+		var scoring map[string]any
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if r.Method == http.MethodGet {
+				_, _ = w.Write([]byte(`{"data":[{"id":"llama3"}]}`))
+				return
+			}
+			_ = json.NewDecoder(r.Body).Decode(&scoring)
+			_, _ = w.Write([]byte(
+				`{"choices":[{"message":{"content":"{\"scores\":[{\"index\":1,\"score\":9,\"reason\":\"Relevant.\"}]}"},"finish_reason":"stop"}]}`,
+			))
+		}))
+		t.Cleanup(srv.Close)
+
+		cfg := config.InferenceConfig{Provider: "vllm", Host: srv.URL, Model: "llama3", StructuredOutput: &structured}
+		s, err := Resolve(t.Context(), cfg, true, "be nice")
+		if err != nil {
+			t.Fatalf("Resolve() error = %v", err)
+		}
+		if _, err := s.Score(t.Context(), "profile", []feeds.Item{{ID: "a", Title: "A"}}); err != nil {
+			t.Fatalf("Score() error = %v", err)
+		}
+		if _, sent := scoring["response_format"]; sent != structured {
+			t.Errorf("structured_output=%v: response_format sent = %v", structured, sent)
+		}
+	}
 }

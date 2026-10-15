@@ -113,6 +113,10 @@ type InferenceConfig struct {
 	Think    *bool  `yaml:"think"`    // model reasoning during scoring; defaults true when not set in the config
 	Effort   string `yaml:"effort"`   // openai reasoning_effort while thinking: low | medium | high | xhigh
 
+	// StructuredOutput sends the verdict schema for the server to enforce; defaults true.
+	// false leaves the shape to the system prompt, for endpoints whose guided decoding garbles it.
+	StructuredOutput *bool `yaml:"structured_output"`
+
 	// SystemPrompt: unset takes inference's built-in default, a path overrides it, false sends none.
 	SystemPrompt SystemPromptSetting `yaml:"system_prompt"`
 
@@ -415,6 +419,10 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Inference.Effort == "" {
 		c.Inference.Effort = defaultEffort
+	}
+	if c.Inference.StructuredOutput == nil {
+		t := true
+		c.Inference.StructuredOutput = &t
 	}
 	if c.Inference.BatchSize <= 0 {
 		c.Inference.BatchSize = defaultBatchSize

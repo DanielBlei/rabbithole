@@ -47,6 +47,7 @@ All fields are optional unless marked required.
 | `inference.model` | Model name | `qwen3.5:4b`                      |
 | `inference.api_key` | Bearer token, or a leading `$NAME`/`${NAME}` environment reference (see note below) | none                              |
 | `inference.think` | Allow model reasoning before scoring, with fallback | `true`                            |
+| `inference.structured_output` | Send the verdict schema for the server to enforce. Keep it on; set `false` only for an endpoint that returns scores with reasons that make no sense, see [troubleshooting](troubleshooting.md#scores-of-0-with-reasons-that-make-no-sense) | `true`                            |
 | `inference.effort` | `openai` only: `reasoning_effort` while thinking, `low` \| `medium` \| `high` \| `xhigh` | `medium`                          |
 | `inference.system_prompt` | Path to a system-prompt override, or `false` to send none — see below | built-in                          |
 | `inference.batch_size` | Articles per scoring request | `1`                               |
@@ -87,7 +88,7 @@ On `vllm`, `think: false` sends `chat_template_kwargs: {"enable_thinking": false
 switches thinking off for models whose chat template has that switch (Qwen3 and similar).
 Other templates ignore it.
 
-On `openai`, the reasoning level is probed once at startup with one-token requests:
+On `openai`, the reasoning level is probed once at startup with small requests:
 
 - `think: true` sends `inference.effort`. A model that rejects that level, or takes no
   `reasoning_effort` at all, gets the field left out, with a warning naming the server's reply.
@@ -98,6 +99,10 @@ On `openai`, the reasoning level is probed once at startup with one-token reques
 An auth or unknown-model reply fails startup, and a probe that keeps timing out keeps the
 plain choice (`inference.effort`, or `low`). Reasoning tokens count against
 `max_completion_tokens`, so raise `model_tuning.tokens_thinking` for `high` and `xhigh`.
+
+A gateway can accept these switches and ignore them: the request succeeds, so startup cannot
+tell. If `completion_tokens` in the debug logs stays high with `think: false`, thinking is still
+on. See [troubleshooting](troubleshooting.md#think-false-does-not-reduce-thinking).
 
 > **Note:** a literal `api_key` is stored in plaintext. The web UI's config viewer masks it,
 > but the file itself is unprotected — keep `configs/config.yaml` out of version control (it
@@ -127,7 +132,11 @@ take the defaults. Worth adjusting when substituting a model that is more or les
 | `reason_max_chars` | Maximum length of the per-item rationale | `512` |
 
 Responses are constrained to a fixed JSON shape, so scores are always returned as integers
-and `reason_max_chars` is enforced rather than merely requested.
+and `reason_max_chars` is enforced rather than merely requested. With
+`inference.structured_output: false` the shape comes from the system prompt instead, and
+`reason_max_chars` is only asked for. The built-in prompt and `system.example.md` both spell
+the shape out; a custom prompt has to as well, and `system_prompt: false` with structured output
+off logs a warning at startup.
 
 > **Recommendations**
 >
