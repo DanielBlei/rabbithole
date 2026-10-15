@@ -99,13 +99,14 @@ An auth or unknown-model reply fails startup, and a probe that keeps timing out 
 plain choice (`inference.effort`, or `low`). Reasoning tokens count against
 `max_completion_tokens`, so raise `model_tuning.tokens_thinking` for `high` and `xhigh`.
 
-> **Note:** `api_key` is stored in plaintext. The web UI's config viewer masks it, but the
-> file itself is unprotected — keep `configs/config.yaml` out of version control (it is
-> gitignored by default).
+> **Note:** a literal `api_key` is stored in plaintext. The web UI's config viewer masks it,
+> but the file itself is unprotected — keep `configs/config.yaml` out of version control (it
+> is gitignored by default).
 >
 > A leading `$NAME` or `${NAME}` reference keeps the token out of the file entirely: it is
-> resolved from the environment when the config is loaded (`inference.api_key` and
-> `inference.summary.api_key` only), and a referenced variable that is unset or empty — or
+> resolved from the environment when the config is loaded (`inference.api_key`,
+> `inference.summary.api_key`, and the password in `store.url`, see
+> [the password](#the-password)), and a referenced variable that is unset or empty — or
 > a `$` anywhere else in the value — fails the load with an error naming the field, because
 > every silent alternative surfaces later as an unexplained 401. There is no escape syntax
 > yet, so a key that genuinely begins with `$` cannot be written as a literal. The resolved

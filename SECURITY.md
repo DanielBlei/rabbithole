@@ -48,8 +48,8 @@ A few more things worth knowing:
 - **`serve` refuses plain HTTP on any address but loopback.** To reach it from another
   machine, give it a certificate (`--tls-cert`, `--tls-key`), put it behind a reverse proxy
   that handles TLS, or use a VPN or an SSH tunnel. The open internet is still not a target.
-- **`inference.api_key` sits in the config in plain text**, so its file permissions are yours
-  to set.
+- **A literal `inference.api_key` sits in the config in plain text**, so its file permissions
+  are yours to set. A `$NAME` reference keeps it in the environment instead.
 - **A Postgres store takes its password from the environment, not from the config file**:
   `store.url` holds a `$NAME` reference, or `RABBITHOLE_DB_PASSWORD` overrides it, so the
   credential stays out of anything that copies `config.yaml` around. A literal password written
