@@ -71,11 +71,12 @@ example `14d`, `168h`, `1h30m`.
   `max_completion_tokens`, which OpenAI's reasoning models require in place of `max_tokens`.
 - `vllm` — a vLLM server. Same client as `openai`, in vLLM's dialect: `max_tokens`, and
   thinking switched off through the chat template (see below).
-
-Both check the model against `/v1/models`. When it is missing there, validation falls back to
-a minimal chat request, since gateways sometimes route models their catalog doesn't list.
 - `heuristic` — keyword matching with no model involved. Suitable for offline use and for
   testing feed and filter changes without inference latency.
+
+`openai` and `vllm` both check the model against `/v1/models`. When it is missing there,
+validation falls back to a minimal chat request, since gateways sometimes route models their
+catalog doesn't list.
 
 **Thinking fallback**
 
