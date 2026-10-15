@@ -8,7 +8,7 @@ inference:
   host: http://localhost:11434
   model: qwen3.5:4b             # gemma4:26b | qwen3.6:35b | etc
   think: false                  # model reasoning before scoring; default true
-  # api_key: ""                 # bearer token, if your endpoint needs one
+  # api_key: $RABBITHOLE_KEY    # bearer token, if your endpoint needs one: a $KEY reference or the literal value
 
   # system_prompt: ./configs/prompts/system.example.md   # model instructions; omit to use the built-in default
   # system_prompt: false                                 # send no system message (e.g. an Ollama Modelfile already sets one)
@@ -30,8 +30,9 @@ store:
   db_path: ./data/rabbithole.db   # sqlite, the local default
 
   # Postgres instead, to reach one store from more than one machine. Set either
-  # db_path or url, never both; the password comes from RABBITHOLE_DB_PASSWORD (.env).
-  # url: postgres://rabbithole@db.example.com:5432/rabbithole
+  # db_path or url, never both. The password can be a $NAME environment reference
+  # or the literal value; RABBITHOLE_DB_PASSWORD (.env) overrides either.
+  # url: postgres://rabbithole:$RABBITHOLE_DB_PASSWORD@db.example.com:5432/rabbithole
   #
   # The same, also verifying the server rather than only encrypting to it:
   # url: postgres://rabbit@db.example.com:5432/rabbithole?sslmode=verify-full&sslrootcert=/etc/ssl/ca.pem

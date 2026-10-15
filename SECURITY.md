@@ -50,11 +50,12 @@ A few more things worth knowing:
   that handles TLS, or use a VPN or an SSH tunnel. The open internet is still not a target.
 - **`inference.api_key` sits in the config in plain text**, so its file permissions are yours
   to set.
-- **A Postgres store takes its password from `RABBITHOLE_DB_PASSWORD`, not from the config
-  file**, so the credential stays out of anything that copies `config.yaml` around. A password
-  written into `store.url` anyway still works, and is warned about at startup: the config viewer
-  prints `$RABBITHOLE_DB_PASSWORD` where the value would be, the environment variable overrides
-  it, and connection errors name the database without it.
+- **A Postgres store takes its password from the environment, not from the config file**:
+  `store.url` holds a `$NAME` reference, or `RABBITHOLE_DB_PASSWORD` overrides it, so the
+  credential stays out of anything that copies `config.yaml` around. A literal password written
+  into `store.url` anyway still works, and is warned about at startup: the config viewer prints
+  `$RABBITHOLE_DB_PASSWORD` where the value would be, and connection errors name the database
+  without it.
 - **A Postgres connection encrypts by default but does not verify the server**, because that is
   the only mode that reaches Supabase and RDS on the first try (`sslmode=require`). Anyone who
   can sit between you and the database can impersonate it, and what crosses includes the

@@ -561,6 +561,46 @@ func TestResolvePostgres(t *testing.T) {
 		}
 	})
 
+	t.Run("an env reference in the url is resolved and not flagged", func(t *testing.T) {
+		t.Setenv("PG_PASS", "from-ref")
+		for _, raw := range []string{
+			"postgres://rabbit:$PG_PASS@db.host/rabbithole",
+			"postgres://rabbit:${PG_PASS}@db.host/rabbithole",
+			"postgres://rabbit@db.host/rabbithole?password=$PG_PASS",
+		} {
+			pg, err := StoreConfig{URL: raw}.ResolvePostgres()
+			if err != nil {
+				t.Fatalf("%s: ResolvePostgres: %v", raw, err)
+			}
+			if !strings.Contains(pg.DSN, "from-ref") || strings.Contains(pg.DSN, "PG_PASS") {
+				t.Errorf("%s: DSN = %q, want the resolved password", raw, pg.DSN)
+			}
+			if pg.PasswordInConfigFile {
+				t.Errorf("%s: PasswordInConfigFile = true, want false for a reference", raw)
+			}
+		}
+	})
+
+	t.Run("an unset env reference fails", func(t *testing.T) {
+		unsetEnv(t, "PG_PASS")
+		_, err := StoreConfig{URL: "postgres://rabbit:$PG_PASS@db.host/rabbithole"}.ResolvePostgres()
+		if err == nil || !strings.Contains(err.Error(), "$PG_PASS is not set or empty") {
+			t.Fatalf("ResolvePostgres error = %v, want the unset variable named", err)
+		}
+	})
+
+	t.Run("the environment beats an env reference", func(t *testing.T) {
+		t.Setenv(DBPasswordEnv, "from-env")
+		unsetEnv(t, "PG_PASS")
+		pg, err := StoreConfig{URL: "postgres://rabbit:$PG_PASS@db.host/rabbithole"}.ResolvePostgres()
+		if err != nil {
+			t.Fatalf("ResolvePostgres: %v", err)
+		}
+		if !strings.Contains(pg.DSN, "from-env") {
+			t.Errorf("DSN = %q, want the environment's password", pg.DSN)
+		}
+	})
+
 	t.Run("a password in the url is used and flagged", func(t *testing.T) {
 		pg, err := StoreConfig{URL: "postgres://rabbit:from-url@db.host/rabbithole"}.ResolvePostgres()
 		if err != nil {

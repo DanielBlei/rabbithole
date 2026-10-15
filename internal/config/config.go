@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -179,7 +180,7 @@ type IngestConfig struct {
 // Postgres. There is no separate driver setting, so nothing can disagree.
 type StoreConfig struct {
 	DBPath string `yaml:"db_path"` // sqlite database path
-	URL    string `yaml:"url"`     // postgres connection url; the password comes from DBPasswordEnv
+	URL    string `yaml:"url"`     // postgres connection url; the password may be a $NAME reference
 
 	// MaxConns caps the Postgres pool. The default is already small enough for a
 	// hosted free tier; this is for going lower when a database is shared with
@@ -192,9 +193,7 @@ type StoreConfig struct {
 	ConnMaxLifetime Duration `yaml:"conn_max_lifetime"`
 }
 
-// DBPasswordEnv supplies the Postgres password. It is kept out of the config
-// file so it stays out of the web UI's config viewer and out of anything that
-// copies the file around.
+// DBPasswordEnv supplies the Postgres password, overriding store.url's.
 const DBPasswordEnv = "RABBITHOLE_DB_PASSWORD"
 
 // defaultSSLMode is applied when the URL names none. It encrypts without
@@ -267,11 +266,15 @@ func (p Postgres) TLSEncrypted() bool {
 	}
 }
 
+// bracedEnvRef matches ${NAME}, which url.Parse rejects in userinfo.
+var bracedEnvRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
 // ResolvePostgres builds the connection from store.url plus DBPasswordEnv. The
 // environment wins over a password in the URL, so an exported variable can
-// override a checked-in file without editing it.
+// override a checked-in file without editing it. A URL password starting with
+// '$' is an environment reference, resolved like api_key.
 func (s StoreConfig) ResolvePostgres() (Postgres, error) {
-	u, err := url.Parse(s.URL)
+	u, err := url.Parse(bracedEnvRef.ReplaceAllString(s.URL, "$$$1"))
 	if err != nil {
 		// url.Error quotes the whole url it failed on, which here may hold a
 		// password — and a mistyped DSN is the first thing a new install gets
@@ -304,11 +307,16 @@ func (s StoreConfig) ResolvePostgres() (Postgres, error) {
 
 	// The file's secret is worth reporting whatever happens to it next, so this
 	// is captured before the environment is allowed to override it.
-	inConfigFile := hasInURL
+	isRef := strings.HasPrefix(inURL, "$")
+	inConfigFile := hasInURL && !isRef
 
 	password := inURL
 	if env := os.Getenv(DBPasswordEnv); env != "" {
 		password = env
+	} else if isRef {
+		if password, err = expandEnvRef("store.url password", inURL); err != nil {
+			return Postgres{}, err
+		}
 	}
 	// url.UserPassword escapes, so a password holding @ / # or ? cannot
 	// corrupt the DSN the way string concatenation would.

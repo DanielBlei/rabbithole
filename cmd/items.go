@@ -149,8 +149,8 @@ func openStore(ctx context.Context, cfg *config.Config, exclusive bool) (*store.
 		}
 		label = pg.Label
 		if pg.PasswordInConfigFile {
-			log.Warn().Msgf("store.url carries a password; %s keeps it out of the config file"+
-				" and out of the web config viewer", config.DBPasswordEnv)
+			log.Warn().Msgf("store.url carries a password; a $%s reference keeps it out of the"+
+				" config file and out of the web config viewer", config.DBPasswordEnv)
 		}
 	}
 	var err error
