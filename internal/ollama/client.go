@@ -175,12 +175,14 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 	messages = append(messages, api.Message{Role: "user", Content: userPrompt})
 
 	req := &api.ChatRequest{
-		Model:  c.model,
-		Stream: &stream,
-		// A schema rather than bare "json": Ollama compiles it to a grammar and samples only conforming tokens
-		Format:   json.RawMessage(c.tuning.Schema()),
+		Model:    c.model,
+		Stream:   &stream,
 		Options:  opts,
 		Messages: messages,
+	}
+	if !c.tuning.Unconstrained {
+		// A schema rather than bare "json": Ollama compiles it to a grammar and samples only conforming tokens
+		req.Format = json.RawMessage(c.tuning.Schema())
 	}
 
 	// Set the model's reasoning mode explicitly. Ignored by models without a

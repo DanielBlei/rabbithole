@@ -273,6 +273,30 @@ func TestScoreRequestConstrainsOutput(t *testing.T) {
 	}
 }
 
+func TestScoreUnconstrainedSendsNoFormat(t *testing.T) {
+	var got map[string]json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(
+			`{"message":{"role":"assistant","content":"{\"scores\":[{\"index\":1,\"score\":9,\"reason\":\"x\"}]}"},"done":true,"done_reason":"stop","eval_count":9}
+`,
+		))
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{Unconstrained: true}, "")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := c.Score(t.Context(), "profile", []feeds.Item{{ID: "a", Title: "A"}}); err != nil {
+		t.Fatalf("Score() error = %v", err)
+	}
+	if f, ok := got["format"]; ok && string(f) != "null" && string(f) != `""` {
+		t.Errorf("format = %s, want none when unconstrained", f)
+	}
+}
+
 // TestScoreOmitsSystemMessageWhenPromptEmpty pins the behavior a disabled system_prompt
 // depends on: an empty systemPrompt must drop the message entirely, not send it empty, since
 // only an absent system message lets a model's own Modelfile default apply.

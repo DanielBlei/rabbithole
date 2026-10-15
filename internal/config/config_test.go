@@ -222,6 +222,24 @@ func TestLoadThinkDefaultsAndOverride(t *testing.T) {
 	}
 }
 
+func TestLoadStructuredOutput(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want bool
+	}{
+		{"", true},
+		{"inference:\n  structured_output: false\n", false},
+	} {
+		cfg, err := Load(writeConfig(t, baseFeeds+tc.body))
+		if err != nil {
+			t.Fatalf("Load(%q): %v", tc.body, err)
+		}
+		if got := *cfg.Inference.StructuredOutput; got != tc.want {
+			t.Errorf("Load(%q) structured_output = %v, want %v", tc.body, got, tc.want)
+		}
+	}
+}
+
 func TestLoadEffort(t *testing.T) {
 	for _, tc := range []struct {
 		body        string

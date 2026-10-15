@@ -39,10 +39,14 @@ func degenerateReason(reason string) string {
 	if letters < minReasonLetters {
 		return "reason has no words"
 	}
+	// A desynced model starts the reason where it expected the key's colon.
+	if strings.HasPrefix(strings.TrimSpace(reason), ":") {
+		return "reason starts with a colon"
+	}
 	return ""
 }
 
-// verdictGuard drops verdicts with a junk reason, so the retry paths in
+// verdictGuard drops verdicts with an unusable reason, so the retry paths in
 // scoreBatch and scoreOne re-ask instead of storing them as real scores.
 type verdictGuard struct {
 	Scorer
@@ -67,9 +71,9 @@ func (g *verdictGuard) Score(ctx context.Context, profile string, items []feeds.
 			continue
 		}
 		g.rejected.Add(1)
-		lastErr = fmt.Errorf("junk verdict (%s): reason=%q", rule, truncate(sc.Reason, 80))
+		lastErr = fmt.Errorf("unusable verdict (%s): reason=%q", rule, truncate(sc.Reason, 80))
 		zerolog.Ctx(ctx).Warn().Str("item", truncate(titles[sc.ID], 80)).Str("rule", rule).
-			Str("reason", truncate(sc.Reason, 80)).Msg("dropping junk verdict, re-asking")
+			Str("reason", truncate(sc.Reason, 80)).Msg("dropping unusable verdict, re-asking")
 	}
 	if len(kept) == 0 && lastErr != nil {
 		return nil, lastErr

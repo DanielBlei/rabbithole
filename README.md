@@ -112,6 +112,8 @@ and [SECURITY.md](SECURITY.md) before exposing it to anything else.
 - [docs/architecture.md](docs/architecture.md): how the pieces fit together, and the roadmap
 - [docs/evals.md](docs/evals.md): checking whether the model actually agrees with your profile
   (`eval benchmark` and `eval audit`)
+- [docs/troubleshooting.md](docs/troubleshooting.md): scores that make no sense, thinking that
+  will not switch off, and other inference and secrets problems
 - [docs/store.md](docs/store.md): database internals for operators and contributors: engines,
   schema, upgrades
 
