@@ -98,7 +98,7 @@ clean-feeds: ## Delete every feed item from the store, keeping todos, ideas and 
 
 .PHONY: ingest
 ingest: config-hint ## Fetch, rank, and record to the store (uses CONFIG, NO_THINK=1 to disable thinking)
-	go run . ingest --config $(CONFIG) $(THINK_FLAG)
+	go run . ingest --config $(CONFIG) $(THINK_FLAG) $(DEBUG_FLAG)
 
 .PHONY: dry-run
 dry-run: config-hint ## Print the ingest to stdout without writing files or recording items

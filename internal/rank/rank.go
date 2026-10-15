@@ -78,6 +78,8 @@ func ScoreAll(
 	}
 	batches := chunk(items, batchSize)
 	logger := zerolog.Ctx(ctx)
+	guard := &verdictGuard{Scorer: s}
+	s = guard
 
 	sem := make(chan struct{}, maxParallel)
 	var (
@@ -119,6 +121,10 @@ func ScoreAll(
 		}(i, batch)
 	}
 	wg.Wait()
+	if n := guard.rejected.Load(); n > 0 {
+		logger.Warn().Int64("junk_verdicts", n).Int("items", len(items)).Int("scored", len(out)).
+			Msg("dropped junk verdicts during scoring; the endpoint returned schema-valid nonsense")
+	}
 	return out
 }
 

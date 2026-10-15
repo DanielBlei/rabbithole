@@ -54,7 +54,7 @@ func TestScoreAllRetriesItemsMissingFromPartialResponse(t *testing.T) {
 		// Only ever score the first item of whatever batch is sent, mimicking a
 		// small model that returns one verdict for a multi-item batch.
 		first := batch[0]
-		return []ItemScore{{ID: first.ID, Score: 5, Reason: "x"}}, nil
+		return []ItemScore{{ID: first.ID, Score: 5, Reason: "Relevant to the reader."}}, nil
 	}}
 
 	got := ScoreAll(context.Background(), scorer, "profile", items, 3, 4)
@@ -85,7 +85,7 @@ func TestScoreBatchSkipsItemModelNeverScores(t *testing.T) {
 				return nil, errors.New("model refuses to score item a")
 			}
 		}
-		return []ItemScore{{ID: batch[0].ID, Score: 5}}, nil
+		return []ItemScore{{ID: batch[0].ID, Score: 5, Reason: "Relevant to the reader."}}, nil
 	}}
 
 	got := scoreBatch(context.Background(), scorer, "profile", items)
@@ -108,7 +108,7 @@ func TestScoreOneRetriesTransientFailure(t *testing.T) {
 		if calls < retryAttempts {
 			return nil, errors.New("transient timeout")
 		}
-		return []ItemScore{{ID: batch[0].ID, Score: 7, Reason: "ok"}}, nil
+		return []ItemScore{{ID: batch[0].ID, Score: 7, Reason: "Relevant to the reader."}}, nil
 	}}
 
 	got := scoreOne(context.Background(), scorer, "profile", item)
@@ -189,7 +189,7 @@ func TestScoreAllReportsBatchProgress(t *testing.T) {
 	scorer := &stubScorer{fn: func(batch []feeds.Item) ([]ItemScore, error) {
 		out := make([]ItemScore, len(batch))
 		for i, it := range batch {
-			out[i] = ItemScore{ID: it.ID, Score: 5, Reason: "x"}
+			out[i] = ItemScore{ID: it.ID, Score: 5, Reason: "Relevant to the reader."}
 		}
 		return out, nil
 	}}
@@ -232,7 +232,7 @@ func TestScoreAllReportsBatchProgress(t *testing.T) {
 func TestScoreAllWithoutProgressHook(t *testing.T) {
 	items := []feeds.Item{{ID: "a", Title: "a"}}
 	scorer := &stubScorer{fn: func(batch []feeds.Item) ([]ItemScore, error) {
-		return []ItemScore{{ID: batch[0].ID, Score: 5}}, nil
+		return []ItemScore{{ID: batch[0].ID, Score: 5, Reason: "Relevant to the reader."}}, nil
 	}}
 	if got := ScoreAll(context.Background(), scorer, "profile", items, 1, 1); len(got) != 1 {
 		t.Fatalf("scored %d items, want 1", len(got))

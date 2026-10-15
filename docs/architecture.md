@@ -71,10 +71,12 @@ goes with every request, since the question is always "worth reading for this re
 
 **What comes back.** A score from 0 to 10 and a sentence or two of reasoning per article, as
 JSON in a fixed shape that the inference server enforces while the model writes rather than
-asking it to comply. Score, reason, model name, profile identity/name and a SHA-256 hash of
-the exact effective profile text are saved against the article. Historical rows may have no
-profile provenance. Editing or switching profiles never rewrites old scores and does not
-trigger automatic rescoring.
+asking it to comply. A verdict that fits the shape but carries no usable score, or a reason
+with no words or with fragments of the JSON itself, is re-asked like a failed request rather
+than stored; an article that never gets a real verdict counts as failed. Score, reason, model
+name, profile identity/name and a SHA-256 hash of the exact effective profile text are saved
+against the article. Historical rows may have no profile provenance. Editing or switching
+profiles never rewrites old scores and does not trigger automatic rescoring.
 
 The active profile is resolved once before a run starts. A profile switch during a live run
 is visible to the next run only, so one run cannot mix profile versions between feeds or

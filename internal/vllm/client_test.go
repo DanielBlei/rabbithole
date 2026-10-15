@@ -115,8 +115,16 @@ func TestProbeRequestShape(t *testing.T) {
 	if raw["model"] != "llama3" {
 		t.Errorf("probe model = %v, want llama3", raw["model"])
 	}
-	if raw["max_tokens"] != float64(1) {
-		t.Errorf("probe max_tokens = %v, want 1", raw["max_tokens"])
+	if _, ok := raw["max_tokens"]; ok {
+		t.Error("probe carries max_tokens; it must not cap output")
+	}
+	if _, ok := raw["max_completion_tokens"]; ok {
+		t.Error("probe carries max_completion_tokens; it must not cap output")
+	}
+	if msgs, ok := raw["messages"].([]any); !ok || len(msgs) != 1 {
+		t.Fatal("probe messages malformed")
+	} else if content, _ := msgs[0].(map[string]any)["content"].(string); content != "Hi, how are you?" {
+		t.Errorf("probe prompt = %q, want a simple greeting", content)
 	}
 	if raw["stream"] != false {
 		t.Errorf("probe stream = %v, want false", raw["stream"])
