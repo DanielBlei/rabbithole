@@ -58,6 +58,17 @@ func writeConfig(t *testing.T, body string) string {
 	return writeConfigWithFeeds(t, body, minimalFeeds)
 }
 
+// loadFile reads, splits and prepares the file the way an import does.
+func loadFile(path string) (Config, error) {
+	f, err := ReadFile(path)
+	if err != nil {
+		return Config{}, err
+	}
+	run, _, _, _ := f.Split()
+	_, err = run.Prepare()
+	return run, err
+}
+
 // baseFeeds is the required-fields-only config the duration/think tests build on.
 const baseFeeds = "profile: ./p.md\nstore:\n  db_path: ./test.db\n"
 const baseWithoutProfile = "store:\n  db_path: ./test.db\n"
@@ -74,7 +85,7 @@ func TestLoadSinceDaysAndHours(t *testing.T) {
 		{"ingest:\n  since: 168h\n", 168 * time.Hour},
 		{"", 7 * 24 * time.Hour}, // omitted -> default 7d
 	} {
-		cfg, err := Load(writeConfig(t, baseFeeds+tc.since))
+		cfg, err := loadFile(writeConfig(t, baseFeeds+tc.since))
 		if err != nil {
 			t.Fatalf("Load(since=%q): %v", tc.since, err)
 		}
@@ -84,25 +95,26 @@ func TestLoadSinceDaysAndHours(t *testing.T) {
 	}
 }
 
-func TestLoadAllowsNoConfiguredProfile(t *testing.T) {
-	cfg, err := Load(writeConfig(t, baseWithoutProfile))
+func TestSplitAllowsNoConfiguredProfile(t *testing.T) {
+	f, err := ReadFile(writeConfig(t, baseWithoutProfile))
 	if err != nil {
-		t.Fatalf("Load without profile: %v", err)
+		t.Fatalf("ReadFile without profile: %v", err)
 	}
-	if cfg.Profile != "" {
-		t.Fatalf("Profile = %q, want empty", cfg.Profile)
+	_, _, legacy, _ := f.Split()
+	if legacy.ProfilePath != "" {
+		t.Fatalf("ProfilePath = %q, want empty", legacy.ProfilePath)
 	}
-	got, err := cfg.LoadProfile()
+	got, err := LoadProfileFile(legacy.ProfilePath)
 	if err != nil {
-		t.Fatalf("LoadProfile without path: %v", err)
+		t.Fatalf("LoadProfileFile without path: %v", err)
 	}
 	if got != profiledomain.DefaultContent {
-		t.Fatalf("LoadProfile without path did not return built-in Default")
+		t.Fatalf("LoadProfileFile without path did not return built-in Default")
 	}
 }
 
 func TestLoadSinceInvalid(t *testing.T) {
-	if _, err := Load(writeConfig(t, baseFeeds+"ingest:\n  since: 14x\n")); err == nil {
+	if _, err := loadFile(writeConfig(t, baseFeeds+"ingest:\n  since: 14x\n")); err == nil {
 		t.Error("expected error for invalid since value")
 	}
 }
@@ -123,83 +135,6 @@ func unsetEnv(t *testing.T, name string) {
 	})
 }
 
-func TestLoadAPIKeyEnvRef(t *testing.T) {
-	const keyVar = "RABBITHOLE_TEST_API_KEY"
-	tests := []struct {
-		name    string
-		apiKey  string
-		env     string // "" leaves keyVar unset; "set" and "empty" control it
-		want    string // resolved key on success
-		wantErr string // substring; empty means success
-	}{
-		{name: "bare name resolves", apiKey: "$" + keyVar, env: "set", want: "sk-test-live"},
-		{name: "braced name resolves", apiKey: "${" + keyVar + "}", env: "set", want: "sk-test-live"},
-		{
-			name:    "unset variable errors",
-			apiKey:  "$" + keyVar,
-			env:     "unset",
-			wantErr: "$" + keyVar + " is not set or empty",
-		},
-		{
-			name:    "empty variable errors",
-			apiKey:  "$" + keyVar,
-			env:     "empty",
-			wantErr: "$" + keyVar + " is not set or empty",
-		},
-		{name: "mid-string dollar errors", apiKey: "sk-$SUFFIX", wantErr: "only allowed as a leading $NAME"},
-		{name: "second dollar in name errors", apiKey: "$A$B", wantErr: "not a single $NAME"},
-		{name: "dollar alone errors", apiKey: "$", wantErr: "not a single $NAME"},
-		{name: "unterminated brace errors", apiKey: "${NAME", wantErr: "not a well-formed ${NAME}"},
-		{name: "literal key passes through", apiKey: "sk-literal-abc123", want: "sk-literal-abc123"},
-		{name: "empty value stays empty", apiKey: "", want: ""},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			switch tc.env {
-			case "set":
-				t.Setenv(keyVar, "sk-test-live")
-			case "empty":
-				t.Setenv(keyVar, "")
-			case "unset":
-				unsetEnv(t, keyVar)
-			}
-			body := baseWithoutProfile + "inference:\n  provider: vllm\n  api_key: " + tc.apiKey + "\n"
-			cfg, err := Load(writeConfig(t, body))
-			if tc.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("Load() error = %v, want containing %q", err, tc.wantErr)
-				}
-				// A non-reference value may be a real key, so errors must not echo it.
-				if !strings.HasPrefix(tc.apiKey, "$") && strings.Contains(err.Error(), tc.apiKey) {
-					t.Errorf("Load() error echoes the api_key value: %v", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Load() error = %v, want nil", err)
-			}
-			if cfg.Inference.APIKey != tc.want {
-				t.Fatalf("api_key = %q, want %q", cfg.Inference.APIKey, tc.want)
-			}
-		})
-	}
-}
-
-func TestLoadSummaryAPIKeyEnvRef(t *testing.T) {
-	t.Setenv("RABBITHOLE_TEST_SUMMARY_KEY", "sk-summary-live")
-	body := baseWithoutProfile + "inference:\n" +
-		"  api_key: $RABBITHOLE_TEST_SUMMARY_KEY\n" +
-		"  summary:\n    model: other-model\n    api_key: ${RABBITHOLE_TEST_SUMMARY_KEY}\n"
-	cfg, err := Load(writeConfig(t, body))
-	if err != nil {
-		t.Fatalf("Load() error = %v, want nil", err)
-	}
-	if cfg.Inference.APIKey != "sk-summary-live" || cfg.Inference.Summary.APIKey != "sk-summary-live" {
-		t.Fatalf("api keys = %q / %q, want both sk-summary-live",
-			cfg.Inference.APIKey, cfg.Inference.Summary.APIKey)
-	}
-}
-
 func TestLoadThinkDefaultsAndOverride(t *testing.T) {
 	for _, tc := range []struct {
 		think string
@@ -209,7 +144,7 @@ func TestLoadThinkDefaultsAndOverride(t *testing.T) {
 		{"inference:\n  think: true\n", true},   // explicit on
 		{"inference:\n  think: false\n", false}, // explicit off must not read as the default
 	} {
-		cfg, err := Load(writeConfig(t, baseFeeds+tc.think))
+		cfg, err := loadFile(writeConfig(t, baseFeeds+tc.think))
 		if err != nil {
 			t.Fatalf("Load(think=%q): %v", tc.think, err)
 		}
@@ -230,7 +165,7 @@ func TestLoadStructuredOutput(t *testing.T) {
 		{"", true},
 		{"inference:\n  structured_output: false\n", false},
 	} {
-		cfg, err := Load(writeConfig(t, baseFeeds+tc.body))
+		cfg, err := loadFile(writeConfig(t, baseFeeds+tc.body))
 		if err != nil {
 			t.Fatalf("Load(%q): %v", tc.body, err)
 		}
@@ -247,16 +182,16 @@ func TestLoadEffort(t *testing.T) {
 		wantSummary string
 		wantErr     string
 	}{
-		{body: "", want: "medium"},
-		{body: "inference:\n  effort: xhigh\n", want: "xhigh"},
+		{body: "inference:\n  provider: openai\n", want: "medium"},
+		{body: "inference:\n  provider: openai\n  effort: xhigh\n", want: "xhigh"},
 		{
-			body: "inference:\n  effort: low\n  summary:\n    model: m\n    effort: high\n",
+			body: "inference:\n  provider: openai\n  effort: low\n  summary:\n    model: m\n    effort: high\n",
 			want: "low", wantSummary: "high",
 		},
-		{body: "inference:\n  effort: none\n", wantErr: `inference.effort "none"`},
-		{body: "inference:\n  summary:\n    model: m\n    effort: max\n", wantErr: `inference.summary.effort "max"`},
+		{body: "inference:\n  provider: openai\n  effort: none\n", wantErr: `inference.effort "none"`},
+		{body: "inference:\n  provider: openai\n  summary:\n    model: m\n    effort: max\n", wantErr: `inference.summary.effort "max"`},
 	} {
-		cfg, err := Load(writeConfig(t, baseFeeds+tc.body))
+		cfg, err := loadFile(writeConfig(t, baseFeeds+tc.body))
 		if tc.wantErr != "" {
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Errorf("Load(%q) error = %v, want containing %q", tc.body, err, tc.wantErr)
@@ -300,7 +235,7 @@ func TestStripHTMLComments(t *testing.T) {
 // The shipped template is mostly an HTML comment, so a profile that looks filled
 // in can strip to nothing. Scoring every article against nothing is meaningless
 // rather than degraded, and it used to happen without a word.
-func TestLoadProfileRejectsAnEmptyProfile(t *testing.T) {
+func TestLoadProfileFileRejectsAnEmptyProfile(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		content string
@@ -316,38 +251,38 @@ func TestLoadProfileRejectsAnEmptyProfile(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			got, err := (&Config{Profile: path}).LoadProfile()
+			got, err := LoadProfileFile(path)
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("LoadProfile() = %q, want an error", got)
+					t.Fatalf("LoadProfileFile() = %q, want an error", got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("LoadProfile() error = %v", err)
+				t.Fatalf("LoadProfileFile() error = %v", err)
 			}
 		})
 	}
 }
 
-func TestLoadProfileCompatibilityPath(t *testing.T) {
+func TestLoadProfileFileCompatibilityPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "legacy.md")
 	if err := os.WriteFile(path, []byte("<!-- private -->\n# Legacy\n- local models"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := (&Config{Profile: path}).LoadProfile()
+	got, err := LoadProfileFile(path)
 	if err != nil {
-		t.Fatalf("LoadProfile: %v", err)
+		t.Fatalf("LoadProfileFile: %v", err)
 	}
 	if got != "# Legacy\n- local models" {
-		t.Fatalf("LoadProfile = %q", got)
+		t.Fatalf("LoadProfileFile = %q", got)
 	}
 
 	missing := filepath.Join(dir, "missing.md")
-	if _, err := (&Config{Profile: missing}).LoadProfile(); err == nil ||
+	if _, err := LoadProfileFile(missing); err == nil ||
 		!strings.Contains(err.Error(), "read profile") {
-		t.Fatalf("missing LoadProfile error = %v", err)
+		t.Fatalf("missing LoadProfileFile error = %v", err)
 	}
 }
 
@@ -481,14 +416,14 @@ func TestInferenceConfigLoadSystemPrompt(t *testing.T) {
 
 func TestLoadSummaryRequiresModel(t *testing.T) {
 	t.Run("a field set without model is rejected", func(t *testing.T) {
-		_, err := Load(writeConfig(t, baseFeeds+"inference:\n  summary:\n    host: http://other:8000\n"))
+		_, err := loadFile(writeConfig(t, baseFeeds+"inference:\n  summary:\n    host: http://other:8000\n"))
 		if err == nil {
 			t.Fatal("expected error for summary block missing model")
 		}
 	})
 
 	t.Run("model alone is enough", func(t *testing.T) {
-		cfg, err := Load(writeConfig(t, baseFeeds+"inference:\n  summary:\n    model: small:1b\n"))
+		cfg, err := loadFile(writeConfig(t, baseFeeds+"inference:\n  summary:\n    model: small:1b\n"))
 		if err != nil {
 			t.Fatalf("Load() error = %v", err)
 		}
@@ -498,7 +433,7 @@ func TestLoadSummaryRequiresModel(t *testing.T) {
 	})
 
 	t.Run("unset summary is fine", func(t *testing.T) {
-		if _, err := Load(writeConfig(t, baseFeeds)); err != nil {
+		if _, err := loadFile(writeConfig(t, baseFeeds)); err != nil {
 			t.Fatalf("Load() error = %v", err)
 		}
 	})
@@ -587,9 +522,8 @@ func TestValidateStoreNeedsExactlyOneTarget(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			c := Config{Profile: "p", Inference: InferenceConfig{Provider: "heuristic"}, Store: tt.store}
-			if err := c.validate(); (err != nil) != tt.wantErr {
-				t.Errorf("validate() error = %v, wantErr %v", err, tt.wantErr)
+			if err := tt.store.Validate(); (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -837,33 +771,48 @@ func TestResolvePostgresRefusesToEchoThePassword(t *testing.T) {
 // else lets you fit inside the cap; they shape a Postgres pool and nothing
 // else, so setting them beside a sqlite path is a mistake worth naming.
 func TestValidateStorePoolKnobs(t *testing.T) {
-	base := func() Config {
-		return Config{
-			Profile:   "p",
-			Inference: InferenceConfig{Provider: "heuristic"},
-			Store:     StoreConfig{URL: "postgres://rabbit@db.host/rabbithole"},
-		}
-	}
+	base := func() StoreConfig { return StoreConfig{URL: "postgres://rabbit@db.host/rabbithole"} }
 
 	ok := base()
-	ok.Store.MaxConns = 4
-	ok.Store.ConnMaxLifetime = Duration(time.Minute)
-	if err := ok.validate(); err != nil {
+	ok.MaxConns = 4
+	ok.ConnMaxLifetime = Duration(time.Minute)
+	if err := ok.Validate(); err != nil {
 		t.Errorf("tuned pool rejected: %v", err)
 	}
 
 	negative := base()
-	negative.Store.MaxConns = -1
-	if err := negative.validate(); err == nil {
+	negative.MaxConns = -1
+	if err := negative.Validate(); err == nil {
 		t.Error("a negative max_conns was accepted")
 	}
 
-	sqlite := Config{
-		Profile:   "p",
-		Inference: InferenceConfig{Provider: "heuristic"},
-		Store:     StoreConfig{DBPath: "./x.db", MaxConns: 4},
-	}
-	if err := sqlite.validate(); err == nil {
+	sqlite := StoreConfig{DBPath: "./x.db", MaxConns: 4}
+	if err := sqlite.Validate(); err == nil {
 		t.Error("max_conns beside db_path was accepted as if it did something")
+	}
+}
+
+func TestParseRef(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		name string
+		ok   bool
+	}{
+		{"$NAME", "NAME", true},
+		{"${NAME}", "NAME", true},
+		{"$name_1", "name_1", true},
+		{"", "", false},
+		{"$", "", false},
+		{"${}", "", false},
+		{"${NAME", "", false},
+		{"$A$B", "", false},
+		{"$1A", "", false},
+		{"sk-$X", "", false},
+		{"literal", "", false},
+	} {
+		name, ok := parseRef(tc.in)
+		if name != tc.name || ok != tc.ok {
+			t.Errorf("parseRef(%q) = (%q, %v), want (%q, %v)", tc.in, name, ok, tc.name, tc.ok)
+		}
 	}
 }

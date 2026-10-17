@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -14,7 +15,6 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-	"gopkg.in/yaml.v3"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
@@ -57,6 +57,17 @@ type sourcesData struct {
 	// gives the add form, which has no resolved feed yet, correct placeholders.
 	DefaultSince string
 	DefaultCap   string
+
+	// Import is the outcome of a feeds-file import, shown above the list.
+	Import *importStatus
+}
+
+// importStatus is what a feeds-file import reports: counts and warnings, or why
+// the file was refused.
+type importStatus struct {
+	Msg      string
+	Warnings []string
+	Err      string
 }
 
 // sourceCounts is the dialog's tally, rendered as the arguments of the faux
@@ -169,7 +180,6 @@ type defaultsData struct {
 // exportData backs the export modal: the live set rendered as a seed file.
 type exportData struct {
 	YAML      string
-	Path      string
 	FeedCount int
 	Err       string
 }
@@ -341,7 +351,12 @@ func (s *Web) handleSourceDefaults(w http.ResponseWriter, r *http.Request) {
 		httpFeedError(w, err)
 		return
 	}
-	s.renderFragment(w, "sourceDefaults", s.defaultsForm(d, ""))
+	cfg, err := s.runConfig(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.renderFragment(w, "sourceDefaults", defaultsForm(cfg.Ingest.Since.Std(), d, ""))
 }
 
 // handleSourceSaveDefaults writes the set-wide fallbacks. Every feed that
@@ -361,7 +376,12 @@ func (s *Web) handleSourceSaveDefaults(w http.ResponseWriter, r *http.Request) {
 		err = s.db.SetFeedDefaults(r.Context(), defaults)
 	}
 	if err != nil {
-		form := s.defaultsForm(defaults, err.Error())
+		cfg, cfgErr := s.runConfig(r.Context())
+		if cfgErr != nil {
+			http.Error(w, cfgErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		form := defaultsForm(cfg.Ingest.Since.Std(), defaults, err.Error())
 		form.Since, form.MaxItems = r.FormValue("since"), r.FormValue("max_items")
 		s.renderFragment(w, "sourceDefaults", form)
 		return
@@ -378,17 +398,63 @@ func (s *Web) handleSourceSaveDefaults(w http.ResponseWriter, r *http.Request) {
 	s.writeSourcesBody(w, r, "", nil)
 }
 
+// sourceImportLimit caps an uploaded feeds file.
+const sourceImportLimit = 1 << 20
+
+// handleSourceImport adds the feeds of an uploaded seed file that the store has
+// never seen, the same operation as `rabbithole sources import`. A file that
+// cannot be used comes back as an inline message, like the add form's errors.
+func (s *Web) handleSourceImport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	r.Body = http.MaxBytesReader(w, r.Body, sourceImportLimit)
+	fail := func(msg string) {
+		s.writeSourcesBodyWith(w, r, "", nil, &importStatus{Err: msg})
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			fail("feeds file is too large (limit 1 MiB)")
+			return
+		}
+		fail("choose a feeds YAML file to import")
+		return
+	}
+	defer func() { _ = file.Close() }()
+	raw, err := io.ReadAll(file)
+	if err != nil {
+		fail("could not read the uploaded file")
+		return
+	}
+	doc, err := config.ParseFeeds(raw)
+	if err != nil {
+		fail(err.Error())
+		return
+	}
+	result, err := s.db.SeedFeeds(r.Context(), *doc)
+	if err != nil {
+		httpFeedError(w, err)
+		return
+	}
+	s.afterFeedChange(r.Context())
+	s.writeSourcesBodyWith(w, r, "", nil, &importStatus{
+		Msg: fmt.Sprintf("added %d feed(s), skipped %d already known (including deleted ones)",
+			result.Added, result.Skipped),
+		Warnings: result.Warnings,
+	})
+}
+
 // handleSourceExport renders the live set as a seed file: the same YAML shape
 // feeds.yaml uses, so it can be copied straight back out to one.
 func (s *Web) handleSourceExport(w http.ResponseWriter, r *http.Request) {
-	data := exportData{Path: s.seedPath()}
+	var data exportData
 	doc, err := s.db.FeedsDoc(r.Context())
 	if err != nil {
 		data.Err = err.Error()
 		s.renderFragment(w, "sourceExport", data)
 		return
 	}
-	raw, err := marshalFeedsDoc(doc)
+	raw, err := config.MarshalFeeds(doc)
 	if err != nil {
 		data.Err = err.Error()
 		s.renderFragment(w, "sourceExport", data)
@@ -398,30 +464,18 @@ func (s *Web) handleSourceExport(w http.ResponseWriter, r *http.Request) {
 	s.renderFragment(w, "sourceExport", data)
 }
 
-// marshalFeedsDoc renders a feed set as a seed file. yaml.Marshal defaults to
-// four-space indentation, which the shipped example does not use, so this goes
-// through an encoder to match what a hand-written feeds.yaml looks like.
-func marshalFeedsDoc(doc config.FeedsDoc) (string, error) {
-	var out strings.Builder
-	enc := yaml.NewEncoder(&out)
-	enc.SetIndent(2)
-	if err := enc.Encode(doc); err != nil {
-		return "", err
-	}
-	if err := enc.Close(); err != nil {
-		return "", err
-	}
-	return out.String(), nil
-}
-
 // sourcesData assembles the dialog: the resolved feed set joined with each feed's
 // fetch history, plus whichever feed the detail pane is showing.
 func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, error) {
+	cfg, err := s.runConfig(ctx)
+	if err != nil {
+		return sourcesData{}, err
+	}
 	doc, err := s.db.FeedsDoc(ctx)
 	if err != nil {
 		return sourcesData{}, err
 	}
-	resolved, err := config.ResolveFeeds(doc, s.cfg.Ingest.Since.Std())
+	resolved, err := config.ResolveFeeds(doc, cfg.Ingest.Since.Std())
 	if err != nil {
 		return sourcesData{}, err
 	}
@@ -430,10 +484,10 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 		return sourcesData{}, err
 	}
 
-	defaultSince, defaultCap := blankFallbacks(doc.Defaults, s.cfg.Ingest.Since.Std())
+	defaultSince, defaultCap := blankFallbacks(doc.Defaults, cfg.Ingest.Since.Std())
 	data := sourcesData{
-		PromptUser:   s.user,
-		Defaults:     defaultsSummary(doc.Defaults, s.cfg.Ingest.Since.Std()),
+		PromptUser:   promptUser(cfg.User),
+		Defaults:     defaultsSummary(doc.Defaults, cfg.Ingest.Since.Std()),
 		DefaultSince: defaultSince,
 		DefaultCap:   defaultCap,
 		Counts:       sourceCounts{Total: len(resolved), Deleted: len(deleted)},
@@ -465,7 +519,7 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 		// render with the same effective values as the rest.
 		gone, err := config.ResolveFeeds(
 			config.FeedsDoc{Defaults: doc.Defaults, Feeds: deleted},
-			s.cfg.Ingest.Since.Std(),
+			cfg.Ingest.Since.Std(),
 		)
 		if err != nil {
 			return sourcesData{}, err
@@ -583,11 +637,18 @@ func (s *Web) renderSourcesBody(w http.ResponseWriter, r *http.Request, selected
 }
 
 func (s *Web) writeSourcesBody(w http.ResponseWriter, r *http.Request, selected string, detail *feedDetail) {
+	s.writeSourcesBodyWith(w, r, selected, detail, nil)
+}
+
+func (s *Web) writeSourcesBodyWith(
+	w http.ResponseWriter, r *http.Request, selected string, detail *feedDetail, status *importStatus,
+) {
 	data, err := s.sourcesData(r.Context(), selected)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	data.Import = status
 	// An explicit detail (a form with an error, or a notice) wins over the one
 	// loaded from the store, so what the user typed isn't thrown away.
 	if detail != nil {
@@ -614,7 +675,12 @@ func (s *Web) renderFragment(w http.ResponseWriter, name string, data any) {
 // tags come from the feed, and an item already scored is never re-inserted, so
 // without this a retag would only ever reach items ingested afterwards.
 func (s *Web) afterFeedChange(ctx context.Context) {
-	configured, err := ingest.ResolveFeeds(ctx, s.db, s.cfg)
+	cfg, err := s.runConfig(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("reading config after an edit failed")
+		return
+	}
+	configured, err := ingest.ResolveFeeds(ctx, s.db, cfg)
 	if err != nil {
 		log.Warn().Err(err).Msg("resolving feeds after an edit failed")
 		return
@@ -624,15 +690,10 @@ func (s *Web) afterFeedChange(ctx context.Context) {
 	}
 }
 
-func (s *Web) seedPath() string {
-	path, _ := s.cfg.FeedsFilePath(s.cfgPath)
-	return path
-}
-
-func (s *Web) defaultsForm(d config.FeedDefaults, errMsg string) defaultsData {
+func defaultsForm(since time.Duration, d config.FeedDefaults, errMsg string) defaultsData {
 	form := defaultsData{
 		EnabledChoice: enabledChoice(d.Enabled),
-		GlobalSince:   shortDur(s.cfg.Ingest.Since.Std()),
+		GlobalSince:   shortDur(since),
 		Err:           errMsg,
 	}
 	if d.Since != nil {

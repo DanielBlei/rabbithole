@@ -142,3 +142,51 @@ func TestResolveHonoursStructuredOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveExpandsAPIKeyReferences(t *testing.T) {
+	var auth []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = append(auth, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"llama3"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Run("references reach the client resolved", func(t *testing.T) {
+		auth = nil
+		t.Setenv("RABBITHOLE_TEST_KEY", "main-secret")
+		t.Setenv("RABBITHOLE_TEST_SUMMARY_KEY", "sum-secret")
+		cfg := config.InferenceConfig{
+			Provider: "vllm", Host: srv.URL, Model: "llama3", APIKey: "$RABBITHOLE_TEST_KEY",
+			Summary: config.SummaryConfig{APIKey: "$RABBITHOLE_TEST_SUMMARY_KEY"},
+		}
+		if _, err := Resolve(t.Context(), cfg, false, ""); err != nil {
+			t.Fatalf("Resolve() error = %v", err)
+		}
+		want := []string{"Bearer main-secret", "Bearer sum-secret"}
+		if len(auth) != 2 || auth[0] != want[0] || auth[1] != want[1] {
+			t.Errorf("Authorization headers = %v, want %v", auth, want)
+		}
+	})
+
+	t.Run("an unset reference fails naming the field only", func(t *testing.T) {
+		cfg := config.InferenceConfig{
+			Provider: "vllm", Host: srv.URL, Model: "llama3", APIKey: "$RABBITHOLE_TEST_UNSET",
+		}
+		_, err := Resolve(t.Context(), cfg, false, "")
+		if err == nil || !strings.Contains(err.Error(), "inference.api_key") {
+			t.Fatalf("Resolve() error = %v, want it to name inference.api_key", err)
+		}
+	})
+
+	t.Run("an unset summary reference names the summary field", func(t *testing.T) {
+		cfg := config.InferenceConfig{
+			Provider: "vllm", Host: srv.URL, Model: "llama3",
+			Summary: config.SummaryConfig{APIKey: "$RABBITHOLE_TEST_UNSET"},
+		}
+		_, err := Resolve(t.Context(), cfg, false, "")
+		if err == nil || !strings.Contains(err.Error(), "inference.summary.api_key") {
+			t.Fatalf("Resolve() error = %v, want it to name inference.summary.api_key", err)
+		}
+	})
+}

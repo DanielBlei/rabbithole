@@ -16,7 +16,8 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/vllm"
 )
 
-// Resolve constructs and validates the Scorer for the configured provider.
+// Resolve constructs and validates the Scorer for the configured provider. Api_key
+// references resolve from the environment here, so errors name the field, never the value.
 // think is passed separately from cfg because a single run can override the
 // configured default (e.g. via --no-think) without editing the config.
 // systemPrompt is the resolved value from cfg.LoadSystemPrompt(); heuristic ignores it.
@@ -29,19 +30,33 @@ import (
 // need to return both Scorers (falling back to returning the same one
 // twice when Summary is unset) instead of discarding the second one.
 func Resolve(ctx context.Context, cfg config.InferenceConfig, think bool, systemPrompt string) (rank.Scorer, error) {
-	s, err := build(ctx, cfg, think, systemPrompt)
+	key, err := cfg.ResolvedAPIKey()
+	if err != nil {
+		return nil, err
+	}
+	main := cfg
+	main.APIKey = key
+	s, err := build(ctx, main, think, systemPrompt)
 	if err != nil {
 		return nil, err
 	}
 	if cfg.Summary != (config.SummaryConfig{}) {
-		if _, err := build(ctx, cfg.ResolveSummary(), think, systemPrompt); err != nil {
+		sum := cfg.ResolveSummary()
+		if cfg.Summary.APIKey != "" {
+			if sum.APIKey, err = cfg.ResolvedSummaryAPIKey(); err != nil {
+				return nil, err
+			}
+		} else {
+			sum.APIKey = key
+		}
+		if _, err := build(ctx, sum, think, systemPrompt); err != nil {
 			return nil, fmt.Errorf("summary model: %w", err)
 		}
 	}
 	return s, nil
 }
 
-// build constructs and validates the Scorer described by cfg.
+// build constructs and validates the Scorer described by cfg, whose APIKey is already resolved.
 func build(ctx context.Context, cfg config.InferenceConfig, think bool, systemPrompt string) (rank.Scorer, error) {
 	var (
 		s   rank.Scorer

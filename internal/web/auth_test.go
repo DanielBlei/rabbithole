@@ -291,7 +291,7 @@ func TestRestartForgetsSessions(t *testing.T) {
 	b := newBrowser(t, w)
 	b.login("alice", "correct horse")
 
-	restarted := New(w.db, &config.Config{}, "", testIngestManager(t, w.db))
+	restarted := New(w.db, config.Static{}, testIngestManager(t, w.db))
 	b.h = restarted.Gate(restarted.Routes())
 	wantRedirect(t, b.get("/feed"), "/login?next=%2Ffeed")
 }

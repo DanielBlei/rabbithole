@@ -1629,6 +1629,7 @@ html.modal-open body{overflow:hidden;}
 }
 .modal__close:hover{color:var(--accent);}
 .modal__error{padding:18px;color:var(--warn);font-size:1.3rem;}
+.modal__note{padding:8px 14px;border-top:1px solid var(--line);color:var(--warn);font-size:1.2rem;}
 .modal__foot{padding:8px 14px;border-top:1px solid var(--line);color:var(--text-dim);font-size:1.1rem;}
 /* min-height:0 lets the flex child shrink to the frame; without it the
    content overflows the clipped frame and cannot scroll. */
@@ -2202,9 +2203,14 @@ button.modal__act{border:0;font:inherit;}
   color:var(--text-dim);font-size:1.2rem;text-decoration:none;white-space:nowrap;
 }
 .src__act:hover{background:var(--fill-hover);color:var(--text);}
+button.src__act{border:0;font-family:inherit;cursor:pointer;}
 /* The one primary action, matching .sdet__btn--go. */
 .src__act--add{background:var(--tint);color:var(--accent);}
 .src__act--add:hover{background:var(--tint);color:var(--accent);filter:brightness(1.25);}
+/* A dragged file over the columns: the whole drop target lights up. */
+.src__cols.is-drop{outline:2px dashed var(--accent);outline-offset:-4px;}
+.src__import{margin:8px 12px 0;}
+.src__import div{margin-top:4px;color:var(--text-dim);}
 .src__note{margin:10px 16px 0;padding:9px 13px;border-radius:8px;background:var(--fill);
   font-size:1.25rem;color:var(--text-dim);}
 

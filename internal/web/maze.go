@@ -97,6 +97,10 @@ func (s *Web) handleMaze(w http.ResponseWriter, r *http.Request) {
 // open tasks as a flat list (already due-ordered by the store), completed tasks
 // grouped by the day they were finished.
 func (s *Web) mazeData(ctx context.Context) (mazeData, error) {
+	cfg, err := s.runConfig(ctx)
+	if err != nil {
+		return mazeData{}, err
+	}
 	open, err := s.db.ListTodos(ctx, store.TodoFilter{Done: ptrBool(false)})
 	if err != nil {
 		return mazeData{}, err
@@ -125,7 +129,7 @@ func (s *Web) mazeData(ctx context.Context) (mazeData, error) {
 		Title:      "The Rabbit Hole",
 		Active:     "maze",
 		Chrome:     s.chrome(ctx),
-		PromptUser: s.user,
+		PromptUser: promptUser(cfg.User),
 		Open:       openViews,
 		Due:        due,
 		DoneGroups: groupByDay(done, today),

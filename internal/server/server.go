@@ -29,27 +29,26 @@ import (
 // Server holds the dependencies shared by every mounted route set.
 type Server struct {
 	db       *store.Store
-	cfg      *config.Config
+	src      config.Source
 	addr     string // listen address, passed to the web UI for its shell prompt
-	cfgPath  string // config file path, surfaced by the web UI's config viewer
 	ing      *ingest.Manager
 	log      zerolog.Logger
 	draining atomic.Bool // set by Drain; makes /readyz report 503
 
 	proxies    []netip.Prefix // set by TrustProxies
 	proxiesSet bool
-	dev        bool // set by Dev: serve assets no-cache
+	dev        bool   // set by Dev: serve assets no-cache
+	managedBy  string // set by ManagedBy: the --config file re-applied on every start
 }
 
-// New returns a Server backed by db, using cfg for request defaults. addr is the
-// bound listen address, forwarded to the web UI for display only. cfgPath is the
-// loaded config's path, shown read-only by the web UI's config viewer. ing owns
-// the in-process ingest runs the web UI triggers. log backs the access log.
+// New returns a Server backed by db, reading the run config from src. addr is the
+// bound listen address, forwarded to the web UI for display only. ing owns the
+// in-process ingest runs the web UI triggers. log backs the access log.
 func New(
-	db *store.Store, cfg *config.Config, addr, cfgPath string,
+	db *store.Store, src config.Source, addr string,
 	ing *ingest.Manager, log zerolog.Logger,
 ) *Server {
-	return &Server{db: db, cfg: cfg, addr: addr, cfgPath: cfgPath, ing: ing, log: log}
+	return &Server{db: db, src: src, addr: addr, ing: ing, log: log}
 }
 
 // TrustProxies sets the networks whose forwarding headers the login gate
@@ -57,6 +56,9 @@ func New(
 func (s *Server) TrustProxies(nets []netip.Prefix) {
 	s.proxies, s.proxiesSet = nets, true
 }
+
+// ManagedBy names the config file applied on every start, shown in the config viewer.
+func (s *Server) ManagedBy(path string) { s.managedBy = path }
 
 // Dev serves the embedded assets no-cache, so an edited stylesheet or script
 // shows on the next reload instead of after the normal cache window.
@@ -66,11 +68,12 @@ func (s *Server) Dev(on bool) { s.dev = on }
 // so mounting it under "/api/" (no StripPrefix) lets its method+path patterns
 // match unchanged.
 func (s *Server) Routes() http.Handler {
-	w := web.New(s.db, s.cfg, s.cfgPath, s.ing)
+	w := web.New(s.db, s.src, s.ing)
 	if s.proxiesSet {
 		w.SetTrustedProxies(s.proxies)
 	}
 	w.SetDev(s.dev)
+	w.SetManagedBy(s.managedBy)
 	app := http.NewServeMux()
 	app.Handle("/api/", api.New(s.db).Routes())
 	// The web mux owns "/" (digest page) and "/static/" (embedded assets);

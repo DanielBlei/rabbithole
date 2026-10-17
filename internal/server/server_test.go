@@ -39,11 +39,11 @@ func newServer(t *testing.T, logger zerolog.Logger) (*Server, *store.Store) {
 	think := false
 	cfg := &config.Config{}
 	cfg.Inference.Think = &think
-	mgr, err := ingest.NewManager(db, cfg, zerolog.InfoLevel)
+	mgr, err := ingest.NewManager(db, config.Static(*cfg), zerolog.InfoLevel)
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	return New(db, cfg, "127.0.0.1:0", "config.yaml", mgr, logger), db
+	return New(db, config.Static(*cfg), "127.0.0.1:0", mgr, logger), db
 }
 
 func newTestServer(t *testing.T) (*Server, *store.Store) {
