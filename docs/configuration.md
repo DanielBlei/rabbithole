@@ -1,122 +1,121 @@
 # Configuration
 
-Files under `configs/`:
+You do not need a config file. Run `rabbithole serve` and it starts on sensible defaults. Settings
+you change are saved in the app's store as numbered versions that you can list and roll back. For
+now you change them from the command line (export, edit, import, below). The web UI shows the
+active settings read-only (gear menu, View config).
 
-| File | Contents |
-|---|---|
-| `config.yaml` | How to run: model, scoring, storage, paths |
-| `feeds.yaml` | Sources to seed the store with on first run; see [Feeds](#feeds) |
-| `prompts/profile.example.md` | Optional example/legacy import source; live profiles are in the store |
-| `prompts/system.md` | Optional [system prompt](#system-prompt) override; omit to use the built-in default |
-
-The system prompt is still file/config owned. Interest profiles are application data managed
-under **Settings → Profiles** and persisted in the store (SQLite or Postgres).
-
-## Getting started
+## Quick start
 
 ```sh
-make setup   # copies the *.example.* templates for any file that is missing
+rabbithole serve
 ```
 
-The templates ship pointing at the example feed list. A fresh checkout needs no profile file:
-it uses the immutable built-in **Default**. Once you have your own feed seed, update
-`configs/config.yaml` accordingly:
+On a terminal, the first start asks `Create a new SQLite store at ...? [Y/n]`. Answer `Y`, then
+open <http://localhost:8080>.
 
-```yaml
-ingest:
-  feeds: ./configs/feeds.yaml
+**Add sources.** Use the Sources page, or start from the example list. Download it, then import it
+with the CLI or drop the file on the Sources page:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/DanielBlei/rabbithole/main/docs/examples/feeds.yaml
+rabbithole sources import feeds.yaml
 ```
 
-Create, duplicate, edit and select profiles from **Settings → Profiles**. Those changes take
-effect on the next ingest without restarting the server.
+**Change settings.** Export what is saved, edit it, and import it back:
 
-`config.yaml` and a system-prompt override are read at startup, so restart after changing
-them. Feeds and profiles live in the database and take effect on the next ingest. The loaded
-configuration can be inspected from the web UI under the gear menu (View config).
+```sh
+rabbithole config export -o my.yaml
+$EDITOR my.yaml
+rabbithole config import my.yaml
+```
 
-## config.yaml
+Keep only the lines you want to change in `my.yaml`. A setting you leave out keeps its default,
+now and in later releases. A running `serve` uses the new version on its next ingest run, with no
+restart.
 
-All fields are optional unless marked required.
+[`docs/examples/config.yaml`](https://github.com/DanielBlei/rabbithole/blob/main/docs/examples/config.yaml)
+lists every setting with its default, to copy lines from.
 
-| Field | Description | Default                           |
-|---|---|-----------------------------------|
-| `user` | Name shown in the web UI's shell prompt | OS login name                     |
-| `profile` | Optional legacy Markdown profile to import at boot | built-in Default |
-| `inference.provider` | `ollama` \| `openai` \| `vllm` \| `heuristic` | `ollama`                          |
-| `inference.host` | Inference server URL | `http://localhost:11434`          |
-| `inference.model` | Model name | `qwen3.5:4b`                      |
-| `inference.api_key` | Bearer token, or a leading `$NAME`/`${NAME}` environment reference (see note below) | none                              |
-| `inference.think` | Allow model reasoning before scoring, with fallback | `true`                            |
-| `inference.structured_output` | Send the verdict schema for the server to enforce. Keep it on; set `false` only for an endpoint that returns scores with reasons that make no sense, see [troubleshooting](troubleshooting.md#scores-of-0-with-reasons-that-make-no-sense) | `true`                            |
-| `inference.effort` | `openai` only: `reasoning_effort` while thinking, `low` \| `medium` \| `high` \| `xhigh` | `medium`                          |
-| `inference.system_prompt` | Path to a system-prompt override, or `false` to send none — see below | built-in                          |
-| `inference.batch_size` | Articles per scoring request | `1`                               |
-| `inference.max_parallel` | Scoring requests in flight | `1`                               |
-| `inference.model_tuning.*` | Decoding limits — see below | see below                         |
-| `ingest.since` | Fallback lookback window, used when neither the feed nor the [feed defaults](#feeds) set `since` | `7d`                              |
-| `ingest.feeds` | Path to the feed seed file | `feeds.yaml` beside `config.yaml` |
-| `ingest.digest_dir` | Output directory for `ingest --markdown` | none — required by that flag      |
-| `store.db_path` | SQLite database file | one of `db_path`/`url` required   |
-| `store.url` | Postgres connection URL, instead of `db_path` | one of `db_path`/`url` required   |
-| `store.max_conns` | Postgres pool ceiling | `10`                              |
-| `store.conn_max_lifetime` | How long one pooled connection may live | `30m`             |
+## Where things live
 
-Durations accept a `d` (days) suffix in addition to the standard `h`, `m` and `s` — for
-example `14d`, `168h`, `1h30m`.
+| What | Where | Changed with |
+|---|---|---|
+| Run settings: model, scoring, lookback window, your name | The store | `config export` and `config import`, or `serve --config` |
+| Feeds (sources) | The store | The Sources page, `sources import` |
+| Interest profiles | The store | Settings → Profiles |
+| Where the store is, the listen address, TLS | Flags and the environment | `--db` or `RABBITHOLE_DB`, `--addr`, the `--tls-*` flags |
+| Secrets (API keys, the Postgres password) | The environment or `./.env` | Your shell profile, or editing `.env` |
+| System prompt text | A file on disk, named by a setting | Any editor; see [System prompt](#system-prompt) |
 
-**Providers**
+No file is read unless you name it.
 
-- `ollama` — a local Ollama server; the default.
-- `openai` — OpenAI, or any hosted gateway that speaks its chat-completions API. Sends
-  `max_completion_tokens`, which OpenAI's reasoning models require in place of `max_tokens`.
-- `vllm` — a vLLM server. Same client as `openai`, in vLLM's dialect: `max_tokens`, and
-  thinking switched off through the chat template (see below).
-- `heuristic` — keyword matching with no model involved. Suitable for offline use and for
-  testing feed and filter changes without inference latency.
+## Settings
 
-`openai` and `vllm` both check the model against `/v1/models`. When it is missing there,
-validation falls back to a minimal chat request, since gateways sometimes route models their
-catalog doesn't list.
+Every field is optional. A setting you leave out takes its default, now and in later releases.
 
-**Thinking fallback**
+| Field | Description | Default |
+|---|---|---|
+| `user` | Name shown in the web UI's shell prompt | OS login name |
+| `inference.provider` | `ollama` \| `vllm` \| `openai` \| `heuristic` | `ollama` |
+| `inference.host` | Inference server URL | `http://localhost:11434` |
+| `inference.model` | Model name | `qwen3.5:4b` |
+| `inference.api_key` | A `$RABBITHOLE_*_API_KEY` reference, see [Secrets](#secrets) | none |
+| `inference.think` | Allow model reasoning before scoring, with fallback | `true` |
+| `inference.structured_output` | Send the verdict schema for the server to enforce. Keep it on; set `false` only for an endpoint that returns scores with reasons that make no sense, see [troubleshooting](troubleshooting.md#scores-of-0-with-reasons-that-make-no-sense) | `true` |
+| `inference.effort` | `openai` only: `reasoning_effort` while thinking, `low` \| `medium` \| `high` \| `xhigh` | `medium` |
+| `inference.system_prompt` | Path to a system-prompt override, or `false` to send none, see [System prompt](#system-prompt) | built-in |
+| `inference.batch_size` | Articles per scoring request | `1` |
+| `inference.max_parallel` | Scoring requests in flight | `1` |
+| `inference.model_tuning.*` | Decoding limits, see [model_tuning](#inferencemodel_tuning) | see below |
+| `inference.summary.*` | A separate summarization backend. Validated and stored, not used for scoring yet | none |
+| `ingest.since` | Fallback lookback window, used when neither the feed nor the [feed defaults](#feeds) set `since` | `7d` |
+| `ingest.digest_dir` | Output directory for `ingest --markdown` | none, required by that flag |
 
-Not every model has a reasoning mode. On Ollama, `think: true` is probed once at startup: a
-model that rejects it falls back to `think: false` with a warning, rather than failing every
-scoring request. Any other error during the probe leaves thinking on, so a transient problem
-is not mistaken for a missing feature.
+Durations accept a `d` (days) suffix in addition to the standard `h`, `m` and `s`, for example
+`14d`, `168h`, `1h30m`.
 
-On `vllm`, `think: false` sends `chat_template_kwargs: {"enable_thinking": false}`, which
-switches thinking off for models whose chat template has that switch (Qwen3 and similar).
-Other templates ignore it.
+### Fields by provider
 
-On `openai`, the reasoning level is probed once at startup with small requests:
+Each provider reads only some fields. A field the chosen provider ignores is dropped when you
+import, with one warning that lists what was dropped (`ignored for provider ollama: inference.effort`).
+It is never an error, so an old file keeps importing after you switch provider.
 
-- `think: true` sends `inference.effort`. A model that rejects that level, or takes no
-  `reasoning_effort` at all, gets the field left out, with a warning naming the server's reply.
-- `think: false` ignores `inference.effort` and sends the lowest level the model accepts,
-  trying `none` (gpt-5.1 and later, which switches reasoning off), then `minimal` (gpt-5), then
-  `low`. A model that takes none of them gets the field left out.
+| Field | ollama | vllm | openai | heuristic |
+|---|---|---|---|---|
+| `host`, `model` | yes | yes | yes | |
+| `api_key` | yes | yes | yes | |
+| `think` | yes | yes | yes | |
+| `effort` | | | yes | |
+| `structured_output`, `system_prompt` | yes | yes | yes | |
+| `batch_size`, `max_parallel` | yes | yes | yes | yes |
+| `model_tuning.num_ctx` | yes | | | |
+| other `model_tuning.*` | yes | yes | yes | |
+| `summary.*` | stored as written for every provider | | | |
 
-An auth or unknown-model reply fails startup, and a probe that keeps timing out keeps the
-plain choice (`inference.effort`, or `low`). Reasoning tokens count against
-`max_completion_tokens`, so raise `model_tuning.tokens_thinking` for `high` and `xhigh`.
+`user`, `ingest.since` and `ingest.digest_dir` apply whatever the provider.
 
-A gateway can accept these switches and ignore them: the request succeeds, so startup cannot
-tell. If `completion_tokens` in the debug logs stays high with `think: false`, thinking is still
-on. See [troubleshooting](troubleshooting.md#think-false-does-not-reduce-thinking).
+### Providers
 
-> **Note:** a literal `api_key` is stored in plaintext. The web UI's config viewer masks it,
-> but the file itself is unprotected — keep `configs/config.yaml` out of version control (it
-> is gitignored by default).
->
-> A leading `$NAME` or `${NAME}` reference keeps the token out of the file entirely: it is
-> resolved from the environment when the config is loaded (`inference.api_key`,
-> `inference.summary.api_key`, and the password in `store.url`, see
-> [the password](#the-password)), and a referenced variable that is unset or empty — or
-> a `$` anywhere else in the value — fails the load with an error naming the field, because
-> every silent alternative surfaces later as an unexplained 401. There is no escape syntax
-> yet, so a key that genuinely begins with `$` cannot be written as a literal. The resolved
-> value is never logged.
+- `ollama`: a local Ollama server. The default.
+- `openai`: OpenAI, or any hosted gateway that speaks its chat-completions API.
+- `vllm`: a vLLM server.
+- `heuristic`: keyword matching with no model. Good for offline use and for testing feed
+  changes without waiting on a model.
+
+### Thinking
+
+`think: true` lets the model reason before it scores. That is slower but usually better. Not
+every model has a reasoning mode, so rabbithole checks once at startup and falls back to
+`think: false` with a warning instead of failing every request. Small models (1B to 4B) do
+better with `think: false`.
+
+On `openai`, `effort` sets how hard it thinks. Raise `model_tuning.tokens_thinking` for `high`
+and `xhigh`, because reasoning tokens count against the reply budget.
+
+If `think: false` seems to be ignored, see
+[troubleshooting](troubleshooting.md#think-false-does-not-reduce-thinking). How the startup
+checks work is in [architecture](architecture.md#provider-startup-checks).
 
 ### inference.model_tuning
 
@@ -135,7 +134,7 @@ take the defaults. Worth adjusting when substituting a model that is more or les
 Responses are constrained to a fixed JSON shape, so scores are always returned as integers
 and `reason_max_chars` is enforced rather than merely requested. With
 `inference.structured_output: false` the shape comes from the system prompt instead, and
-`reason_max_chars` is only asked for. The built-in prompt and `system.example.md` both spell
+`reason_max_chars` is only asked for. The built-in prompt and `docs/examples/prompts/system.md` both spell
 the shape out; a custom prompt has to as well, and `system_prompt: false` with structured output
 off logs a warning at startup.
 
@@ -147,11 +146,97 @@ off logs a warning at startup.
 > - **Leave `max_parallel` at 1 with Ollama.** Requests are queued rather than served
 >   concurrently, so higher values yield no additional throughput. Raise it only against an
 >   endpoint that genuinely serves in parallel, such as vLLM.
-> - **Disable `think` for small models** (1B–4B). Reasoning quality is limited at that size
->   and consumes `tokens_thinking` on every request. The shipped example config does this.
+> - **Disable `think` for small models** (1B to 4B). Reasoning quality is limited at that size
+>   and consumes `tokens_thinking` on every request. Set `think: false` in your config.
 > - **Raise `batch_size` only on a capable model.** One article per request is the default
 >   because a local 4B has the whole context to itself and scores it better; larger batches
 >   lengthen the prompt and increase the chance of the model losing track of individual items.
+
+
+## Secrets
+
+The store never holds a secret. It holds a reference to an environment variable, and the
+variable is resolved when a run needs it.
+
+```yaml
+inference:
+  api_key: $RABBITHOLE_INFERENCE_API_KEY
+```
+
+The reference must be a whole `$NAME` or `${NAME}` where `NAME` starts with `RABBITHOLE_` and ends
+with `_API_KEY`. That list is deliberately narrow. Any other name is refused on import, so a
+config file cannot point at `$AWS_SECRET_ACCESS_KEY` and a changed `host` cannot carry an
+unrelated variable to another server. `RABBITHOLE_DB` and `RABBITHOLE_DB_PASSWORD` can never be
+config references. The error suggests the fix: `export RABBITHOLE_INFERENCE_API_KEY=$YOUR_VAR`.
+
+- The reference is shown in the config viewer, in `config export` and in `config history`. It is a
+  name, not a secret. The value is never shown or logged.
+- An unset variable is a warning after `config import`, naming the variable, and a clear error when
+  a run needs the key. It is never an unexplained 401 later.
+- `inference.summary.api_key` follows the same rule, with `RABBITHOLE_SUMMARY_API_KEY`.
+
+### Setting the value
+
+Put it in your shell profile (`~/.zshrc`, `~/.bashrc`) or in `./.env`. Either works, and the
+environment wins when both are set.
+
+```sh
+# ./.env
+RABBITHOLE_INFERENCE_API_KEY=sk-...
+```
+
+The binary reads `./.env` itself on every command (`--env-file` reads another path). It loads only
+`RABBITHOLE_*` variables and never overrides one the real environment already sets. `.env` is
+gitignored. `.env.example` is a starting point, and `make setup` creates `.env` from it.
+
+The format is `KEY=value`, one per line. A leading `export ` is accepted, and one matching pair of
+single or double quotes around the value is removed. Nothing is expanded, and a `#` inside a value
+is kept. Lines starting with `#` are comments.
+
+### A literal key in an import
+
+If an imported file has a literal `api_key: sk-...`, rabbithole moves it to `./.env` under
+`RABBITHOLE_INFERENCE_API_KEY` (or `RABBITHOLE_SUMMARY_API_KEY` for the summary block), stores only
+the reference, and warns with the variable name. The file is created `0600`, and your other lines
+in it are kept as they are. If the real environment already sets that variable, it wins and the
+file's value is ignored with a warning. A key that is not a safe single-line value is refused.
+
+## Import and export
+
+Four commands manage the saved settings. [cli.md](cli.md#config) has the details of each.
+
+```sh
+rabbithole config export -o my.yaml   # the saved settings, as an import file
+rabbithole config import my.yaml      # save a file as the new active version
+rabbithole config history             # versions, newest first
+rabbithole config rollback 3          # go back to version 3
+```
+
+Import never asks: the file wins, a file equal to the active settings changes nothing, and an
+invalid file saves nothing. Every change is a new version, so nothing is lost and a rollback can
+itself be rolled back.
+
+### The --config file
+
+If the file is your source of truth (a container, a systemd unit, a cron job), pass
+`--config <file>` to any command. The file is applied again every time rabbithole starts, so edits
+made in the app or with `config import` last only until the next restart. In detail:
+
+- If the file equals the active settings, nothing happens.
+- Otherwise it is saved as a new version. If that replaces a version saved somewhere else, a
+  warning names that version and the command to undo it.
+- There is no prompt and no force flag. The last writer wins, and the history keeps everything.
+
+`serve` says so in its log, and the config viewer shows the same note:
+
+```
+INF config is managed by ./config.yaml: it is re-applied on every start, so changes made in the UI or with config import last until the next restart
+WRN config version 3 (from import of ./other.yaml, saved 14:02) replaced by ./config.yaml; undo with: rabbithole config rollback 3
+```
+
+If you edit with export and import, leave `--config` off. The `store` block of a `--config` file
+only locates the store, see [Store location](#store-location). It is never saved.
+`eval benchmark` reads `--config` without importing it.
 
 ## Feeds
 
@@ -160,36 +245,44 @@ feed (`type: rss`, the default), or a saved search on arXiv, Crossref or Semanti
 (`type: academic`, see [Academic sources](#academic-sources)). `blog` and `news` are reserved
 for source types still to come and are skipped by ingest for now.
 
-Feeds live in the database and are managed from the **Sources** page (side menu → Sources,
-or the gear menu → Edit sources). You can add, edit, enable, disable and delete feeds there,
-pick each one's type, edit the set-wide defaults, and search the list. Changes take effect on
-the next ingest run, with no restart.
+Feeds live in the store and are managed from the **Sources** page (side menu → Sources, or the
+gear menu → Edit sources). You can add, edit, enable, disable and delete feeds there, pick each
+one's type, edit the set-wide defaults, and search the list. Changes take effect on the next
+ingest run, with no restart.
 
-`configs/feeds.yaml` is a **seed file**, not the live configuration. On every `serve`
-startup, any feed in it the database has never seen is added; everything else is left as it
-is. Nothing ever writes to it. Start with `--debug` to see which file was read and how many
-feeds it added.
+### Importing and exporting feeds
 
-So both routes work, and neither undoes the other:
+Import a feeds file from the Sources page (the import button opens a file picker, or drop a file on
+the page) or with the CLI:
 
-- Adding an entry to the file and restarting picks it up.
-- Disabling, retuning or deleting a feed on the Sources page survives every restart. That is
-  why deleting hides a feed rather than dropping it — the database has to remember it, or
-  the next restart would add it back from the file.
+```sh
+rabbithole sources import feeds.yaml
+```
 
-The **export** button on the Sources page gives you the current set in this same YAML shape.
-Copy it over `configs/feeds.yaml` to reproduce the set on another install.
+The example list is
+[`docs/examples/feeds.yaml`](https://github.com/DanielBlei/rabbithole/blob/main/docs/examples/feeds.yaml)
+(download it with the `curl` command in the [Quick start](#quick-start)). An import adds the feeds
+the store has never held. Known feeds, deleted ones included, are skipped, so importing the same
+file twice adds nothing the second time. The page shows how many were added and skipped, or the
+parse error inline.
+
+The **export** button on the Sources page and `rabbithole sources export [-o file]` write the
+current set in the same shape, so you can move it to another install. Nothing reads a feeds file at
+startup. See [cli.md](cli.md#sources).
+
+An old config whose `ingest.feeds` names a feeds file is honoured only when you import that config
+(see [Upgrading from v0.2.x](#upgrading-from-v02x)).
 
 ### Feed URLs
 
-You can leave `https://` off — `example.com/feed.xml` is filled in for you, here and on the
+You can leave `https://` off: `example.com/feed.xml` is filled in for you, here and on the
 Sources window. Either way it is the same feed, not two.
 
 `http://` is accepted and left as you wrote it, because some feeds only serve it. The Sources
 page marks those insecure: the request goes over the network in the clear, so anyone in
 between can see which feed you asked for.
 
-### The seed file's shape
+### The feeds file's shape
 
 A `defaults:` block followed by the feed list. Any RSS or Atom URL works as `type: rss`;
 academic searches are described under [Academic sources](#academic-sources).
@@ -204,7 +297,7 @@ feeds:
     url: https://huggingface.co/blog/feed.xml
     tags: [AI, Research]
 
-  - name: Medium — AI          # high volume: tighter window, harder cap
+  - name: "Medium: AI"          # high volume: tighter window, harder cap
     url: https://medium.com/feed/tag/artificial-intelligence
     since: 2d
     max_items: 10
@@ -226,7 +319,7 @@ feeds:
 
 ### Academic sources
 
-Set `type: academic` in the seed file, or pick **academic** as the type when adding a feed
+Set `type: academic` in the feeds file, or pick **academic** as the type when adding a feed
 on the Sources page, to use an academic provider. The URL host selects arXiv, Crossref or
 Semantic Scholar, and its query parameters define the saved search. The page offers only the
 types ingest can fetch, `rss` and `academic`.
@@ -256,15 +349,12 @@ The defaults accept `since`, `max_items`, `enabled` and `tags`, applying each to
 that does not set it. Values resolve through the following chain:
 
 ```
-feed  →  feed defaults  →  config.yaml ingest.since  →  built-in
+feed  →  feed defaults  →  the ingest.since setting  →  built-in
 ```
 
 Tags are the exception: a feed's tags are added to the defaults rather than replacing them.
-On the Sources window, leaving `since` or `max items` blank means the feed takes the default —
+On the Sources window, leaving `since` or `max items` blank means the feed takes the default:
 the greyed value in the empty box is what it will use.
-
-`ingest.feeds` in `config.yaml` names the seed file. It defaults to `feeds.yaml` beside the
-config. A missing seed file is not an error — it just means nothing new to import.
 
 > **Recommendations**
 >
@@ -285,16 +375,13 @@ involving the database:
   time, instead of creating a second one.
 
 Either way the feed keeps its fetch history. What you cannot do from the page is erase a
-deleted feed for good — deliberately, for the reason below.
+deleted feed for good, on purpose: its history stays with it.
 
-### Deleted feeds and the seed file
+### Deleted feeds and imports
 
-A deleted feed still counts as one the database has seen, so a feed you remove stays removed
-even while it is still listed in `feeds.yaml`. Without that, every restart would bring it
-back.
-
-To be rid of a feed for good, delete it on the Sources page *and* take it out of the seed
-file. Otherwise adding it again later restores the old feed rather than starting fresh.
+A deleted feed still counts as one the store has seen, so importing a file that lists it does not
+bring it back. To start a deleted feed fresh instead of restoring it, there is no shortcut by
+design: restore it, or add the same URL again, and it returns with its history.
 
 ### Feed identity
 
@@ -329,23 +416,61 @@ https://medium.com/feed/@<username>
 
 ## Store
 
-Set exactly one of `store.db_path` or `store.url`. Which one is set picks the engine, so
-there is no separate driver setting that could disagree with it. Setting both, or neither,
-is rejected at startup.
+Which engine you use is picked by the location: a file path means SQLite, a `postgres://` URL means
+Postgres. There is no separate driver setting that could disagree with it.
 
-```yaml
-store:
-  db_path: ./data/rabbithole.db   # SQLite, the local default
-  # url: postgres://rabbithole:$RABBITHOLE_DB_PASSWORD@db.example.com:5432/rabbithole
+SQLite is the right answer for one machine and needs nothing installed. Postgres is for reaching
+the same store from more than one machine, and is what to use with a hosted database such as
+Supabase, RDS or Cloud SQL. The subsections on the password, TLS, pooling and privileges apply
+only to Postgres.
+
+### Store location
+
+The first of these wins:
+
+1. `--db <path or url>`
+2. the `RABBITHOLE_DB` environment variable (also read from `./.env`)
+3. the `store` block of the `--config` file, if you pass one (`db_path` or `url`, never both,
+   plus `max_conns` and `conn_max_lifetime` for Postgres). It only locates the store and is never
+   saved.
+4. the default
+
+`rabbithole store path` prints which store this command line would use and why, without creating
+anything.
+
+**The default** is a file in your per-user data directory:
+
+| OS | Path |
+|---|---|
+| Linux | `$XDG_DATA_HOME/rabbithole/rabbithole.db`, or `~/.local/share/rabbithole/rabbithole.db` |
+| macOS | `~/Library/Application Support/rabbithole/rabbithole.db` |
+
+The directory is created `0700` and the database `0600`, because it holds the login hash and the
+session signing key.
+
+**Legacy locations.** If there is no store in the per-user directory, `./data/rabbithole.db` and then
+`./rabbithole/data/rabbithole.db` (where earlier releases kept it) are still used, with a
+deprecation warning. They are supported until v0.4.0. An existing per-user store wins over both.
+
+**First start.** When no store exists yet and a terminal is attached, rabbithole shows where it
+looked and asks `Create a new SQLite store at ...? [Y/n]`. `n` creates nothing and exits 0, so you
+can set `RABBITHOLE_DB` first. Without a terminal (a service, a script) it creates the store and
+logs a hint on how to choose another location. Read-only commands such as `items list` and
+`config history` never create a store.
+
+### Using Postgres
+
+Choose it before the first start, in `.env` or your shell profile:
+
+```sh
+RABBITHOLE_DB=postgres://rabbithole@db.example.com:5432/rabbithole
+RABBITHOLE_DB_PASSWORD=...
 ```
 
-SQLite is the right answer for one machine and needs nothing installed. Postgres is for
-reaching the same store from more than one machine, and is what to use with a hosted
-database such as Supabase, RDS or Cloud SQL.
-
-**Which one?** Start with `db_path`. Switch to `store.url` only when a second machine needs the
-same store, or you already run a hosted Postgres. The subsections below on the password, TLS,
-pooling and privileges apply only to Postgres.
+The database must already exist. rabbithole creates its tables, not the database. Postgres is never
+a fallback: if it cannot be reached, the command fails instead of quietly using a local file.
+`--db-max-conns` and `--db-conn-max-lifetime` (or the same two fields in a `--config` file's
+`store` block) tune the pool and are an error beside a SQLite path.
 
 **One process at a time.** Whichever engine you choose, only one `rabbithole serve` may point at
 a store at a time; machines take turns. On Postgres the second server is refused at startup
@@ -356,36 +481,24 @@ one's running ingest as failed; on SQLite nothing enforces it. One-shot commands
 
 ### The password
 
-Write it in `store.url` as an environment reference, so the file holds only the variable's
-name, the same `$NAME` or `${NAME}` form `inference.api_key` takes:
+Set `RABBITHOLE_DB_PASSWORD` in `./.env` or your shell profile. It is the password for the
+`RABBITHOLE_DB` URL, so the URL itself carries none. Nothing is stored, and the log and the
+`store path` output show the host and database, never the password.
 
-```yaml
-store:
-  url: postgres://rabbithole:$RABBITHOLE_DB_PASSWORD@db.example.com:5432/rabbithole
-```
-
-Any variable name works, and `?password=$NAME` does too. An unset or empty variable fails at
-startup with its name in the error. The config viewer shows the reference as written.
-
-Setting `RABBITHOLE_DB_PASSWORD` in the environment overrides whatever `store.url` holds, so a
-URL with no password at all works too. `.env.example` is a starting point; nothing reads `.env`
-automatically, so source it from your shell or point a systemd unit at it with
-`EnvironmentFile=`. The `make` targets that run the binary do pick up `./.env`.
-
-A literal password in the URL also works, in either form the drivers accept
-(`postgres://user:pw@host/db` or `?password=pw`), but expect a warning at startup: it lives in
-the config file whatever ends up being used. The config viewer shows `$RABBITHOLE_DB_PASSWORD`
-in place of the value, and a connection error names the database without it — including when the URL is malformed enough that it could not
-be parsed, whose message would otherwise repeat the whole thing.
+A password in the URL (`postgres://user:pw@host/db` or `?password=pw`) also works, but it is not
+recommended and you get a warning at startup: the URL then lives in your shell history, the
+process list and any config file. A `$RABBITHOLE_DB_PASSWORD` reference inside the URL is
+expanded from the environment. Connection errors name the database without the password, even
+when the URL is too malformed to parse.
 
 A password is not required: a server that trusts this client can be reached without one. The
-error says so when a connection is refused and no password came from either place.
+error says so when a connection is refused and no password was set.
 
 ### TLS
 
-`sslmode` defaults to **`require`** when the URL does not name one: the connection is
-encrypted, but the server's certificate is not checked. That is a deliberate trade, and it is
-worth understanding rather than accepting — `verify-full` is the setting you actually want.
+If the URL names no `sslmode`, the connection is encrypted with `require`, but the server's
+certificate is not checked. That is what makes Supabase and RDS work on the first try. For anything
+beyond loopback, ask for verification:
 
 | Mode | Encrypted | Server verified | Notes |
 |---|---|---|---|
@@ -396,36 +509,14 @@ worth understanding rather than accepting — `verify-full` is the setting you a
 | `allow` | no, then yes | no | Starts in plain text |
 | `disable` | no | no | Only sensible over loopback |
 
-**Why not `verify-full` by default.** Supabase signs its database certificate with its own
-"Supabase Intermediate" CA rather than a public one, so `verify-full` cannot complete a
-handshake at all until you point the client at that CA — measured against a live project, both
-`verify-full` and `verify-ca` fail there out of the box while `require` connects. A default that
-refuses to start on the database the docs recommend is a default people work around by deleting
-the setting entirely, which lands them somewhere worse and unlogged.
+Why the default is `require`, and what that costs, is in [store.md](store.md#postgres-tls-background).
+`serve` logs the `sslmode` and whether the connection was encrypted and verified at every start.
 
-**What the weaker default costs.** With no certificate check, an attacker positioned between you
-and the database can terminate your TLS with a certificate of their own making and read what
-passes. This store carries the login's argon2 hash and the `signing_key` that HMACs the "stay
-signed in" cookies, so an intercepted session is not only a row leak — it can be enough to mint
-cookies that keep working. Loopback is exempt from all of this, which is why local Postgres needs
-no certificates at all.
+**To verify the server,** point the client at your provider's CA bundle (Supabase, RDS and Cloud
+SQL each publish theirs):
 
-**What the app does about it.** `serve` reports the connection it made at every boot — engine,
-database, `sslmode`, and `encrypted` / `verified` / `loopback` as fields — so what the mode
-actually bought is in the log rather than assumed. It is **stated, not warned about**: the default
-is a documented trade, and a warning about it every start reads as alarm, which trains you to skim
-past the lines that do mean something. The argument belongs here, where you read it once. Nothing
-is ever downgraded behind your back: an explicit `sslmode` is always respected, and at the default
-(`require`) a server that will not do TLS is refused rather than accepted in plain text. `prefer`
-is the one mode that does fall back, which is why it is not recommended — and `encrypted=false` on
-that boot line is how you notice you are running it.
-
-**Hardening it.** Point the client at your provider's CA bundle — Supabase publishes it with its
-connection documentation, RDS and Cloud SQL each publish theirs — and ask for verification:
-
-```yaml
-store:
-  url: postgres://you@db.example.com:5432/rabbithole?sslmode=verify-full&sslrootcert=/etc/ssl/certs/provider-ca.pem
+```sh
+RABBITHOLE_DB='postgres://you@db.example.com:5432/rabbithole?sslmode=verify-full&sslrootcert=/etc/ssl/certs/provider-ca.pem'
 ```
 
 Some providers also want `search_path` when you keep the tables somewhere other than `public`
@@ -433,20 +524,15 @@ Some providers also want `search_path` when you keep the tables somewhere other 
 
 ### Connection pool
 
-Postgres is reached through a pool. `serve` keeps one connection apart from that pool for the
-single-writer guard — it is held for the life of the process, so queries are never waiting on
-it — which makes `store.max_conns` the number the queries get. SQLite needs none of this: its
-concurrency is already shaped by the pragmas in its own connection string.
+A hosted database caps connections, and a free tier shares that cap, so these two flags exist to
+go **down**, not up.
 
-| Field | Default | What it is |
+| Flag | Default | What it is |
 |---|---|---|
-| `store.max_conns` | `10` | Connections the queries may hold at once (`serve` adds one for its guard) |
-| `store.conn_max_lifetime` | `30m` | Age at which a pooled connection is retired |
+| `--db-max-conns` | `10` | Connections the queries may hold at once (`serve` adds one for its guard) |
+| `--db-conn-max-lifetime` | `30m` | Age at which a pooled connection is retired; lower it if something in front recycles connections |
 
-A hosted database caps connections per role and per database, and a free tier shares that cap
-with everything else using the database, so these are there to go **down**, not up. The lifetime
-is the one that matters against a hosted database, where something in front recycles server
-connections underneath a handle held open forever.
+SQLite needs neither.
 
 ### Behind a pooler
 
@@ -454,135 +540,92 @@ PgBouncer and the poolers hosted databases ship with can run in **transaction** 
 hands each query a different server connection. Prepared statements do not survive that, and the
 driver caches them by default, so add one parameter and it stops using them:
 
-```yaml
-store:
-  url: postgres://you@db.example.com:5432/rabbithole?default_query_exec_mode=simple_protocol
+```sh
+RABBITHOLE_DB='postgres://you@db.example.com:5432/rabbithole?default_query_exec_mode=simple_protocol'
 ```
 
-The store suite is run against this mode as well, so it is a supported path rather than a
-workaround someone hoped would do.
+This mode is part of the store test suite, so it is supported.
 
 ### Privileges
 
-Setting a database up and running it are two different amounts of access, and the app does not
-ask for the first one after the first time.
+rabbithole needs more access the first time than afterwards.
 
 - **Once, with a role that can create:** the tables and indexes, on the first start against an
-  empty database, or whenever a new release adds a table. Tables in a schema of your own need
+  empty database, or when a new release adds a table. Tables in a schema of your own need
   `CREATE` **and** `USAGE` on that schema too.
-- **Thereafter, with a role that can only read and write:** `SELECT`, `INSERT`, `UPDATE`,
-  `DELETE` on the tables, plus `USAGE` on the schema holding them, is enough. Each start looks
-  for the tables it might have to add and leaves the ones it finds alone, rather than running a
-  create that Postgres would refuse before it noticed the table was already there.
+- **Thereafter, with a role that can only read and write:** `SELECT`, `INSERT`, `UPDATE` and
+  `DELETE` on the tables, plus `USAGE` on the schema holding them.
 
-`USAGE` on the schema is its own grant, and forgetting it is the one privileges mistake that
-looks like something else: a role that cannot enter a schema is not told permission denied, it is
-told `relation "items" does not exist`, because the names inside are invisible to it. So the
-grant looks complete, the tables are there, and every query claims they are not. The store's own
-lookup inherits it: the freshness check asks `to_regclass` for `items`, gets NULL for a table it
-cannot see, takes the populated database for an empty one and runs its creates — which come back
-`no schema has been selected to create in`. Only `public` is spared, since it grants `USAGE` to
-every role already; put the tables anywhere else and the grant is part of the setup.
+Forgetting `USAGE` on a schema other than `public` shows up as `relation "items" does not exist`,
+not as permission denied; see [store.md](store.md#postgres-privileges-background).
 
-So a managed deployment can migrate with an admin role and run with a DML-only one. Running one
-role that can do both is equally fine, which is what a single-machine install does.
+Running one role that can do both is fine, and is what a single-machine install does.
 
 ## Interest profile
 
-Profiles are first-class local application data. The effective profile is free-form Markdown
-passed with every scoring batch and is the primary influence on how items are scored.
+Your profile is plain Markdown that says what you want to read. It is sent with every scoring
+batch and is the biggest influence on how items rank.
 
-A fresh database has an application-owned **Default** profile:
+> **Tip:** be specific, and say what you do not want as well as what you do. "Kubernetes operators,
+> KubeVirt, Go internals, not funding rounds or product launches" ranks far better than "AI and
+> infrastructure". If results are off-target, revise the profile before changing the model.
 
-- its stable identity and content are built into the binary;
-- it can be selected and duplicated;
-- it cannot be edited or deleted;
-- it does not require a writable `profile.md`.
+A fresh store has a built-in **Default** profile. You can select it or duplicate it, but not edit
+or delete it. Manage your own under **Settings → Profiles**. The friendly editor has **I'm
+interested in**, **I'm less interested in** and **Additional context** fields. A profile written
+some other way opens in the raw Markdown editor, unchanged.
 
-Local profiles live in the store and are managed under **Settings → Profiles**. The friendly
-editor has **I'm interested in**, **I'm less interested in**, and **Additional context**
-fields. It deterministically renders Markdown. Profiles that do not match that canonical
-format open in Advanced/raw mode, which preserves arbitrary Markdown instead of attempting a
-lossy conversion.
+A profile change applies to the next ingest run, with no restart. A run already going keeps the
+profile it started with, and existing scores stay as they are until you ask for a rescore:
+**Settings → Profiles → Rescore recent items** re-scores the last seven days from the stored
+titles and summaries, without refetching feeds. It keeps your ratings, notes, bookmarks and read
+state, and items that fail keep their old score. It costs as much model time (or provider money)
+as scoring the same number of new articles.
 
-The active profile is resolved once at the start of each ingest run. Switching or editing a
-profile therefore affects the next run immediately, without restarting `serve`; a run already
-in progress keeps its original immutable snapshot for every feed and batch. Existing scores
-are never automatically invalidated or rescored.
+HTML comments (`<!-- ... -->`) are removed before the profile reaches the model, so you can leave
+notes to yourself in it.
 
-To update existing feed rows intentionally, use **Settings → Profiles → Rescore recent
-items**. After confirmation, the application:
+### Importing a profile file
 
-- snapshots the currently active profile once;
-- loads already-scored items from the last seven days from the store, without refetching feeds;
-- scores them with the configured provider, model, system prompt, thinking, batch and
-  parallelism settings;
-- replaces successful LLM scores, explanations, model attribution and profile provenance;
-- preserves ratings, notes, read/hidden state, bookmarks, tags and digest dates.
+A v0.2.x config could name a profile file with `profile:`. rabbithole reads that file only when you
+import that config (with `--config` or `config import`), and only when the import saves a new
+version. Its text becomes a local profile, selected if none is active yet. After that the file is
+not read again, so edit the local copy under Settings → Profiles.
 
-Items that still fail after the normal scoring retries keep their previous valid score. The
-runner reports candidates, successful replacements and failures. Rescoring can incur the same
-runtime or provider cost as scoring an equivalent number of new articles.
-
-HTML comments (`<!-- ... -->`) are removed before the profile reaches the model, so notes to
-yourself can be kept in raw Markdown without being read as interests.
-
-### Backward compatibility: `config.profile`
-
-An existing configuration may still contain:
-
-```yaml
-profile: ./configs/prompts/profile.md
-```
-
-At startup the file is read, HTML comments are stripped, and unreadable or semantically empty
-files remain errors. Its cleaned contents are imported into a deterministic local profile:
-
-- the same configured path does not create duplicates on later starts;
-- on a database with no persisted active selection, the imported profile becomes active, so
-  an existing file-based setup keeps its old scoring behavior;
-- once an active profile has been selected in the UI, later restarts do not overwrite that
-  choice merely because `profile:` remains configured;
-- the import is a bootstrap, not synchronization. Later edits to the Markdown file do not
-  overwrite the local profile. Edit the local copy in Settings, or change/remove `profile:`
-  deliberately.
-
-CLI `ingest` uses the same stored active profile and the same bootstrap rule as `serve`. With
-no configured file and no persisted selection, both use Default.
-
-> **Recommendation:** be specific, and state exclusions as well as interests. "Kubernetes
-> operators, KubeVirt, Go internals — not funding rounds or product launches" ranks
-> considerably better than "AI and infrastructure". When results are consistently
-> off-target, revise the active profile before changing the model.
+[`docs/examples/prompts/profile.md`](https://github.com/DanielBlei/rabbithole/blob/main/docs/examples/prompts/profile.md)
+is the built-in Default as a file, for pasting into a new profile.
 
 ## System prompt
 
-Where `profile.md` describes what the reader wants, `inference.system_prompt` controls how the
-model is instructed to score and respond — the scale it uses, and the JSON shape it must reply
-in. Unlike `profile`, it's optional: leave it unset and a built-in default is used.
+Where the profile describes what the reader wants, `inference.system_prompt` controls how the
+model is instructed to score and respond (the scale it uses, and the JSON shape it must reply
+in). Unlike the profile, it is optional: leave it unset and a built-in default is used.
 
 `inference.system_prompt` takes one of three forms:
 
 ```yaml
 inference:
-  # system_prompt: ./configs/prompts/system.md   # override: this file's contents
+  # system_prompt: ./prompts/system.md   # override: this file's contents
   # system_prompt: false                         # send no system message at all
 ```
 
-- **Unset** (the default) — the built-in prompt is used.
-- **A path** — that file's contents are used instead, verbatim. HTML comments (`<!-- ... -->`)
-  are stripped first, same as `profile.md`. `configs/prompts/system.example.md` carries the
-  built-in prompt's exact text as a starting point to copy from — prompt files live in their own
-  `configs/prompts/` folder rather than directly under `configs/`.
-- **`false`** — no system message is sent at all. Useful for a model whose own Modelfile or chat
-  template already bakes one in: any system message the app sends — the built-in default or an
-  override — takes precedence over a model's own, so `false` is how you defer to it instead.
+- **Unset** (the default): the built-in prompt is used.
+- **A path**: that file's contents are used instead, verbatim. HTML comments (`<!-- ... -->`)
+  are stripped first, same as `profile.md`. [`docs/examples/prompts/system.md`](https://github.com/DanielBlei/rabbithole/blob/main/docs/examples/prompts/system.md) carries the
+  built-in prompt's exact text as a starting point to copy from.
+- **`false`**: no system message is sent at all. Useful for a model whose own Modelfile or chat
+  template already bakes one in: any system message the app sends, the built-in default or an
+  override, takes precedence over a model's own, so `false` is how you defer to it instead.
   (Ollama documents this directly for `/api/generate`'s `system` field as overriding what the
   Modelfile sets; `/api/chat` runs through the same templating.)
 
 The built-in prompt already tells the model that article titles/summaries are data, not
-instructions — worth keeping if you write your own override. See
+instructions, worth keeping if you write your own override. See
 [SECURITY.md](../SECURITY.md#untrusted-content) for why that matters.
+
+
+The path is made absolute when the config is saved, so it keeps working wherever you run
+rabbithole from. The file stays on disk: edit it in place, and the next ingest run reads it.
 
 ## The weather widget
 
@@ -603,3 +646,57 @@ Data comes from [Open-Meteo](https://open-meteo.com), fetched by the browser and
 minutes. You are asked for a location once, on the first visit; decline and nothing is
 requested, and the city search does the same job. [SECURITY.md](../SECURITY.md) has what gets
 sent.
+
+
+## Upgrading from v0.2.x
+
+Earlier releases read `config.yaml` at every start. Now the settings live in the store, and no file
+is read unless you name it.
+
+1. **Import your old config once.** Pass it on a start, or import it by itself:
+
+   ```sh
+   rabbithole serve --config ./rabbithole/config.yaml
+   # or
+   rabbithole config import ./rabbithole/config.yaml
+   ```
+
+   The settings are saved as version 1. A literal `api_key` moves to `./.env` and the store keeps
+   only the reference. Fields your provider does not read are dropped with a warning. A
+   `ingest.feeds` or `profile` written in the file is imported once, with that import. If the file
+   also has a `store` block, it keeps locating your store.
+2. **Decide whether to keep passing `--config`.** If you do, the file is re-applied on every start
+   (see [The --config file](#the---config-file)). If you do not, drop it after the first import
+   and edit with `config export` and `config import`.
+3. **Your data.** The store is found in this order: the per-user directory, then `./data/rabbithole.db`,
+   then `./rabbithole/data/rabbithole.db`. A legacy store is still used, with a deprecation warning,
+   until v0.4.0. To move it to the new default:
+
+   ```sh
+   rabbithole store path            # shows the current store and the per-user target
+   mkdir -p ~/.local/share/rabbithole && chmod 700 ~/.local/share/rabbithole
+   mv ./rabbithole/data/rabbithole.db ~/.local/share/rabbithole/
+   ```
+
+   Move the `-wal` and `-shm` files beside it too, if they exist, with `serve` stopped. On macOS
+   the target is `~/Library/Application Support/rabbithole/`.
+4. **Makefile users.** The `make` targets pin `--db ./data/rabbithole.db`, so your data stays in
+   `./data`. Run `make serve DB=...` to use another store. `make setup` now only creates `.env`.
+
+The `store.url` password reference (`$RABBITHOLE_DB_PASSWORD`) in an old config still works as a
+store locator. A Postgres user should move to `RABBITHOLE_DB` and `RABBITHOLE_DB_PASSWORD` in `.env`.
+
+## Known limitations
+
+- **A CLI key rotation does not reach a running `serve`.** The server's environment is fixed when it
+  starts. After you change a key in `.env` or your shell, restart `serve`. The next CLI command
+  sees the new key at once.
+- **`.env` writers are not coordinated across processes.** rabbithole replaces the file atomically,
+  but two commands that write a key at the same moment can lose one write. Run imports one at a
+  time.
+- **An explicit `think: true` differs from leaving `think` out.** Both run with thinking on, but
+  the stored form is hashed differently, so a file that spells out the default counts as a new
+  version the first time you import it over one that omits it.
+- **The settings editor is not in the UI yet.** The config viewer is read-only. Edit with
+  `config export` and `config import`.
+

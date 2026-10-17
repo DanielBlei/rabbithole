@@ -212,7 +212,7 @@ func TestItemsCarryOnlyWhatTheModelSees(t *testing.T) {
 // it drifting away from the loader, and checks the properties that make a
 // fixture worth running rather than only the ones that make it parse.
 func TestLoadShippedExample(t *testing.T) {
-	const path = "../../configs/golden.example.yaml"
+	const path = "../../docs/examples/golden.yaml"
 	ds, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load(%s) error = %v", path, err)

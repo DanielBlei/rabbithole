@@ -541,17 +541,17 @@ func TestMergeTags(t *testing.T) {
 // The shipped example is what every new user copies, so a typo in it is a
 // first-run failure. Load it through the real path rather than trusting review.
 func TestFeedsExampleFileLoads(t *testing.T) {
-	examplePath, err := filepath.Abs(filepath.Join("..", "..", "configs", "feeds.example.yaml"))
+	examplePath, err := filepath.Abs(filepath.Join("..", "..", "docs", "examples", "feeds.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	doc, found, err := ReadFeedsFile(examplePath)
 	if err != nil || !found {
-		t.Fatalf("configs/feeds.example.yaml does not parse: found=%v err=%v", found, err)
+		t.Fatalf("docs/examples/feeds.yaml does not parse: found=%v err=%v", found, err)
 	}
 	resolved, err := ResolveFeeds(*doc, 10*24*time.Hour)
 	if err != nil {
-		t.Fatalf("configs/feeds.example.yaml does not resolve: %v", err)
+		t.Fatalf("docs/examples/feeds.yaml does not resolve: %v", err)
 	}
 	if len(resolved) == 0 {
 		t.Fatal("example resolved to no feeds")

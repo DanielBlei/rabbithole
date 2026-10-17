@@ -293,7 +293,7 @@ func TestSystemPromptSettingUnmarshalYAML(t *testing.T) {
 		want    SystemPromptSetting
 		wantErr bool
 	}{
-		{"path", "system_prompt: ./configs/prompts/system.md", SystemPromptSetting{Path: "./configs/prompts/system.md"}, false},
+		{"path", "system_prompt: ./prompts/system.md", SystemPromptSetting{Path: "./prompts/system.md"}, false},
 		{"false disables", "system_prompt: false", SystemPromptSetting{Disabled: true}, false},
 		{"true is rejected", "system_prompt: true", SystemPromptSetting{}, true},
 	} {

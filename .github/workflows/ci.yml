@@ -178,8 +178,9 @@ jobs:
           cp dist/*.tar.gz dist/checksums.txt "$RUNNER_TEMP/srv/v$ver/"
           cd "$RUNNER_TEMP/work"
           RABBITHOLE_BASE_URL="file://$RUNNER_TEMP/srv" sh "$GITHUB_WORKSPACE/scripts/install.sh" \
-            --version "v$ver" --dir "$RUNNER_TEMP/bin" --yes
+            --version "v$ver" --dir "$RUNNER_TEMP/bin"
           "$RUNNER_TEMP/bin/rabbithole" --version
-          grep "^  db_path: '/" rabbithole/config.yaml
-          grep "^  feeds: '/" rabbithole/config.yaml
-          test -f rabbithole/feeds.yaml
+          test ! -e rabbithole
+          # A fresh store exports a header only, and the read does not create it.
+          "$RUNNER_TEMP/bin/rabbithole" config export --db "$RUNNER_TEMP/x.db"
+          test ! -e "$RUNNER_TEMP/x.db"

@@ -33,9 +33,11 @@ history rather than being stored with a made-up score.
      structured_output: false
    ```
 
+   Save it with `rabbithole config export -o config.yaml`, edit, then `rabbithole config import config.yaml`.
+
    The model then writes the JSON from the system prompt's instructions, and the checks above
    still apply. Keep a system prompt that spells out the shape: the built-in one does, and so
-   does `configs/prompts/system.example.md`. `reason_max_chars` becomes a request rather than a
+   does `docs/examples/prompts/system.md`. `reason_max_chars` becomes a request rather than a
    hard limit.
 3. **Upgrade vLLM**, if you run it yourself. Several fixes to structured output after reasoning
    are recent.
@@ -81,15 +83,52 @@ default.
 
 ## `$NAME is not set or empty`
 
-**What you see.** The config refuses to load with, for example,
-`inference.api_key: $RABBITHOLE_KEY is not set or empty`.
+**What you see.** An ingest run fails to start with, for example,
+`inference.api_key: $RABBITHOLE_INFERENCE_API_KEY is not set or empty`. After `config import` or
+`config rollback`, the same case is a warning: `the config uses $RABBITHOLE_INFERENCE_API_KEY,
+which is not set`.
 
-**Why.** The value is an environment reference and the variable is missing in the process that
+**Why.** The stored config holds a reference, and the variable is missing in the process that
 started rabbithole.
 
-**What to do.** Export it, or put it in `.env`. `.env` is only picked up by the `make` targets;
-when running the binary directly, load it first (`set -a; source .env; set +a`) or point a
-systemd unit at it with `EnvironmentFile=`.
+**What to do.** Export it in your shell profile, or put it in `./.env`. The binary reads `.env`
+itself (`RABBITHOLE_*` keys only, and a variable already in the environment wins). A running
+`serve` keeps the environment it started with, so restart it after changing a key.
+
+## `an api_key must be a reference to a RABBITHOLE_*_API_KEY environment variable`
+
+**What you see.** `config import` (or `serve --config`) refuses a file and saves nothing.
+
+**Why.** The store holds only references to variables named `RABBITHOLE_*_API_KEY`. A reference
+to any other variable, such as `$OPENAI_API_KEY`, is refused so a config cannot read arbitrary
+environment variables.
+
+**What to do.** Export the key under the allowed name and refer to that:
+`export RABBITHOLE_INFERENCE_API_KEY=$OPENAI_API_KEY`, then `api_key: $RABBITHOLE_INFERENCE_API_KEY`.
+Or write the literal key in the file once: it is moved to `./.env` and only the reference is kept.
+
+## `ignored for provider ...`
+
+**What you see.** A warning on import, such as
+`ignored for provider ollama: inference.effort`.
+
+**Why.** The field is not read by the provider you chose, so it is dropped rather than stored.
+[Fields by provider](configuration.md#fields-by-provider) lists which provider reads which field.
+
+**What to do.** Nothing, or remove the line, or change the provider.
+
+## The store is not where I expect
+
+**What you see.** An empty feed after an upgrade, or `Create a new SQLite store` on a machine that
+already has data.
+
+**Why.** The default store moved to your per-user data folder. Older releases kept it in
+`./data` or `./rabbithole/data`, which are still used when no per-user store exists, with a
+deprecation warning.
+
+**What to do.** Run `rabbithole store path`: it prints the store in use and why. Point at an
+existing file with `--db` or `RABBITHOLE_DB`, or move it; see
+[Upgrading from v0.2.x](configuration.md#upgrading-from-v02x).
 
 ## A 400 that mentions `max_tokens` or `max_completion_tokens`
 

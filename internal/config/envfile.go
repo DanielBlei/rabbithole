@@ -15,8 +15,8 @@ import (
 )
 
 // envValueRE is the charset .env values written by Set must match. It excludes
-// whitespace, quotes, newlines and NUL (injection) and `$` and `#` (which break
-// the Makefile's .env include).
+// whitespace, quotes, newlines and NUL (injection) and `$` and `#`, so the line
+// Set writes stays safe to `source` from a shell.
 var envValueRE = regexp.MustCompile(`^[A-Za-z0-9._~+/=:-]+$`)
 
 // Source names reported by EnvFile.Source.
@@ -47,9 +47,8 @@ type EnvFile struct {
 // Value rules: a line is KEY=VALUE with an optional leading `export `; blank
 // lines and lines starting with # are ignored. The value is everything after the
 // first `=`, trimmed of surrounding whitespace, with one matching pair of single
-// or double quotes removed (the form .env.example shows for a shell). Nothing is
-// expanded and `#` inside a value is kept, matching how make reads the file. An
-// empty value is treated as unset.
+// or double quotes removed. Nothing is expanded and `#` inside a value is kept.
+// An empty value is treated as unset.
 func LoadEnvFile(path string) (*EnvFile, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
