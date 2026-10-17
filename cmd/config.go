@@ -20,7 +20,7 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
-const exampleConfigHint = "Every field and its default: docs/examples/config.yaml"
+const exampleConfigHint = "Every setting and its default: https://github.com/DanielBlei/rabbithole/blob/main/docs/configuration.md"
 
 var (
 	configExportOut  string

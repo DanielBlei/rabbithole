@@ -81,7 +81,7 @@ either). Returns `204 No Content` on success, `404` if the id doesn't exist.
 ## GET /healthz
 
 Liveness. Answers `200 {"status":"ok"}` for as long as the process is serving, and
-checks nothing else — a database it cannot reach is not a fault a restart repairs,
+checks nothing else: a database it cannot reach is not a fault a restart repairs,
 so that condition belongs to `/readyz` instead.
 
 ## GET /readyz

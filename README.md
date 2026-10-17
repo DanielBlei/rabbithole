@@ -20,7 +20,7 @@ where you put down tasks or todos, throw ideas at the board before they get away
 eye on the weather.
 
 It runs on your own machine: one binary with the UI inside it, no dependency hell, and state in
-a local SQLite file, or in Postgres, enabling one store to serve more than one machine.
+a local SQLite file in your user data folder, or in Postgres, enabling one store to serve more than one machine.
 Scoring runs on a local model, any OpenAI-compatible endpoint, or a built-in keyword scorer that
 needs no model at all.
 
@@ -28,7 +28,7 @@ needs no model at all.
   <img src="docs/img/feed-page.png" alt="The Feed page: items ranked by score, each with a one-line reason" width="900">
 </p>
 
-> **Status:** 0.x. Usable day to day, but the config format and the HTTP API can still change
+> **Status:** 0.x. Usable day to day, but the settings format and the HTTP API can still change
 > between releases. Anything breaking is called out in the release notes.
 
 ## What it reads
@@ -65,9 +65,9 @@ Linux or macOS:
 curl -fsSL https://raw.githubusercontent.com/DanielBlei/rabbithole/main/scripts/install.sh | sh
 ```
 
-It installs the latest release and can copy the default configs into a `rabbithole/` folder
-where you run it. Archives are also on the
-[Releases page](https://github.com/DanielBlei/rabbithole/releases).
+It verifies the download and installs the latest release binary to `~/.local/bin`. It writes no
+config: settings live in the app, and a bare `rabbithole serve` runs on the defaults. Archives are
+also on the [Releases page](https://github.com/DanielBlei/rabbithole/releases).
 
 ### From source
 
@@ -77,18 +77,29 @@ cd rabbithole
 make build
 ```
 
-`go install github.com/DanielBlei/rabbithole@latest` gives the same binary; copy a config from
-[configs/](configs) (`make setup` does it in a checkout).
+`go install github.com/DanielBlei/rabbithole@latest` gives the same binary. No config file is
+needed; [docs/examples/](docs/examples) has an example sources list, a settings reference and prompts.
 
 ## Quickstart
 
 ```bash
 ollama pull qwen3.5:4b   # the default model
-make serve               # runs on the shipped example config
+rabbithole serve         # or `make serve` in a checkout
 ```
 
-Open <http://localhost:8080> and hit ingest. The first run fetches the feeds and scores them,
-which takes a while on a local model; after that the page fills in.
+The first start asks `Create a new SQLite store at ...? [Y/n]`; answer `Y`, then open
+<http://localhost:8080>.
+
+Add sources before the first ingest: use the **Sources** page, or download the example list and
+import it (in a checkout, `make sources` does this):
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/DanielBlei/rabbithole/main/docs/examples/feeds.yaml
+rabbithole sources import feeds.yaml
+```
+
+Then hit ingest. The first run fetches the feeds and scores them, which takes a while on a local
+model; after that the page fills in.
 
 That ranks against the immutable built-in **Default** profile. Open
 **Settings → Profiles** to create or duplicate one for your own interests; the next ingest
@@ -99,14 +110,14 @@ an arXiv, Crossref or Semantic Scholar search. For the full setup, see
 **[docs/quickstart.md](docs/quickstart.md)**.
 
 The first visit asks who can open it: create an account, or leave it open with no login.
-`make serve` binds to loopback only; read [docs/auth.md](docs/auth.md)
+`serve` binds to loopback only; read [docs/auth.md](docs/auth.md)
 and [SECURITY.md](SECURITY.md) before exposing it to anything else.
 
 ## Documentation
 
 - [docs/quickstart.md](docs/quickstart.md): the same steps with the details filled in
-- [docs/configuration.md](docs/configuration.md): every field in the three config files
-- [docs/cli.md](docs/cli.md): the `ingest`, `items`, `serve` and `auth` commands
+- [docs/configuration.md](docs/configuration.md): every setting, the store, secrets, and importing and exporting config
+- [docs/cli.md](docs/cli.md): the `serve`, `ingest`, `config`, `sources`, `store`, `items` and `auth` commands
 - [docs/api.md](docs/api.md): a small read-and-mark JSON API
 - [docs/auth.md](docs/auth.md): the login, sessions, HTTPS, and resetting a forgotten password
 - [docs/architecture.md](docs/architecture.md): how the pieces fit together, and the roadmap

@@ -5,25 +5,42 @@ scripted runs, direct access to the item store, the web UI's login, and inspecti
 model received.
 
 ```
-rabbithole [--config PATH] [--debug] [--trace] <command>
+rabbithole [global flags] <command>
 ```
 
 | Command | What it does |
 |---|---|
-| [`ingest`](#ingest) | Fetch the feeds, score what is new, record it, and optionally write a markdown digest |
 | [`serve`](#serve) | Serve the web UI and the JSON API, behind the login |
+| [`ingest`](#ingest) | Fetch the feeds, score what is new, record it, and optionally write a markdown digest |
+| [`config`](#config) | Export, import, list and roll back the saved settings |
+| [`sources`](#sources) | Import and export the feed set |
+| [`store`](#store) | Show where the store lives |
 | [`auth`](#auth) | Show, reset or switch off the web UI's login |
 | [`items`](#items) | Browse the stored items and record your own read, skip, rating and notes |
 | `eval` | Measure how well scoring matches your profile; see [evals.md](evals.md) |
 
-Commands that touch the database take the same `--config` as `serve`, so they work on the same
-store.
+Every command reads its settings from the store. No file is read unless you name one, and a bare
+run uses the defaults.
+
+## Global flags
 
 | Flag | Description | Default |
 |---|---|---|
-| `--config` | Path to the configuration file | `./configs/config.yaml` |
-| `--debug` | Log each stage with timings: configuration, per-feed fetches, filtering, scoring batches and per-item scores, selection, write | off |
+| `--db` | Where the store is: a SQLite path or a `postgres://` URL. Also `RABBITHOLE_DB` | a file in your user data dir, see [Store location](configuration.md#store-location) |
+| `--config` | A config file to import on start. It is re-applied on every start: unchanged is a no-op, otherwise a new version is saved. A `store` block in it only locates the store. Optional | none |
+| `--env-file` | The env file read for `RABBITHOLE_*` variables the environment does not set | `./.env` |
+| `--db-max-conns` | Postgres only: cap the connection pool | `10` |
+| `--db-conn-max-lifetime` | Postgres only: how long one pooled connection may live, e.g. `30m` | `30m` |
+| `--debug` | Log each stage with timings: settings, per-feed fetches, filtering, scoring batches and per-item scores, selection, write | off |
 | `--trace` | Additionally log raw model prompts and responses; implies `--debug` | off |
+
+`--config` is an import, not a requirement. On the `config` subcommands it only locates the store and
+is never imported. The details are in [The --config file](configuration.md#the---config-file).
+
+The store location is `--db`, then `RABBITHOLE_DB`, then the `--config` file's `store` block, then the
+default. On the first start with no store, a terminal gets the question
+`Create a new SQLite store at ...? [Y/n]`; `n` creates nothing and exits 0. Without a terminal the
+store is created and a hint is logged. A Postgres password comes from `RABBITHOLE_DB_PASSWORD`.
 
 ## ingest
 
@@ -31,8 +48,9 @@ store.
 rabbithole ingest [--dry-run] [--provider P] [--no-think] [--markdown]
 ```
 
-Fetches the configured feeds, scores new items against the interest profile, and records
-them in the store.
+Fetches the feeds in the store, scores new items against the active interest profile, and records
+them in the store, using the saved settings. `--provider` and `--no-think` apply to this run only
+and are never saved.
 
 | Flag | Description |
 |---|---|
@@ -61,8 +79,74 @@ to finish.
 | `--trusted-proxies` | Comma-separated networks or addresses whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed; default `127.0.0.0/8,::1/128`, empty trusts none |
 | `--dev` | Serve the CSS, scripts and fonts `no-cache`, so an edit shows on the next reload instead of up to 5 minutes later. For working on them; `DEV=1 make serve` passes it |
 
+With `--config`, the log says `config is managed by <file>: it is re-applied on every start`, and
+the config viewer shows the same note. A running `serve` reads the active settings at the start of
+each ingest run, so `config import` and `config rollback` from another terminal apply to the next
+run with no restart. Its environment is fixed at start, so restart it after changing an API key.
+
 Without either, an `--addr` that other machines can reach (`:8080`, `0.0.0.0`, a LAN address)
 is refused, since the login would cross the network unencrypted.
+
+## config
+
+```
+rabbithole config export [-o FILE]
+rabbithole config import <file>
+rabbithole config history [--limit N]
+rabbithole config rollback <version>
+```
+
+The settings live in the store as a numbered history; the highest version is in force, and no
+saved version means the defaults. See [configuration.md](configuration.md#import-and-export).
+
+- **`export`** writes the active version as YAML to stdout, or to `-o FILE`, with a header comment
+  naming the version. It holds only `$RABBITHOLE_*_API_KEY` references, never a key. With no saved
+  version it writes a comment only, which is still a valid import file. It never creates a store.
+- **`import <file>`** saves the file as the new active version. It never asks: the file wins. A file
+  equal to the active config changes nothing. If it replaces a version saved elsewhere, it prints
+  the undo command. An invalid file saves nothing. A literal `api_key` is moved to `./.env`. The
+  file's `store` block locates the store unless `--db` or `RABBITHOLE_DB` is set.
+- **`history`** lists versions, newest first, with their source and time. `*` marks the active one.
+  `--limit` defaults to 20; `0` shows all.
+- **`rollback <version>`** copies an earlier version forward as a new latest version, so the history
+  is kept and a rollback can itself be rolled back.
+
+After an import or rollback, a warning names any referenced API key variable that is not set.
+
+```
+$ rabbithole config import config.yaml
+config version 4 saved from config.yaml, replacing version 3 (settings UI, saved 14:02); undo with: rabbithole config rollback 3
+```
+
+## sources
+
+```
+rabbithole sources import <file>
+rabbithole sources export [-o FILE]
+```
+
+Feeds are an explicit import; no feeds file is read at startup.
+
+- **`import`** adds the feeds in a feeds YAML file whose name and URL the store has never held.
+  Known feeds, deleted ones included, are skipped, so a second run adds nothing. It prints how many
+  were added and skipped, and any warnings. The same import is on the Sources page (file picker or
+  drag and drop).
+- **`export`** writes the current feed set in the same shape, to stdout or `-o FILE`.
+
+The example list is
+[`docs/examples/feeds.yaml`](https://github.com/DanielBlei/rabbithole/blob/main/docs/examples/feeds.yaml)
+(download it with `curl`, see [configuration.md](configuration.md#quick-start)), and the file's shape is in
+[configuration.md](configuration.md#the-feeds-files-shape).
+
+## store
+
+```
+rabbithole store path
+```
+
+Prints the store this command line would use and where that choice came from (`--db`,
+`RABBITHOLE_DB`, `--config`, `default` or `legacy`), without creating anything. A Postgres store
+prints its host and database, never the password.
 
 ## auth
 
@@ -74,7 +158,7 @@ rabbithole auth disable
 
 The web UI's login, managed from the machine the database lives on. How the login itself
 works (first run, sessions, HTTPS) is in [auth.md](auth.md). These commands are the only way to
-switch a login off or replace a forgotten password: nothing in the web UI or the config file
+switch a login off or replace a forgotten password: nothing in the web UI or a config file
 can, so reaching the port is never enough to unlock the app.
 
 **`status`** says whether the login is on, and for which user:
@@ -142,7 +226,7 @@ rabbithole items prune [--all | --source NAME [--since D] [--before D]] [--inclu
   continue past individual failures and report the number that failed.
 - `rate` and `note` apply to a single item, as one value cannot meaningfully apply to
   several. `note` requires no quoting; trailing arguments are joined.
-- `prune` deletes items, and only items — one source, everything past a certain age, or a
+- `prune` deletes items, and only items: one source, everything past a certain age, or a
   window combining both. Todos, ideas, feed health and run history are untouched, so it is
   the way to clean up a feed without starting the database over.
 
@@ -164,8 +248,7 @@ rabbithole items prune --all --include-saved       # or: make clean-feeds
 ```
 
 `make clean-feeds` wraps that last one in a y/N prompt and is the quickest way to reset the
-feed while developing. It names the config it is about to act on, since that is what decides
-which database gets emptied.
+feed while developing. It runs against the store `make` uses (`DB=`, default `./data/rabbithole.db`).
 
 Two things to know. Pruning inside the ingest window costs a re-fetch and a re-score: the
 next run sees the link as new, because deduplication keys on links that are still stored.

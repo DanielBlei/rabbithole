@@ -44,7 +44,7 @@ const (
 
 // DefaultSystemPrompt instructs the model to emit strict JSON scores. It is used whenever
 // inference.system_prompt is unset; its text is also shipped verbatim as
-// configs/prompts/system.example.md for easy copying into an override.
+// docs/examples/prompts/system.md for easy copying into an override.
 //
 // It owns the scale and nothing else: the bands are stated in terms of where an
 // article sits in the reader's own ordering, never in terms of subject matter.

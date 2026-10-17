@@ -19,7 +19,7 @@ open this instance. The two answers sit side by side on the card:
 - **Leave it open.** The login switches off and the app is open to anyone who can reach it.
   Settings → Account offers **set a password** to lock it later.
 
-The choice is stored in the database, so it survives restarts and config edits.
+The choice is stored in the database, so it survives restarts and config changes.
 
 Until it is made, the instance is unclaimed rather than protected: whoever reaches the
 address first answers the question. It is the same trust model `serve` already assumes by
@@ -78,7 +78,7 @@ rabbithole auth reset     # set a new password (asked for twice, not echoed)
 rabbithole auth disable   # switch the login off
 ```
 
-Pass the same `--config` you run `serve` with. `reset` keeps the username unless you give
+Run these against the same store as `serve` (the same `--db` or `RABBITHOLE_DB`, if you set one). `reset` keeps the username unless you give
 `--username`, and for scripts reads the password from stdin with `--password-stdin`:
 
 ```
@@ -90,7 +90,7 @@ never a moment when whoever reaches the port first could claim the instance. On 
 with no login yet (unclaimed, or one left open) there is no account name to keep, so a reset
 there needs `--username`.
 
-Once a password is set, nothing in the web UI or the config file can switch the login off:
+Once a password is set, nothing in the web UI or in a config file can switch the login off:
 that takes a shell on the machine, the same access it would take to edit the database by
 hand. The login page's **forgot password?** says so.
 

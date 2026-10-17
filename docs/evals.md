@@ -23,15 +23,17 @@ It scores the articles **now**, rather than reading marks recorded earlier. That
 point: two runs either side of an edit are directly comparable, so you can tell whether the
 edit did anything. Nothing is written to the store and your profile is never rewritten.
 
-The benchmark remains deliberately configuration-driven and read-only: it uses the Markdown
-named by `config.profile`, or the built-in Default when that setting is absent. It does not
-read or mutate the active profile in the store. To benchmark a local UI profile in v1, copy its raw
-text to a Markdown file and point `profile:` at that file for the benchmark.
+The benchmark is read-only. It scores with your stored config and your active profile, or with
+the built-in Default if the store has none. It never writes to the store. To try other settings
+without saving them, pass `--config <file>`: for `eval benchmark` the file is read as is and never
+imported (a `profile:` key in it names the profile Markdown to use). With no store yet, it
+runs on the defaults.
 
 ## The set of articles
 
-Copy `configs/golden.example.yaml` to `configs/golden.yaml` (`make setup` does this for you)
-and replace the examples with articles from your own feeds. One looks like this:
+Download [`docs/examples/golden.yaml`](https://github.com/DanielBlei/rabbithole/blob/main/docs/examples/golden.yaml)
+(`curl -fsSLO https://raw.githubusercontent.com/DanielBlei/rabbithole/main/docs/examples/golden.yaml`)
+or copy it from a checkout, and replace the examples with articles from your own feeds. One looks like this:
 
 ```yaml
 - id: rb001
@@ -76,7 +78,7 @@ than being quietly skipped.
 ## Running it
 
 ```
-rabbithole eval benchmark [file] [--model M] [--provider P] [--host URL] [--no-think]
+rabbithole eval benchmark <file> [--model M] [--provider P] [--host URL] [--no-think]
                           [--repeats N] [--limit N] [--show-why]
                           [--format text|markdown|json] [--output-path PATH]
 ```
@@ -99,20 +101,20 @@ markup, 120 columns wide, and the same bytes whether it lands on a terminal or i
 order rather than drawing a sample, so a narrowed run stays comparable to the last one.
 
 ```sh
-# your configured backend, against configs/golden.yaml
-rabbithole eval benchmark
+# your configured backend, against your golden file
+rabbithole eval benchmark golden.yaml
 
 # a bigger model than you ingest with
-rabbithole eval benchmark --model qwen3.6:35b
+rabbithole eval benchmark golden.yaml --model qwen3.6:35b
 
 # no model at all: a keyword matcher, useful to check the plumbing works
-rabbithole eval benchmark --provider heuristic
+rabbithole eval benchmark golden.yaml --provider heuristic
 
 # save it, to compare against a later run
-rabbithole eval benchmark --format json --output-path before.json
+rabbithole eval benchmark golden.yaml --format json --output-path before.json
 
 # the first ten only, with its reasoning beside your notes
-rabbithole eval benchmark --limit 10 --show-why
+rabbithole eval benchmark golden.yaml --limit 10 --show-why
 ```
 
 Batch size and parallelism default to your config rather than to a flag, because a batched model
@@ -132,8 +134,8 @@ your marks is wrong. Those want opposite fixes, and the report cannot tell them 
 and produces an ordinary report you can put beside the usual one:
 
 ```sh
-rabbithole eval benchmark --format json --output-path ollama.json
-rabbithole eval benchmark --provider claude --model sonnet --format json --output-path claude.json
+rabbithole eval benchmark golden.yaml --format json --output-path ollama.json
+rabbithole eval benchmark golden.yaml --provider claude --model sonnet --format json --output-path claude.json
 ```
 
 Both reports carry the same `profile_hash`, `prompt_hash` and `dataset_hash`, which is what

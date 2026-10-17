@@ -77,9 +77,9 @@ func init() {
 			"your configured or built-in profile and system prompt, and reports how far the model landed from " +
 			"your scores. Because it re-scores rather than reading stored values, two runs either " +
 			"side of a profile edit are directly comparable.\n\n" +
-			"Copy configs/golden.example.yaml to start one of your own. " +
+			"Copy docs/examples/golden.yaml to start one of your own. " +
 			"Nothing is written to the store.",
-		Example: "  rabbithole eval benchmark configs/golden.example.yaml\n" +
+		Example: "  rabbithole eval benchmark docs/examples/golden.yaml\n" +
 			"  rabbithole eval benchmark my-golden.yaml --model qwen3.6:35b --repeats 5\n" +
 			"  rabbithole eval benchmark my-golden.yaml --format json --output-path before.json",
 		Args: cobra.ExactArgs(1),

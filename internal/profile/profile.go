@@ -28,7 +28,7 @@ const (
 )
 
 // DefaultContent is the semantic content formerly shipped only as
-// configs/prompts/profile.example.md. Keeping it in Go makes a fresh install
+// docs/examples/prompts/profile.md. Keeping it in Go makes a fresh install
 // independent of a writable runtime profile file.
 const DefaultContent = `# Reading interest profile
 

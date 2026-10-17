@@ -34,10 +34,15 @@ question and a good one to argue about.
 ## Getting set up
 
 ```bash
-make setup                            # your own config and feed seed
-export CONFIG=./configs/config.yaml   # targets default to the example config
-make heuristic                        # a full ingest, no model needed
+make setup       # creates .env from .env.example (optional; the binary reads it)
+make sources     # adds the example sources from docs/examples/feeds.yaml
+make heuristic   # a full ingest, no model needed
 ```
+
+No config file is needed. `make` targets keep their data in `./data/rabbithole.db`, so a checkout
+never touches your personal store. `DB=` points them elsewhere, and so does a `RABBITHOLE_DB` in your
+shell (`DB=` wins when both are set). `make` does not read `.env`; the binary does. `CONFIG=` names
+a file to import on start. Templates for settings, sources and prompts are in `docs/examples/`.
 
 `make heuristic` scores with the keyword scorer instead of an LLM, so it confirms a working
 checkout without Ollama/vLLM running. `make help` lists every target.

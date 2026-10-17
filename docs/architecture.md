@@ -34,7 +34,7 @@ flowchart LR
 can write the result as a markdown digest, while `serve` exposes the store over HTTP and can
 trigger the same cycle in the background (see [docs/api.md](api.md)). State (seen items,
 scores, digest history, local profiles, active-profile selection and user status/notes)
-lives in the store (a local SQLite file by default, or Postgres when `store.url` names a
+lives in the store (a local SQLite file by default, or Postgres when `RABBITHOLE_DB` names a
 database), so re-runs only score genuinely new items.
 
 Everything `serve` exposes, the JSON API included, sits behind one login (see
@@ -89,7 +89,9 @@ only model score/reason/model/profile provenance; failed items keep their previo
 Ingest and rescore share the same background manager, history, log capture, cancellation and
 single-flight slot, so they cannot write scores concurrently.
 
-Each step has a knob, all of them in [configuration.md](configuration.md):
+Each step has a knob, all of them in [configuration.md](configuration.md). The knobs are settings
+saved in the store as numbered versions, read when each ingest run starts, so a change applies to the
+next run without a restart:
 
 | Step | Knobs |
 |---|---|
@@ -103,11 +105,37 @@ scored on that teaser, and academic sources are scored on the metadata or summar
 their provider. Full-text page retrieval is not part of the scoring path. Direct ingestion of
 ordinary pages without a feed remains on the roadmap below.
 
+## Provider startup checks
+
+Not every model has a reasoning mode. On Ollama, `think: true` is probed once at startup: a model
+that rejects it falls back to `think: false` with a warning, rather than failing every scoring
+request. Any other error during the probe leaves thinking on, so a transient problem is not
+mistaken for a missing feature.
+
+On `vllm`, `think: false` sends `chat_template_kwargs: {"enable_thinking": false}`, which switches
+thinking off for models whose chat template has that switch (Qwen3 and similar). Other templates
+ignore it. `vllm` sends `max_tokens`; `openai` sends `max_completion_tokens`, which OpenAI's
+reasoning models require.
+
+`openai` and `vllm` both check the model against `/v1/models`, and fall back to a minimal chat
+request when it is missing there, since gateways sometimes route models their catalog does not
+list. On `openai`, the reasoning level is probed once with small requests:
+
+- `think: true` sends `inference.effort`. A model that rejects that level, or takes no
+  `reasoning_effort` at all, gets the field left out, with a warning naming the server's reply.
+- `think: false` ignores `inference.effort` and sends the lowest level the model accepts, trying
+  `none` (gpt-5.1 and later), then `minimal` (gpt-5), then `low`. A model that takes none of them
+  gets the field left out.
+
+An auth or unknown-model reply fails startup, and a probe that keeps timing out keeps the plain
+choice (`inference.effort`, or `low`). A gateway can accept these switches and ignore them: the
+request succeeds, so startup cannot tell.
+
 ## Layout
 
 ```
-cmd/                  cobra CLI (root, ingest, serve, auth, items, eval)
-internal/config       YAML config and legacy profile-file loading
+cmd/                  cobra CLI (root, serve, ingest, config, sources, store, auth, items, eval)
+internal/config       typed settings, the per-provider field table, secret references, .env loading, feeds-file parsing
 internal/profile      built-in Default, profile text validation/editor format and hashing
 internal/profilemgr   built-in + stored composition, legacy bootstrap and active resolution
 internal/ingest       source dispatch -> fetch -> filter -> score -> record cycle, plus the background run manager
@@ -119,7 +147,7 @@ internal/vllm         OpenAI-compatible JSON-mode client, in openai and vllm fla
 internal/httpclient   shared HTTP transport (bearer auth injection)
 internal/retry        exponential backoff for a still-starting-up inference server
 internal/digest       markdown renderer
-internal/store        SQLite or Postgres (items, profiles, feed config, run history, user state)
+internal/store        SQLite or Postgres (items, profiles, feed config, config versions, run history, user state)
 internal/server       composition root for serve: mounts api + web behind the login gate, health endpoints
 internal/api          JSON API route set (/api/*)
 internal/web          server-rendered htmx UI, the login gate and sessions, templates and static assets

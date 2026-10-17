@@ -1,9 +1,9 @@
-# The Rabbit Hole feed list. Copy to configs/feeds.yaml and edit.
+# The Rabbit Hole feed list, in the shape `sources import` and the Sources page read.
 #
-# This is a seed file, not the live feed set. Feeds live in the database and are
-# managed from the Sources page; on every startup, anything here the store has
-# never seen is added, and everything else is ignored.
-# Nothing writes back to this file: use the Sources page's export to get the live set out.
+# Import it with `rabbithole sources import docs/examples/feeds.yaml`, or drop it on
+# the Sources page. Feeds live in the store: an import adds the ones it has never
+# seen and skips the rest, so it is safe to repeat. Nothing writes back to this
+# file; `rabbithole sources export` (or the Sources page) gets the live set out.
 #
 # RSS is the default when `type` is omitted. Academic sources use
 # `type: academic`; blog and news are not yet implemented.

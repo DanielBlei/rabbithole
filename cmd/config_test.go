@@ -124,7 +124,7 @@ func TestConfigExportImportRoundTrip(t *testing.T) {
 	}
 	raw, _ := os.ReadFile(exported)
 	if !strings.HasPrefix(string(raw), "# rabbithole config version 1 (import:") ||
-		!strings.Contains(string(raw), "docs/examples/config.yaml") {
+		!strings.Contains(string(raw), "docs/configuration.md") {
 		t.Errorf("header = %q", strings.SplitN(string(raw), "\n", 2)[0])
 	}
 	out := e.mustRun("config", "import", exported)

@@ -1,4 +1,5 @@
 BINARY   := rabbithole
+# A config file to import on start (optional; settings live in the store).
 CONFIG   ?=
 CONFIG_FLAG := $(if $(CONFIG),--config $(CONFIG),)
 PKG      := ./...
@@ -9,30 +10,20 @@ DEBUG    ?=
 DEBUG_FLAG := $(if $(DEBUG),--debug,)
 DEV      ?=
 DEV_FLAG := $(if $(DEV),--dev,)
-GOLDEN   ?= ./configs/golden.example.yaml
+GOLDEN   ?= ./docs/examples/golden.yaml
 # Repo work keeps its store here, so it never touches the personal one in the user
-# data dir and never sees the legacy-location warning.
+# data dir and never sees the legacy-location warning. A RABBITHOLE_DB in the
+# shell is respected (the binary reads it), and DB= on the command line wins over
+# both. make does not read .env; the binary does.
 DB       ?= ./data/rabbithole.db
+ENV_DB   := $(and $(filter file,$(origin DB)),$(RABBITHOLE_DB))
+DB_FLAG  := $(if $(ENV_DB),,--db '$(value DB)')
+DB_FROM  := $(if $(ENV_DB),from your shell environment,$(if $(filter file,$(origin DB)),the repo default,from DB=))
 FORMAT   ?= text
 
 # Nearest git tag plus any commits past it.
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS  := -X github.com/DanielBlei/rabbithole/cmd.version=$(VERSION)
-
-# Pick up ./.env if it exists, so targets that run the binary see
-# RABBITHOLE_DB_PASSWORD without it being exported by hand. See .env.example.
--include .env
-export RABBITHOLE_DB_PASSWORD
-
-# …but read the password back out of the file as text. make parses .env as a
-# makefile, not as an environment file: `ab$cd` comes out as `abd`, because `$c`
-# is a variable reference, and everything after a `#` is a comment. Both fail as
-# an authentication error against a live database, with nothing pointing at the
-# cause. Everything else in .env is a make knob (CONFIG, ADDR) and stays with the
-# include above.
-ifneq ($(wildcard .env),)
-RABBITHOLE_DB_PASSWORD := $(shell sed -n 's/^RABBITHOLE_DB_PASSWORD=//p' .env | tail -n 1 | tr -d '\r')
-endif
 
 .DEFAULT_GOAL := help
 
@@ -42,30 +33,11 @@ endif
 help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(MAKEFILE_LIST)
 
-# Nudge shown when a target still runs on the shipped example config, which ranks against project generic configurations
-.PHONY: config-hint
-config-hint:
-	@case "$(CONFIG)" in *example*) \
-	  printf '\033[33m▌\033[0m\n'; \
-	  printf '\033[33m▌\033[0m Running on \033[36m$(CONFIG)\033[0m -> the shipped defaults.\n'; \
-	  printf '\033[33m▌\033[0m\n'; \
-	  printf '\033[33m▌\033[0m The Rabbit Hole ranks what it reads against your interests.\n'; \
-	  printf '\033[33m▌\033[0m\n'; \
-	  printf '\033[33m▌\033[0m   1. \033[36mmake setup\033[0m            your own config and feeds\n'; \
-	  printf '\033[33m▌\033[0m   2. \033[36mconfigs/feeds.yaml\033[0m    your sources (RSS, academic)\n'; \
-	  printf '\033[33m▌\033[0m   3. \033[36mSettings → Profiles\033[0m       what you care about, in your words\n'; \
-	  printf '\033[33m▌\033[0m\n'; \
-	  printf '\033[33m▌\033[0m Then: \033[36mCONFIG=./configs/config.yaml make serve\033[0m (or edit CONFIG in the Makefile)\n'; \
-	  printf '\033[33m▌\033[0m\n'; \
-	  printf '\033[33m▌\033[0m Details: \033[36mdocs/configuration.md\033[0m\n'; \
-	  printf '\033[33m▌\033[0m\n'; \
-	esac
-
 # Says where a make target keeps its data, and how to change it.
 USER_DATA_DIR := $(if $(filter Darwin,$(shell uname -s)),~/Library/Application Support/rabbithole,~/.local/share/rabbithole)
 .PHONY: db-hint
 db-hint:
-	@printf '\033[33m▌\033[0m make keeps your data $(if $(filter file,$(origin DB)),in the repo,in): \033[36m$(DB)\033[0m\n'
+	@printf '\033[33m▌\033[0m make keeps your data in \033[36m$(if $(ENV_DB),the store RABBITHOLE_DB names,$(DB))\033[0m ($(DB_FROM))\n'
 	@printf '\033[33m▌\033[0m   Use another local store:  \033[36mmake $(or $(firstword $(MAKECMDGOALS)),serve) DB=/path/to/rabbithole.db\033[0m\n'
 	@printf '\033[33m▌\033[0m   Use Postgres:             \033[36mmake $(or $(firstword $(MAKECMDGOALS)),serve) DB=postgres://user@host:5432/rabbithole\033[0m\n'
 	@printf '\033[33m▌\033[0m                             with \033[36mRABBITHOLE_DB_PASSWORD\033[0m set in .env or your shell profile\n'
@@ -73,13 +45,8 @@ db-hint:
 	@printf '\033[33m▌\033[0m   Run without make:         \033[36m./$(BINARY)\033[0m uses \033[36m$(USER_DATA_DIR)\033[0m, or RABBITHOLE_DB when set\n'
 
 .PHONY: setup
-setup: ## Create config.yaml, feeds.yaml and golden.yaml from the examples (if missing)
-	@test -f configs/config.yaml  || ( \
-	  sed -e 's|feeds.example.yaml|feeds.yaml|' \
-	      configs/config.example.yaml > configs/config.yaml && \
-	  echo "created configs/config.yaml (pointing at your feeds.yaml; profile uses built-in Default)" )
-	@test -f configs/feeds.yaml           || (cp configs/feeds.example.yaml           configs/feeds.yaml           && echo "created configs/feeds.yaml")
-	@test -f configs/golden.yaml          || (cp configs/golden.example.yaml          configs/golden.yaml          && echo "created configs/golden.yaml")
+setup: ## Create .env from .env.example (if missing); the binary reads it itself
+	@test -f .env || (cp .env.example .env && chmod 600 .env && echo "created .env (the binary reads it; RABBITHOLE_* keys only)")
 
 ##@ Build
 
@@ -92,7 +59,7 @@ tidy: ## Sync go.mod/go.sum
 	go mod tidy
 
 .PHONY: clean
-clean: ## Remove build artifacts (DATA=1 also deletes ./data — the database and digests)
+clean: ## Remove build artifacts (DATA=1 also deletes ./data: the database and digests)
 	rm -f $(BINARY) coverage.out
 	@if [ -n "$(DATA)" ] && [ -d data ]; then \
 	  printf 'Delete ./data (database, digests)? This cannot be undone. [y/N] '; \
@@ -100,54 +67,58 @@ clean: ## Remove build artifacts (DATA=1 also deletes ./data — the database an
 	fi
 
 .PHONY: clean-feeds
-clean-feeds: ## Delete every feed item from the store, keeping todos, ideas and run history (uses CONFIG)
+clean-feeds: ## Delete every feed item from the store, keeping todos, ideas and run history (CONFIG optional)
 	@printf 'Delete every feed item from the store?\n'
 	@printf 'Bookmarks, ratings and notes go too. Todos, ideas and run history are kept.\n'
 	@printf 'The next ingest re-fetches and re-scores anything still in your feeds. [y/N] '
 	@read ans; case "$$ans" in \
-	  [yY]*) go run . items prune --all --include-saved --db '$(value DB)' $(CONFIG_FLAG);; \
+	  [yY]*) go run . items prune --all --include-saved $(DB_FLAG) $(CONFIG_FLAG);; \
 	  *) echo "kept";; \
 	esac
 
 ##@ ingest
 
+.PHONY: sources
+sources: db-hint build ## Add the example sources (docs/examples/feeds.yaml) to the store; repeat-safe
+	./$(BINARY) sources import docs/examples/feeds.yaml $(DB_FLAG)
+
 .PHONY: ingest
-ingest: config-hint db-hint ## Fetch, rank, and record to the store (uses CONFIG, NO_THINK=1 to disable thinking)
-	go run . ingest --db '$(value DB)' $(CONFIG_FLAG) $(THINK_FLAG) $(DEBUG_FLAG)
+ingest: db-hint ## Fetch, rank, and record to the store (CONFIG optional, NO_THINK=1 to disable thinking)
+	go run . ingest $(DB_FLAG) $(CONFIG_FLAG) $(THINK_FLAG) $(DEBUG_FLAG)
 
 .PHONY: dry-run
-dry-run: config-hint db-hint ## Print the ingest to stdout without writing files or recording items
-	go run . ingest --db '$(value DB)' $(CONFIG_FLAG) --dry-run $(THINK_FLAG)
+dry-run: db-hint ## Print the ingest to stdout without writing files or recording items
+	go run . ingest $(DB_FLAG) $(CONFIG_FLAG) --dry-run $(THINK_FLAG)
 
 .PHONY: heuristic
-heuristic: config-hint db-hint ## Offline ingest with the model-free keyword scorer (no Ollama needed)
-	go run . ingest --db '$(value DB)' $(CONFIG_FLAG) --provider heuristic $(THINK_FLAG)
+heuristic: db-hint ## Offline ingest with the model-free keyword scorer (no Ollama needed)
+	go run . ingest $(DB_FLAG) $(CONFIG_FLAG) --provider heuristic $(THINK_FLAG)
 
 ##@ Eval
 
 .PHONY: eval
-eval: config-hint ## Benchmark scoring against GOLDEN (uses CONFIG, GOLDEN, FORMAT)
-	go run . eval benchmark --db '$(value DB)' $(GOLDEN) $(CONFIG_FLAG) --format $(FORMAT) $(THINK_FLAG)
+eval: ## Benchmark scoring against GOLDEN (GOLDEN, FORMAT; CONFIG optional)
+	go run . eval benchmark $(DB_FLAG) $(GOLDEN) $(CONFIG_FLAG) --format $(FORMAT) $(THINK_FLAG)
 
 .PHONY: eval-example
 eval-example: ## Benchmark the shipped example dataset with the model-free scorer (no Ollama needed)
-	go run . eval benchmark --db '$(value DB)' configs/golden.example.yaml $(CONFIG_FLAG) --provider heuristic
+	go run . eval benchmark $(DB_FLAG) docs/examples/golden.yaml $(CONFIG_FLAG) --provider heuristic
 
 .PHONY: eval-smoke
 eval-smoke: ## Render every report format from the example dataset, model-free
 	@for format in text markdown json; do \
 	  printf '\033[36m==> %s\033[0m\n' "$$format"; \
-	  go run . eval benchmark --db '$(value DB)' configs/golden.example.yaml --config configs/config.example.yaml \
+	  go run . eval benchmark $(DB_FLAG) docs/examples/golden.yaml --config docs/examples/config.yaml \
 	    --provider heuristic --format "$$format" > /dev/null || exit 1; \
 	done
-	@go run . eval benchmark --db '$(value DB)' configs/golden.example.yaml --config configs/config.example.yaml \
+	@go run . eval benchmark $(DB_FLAG) docs/examples/golden.yaml --config docs/examples/config.yaml \
 	  --provider heuristic | awk 'length > 120 { print "line over 120 columns: " $$0; fail=1 } END { exit fail }'
 
 ##@ Serve
 
 .PHONY: serve
-serve: config-hint db-hint build ## Serve the web UI and items API over HTTP (uses CONFIG, ADDR; DEBUG=1 for verbose ingest logging, DEV=1 to serve assets no-cache)
-	./$(BINARY) serve --db '$(value DB)' $(CONFIG_FLAG) --addr $(ADDR) $(DEBUG_FLAG) $(DEV_FLAG)
+serve: db-hint build ## Serve the web UI and items API over HTTP (CONFIG optional, ADDR; DEBUG=1 for verbose ingest logging, DEV=1 to serve assets no-cache)
+	./$(BINARY) serve $(DB_FLAG) $(CONFIG_FLAG) --addr $(ADDR) $(DEBUG_FLAG) $(DEV_FLAG)
 
 ##@ Test
 
@@ -225,11 +196,11 @@ check: lint test-race build ## The gate CI runs (run before committing; needs go
 
 .PHONY: debug
 debug: ## Run the ingest with verbose logging
-	go run . ingest --db '$(value DB)' $(CONFIG_FLAG) --debug $(THINK_FLAG)
+	go run . ingest $(DB_FLAG) $(CONFIG_FLAG) --debug $(THINK_FLAG)
 
 .PHONY: trace
 trace: ## Run the ingest with trace logging (raw model prompts/responses)
-	go run . ingest --db '$(value DB)' $(CONFIG_FLAG) --trace $(THINK_FLAG)
+	go run . ingest $(DB_FLAG) $(CONFIG_FLAG) --trace $(THINK_FLAG)
 
 .PHONY: db-dump-items
 db-dump: ## Dump the items table via the sqlite3 CLI (uses DB)
