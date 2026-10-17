@@ -6,19 +6,15 @@ package config
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
-
-// defaultFeedsFileName is the feeds file Load looks for next to the config
-// file when `ingest.feeds` isn't set.
-const defaultFeedsFileName = "feeds.yaml"
 
 // feedIDLen is how many hex characters of the URL digest make up a feed ID.
 // 12 hex chars (48 bits) makes an accidental collision across a personal feed
@@ -191,17 +187,6 @@ func ValidateFeedURL(raw string) error {
 	return nil
 }
 
-// FeedsFilePath returns the seed file to read and whether the user named it
-// explicitly. An explicit ingest.feeds is taken as written (resolved against the
-// process working directory, like `profile`); when unset, the default sits
-// beside the config file so moving the config directory keeps them together.
-func (c *Config) FeedsFilePath(configPath string) (path string, explicit bool) {
-	if c.Ingest.Feeds != "" {
-		return c.Ingest.Feeds, true
-	}
-	return filepath.Join(filepath.Dir(configPath), defaultFeedsFileName), false
-}
-
 // ReadFeedsFile parses the feed seed file at path. A missing file is not an
 // error — it reports found=false, which is an ordinary state now that feeds
 // live in the store and the file only seeds new ones.
@@ -213,11 +198,69 @@ func ReadFeedsFile(path string) (doc *FeedsDoc, found bool, err error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("read feeds file: %w", err)
 	}
-	doc = &FeedsDoc{}
-	if err := yaml.Unmarshal(raw, doc); err != nil {
+	doc, err = decodeFeeds(raw)
+	if err != nil {
 		return nil, false, fmt.Errorf("parse feeds file %s: %w", path, err)
 	}
 	return doc, true, nil
+}
+
+// ParseFeeds parses a feeds document. It must carry a `feeds:` key, so a
+// config file or an empty document is refused instead of importing nothing.
+func ParseFeeds(raw []byte) (*FeedsDoc, error) {
+	doc, err := decodeFeeds(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse feeds file: %w", err)
+	}
+	return doc, nil
+}
+
+func decodeFeeds(raw []byte) (*FeedsDoc, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(raw, &root); err != nil {
+		return nil, err
+	}
+	if !hasFeedsKey(&root) {
+		return nil, errors.New("not a feeds file: no feeds list")
+	}
+	doc := &FeedsDoc{}
+	if err := root.Decode(doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+// hasFeedsKey reports whether the document is a mapping with a top-level feeds key.
+func hasFeedsKey(root *yaml.Node) bool {
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return false
+	}
+	m := root.Content[0]
+	if m.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == "feeds" {
+			return true
+		}
+	}
+	return false
+}
+
+// MarshalFeeds renders a feed set as a seed file. yaml.Marshal defaults to
+// four-space indentation, which the shipped example does not use, so this goes
+// through an encoder to match what a hand-written feeds.yaml looks like.
+func MarshalFeeds(doc FeedsDoc) (string, error) {
+	var out strings.Builder
+	enc := yaml.NewEncoder(&out)
+	enc.SetIndent(2)
+	if err := enc.Encode(doc); err != nil {
+		return "", err
+	}
+	if err := enc.Close(); err != nil {
+		return "", err
+	}
+	return out.String(), nil
 }
 
 // ResolveFeeds applies the defaults cascade to every entry in doc. globalSince

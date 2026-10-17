@@ -4,10 +4,11 @@
 package web
 
 import (
+	"context"
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
 
@@ -18,22 +19,25 @@ import (
 
 // configData is the model for the read-only config viewer modal.
 type configData struct {
-	Path  string
+	Title string        // "config version N · source", or "defaults"
 	YAML  template.HTML // highlighted YAML, or empty when Error is set
 	Error string
+
+	Managed string // the --config file serve was started with, "" without one
 }
 
-// handleConfig returns the config-viewer modal fragment: the running config's
-// path and its file contents, syntax-highlighted, read-only. It's a fragment so
+// handleConfig returns the config-viewer modal fragment: the active config
+// version from the store, syntax-highlighted, read-only. It's a fragment so
 // htmx can swap it into the page's modal container.
 func (s *Web) handleConfig(w http.ResponseWriter, r *http.Request) {
-	data := configData{Path: s.cfgPath}
-	if raw, err := os.ReadFile(s.cfgPath); err != nil {
+	data := configData{Title: "defaults", Managed: s.managedBy}
+	raw, err := s.activeConfigYAML(r.Context(), &data)
+	if err != nil {
 		data.Error = err.Error()
 	} else {
 		// Never paint a credential into the page: the modal is opened over
 		// screen-shares and lands in screenshots.
-		data.YAML = highlightYAML(redactSecrets(string(raw)))
+		data.YAML = highlightYAML(redactSecrets(raw))
 	}
 
 	// The config modal is shared chrome (opened from the topbar gear on any
@@ -45,12 +49,31 @@ func (s *Web) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// secretKeyRE matches a YAML line whose key looks like a credential. It's
-// deliberately loose on the key (any key *containing* one of the words, so
-// `openai_api_key` and `auth_token` are caught too) and requires a non-empty
-// value, which is captured whole for the redactor to inspect.
+// activeConfigYAML returns the active version's YAML and sets the title from
+// it. With nothing saved it returns the empty config under a defaults note.
+func (s *Web) activeConfigYAML(ctx context.Context, data *configData) (string, error) {
+	v, ok, err := s.db.ActiveConfig(ctx)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		data.Title = fmt.Sprintf("config version %d · %s", v.Version, v.Source)
+		return v.Content, nil
+	}
+	empty, err := config.Config{}.Marshal()
+	if err != nil {
+		return "", err
+	}
+	return "# defaults: nothing saved yet\n" + string(empty), nil
+}
+
+// secretKeyRE matches a YAML line whose key looks like a credential. A credential
+// word has to be a whole `_`, `.` or `-` separated part of the key, so
+// `openai_api_key` and `auth_token` are caught but `tokens_per_item` is not. It
+// requires a non-empty value, which is captured whole for the redactor to inspect.
 var secretKeyRE = regexp.MustCompile(
-	`(?i)^(\s*(?:- )?)([a-z0-9_.-]*(?:api_key|apikey|token|secret|password|passwd)[a-z0-9_.-]*)(\s*:[ \t]*)(.+)$`)
+	`(?i)^(\s*(?:- )?)((?:[a-z0-9_.-]*[_.-])?(?:api_key|apikey|token|secret|password|passwd)(?:[_.-][a-z0-9_.-]*)?)(\s*:[ \t]*)(.+)$`,
+)
 
 // redactedMask stands in for a secret's value in the viewer.
 const redactedMask = "••••••••"
@@ -155,7 +178,7 @@ func redactSecrets(src string) string {
 			continue
 		}
 		value, comment := splitComment(m[4])
-		if isBlankScalar(value) {
+		if isBlankScalar(value) || isAllowedRef(value) {
 			continue
 		}
 		redacted := m[1] + m[2] + m[3] + redactedMask
@@ -165,6 +188,13 @@ func redactSecrets(src string) string {
 		lines[i] = redacted
 	}
 	return strings.Join(lines, "\n")
+}
+
+// isAllowedRef reports whether a value is a reference to an allow-listed
+// RABBITHOLE_* variable. It is a name, not a secret, so the viewer shows it.
+func isAllowedRef(v string) bool {
+	v = strings.Trim(strings.TrimSpace(v), `"'`)
+	return config.ValidRef(v) == nil
 }
 
 // isBlankScalar reports whether a YAML value carries nothing worth hiding:

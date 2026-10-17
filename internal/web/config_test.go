@@ -6,59 +6,65 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
-func TestHandleConfig(t *testing.T) {
+func configTestWeb(t *testing.T) (*Web, *store.Store) {
+	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	return New(db, db.ConfigSource(), testIngestManager(t, db)), db
+}
 
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	body := "provider: ollama\nthink: false # no thinking mode\n"
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	w := New(db, &config.Config{}, path, testIngestManager(t, db))
+func getConfig(t *testing.T, w *Web) string {
+	t.Helper()
 	rec := httptest.NewRecorder()
 	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/config", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /config: status = %d, want 200; body=%s", rec.Code, rec.Body)
 	}
-	out := rec.Body.String()
-	if !strings.Contains(out, path) {
-		t.Errorf("config modal missing path %q", path)
+	return rec.Body.String()
+}
+
+func TestHandleConfigShowsActiveVersion(t *testing.T) {
+	w, db := configTestWeb(t)
+	ctx := t.Context()
+	if _, err := db.SaveConfig(ctx, "inference:\n  provider: ollama\n", "h1", "import:/a/c.yaml", 0); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(out, `<span class="yml-key">provider</span>`) {
-		t.Errorf("config modal missing highlighted key; body=%s", out)
+	if _, err := db.SaveConfig(
+		ctx,
+		"inference:\n  provider: vllm # served locally\n",
+		"h2",
+		store.ConfigSourceUI,
+		1,
+	); err != nil {
+		t.Fatal(err)
+	}
+	out := getConfig(t, w)
+	if !strings.Contains(out, "config version 2") || !strings.Contains(out, "ui") {
+		t.Errorf("title missing the active version and source; body=%s", out)
+	}
+	if !strings.Contains(out, `<span class="yml-key">provider</span>`) || !strings.Contains(out, "vllm") {
+		t.Errorf("config modal missing the active content; body=%s", out)
+	}
+	if strings.Contains(out, "import:/a/c.yaml") {
+		t.Errorf("an older version's source leaked into the title; body=%s", out)
 	}
 }
 
-func TestHandleConfigMissingFile(t *testing.T) {
-	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	// A bad path renders the modal with an error rather than failing the request.
-	w := New(db, &config.Config{}, filepath.Join(t.TempDir(), "nope.yaml"), testIngestManager(t, db))
-	rec := httptest.NewRecorder()
-	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/config", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /config: status = %d, want 200", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "could not read config") {
-		t.Errorf("expected error message in modal; body=%s", rec.Body)
+func TestHandleConfigDefaultsWhenNothingSaved(t *testing.T) {
+	w, _ := configTestWeb(t)
+	out := getConfig(t, w)
+	if !strings.Contains(out, "defaults") || !strings.Contains(out, "nothing saved yet") {
+		t.Errorf("expected the defaults note; body=%s", out)
 	}
 }
 
@@ -81,26 +87,14 @@ func TestHighlightYAML(t *testing.T) {
 // A set credential must never reach the rendered page — the modal is opened
 // over screen-shares and lands in screenshots (review finding 1.1).
 func TestHandleConfigRedactsSecrets(t *testing.T) {
-	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	w, db := configTestWeb(t)
 
 	const secret = "sk-live-SUPERSECRET-0123456789"
-	path := filepath.Join(t.TempDir(), "config.yaml")
 	body := "inference:\n  provider: ollama\n  api_key: \"" + secret + "\" # ollama cloud\n"
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+	if _, err := db.SaveConfig(t.Context(), body, "h", store.ConfigSourceUI, 0); err != nil {
 		t.Fatal(err)
 	}
-
-	w := New(db, &config.Config{}, path, testIngestManager(t, db))
-	rec := httptest.NewRecorder()
-	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/config", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /config: status = %d, want 200", rec.Code)
-	}
-	out := rec.Body.String()
+	out := getConfig(t, w)
 	if strings.Contains(out, secret) {
 		t.Fatalf("api_key leaked into the config modal; body=%s", out)
 	}
@@ -113,6 +107,18 @@ func TestHandleConfigRedactsSecrets(t *testing.T) {
 	}
 }
 
+func TestHandleConfigKeepsAllowedReferences(t *testing.T) {
+	w, db := configTestWeb(t)
+	body := "inference:\n  provider: ollama\n  api_key: $RABBITHOLE_INFERENCE_API_KEY\n"
+	if _, err := db.SaveConfig(t.Context(), body, "h", store.ConfigSourceUI, 0); err != nil {
+		t.Fatal(err)
+	}
+	out := getConfig(t, w)
+	if !strings.Contains(out, "RABBITHOLE_INFERENCE_API_KEY") {
+		t.Errorf("allow-listed reference was masked; body=%s", out)
+	}
+}
+
 func TestRedactSecrets(t *testing.T) {
 	cases := []struct {
 		name string
@@ -122,13 +128,26 @@ func TestRedactSecrets(t *testing.T) {
 		{"quoted key", `  api_key: "abc123"`, "  api_key: " + redactedMask},
 		{"bare key", `api_key: abc123`, "api_key: " + redactedMask},
 		{"prefixed key", `  openai_api_key: abc`, "  openai_api_key: " + redactedMask},
+		{"tokens_per_item stays visible", `    tokens_per_item: 400`, `    tokens_per_item: 400`},
+		{"tokens_overhead stays visible", `    tokens_overhead: 200`, `    tokens_overhead: 200`},
+		{"tokens_thinking stays visible", `    tokens_thinking: 800`, `    tokens_thinking: 800`},
+		{"max_tokens stays visible", `    max_tokens: 800`, `    max_tokens: 800`},
+		{"dashed key", `  api-token: xyz`, "  api-token: " + redactedMask},
 		{"token", `token: xyz`, "token: " + redactedMask},
 		{"auth_token", `  auth_token: xyz`, "  auth_token: " + redactedMask},
 		{"password", `password: hunter2`, "password: " + redactedMask},
 		{"client_secret", `client_secret: shh`, "client_secret: " + redactedMask},
 		{"list item", `  - token: xyz`, "  - token: " + redactedMask},
 		{"comment kept", `api_key: abc # note`, "api_key: " + redactedMask + " # note"},
-		{"env reference", `api_key: $API_KEY`, "api_key: " + redactedMask},
+		{"env reference outside the allow-list", `api_key: $API_KEY`, "api_key: " + redactedMask},
+		{"allow-listed reference", `api_key: $RABBITHOLE_INFERENCE_API_KEY`, `api_key: $RABBITHOLE_INFERENCE_API_KEY`},
+		{
+			"braced allow-listed reference",
+			`api_key: ${RABBITHOLE_SUMMARY_API_KEY}`,
+			`api_key: ${RABBITHOLE_SUMMARY_API_KEY}`,
+		},
+		{"db url reference", `api_key: $RABBITHOLE_DB`, "api_key: " + redactedMask},
+		{"db password reference", `api_key: $RABBITHOLE_DB_PASSWORD`, "api_key: " + redactedMask},
 		// Nothing to hide: an unset value stays legible.
 		{"empty quoted", `api_key: ""`, `api_key: ""`},
 		{"empty", `api_key:`, `api_key:`},
@@ -240,5 +259,18 @@ func TestRedactSecretsMultiline(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q; got %q", want, got)
 		}
+	}
+}
+
+func TestHandleConfigManagedNote(t *testing.T) {
+	w, _ := configTestWeb(t)
+	if out := getConfig(t, w); strings.Contains(out, "is managed by") {
+		t.Errorf("managed note shown without --config; body=%s", out)
+	}
+	w.SetManagedBy("./a.yaml")
+	out := getConfig(t, w)
+	if !strings.Contains(out, "config is managed by") || !strings.Contains(out, "./a.yaml") ||
+		!strings.Contains(out, "re-applied on every start") {
+		t.Errorf("managed note missing; body=%s", out)
 	}
 }

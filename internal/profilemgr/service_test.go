@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/profile"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -48,8 +47,7 @@ func TestBootstrapLegacyOnceDoesNotOverrideSelection(t *testing.T) {
 	if err := os.WriteFile(path, []byte("<!-- note -->\n# Legacy"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config.Config{Profile: path}
-	if err := s.BootstrapLegacy(t.Context(), cfg); err != nil {
+	if err := s.BootstrapLegacy(t.Context(), path); err != nil {
 		t.Fatal(err)
 	}
 	first, err := s.Resolve(t.Context())
@@ -62,7 +60,7 @@ func TestBootstrapLegacyOnceDoesNotOverrideSelection(t *testing.T) {
 	if err := os.WriteFile(path, []byte("# Changed on disk"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.BootstrapLegacy(t.Context(), cfg); err != nil {
+	if err := s.BootstrapLegacy(t.Context(), path); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.Resolve(t.Context())
@@ -81,8 +79,7 @@ func TestDeletedLegacyImportDoesNotReappear(t *testing.T) {
 	if err := os.WriteFile(path, []byte("# Legacy"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config.Config{Profile: path}
-	if err := s.BootstrapLegacy(t.Context(), cfg); err != nil {
+	if err := s.BootstrapLegacy(t.Context(), path); err != nil {
 		t.Fatal(err)
 	}
 	locals, err := db.ListProfiles(t.Context())
@@ -92,7 +89,7 @@ func TestDeletedLegacyImportDoesNotReappear(t *testing.T) {
 	if err := s.Delete(t.Context(), locals[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.BootstrapLegacy(t.Context(), cfg); err != nil {
+	if err := s.BootstrapLegacy(t.Context(), path); err != nil {
 		t.Fatal(err)
 	}
 	locals, err = db.ListProfiles(t.Context())

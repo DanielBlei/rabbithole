@@ -16,6 +16,7 @@ import (
 	"os/user"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -83,9 +84,7 @@ const (
 // Web renders the HTML frontend over the same store the JSON API uses.
 type Web struct {
 	db       *store.Store
-	cfg      *config.Config
-	user     string // shell-prompt name: cfg.User, or the OS user when blank
-	cfgPath  string // config file path, read on demand by the config viewer
+	src      config.Source
 	ing      *ingest.Manager
 	profiles *profilemgr.Service
 
@@ -94,19 +93,34 @@ type Web struct {
 	hashing  chan struct{}  // password-hash slots, hashSlots wide
 	trusted  []netip.Prefix // proxies whose forwarding headers are believed
 	dev      bool           // serve assets no-cache, for editing them live
+
+	managedBy string // the --config file re-applied on every start, "" without one
 }
 
-// New returns a Web backed by db, using cfg for request defaults. cfgPath is
-// the config file the viewer reads and displays read-only. ing owns the
+// New returns a Web backed by db, reading the run config from src once per request. ing owns the
 // in-process ingest runs the UI triggers and watches.
-func New(db *store.Store, cfg *config.Config, cfgPath string, ing *ingest.Manager) *Web {
+func New(db *store.Store, src config.Source, ing *ingest.Manager) *Web {
 	return &Web{
-		db: db, cfg: cfg, user: promptUser(cfg.User), cfgPath: cfgPath, ing: ing,
+		db: db, src: src, ing: ing,
 		profiles: profilemgr.New(db),
 		sessions: newSessionStore(), limiter: newLoginLimiter(),
 		hashing: make(chan struct{}, hashSlots), trusted: DefaultTrustedProxies,
 	}
 }
+
+// runConfig takes the request's one snapshot of the run config.
+func (s *Web) runConfig(ctx context.Context) (config.Config, error) {
+	cfg, _, err := s.src.Active(ctx)
+	return cfg, err
+}
+
+// osUser looks the OS login name up once: it is a syscall and never changes.
+var osUser = sync.OnceValue(func() string {
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return ""
+})
 
 // promptUser picks the shell-prompt name: the configured user, or the OS login
 // name when config leaves it blank. If even that can't be read, it stays empty
@@ -115,10 +129,7 @@ func promptUser(configured string) string {
 	if configured != "" {
 		return configured
 	}
-	if u, err := user.Current(); err == nil {
-		return u.Username
-	}
-	return ""
+	return osUser()
 }
 
 // Routes returns the web handler: the digest ("feed") page — the landing page,
@@ -154,6 +165,7 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /sources/export", s.handleSourceExport)
 	mux.HandleFunc("GET /sources/{id}", s.handleSourceSelect)
 	mux.HandleFunc("POST /sources", s.handleSourceAdd)
+	mux.HandleFunc("POST /sources/import", s.handleSourceImport)
 	mux.HandleFunc("POST /sources/defaults", s.handleSourceSaveDefaults)
 	mux.HandleFunc("POST /sources/{id}", s.handleSourceSave)
 	mux.HandleFunc("POST /sources/{id}/enabled", s.handleSourceEnabled)
@@ -240,6 +252,10 @@ func (s *Web) staticControl() string {
 // no-cache, so a rebuild shows on the next reload rather than after the normal
 // cache window.
 func (s *Web) SetDev(on bool) { s.dev = on }
+
+// SetManagedBy names the config file the server re-applies on every start, so
+// the config viewer can say that edits made elsewhere last until the next restart.
+func (s *Web) SetManagedBy(path string) { s.managedBy = path }
 
 // contentTags hashes every embedded asset once, at startup. The whole tree is
 // under a megabyte, and doing it here means no hashing on the request path and
@@ -493,13 +509,18 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	cfg, err := s.runConfig(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	items := toRows(rows)
 	chrome := s.chrome(r.Context())
 	data := pageData{
 		Title:      "The Rabbit Hole",
 		Active:     "feed",
 		Chrome:     chrome,
-		PromptUser: s.user,
+		PromptUser: promptUser(cfg.User),
 		Stats: s.stats(
 			r,
 			rows,

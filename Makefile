@@ -1,5 +1,6 @@
 BINARY   := rabbithole
-CONFIG   ?= ./configs/config.example.yaml
+CONFIG   ?=
+CONFIG_FLAG := $(if $(CONFIG),--config $(CONFIG),)
 PKG      := ./...
 NO_THINK ?=
 THINK_FLAG := $(if $(NO_THINK),--no-think,)
@@ -9,6 +10,9 @@ DEBUG_FLAG := $(if $(DEBUG),--debug,)
 DEV      ?=
 DEV_FLAG := $(if $(DEV),--dev,)
 GOLDEN   ?= ./configs/golden.example.yaml
+# Repo work keeps its store here, so it never touches the personal one in the user
+# data dir and never sees the legacy-location warning.
+DB       ?= ./data/rabbithole.db
 FORMAT   ?= text
 
 # Nearest git tag plus any commits past it.
@@ -57,6 +61,17 @@ config-hint:
 	  printf '\033[33m▌\033[0m\n'; \
 	esac
 
+# Says where a make target keeps its data, and how to change it.
+USER_DATA_DIR := $(if $(filter Darwin,$(shell uname -s)),~/Library/Application Support/rabbithole,~/.local/share/rabbithole)
+.PHONY: db-hint
+db-hint:
+	@printf '\033[33m▌\033[0m make keeps your data $(if $(filter file,$(origin DB)),in the repo,in): \033[36m$(DB)\033[0m\n'
+	@printf '\033[33m▌\033[0m   Use another local store:  \033[36mmake $(or $(firstword $(MAKECMDGOALS)),serve) DB=/path/to/rabbithole.db\033[0m\n'
+	@printf '\033[33m▌\033[0m   Use Postgres:             \033[36mmake $(or $(firstword $(MAKECMDGOALS)),serve) DB=postgres://user@host:5432/rabbithole\033[0m\n'
+	@printf '\033[33m▌\033[0m                             with \033[36mRABBITHOLE_DB_PASSWORD\033[0m set in .env or your shell profile\n'
+	@printf '\033[33m▌\033[0m                             (a password in the URL is accepted, but not recommended)\n'
+	@printf '\033[33m▌\033[0m   Run without make:         \033[36m./$(BINARY)\033[0m uses \033[36m$(USER_DATA_DIR)\033[0m, or RABBITHOLE_DB when set\n'
+
 .PHONY: setup
 setup: ## Create config.yaml, feeds.yaml and golden.yaml from the examples (if missing)
 	@test -f configs/config.yaml  || ( \
@@ -86,76 +101,76 @@ clean: ## Remove build artifacts (DATA=1 also deletes ./data — the database an
 
 .PHONY: clean-feeds
 clean-feeds: ## Delete every feed item from the store, keeping todos, ideas and run history (uses CONFIG)
-	@printf 'Delete every feed item from the store in \033[36m$(CONFIG)\033[0m?\n'
+	@printf 'Delete every feed item from the store?\n'
 	@printf 'Bookmarks, ratings and notes go too. Todos, ideas and run history are kept.\n'
 	@printf 'The next ingest re-fetches and re-scores anything still in your feeds. [y/N] '
 	@read ans; case "$$ans" in \
-	  [yY]*) go run . items prune --all --include-saved --config $(CONFIG);; \
+	  [yY]*) go run . items prune --all --include-saved --db '$(value DB)' $(CONFIG_FLAG);; \
 	  *) echo "kept";; \
 	esac
 
 ##@ ingest
 
 .PHONY: ingest
-ingest: config-hint ## Fetch, rank, and record to the store (uses CONFIG, NO_THINK=1 to disable thinking)
-	go run . ingest --config $(CONFIG) $(THINK_FLAG) $(DEBUG_FLAG)
+ingest: config-hint db-hint ## Fetch, rank, and record to the store (uses CONFIG, NO_THINK=1 to disable thinking)
+	go run . ingest --db '$(value DB)' $(CONFIG_FLAG) $(THINK_FLAG) $(DEBUG_FLAG)
 
 .PHONY: dry-run
-dry-run: config-hint ## Print the ingest to stdout without writing files or recording items
-	go run . ingest --config $(CONFIG) --dry-run $(THINK_FLAG)
+dry-run: config-hint db-hint ## Print the ingest to stdout without writing files or recording items
+	go run . ingest --db '$(value DB)' $(CONFIG_FLAG) --dry-run $(THINK_FLAG)
 
 .PHONY: heuristic
-heuristic: config-hint ## Offline ingest with the model-free keyword scorer (no Ollama needed)
-	go run . ingest --config $(CONFIG) --provider heuristic $(THINK_FLAG)
+heuristic: config-hint db-hint ## Offline ingest with the model-free keyword scorer (no Ollama needed)
+	go run . ingest --db '$(value DB)' $(CONFIG_FLAG) --provider heuristic $(THINK_FLAG)
 
 ##@ Eval
 
 .PHONY: eval
-eval: config-hint ## Benchmark scoring against configs/golden.yaml (uses CONFIG, GOLDEN, FORMAT)
-	go run . eval benchmark $(GOLDEN) --config $(CONFIG) --format $(FORMAT) $(THINK_FLAG)
+eval: config-hint ## Benchmark scoring against GOLDEN (uses CONFIG, GOLDEN, FORMAT)
+	go run . eval benchmark --db '$(value DB)' $(GOLDEN) $(CONFIG_FLAG) --format $(FORMAT) $(THINK_FLAG)
 
 .PHONY: eval-example
 eval-example: ## Benchmark the shipped example dataset with the model-free scorer (no Ollama needed)
-	go run . eval benchmark configs/golden.example.yaml --config $(CONFIG) --provider heuristic
+	go run . eval benchmark --db '$(value DB)' configs/golden.example.yaml $(CONFIG_FLAG) --provider heuristic
 
 .PHONY: eval-smoke
 eval-smoke: ## Render every report format from the example dataset, model-free
 	@for format in text markdown json; do \
 	  printf '\033[36m==> %s\033[0m\n' "$$format"; \
-	  go run . eval benchmark configs/golden.example.yaml --config configs/config.example.yaml \
+	  go run . eval benchmark --db '$(value DB)' configs/golden.example.yaml --config configs/config.example.yaml \
 	    --provider heuristic --format "$$format" > /dev/null || exit 1; \
 	done
-	@go run . eval benchmark configs/golden.example.yaml --config configs/config.example.yaml \
+	@go run . eval benchmark --db '$(value DB)' configs/golden.example.yaml --config configs/config.example.yaml \
 	  --provider heuristic | awk 'length > 120 { print "line over 120 columns: " $$0; fail=1 } END { exit fail }'
 
 ##@ Serve
 
 .PHONY: serve
-serve: config-hint ## Serve the web UI and items API over HTTP (uses CONFIG, ADDR; DEBUG=1 for verbose ingest logging, DEV=1 to serve assets no-cache)
-	go run . serve --config $(CONFIG) --addr $(ADDR) $(DEBUG_FLAG) $(DEV_FLAG)
+serve: config-hint db-hint build ## Serve the web UI and items API over HTTP (uses CONFIG, ADDR; DEBUG=1 for verbose ingest logging, DEV=1 to serve assets no-cache)
+	./$(BINARY) serve --db '$(value DB)' $(CONFIG_FLAG) --addr $(ADDR) $(DEBUG_FLAG) $(DEV_FLAG)
 
 ##@ Test
 
 .PHONY: test
 test: ## Run the test suite
-	@RABBITHOLE_DB_PASSWORD= go test $(PKG)
+	@RABBITHOLE_DB= RABBITHOLE_DB_PASSWORD= go test $(PKG)
 
 .PHONY: test-v
 test-v: ## Run the test suite verbosely
-	@RABBITHOLE_DB_PASSWORD= go test -v $(PKG)
+	@RABBITHOLE_DB= RABBITHOLE_DB_PASSWORD= go test -v $(PKG)
 
 .PHONY: test-race
 test-race: ## Run tests with the race detector
-	@RABBITHOLE_DB_PASSWORD= go test -race $(PKG)
+	@RABBITHOLE_DB= RABBITHOLE_DB_PASSWORD= go test -race $(PKG)
 
 .PHONY: bench
 bench: ## Run ranking and store benchmarks
-	@RABBITHOLE_DB_PASSWORD= go test -bench=. -benchmem ./internal/rank ./internal/store
+	@RABBITHOLE_DB= RABBITHOLE_DB_PASSWORD= go test -bench=. -benchmem ./internal/rank ./internal/store
 
 .PHONY: cover
 cover: ## Run tests and open an HTML coverage report
-	@RABBITHOLE_DB_PASSWORD= go test -coverprofile=coverage.out $(PKG)
-	@RABBITHOLE_DB_PASSWORD= go tool cover -html=coverage.out
+	@RABBITHOLE_DB= RABBITHOLE_DB_PASSWORD= go test -coverprofile=coverage.out $(PKG)
+	@RABBITHOLE_DB= RABBITHOLE_DB_PASSWORD= go tool cover -html=coverage.out
 
 # The suite runs on SQLite by default and needs nothing installed. These three
 # run the same tests a second time against Postgres, which is opt-in: `check`
@@ -172,7 +187,7 @@ pg-down: ## Stop the throwaway Postgres and drop its data
 .PHONY: test-pg
 test-pg: ## Run the store suite against the throwaway Postgres
 	@./scripts/dev-postgres.sh status >/dev/null || { echo "not running; start it with 'make pg-up'" >&2; exit 1; }
-	@RABBITHOLE_TEST_POSTGRES="$$(./scripts/dev-postgres.sh dsn)" go test -count=1 ./internal/store/...
+	@RABBITHOLE_DB= RABBITHOLE_TEST_POSTGRES="$$(./scripts/dev-postgres.sh dsn)" go test -count=1 ./internal/store/...
 
 ##@ Quality
 
@@ -210,14 +225,13 @@ check: lint test-race build ## The gate CI runs (run before committing; needs go
 
 .PHONY: debug
 debug: ## Run the ingest with verbose logging
-	go run . ingest --config $(CONFIG) --debug $(THINK_FLAG)
+	go run . ingest --db '$(value DB)' $(CONFIG_FLAG) --debug $(THINK_FLAG)
 
 .PHONY: trace
 trace: ## Run the ingest with trace logging (raw model prompts/responses)
-	go run . ingest --config $(CONFIG) --trace $(THINK_FLAG)
+	go run . ingest --db '$(value DB)' $(CONFIG_FLAG) --trace $(THINK_FLAG)
 
 .PHONY: db-dump-items
-db-dump: ## Dump the items table via the sqlite3 CLI (requires DB=path)
-	@test -n "$(DB)" || { echo "usage: make db-dump DB=./data/rabbithole.db" >&2; exit 1; }
+db-dump: ## Dump the items table via the sqlite3 CLI (uses DB)
 	sqlite3 -header -column $(DB) "SELECT id, source, title, status, llm_score, user_score, digested_on, created_at FROM items ORDER BY created_at;"
 

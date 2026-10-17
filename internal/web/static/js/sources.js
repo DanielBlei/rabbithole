@@ -1,5 +1,6 @@
 // The Sources dialog: instant client-side filtering and paging of the feed
-// list, and the copy button on the export modal.
+// list, the copy button on the export modal, and importing a feeds file by
+// picker or drop.
 //
 // Both are client-side because the whole set is already in the dialog and a
 // personal feed list is tens of rows, not thousands — the same call the Feed
@@ -218,6 +219,87 @@
     sel.removeAllRanges();
     sel.addRange(range);
   }
+
+  // ---- import ----------------------------------------------------------
+  // The server answers with the repainted #srcBody (and the out-of-band tally),
+  // so the response is swapped in the way an htmx request would have.
+  function sendFeeds(file) {
+    var body = document.getElementById('srcBody');
+    if (!file || !body) return;
+    var form = new FormData();
+    form.append('file', file);
+    fetch('/sources/import', { method: 'POST', body: form, credentials: 'same-origin' })
+      .then(function (res) {
+        // An expired session redirects to the login page; let the gate take over
+        // rather than swap that page into the dialog.
+        if (res.redirected || new URL(res.url).pathname !== '/sources/import') {
+          window.location.reload();
+          return null;
+        }
+        if (!res.ok) throw new Error('status ' + res.status);
+        return res.text();
+      })
+      .then(function (html) {
+        var target = document.getElementById('srcBody');
+        if (html !== null && target) htmx.swap(target, html, { swapStyle: 'outerHTML' });
+      })
+      .catch(function () { importError('could not import the feeds file'); });
+  }
+
+  // Same markup as the server's error banner, put at the top of the list column.
+  function importError(msg) {
+    var col = document.querySelector('#srcBody .src__col');
+    if (!col) return;
+    var old = col.querySelector('.src__import');
+    if (old) old.remove();
+    var el = document.createElement('div');
+    el.className = 'sdet__err src__import';
+    el.setAttribute('role', 'alert');
+    el.textContent = msg;
+    col.insertBefore(el, col.firstChild);
+    var zone = document.getElementById('srcBody');
+    if (zone) zone.classList.remove('is-drop');
+  }
+
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-src-import]');
+    if (!btn) return;
+    var input = document.querySelector('[data-src-file]');
+    if (input) input.click();
+  });
+
+  document.addEventListener('change', function (e) {
+    if (!e.target.matches('[data-src-file]')) return;
+    sendFeeds(e.target.files[0]);
+    e.target.value = '';
+  });
+
+  function dropTarget(e) {
+    return e.target.closest && e.target.closest('[data-src-drop]');
+  }
+  function hasFiles(e) {
+    return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') !== -1;
+  }
+
+  document.addEventListener('dragover', function (e) {
+    var zone = dropTarget(e);
+    if (!zone || !hasFiles(e)) return;
+    e.preventDefault();
+    zone.classList.add('is-drop');
+  });
+
+  document.addEventListener('dragleave', function (e) {
+    var zone = dropTarget(e);
+    if (zone && !zone.contains(e.relatedTarget)) zone.classList.remove('is-drop');
+  });
+
+  document.addEventListener('drop', function (e) {
+    var zone = dropTarget(e);
+    if (!zone || !hasFiles(e)) return;
+    e.preventDefault();
+    zone.classList.remove('is-drop');
+    sendFeeds(e.dataTransfer.files[0]);
+  });
 
   function refresh() { apply(); flagInsecure(); }
 

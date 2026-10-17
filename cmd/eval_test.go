@@ -48,16 +48,14 @@ func TestResolveBenchmarkOptions(t *testing.T) {
 		name     string
 		args     []string
 		limitSet bool
+		noArgs   bool
 		setup    func()
 		wantErr  bool
 		check    func(t *testing.T, o eval.BenchmarkOptions)
 	}{
 		{
-			name: "bare benchmark defaults to the golden file beside the config",
+			name: "defaults apply to the named dataset",
 			check: func(t *testing.T, o eval.BenchmarkOptions) {
-				if o.Path != defaultBenchmarkPath {
-					t.Errorf("Path = %q, want %q", o.Path, defaultBenchmarkPath)
-				}
 				if o.Repeats != eval.DefaultRepeats {
 					t.Errorf("Repeats = %d, want %d", o.Repeats, eval.DefaultRepeats)
 				}
@@ -76,13 +74,18 @@ func TestResolveBenchmarkOptions(t *testing.T) {
 			},
 		},
 		{
-			name: "positional argument overrides the default golden file",
+			name: "the positional argument is the dataset path",
 			args: []string{"testdata/other.yaml"},
 			check: func(t *testing.T, o eval.BenchmarkOptions) {
 				if o.Path != "testdata/other.yaml" {
 					t.Errorf("Path = %q, want testdata/other.yaml", o.Path)
 				}
 			},
+		},
+		{
+			name:    "a missing dataset path is refused",
+			noArgs:  true,
+			wantErr: true,
 		},
 		{
 			name:     "limit narrows the run",
@@ -154,7 +157,11 @@ func TestResolveBenchmarkOptions(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup()
 			}
-			o, err := resolveBenchmarkOptions(tt.args, tt.limitSet)
+			args := tt.args
+			if args == nil && !tt.noArgs {
+				args = []string{"golden.yaml"}
+			}
+			o, err := resolveBenchmarkOptions(args, tt.limitSet)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("resolveBenchmarkOptions() error = nil, want non-nil")
