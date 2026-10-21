@@ -76,22 +76,49 @@ const baseWithoutProfile = "store:\n  db_path: ./test.db\n"
 // minimalFeeds is the smallest valid feeds file.
 const minimalFeeds = "feeds:\n  - name: x\n    url: http://x\n"
 
-func TestLoadSinceDaysAndHours(t *testing.T) {
+func TestSplitTurnsIngestSinceIntoALegacyDirective(t *testing.T) {
 	for _, tc := range []struct {
 		since string
 		want  time.Duration
 	}{
 		{"ingest:\n  since: 14d\n", 14 * 24 * time.Hour},
 		{"ingest:\n  since: 168h\n", 168 * time.Hour},
-		{"", 7 * 24 * time.Hour}, // omitted -> default 7d
+		{"", 0}, // omitted: nothing to write to the feed defaults
 	} {
-		cfg, err := loadFile(writeConfig(t, baseFeeds+tc.since))
+		f, err := ReadFile(writeConfig(t, baseFeeds+tc.since))
 		if err != nil {
-			t.Fatalf("Load(since=%q): %v", tc.since, err)
+			t.Fatalf("ReadFile(since=%q): %v", tc.since, err)
 		}
-		if cfg.Ingest.Since.Std() != tc.want {
-			t.Errorf("since=%q -> %s, want %s", tc.since, cfg.Ingest.Since, tc.want)
+		run, _, legacy, _ := f.Split()
+		if legacy.Since.Std() != tc.want {
+			t.Errorf("since=%q -> legacy %s, want %s", tc.since, legacy.Since, tc.want)
 		}
+		if run.Ingest != (IngestConfig{}) {
+			t.Errorf("since=%q leaked into the stored config: %+v", tc.since, run.Ingest)
+		}
+	}
+}
+
+func TestFileDeprecations(t *testing.T) {
+	f, err := ParseFile([]byte("ingest:\n  since: 3d\n  digest_dir: ./d\ninference:\n  summary:\n    model: m\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := f.Deprecations()
+	if len(got) != 3 {
+		t.Fatalf("Deprecations() = %q, want one warning per deprecated key", got)
+	}
+	for i, key := range []string{"ingest.since", "ingest.digest_dir", "inference.summary"} {
+		if !strings.HasPrefix(got[i], key) || !strings.Contains(got[i], "v0.4.0") {
+			t.Errorf("warning %d = %q, want it to name %s and v0.4.0", i, got[i], key)
+		}
+	}
+	clean, err := ParseFile([]byte("inference:\n  provider: ollama\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := clean.Deprecations(); len(w) != 0 {
+		t.Errorf("Deprecations() = %q for a current file, want none", w)
 	}
 }
 
@@ -177,19 +204,13 @@ func TestLoadStructuredOutput(t *testing.T) {
 
 func TestLoadEffort(t *testing.T) {
 	for _, tc := range []struct {
-		body        string
-		want        string
-		wantSummary string
-		wantErr     string
+		body    string
+		want    string
+		wantErr string
 	}{
 		{body: "inference:\n  provider: openai\n", want: "medium"},
 		{body: "inference:\n  provider: openai\n  effort: xhigh\n", want: "xhigh"},
-		{
-			body: "inference:\n  provider: openai\n  effort: low\n  summary:\n    model: m\n    effort: high\n",
-			want: "low", wantSummary: "high",
-		},
 		{body: "inference:\n  provider: openai\n  effort: none\n", wantErr: `inference.effort "none"`},
-		{body: "inference:\n  provider: openai\n  summary:\n    model: m\n    effort: max\n", wantErr: `inference.summary.effort "max"`},
 	} {
 		cfg, err := loadFile(writeConfig(t, baseFeeds+tc.body))
 		if tc.wantErr != "" {
@@ -203,13 +224,6 @@ func TestLoadEffort(t *testing.T) {
 		}
 		if cfg.Inference.Effort != tc.want {
 			t.Errorf("Load(%q) effort = %q, want %q", tc.body, cfg.Inference.Effort, tc.want)
-		}
-		wantSummary := tc.wantSummary
-		if wantSummary == "" {
-			wantSummary = tc.want
-		}
-		if got := cfg.Inference.ResolveSummary().Effort; got != wantSummary {
-			t.Errorf("Load(%q) summary effort = %q, want %q", tc.body, got, wantSummary)
 		}
 	}
 }
@@ -293,7 +307,8 @@ func TestSystemPromptSettingUnmarshalYAML(t *testing.T) {
 		want    SystemPromptSetting
 		wantErr bool
 	}{
-		{"path", "system_prompt: ./prompts/system.md", SystemPromptSetting{Path: "./prompts/system.md"}, false},
+		{"text", "system_prompt: Score everything a 10.", SystemPromptSetting{Text: "Score everything a 10."}, false},
+		{"multiline text", "system_prompt: |\n  line one\n  line two\n", SystemPromptSetting{Text: "line one\nline two\n"}, false},
 		{"false disables", "system_prompt: false", SystemPromptSetting{Disabled: true}, false},
 		{"true is rejected", "system_prompt: true", SystemPromptSetting{}, true},
 	} {
@@ -318,196 +333,107 @@ func TestSystemPromptSettingUnmarshalYAML(t *testing.T) {
 	}
 }
 
-func TestSystemPromptSettingLoadOverride(t *testing.T) {
-	t.Run("unset path returns empty", func(t *testing.T) {
-		got, err := (&SystemPromptSetting{}).LoadOverride()
-		if err != nil {
-			t.Fatalf("LoadOverride() error = %v", err)
-		}
-		if got != "" {
-			t.Fatalf("LoadOverride() = %q, want empty", got)
-		}
-	})
-
-	for _, tc := range []struct {
-		name    string
-		content string
-		wantErr bool
-		want    string
-	}{
-		{"real override", "Score everything a 10.", false, "Score everything a 10."},
-		{"empty file", "", true, ""},
-		{"comment only", "<!-- edit me -->\n", true, ""},
+func TestLooksLikePath(t *testing.T) {
+	for v, want := range map[string]bool{
+		"prompt.md":                      true,
+		"./prompts/system.md":            true,
+		"../up/system.md":                true,
+		"/abs/system.md":                 true,
+		"~/prompts/system.md":            true,
+		"/dir with space/system.md":      true,
+		"Score every article from 0-10.": false,
+		"Rate this.\nBe strict.":         false,
+		"":                               false,
+		"two words":                      false,
+		"line one\nsystem.md":            false,
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "system.md")
-			if err := os.WriteFile(path, []byte(tc.content), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			got, err := (&SystemPromptSetting{Path: path}).LoadOverride()
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("LoadOverride() = %q, want an error", got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("LoadOverride() error = %v", err)
-			}
-			if got != tc.want {
-				t.Fatalf("LoadOverride() = %q, want %q", got, tc.want)
-			}
-		})
+		if got := LooksLikePath(v); got != want {
+			t.Errorf("LooksLikePath(%q) = %v, want %v", v, got, want)
+		}
 	}
 }
 
-func TestInferenceConfigLoadSystemPrompt(t *testing.T) {
-	t.Run("heuristic provider ignores a broken override path", func(t *testing.T) {
-		cfg := InferenceConfig{
-			Provider:     "heuristic",
-			SystemPrompt: SystemPromptSetting{Path: filepath.Join(t.TempDir(), "missing.md")},
-		}
-		got, err := cfg.LoadSystemPrompt()
-		if err != nil {
-			t.Fatalf("LoadSystemPrompt() error = %v, want nil (heuristic never reads the path)", err)
-		}
-		if got != "" {
-			t.Fatalf("LoadSystemPrompt() = %q, want empty", got)
-		}
-	})
-
-	t.Run("disabled returns empty", func(t *testing.T) {
-		cfg := InferenceConfig{Provider: "ollama", SystemPrompt: SystemPromptSetting{Disabled: true}}
-		got, err := cfg.LoadSystemPrompt()
-		if err != nil {
-			t.Fatalf("LoadSystemPrompt() error = %v", err)
-		}
-		if got != "" {
-			t.Fatalf("LoadSystemPrompt() = %q, want empty", got)
-		}
-	})
-
-	t.Run("unset returns the built-in default", func(t *testing.T) {
-		cfg := InferenceConfig{Provider: "ollama"}
-		got, err := cfg.LoadSystemPrompt()
-		if err != nil {
-			t.Fatalf("LoadSystemPrompt() error = %v", err)
-		}
-		if got != rank.DefaultSystemPrompt {
-			t.Fatalf("LoadSystemPrompt() = %q, want the built-in default", got)
-		}
-	})
-
-	t.Run("path overrides the default", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "system.md")
-		if err := os.WriteFile(path, []byte("Score everything a 10."), 0o600); err != nil {
+func TestInlineSystemPrompt(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		cfg := InferenceConfig{Provider: "ollama", SystemPrompt: SystemPromptSetting{Path: path}}
-		got, err := cfg.LoadSystemPrompt()
-		if err != nil {
-			t.Fatalf("LoadSystemPrompt() error = %v", err)
-		}
-		if got != "Score everything a 10." {
-			t.Fatalf("LoadSystemPrompt() = %q, want the override", got)
-		}
-	})
-}
+	}
+	write("system.md", "<!-- note -->Score everything a 10.")
+	write("empty.md", "<!-- only a note -->\n")
+	// A file named like prose is still read when it exists.
+	write("rate it strictly", "Be strict.")
 
-func TestLoadSummaryRequiresModel(t *testing.T) {
-	t.Run("a field set without model is rejected", func(t *testing.T) {
-		_, err := loadFile(writeConfig(t, baseFeeds+"inference:\n  summary:\n    host: http://other:8000\n"))
-		if err == nil {
-			t.Fatal("expected error for summary block missing model")
-		}
-	})
-
-	t.Run("model alone is enough", func(t *testing.T) {
-		cfg, err := loadFile(writeConfig(t, baseFeeds+"inference:\n  summary:\n    model: small:1b\n"))
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-		if cfg.Inference.Summary.Model != "small:1b" {
-			t.Errorf("Summary.Model = %q, want small:1b", cfg.Inference.Summary.Model)
-		}
-	})
-
-	t.Run("unset summary is fine", func(t *testing.T) {
-		if _, err := loadFile(writeConfig(t, baseFeeds)); err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-	})
-}
-
-func TestResolveSummary(t *testing.T) {
-	think := true
-	base := InferenceConfig{
-		Provider: "ollama",
-		Host:     "http://localhost:11434",
-		Model:    "big:8b",
-		APIKey:   "base-key",
-		Think:    &think,
+	inline := func(v string) (string, error) {
+		f := File{}
+		f.Inference.SystemPrompt.Text = v
+		err := f.InlineSystemPrompt(dir)
+		return f.Inference.SystemPrompt.Text, err
 	}
 
-	t.Run("unset summary resolves to the parent unchanged", func(t *testing.T) {
-		got := base.ResolveSummary()
-		if got != base {
-			t.Errorf("ResolveSummary() = %+v, want %+v", got, base)
+	t.Run("relative path is read from the file's directory", func(t *testing.T) {
+		if got, err := inline("./system.md"); err != nil || got != "Score everything a 10." {
+			t.Fatalf("got %q, %v", got, err)
+		}
+		if got, err := inline("system.md"); err != nil || got != "Score everything a 10." {
+			t.Fatalf("bare name: got %q, %v", got, err)
 		}
 	})
-
-	t.Run("model alone overrides only Model", func(t *testing.T) {
-		cfg := base
-		cfg.Summary = SummaryConfig{Model: "small:1b"}
-		got := cfg.ResolveSummary()
-		if got.Model != "small:1b" {
-			t.Errorf("Model = %q, want small:1b", got.Model)
-		}
-		if got.Provider != base.Provider || got.Host != base.Host || got.APIKey != base.APIKey ||
-			got.Think != base.Think {
-			t.Errorf("ResolveSummary() changed an unset field: %+v", got)
+	t.Run("absolute path", func(t *testing.T) {
+		if got, err := inline(filepath.Join(dir, "system.md")); err != nil || got != "Score everything a 10." {
+			t.Fatalf("got %q, %v", got, err)
 		}
 	})
-
-	t.Run("host and model override both, provider/api_key/think stay inherited", func(t *testing.T) {
-		cfg := base
-		cfg.Summary = SummaryConfig{Host: "http://other:8000", Model: "small:1b"}
-		got := cfg.ResolveSummary()
-		if got.Host != "http://other:8000" || got.Model != "small:1b" {
-			t.Errorf("ResolveSummary() = %+v, want overridden host/model", got)
-		}
-		if got.Provider != base.Provider || got.APIKey != base.APIKey || got.Think != base.Think {
-			t.Errorf("ResolveSummary() changed an unset field: %+v", got)
+	t.Run("an existing one-line file wins over prose", func(t *testing.T) {
+		if got, err := inline("rate it strictly"); err != nil || got != "Be strict." {
+			t.Fatalf("got %q, %v", got, err)
 		}
 	})
-
-	t.Run("full override replaces every field", func(t *testing.T) {
-		otherThink := false
-		cfg := base
-		cfg.Summary = SummaryConfig{
-			Provider: "vllm",
-			Host:     "http://other:8000",
-			Model:    "small:1b",
-			APIKey:   "other-key",
-			Think:    &otherThink,
+	t.Run("text stays text", func(t *testing.T) {
+		for _, v := range []string{"Score every article.", "line one\nline two", ""} {
+			if got, err := inline(v); err != nil || got != v {
+				t.Errorf("inline(%q) = %q, %v", v, got, err)
+			}
 		}
-		got := cfg.ResolveSummary()
-		want := InferenceConfig{
-			Provider: "vllm",
-			Host:     "http://other:8000",
-			Model:    "small:1b",
-			APIKey:   "other-key",
-			Think:    &otherThink,
+	})
+	t.Run("a path that cannot be read is an error", func(t *testing.T) {
+		if _, err := inline("./missing.md"); err == nil || !strings.Contains(err.Error(), "looks like a file path") {
+			t.Fatalf("err = %v", err)
 		}
-		if got.Provider != want.Provider || got.Host != want.Host || got.Model != want.Model ||
-			got.APIKey != want.APIKey || got.Think != want.Think {
-			t.Errorf("ResolveSummary() = %+v, want %+v", got, want)
+	})
+	t.Run("an empty file is an error", func(t *testing.T) {
+		if _, err := inline("./empty.md"); err == nil || !strings.Contains(err.Error(), "empty") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("false stays disabled", func(t *testing.T) {
+		f := File{}
+		f.Inference.SystemPrompt.Disabled = true
+		if err := f.InlineSystemPrompt(dir); err != nil || !f.Inference.SystemPrompt.Disabled {
+			t.Fatalf("err = %v, %+v", err, f.Inference.SystemPrompt)
 		}
 	})
 }
 
-// The engine is chosen by which key is set, so the pair has to be exclusive:
-// neither leaves nothing to open, both leaves two answers and no tiebreak.
+func TestInferenceConfigEffectiveSystemPrompt(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  InferenceConfig
+		want string
+	}{
+		{"heuristic never gets one", InferenceConfig{Provider: "heuristic", SystemPrompt: SystemPromptSetting{Text: "x"}}, ""},
+		{"disabled", InferenceConfig{Provider: "ollama", SystemPrompt: SystemPromptSetting{Disabled: true}}, ""},
+		{"unset is the built-in", InferenceConfig{Provider: "ollama"}, rank.DefaultSystemPrompt},
+		{"text is used as is", InferenceConfig{Provider: "ollama", SystemPrompt: SystemPromptSetting{Text: "Score everything a 10."}}, "Score everything a 10."},
+	} {
+		if got := tc.cfg.EffectiveSystemPrompt(); got != tc.want {
+			t.Errorf("%s: EffectiveSystemPrompt() = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestValidateStoreNeedsExactlyOneTarget(t *testing.T) {
 	cases := []struct {
 		name    string

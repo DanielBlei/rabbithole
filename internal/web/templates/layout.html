@@ -52,14 +52,14 @@
           <span class="clock__date"></span>
         </div>
       </div>
-      <button class="settings-btn" id="settingsToggle" type="button" data-stg-open aria-haspopup="dialog" aria-label="Settings">
+      <a class="settings-btn" id="settingsToggle" href="/settings" aria-label="Settings"{{if eq .Active "settings"}} aria-current="page"{{end}}>
         <span class="gear" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3"></circle>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
           </svg>
         </span>
-      </button>
+      </a>
     </div>
     </div>
   </header>
@@ -132,12 +132,12 @@
         <span class="navrail__note">feeds &amp; defaults</span>
       </button>
       {{template "navIngest" .Chrome}}
-      {{/* The gear opens the same dialog; this is the route for anyone already
+      {{/* The gear goes to the same page; this is the route for anyone already
            in the menu. */}}
-      <button class="navrail__item navrail__item--cmd" type="button" data-stg-open aria-label="Settings">
+      <a class="navrail__item navrail__item--cmd" href="/settings" aria-label="Settings"{{if eq .Active "settings"}} aria-current="page"{{end}}>
         <span class="navrail__sig" aria-hidden="true">$</span>
         <span class="navrail__cmd">settings</span>
-      </button>
+      </a>
     </div>
   </nav>
   {{template "ingWatch" .Chrome}}
@@ -169,9 +169,9 @@
                       hx-get="/sources" hx-target="#modal" hx-swap="innerHTML">
             <span class="welcome__txt">Check your sources<small>the feeds that get read</small></span>
             <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></button></li>
-          <li><button class="welcome__step{{if index .Chrome.Welcome "profile"}} is-done{{end}}" type="button" data-welcome-step="profile" data-stg-open="profiles">
+          <li><a class="welcome__step{{if index .Chrome.Welcome "profile"}} is-done{{end}}" href="/settings/profiles" data-welcome-step="profile">
             <span class="welcome__txt">Check your profile<small>what gets ranked up and down</small></span>
-            <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></button></li>
+            <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></a></li>
           <li><button class="welcome__step{{if index .Chrome.Welcome "ingest"}} is-done{{end}}" type="button" data-welcome-step="ingest"
                       hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML">
             <span class="welcome__txt">Run your first ingest<small>fetch, score and fill the feed</small></span>
@@ -185,277 +185,6 @@
   </div>
   {{end}}
 
-  {{/* Settings, in the same frame Config, Sources and Ingest use. Two reasons
-       it is rendered here rather than fetched like those three:
-
-       - clock.js, weather.js and fonts.js bind these controls once at load, so
-         markup that came and went over htmx would need re-initialising on every
-         swap. It stays in the page and hides instead.
-       - it cannot live in the topbar: that is a sticky stacking context below
-         --z-modal, so a dialog nested in it could never clear the others.
-
-       The rail is a radio group, not an ARIA tablist — the question really is
-       "which section am I looking at", and arrow keys then work for free. */}}
-  <div class="modal modal--stg" id="settingsModal" hidden>
-    <div class="modal__backdrop" data-modal-close></div>
-    <div class="modal__frame modal__frame--stg" role="dialog" aria-modal="true" aria-label="Settings">
-      <div class="modal__bar">
-        <span class="modal__title"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~/settings</span><span class="sh">$&nbsp;</span><span class="pane__cmd stg__cmd"></span><span class="blink">_</span></span>
-        <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
-      </div>
-
-      <div class="stg">
-        <fieldset class="stg__rail">
-          <legend class="stg__legend">Settings section</legend>
-          <label class="stg__tab"><input type="radio" name="stgSect" id="stgProfiles"><span>Profiles</span></label>
-          <label class="stg__tab"><input type="radio" name="stgSect" id="stgTime" checked><span>Date &amp; time</span></label>
-          <label class="stg__tab"><input type="radio" name="stgSect" id="stgWx"><span>Weather</span></label>
-          <label class="stg__tab"><input type="radio" name="stgSect" id="stgTheme"><span>Theme</span></label>
-          {{if .Chrome.Account.Mode}}<label class="stg__tab stg__tab--acct"><input type="radio" name="stgSect" id="stgAccount"><span>Account</span></label>{{end}}
-        </fieldset>
-
-        <div class="stg__pane">
-          <section class="stg__sect stg__sect--profiles">{{template "profileSettings" .Chrome.Profiles}}</section>
-          <section class="stg__sect stg__sect--time">
-            {{/* The hours read the way the dates below do: each tile is the
-                 clock as that setting would render it, ticking live, so the
-                 choice is made by looking rather than by decoding a label that
-                 could be either the state or the action. */}}
-            <div class="stg__lbl">Clock</div>
-            <div class="dfmt dfmt--pair" role="radiogroup" aria-label="Clock format">
-              <label class="dfmt__opt"><input type="radio" name="clkHours" value="24" data-clk-hours><span data-clk-tsample="24"></span></label>
-              <label class="dfmt__opt"><input type="radio" name="clkHours" value="12" data-clk-hours><span data-clk-tsample="12"></span></label>
-            </div>
-            {{/* Named on the left, state on the right — the same switch the
-                 Weather section uses, and for the same reason. */}}
-            <div class="wx-switches">
-              <div class="wx-switch">
-                <span>Seconds</span>
-                <button type="button" class="clk-btn" data-clk-toggle="seconds" aria-pressed="false">Off</button>
-              </div>
-            </div>
-            {{/* Six discrete styles, not a scale, so each one shows itself:
-                 every tile renders today's date the way that setting would.
-                 static/js/clock.js fills them and keeps them current. */}}
-            <div class="stg__lbl">Date</div>
-            <div class="dfmt" role="radiogroup" aria-label="Date format">
-              <label class="dfmt__opt"><input type="radio" name="clkDateFmt" value="numeric" data-clk-fmt><span data-clk-sample="numeric"></span></label>
-              <label class="dfmt__opt"><input type="radio" name="clkDateFmt" value="short"   data-clk-fmt><span data-clk-sample="short"></span></label>
-              <label class="dfmt__opt"><input type="radio" name="clkDateFmt" value="medium"  data-clk-fmt><span data-clk-sample="medium"></span></label>
-              <label class="dfmt__opt"><input type="radio" name="clkDateFmt" value="long"    data-clk-fmt><span data-clk-sample="long"></span></label>
-              <label class="dfmt__opt"><input type="radio" name="clkDateFmt" value="ordinal" data-clk-fmt><span data-clk-sample="ordinal"></span></label>
-              <label class="dfmt__opt dfmt__opt--off"><input type="radio" name="clkDateFmt" value="hidden" data-clk-fmt><span data-clk-sample="hidden"></span></label>
-            </div>
-          </section>
-
-          <section class="stg__sect stg__sect--wx">
-            <div class="stg__lbl">Display</div>
-            <!-- Named on the left, state on the right: the pill alone did not
-                 say whether it was the current state or the action. Four rows
-                 rather than two blocks and two labelled pill rows — units and
-                 hours each have exactly two states and a name, which is the
-                 shape of a switch, and a labelled row of two pills to say the
-                 same thing cost three lines of the pane apiece. Pollen follows
-                 Weather, since it has nowhere to render without it. -->
-            <div class="wx-switches">
-              <div class="wx-switch">
-                <span>Weather</span>
-                <button type="button" class="wx-sw" data-wx-toggle="show" role="switch" aria-checked="false"
-                        aria-label="Weather">
-                  <span class="wx-sw__knob" aria-hidden="true"></span>
-                  <span class="wx-sw__txt">On</span>
-                </button>
-              </div>
-              <div class="wx-switch">
-                <span>Pollen</span>
-                <button type="button" class="wx-sw" data-wx-toggle="showPollen" role="switch" aria-checked="false"
-                        aria-label="Pollen">
-                  <span class="wx-sw__knob" aria-hidden="true"></span>
-                  <span class="wx-sw__txt">On</span>
-                </button>
-              </div>
-              <div class="wx-switch">
-                <span>Units</span>
-                <button type="button" class="wx-sw wx-sw--ab" data-wx-unit role="switch" aria-checked="false"
-                        aria-label="Temperature units">
-                  <span class="wx-sw__knob" aria-hidden="true"></span>
-                  <span class="wx-sw__txt">&deg;C</span>
-                </button>
-              </div>
-              <div class="wx-switch">
-                <span>Hours</span>
-                <button type="button" class="wx-sw wx-sw--ab" data-wx-toggle="time24" role="switch" aria-checked="false"
-                        aria-label="Hour format">
-                  <span class="wx-sw__knob" aria-hidden="true"></span>
-                  <span class="wx-sw__txt">24-hour</span>
-                </button>
-              </div>
-            </div>
-            {{/* Where it shows, in the order the answers depend on each other:
-                 which pages, then the shape those pages take, then the side
-                 menu — which is its own answer, because the menu is on every
-                 page and carries its own read-out rather than a page's. */}}
-            <div class="stg__lbl">Pages</div>
-            <div class="wx-switches">
-              <div class="wx-switch">
-                <span>Feed</span>
-                <button type="button" class="wx-sw" data-wx-toggle="feed" role="switch" aria-checked="true"
-                        aria-label="Weather on the Feed">
-                  <span class="wx-sw__knob" aria-hidden="true"></span>
-                  <span class="wx-sw__txt">On</span>
-                </button>
-              </div>
-              <div class="wx-switch">
-                <span>Maze</span>
-                <button type="button" class="wx-sw" data-wx-toggle="maze" role="switch" aria-checked="true"
-                        aria-label="Weather on the Maze">
-                  <span class="wx-sw__knob" aria-hidden="true"></span>
-                  <span class="wx-sw__txt">On</span>
-                </button>
-              </div>
-            </div>
-            {{/* The shape the two pages take. Reads as unavailable while
-                 neither page is showing it — there is nothing for it to be the
-                 shape of. */}}
-            <div class="stg__lbl">Layout</div>
-            <div class="wx-layout-step" data-wx-layout-step>
-              <button type="button" class="font-step__arrow" data-wx-layout-prev aria-label="Previous weather layout">&#8249;</button>
-              <div class="font-step__face">
-                <span class="font-step__name" data-wx-layout-name></span>
-                <span class="font-step__dots" data-wx-layout-dots aria-hidden="true"></span>
-              </div>
-              <button type="button" class="font-step__arrow" data-wx-layout-next aria-label="Next weather layout">&#8250;</button>
-            </div>
-            {{/* Three positions including off, so it is the same stepper the
-                 layout is rather than a labelled row of pills — and off leads,
-                 because it is where the menu starts. */}}
-            <div class="stg__lbl">Side menu</div>
-            <div class="wx-layout-step" data-wx-side-step>
-              <button type="button" class="font-step__arrow" data-wx-side-prev aria-label="Previous side menu position">&#8249;</button>
-              <div class="font-step__face">
-                <span class="font-step__name" data-wx-side-name></span>
-                <span class="font-step__dots" data-wx-side-dots aria-hidden="true"></span>
-              </div>
-              <button type="button" class="font-step__arrow" data-wx-side-next aria-label="Next side menu position">&#8250;</button>
-            </div>
-            <div class="stg__lbl">Location</div>
-            <!-- A combobox, not a search box: the field shows the place that is
-                 set, and typing over it offers matches to replace it with. -->
-            <div class="wx-loc">
-              <input type="text" class="wx-loc__input" id="wxLocSearch" placeholder="Search a city&hellip;"
-                     autocomplete="off" spellcheck="false" aria-label="Location"
-                     role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="wxLocResults">
-              <div class="wx-loc__results" id="wxLocResults" role="listbox" aria-label="Matching places" hidden></div>
-              <p class="wx-loc__note" id="wxLocNote" role="status" hidden></p>
-              <button type="button" class="clk-btn" id="wxLocBtn">Use my location</button>
-            </div>
-            <!-- Open-Meteo's free API is CC BY 4.0, which requires the credit to
-                 be visible where the data is used. Here rather than in the four
-                 placements: reachable from all of them, and it leaves the
-                 compact sub-bar and chip uncluttered. -->
-            <p class="wx-credit">Weather and pollen data by
-              <a href="https://open-meteo.com" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a>,
-              place names by <a href="https://www.bigdatacloud.com" target="_blank" rel="noopener noreferrer">BigDataCloud</a>
-            </p>
-          </section>
-
-          {{/* The chrome layout, not the palette. The preview and the radios are
-               the first-run setup card's own (partials/look.html), so the two
-               places that pick a look show the same thing. The preview is
-               larger here, where there is room for it. */}}
-          <section class="stg__sect stg__sect--theme">
-            <div class="stg__lbl">Layout</div>
-            <div class="look look--stg">
-              {{template "lookPreview"}}
-              {{template "lookOptions"}}
-            </div>
-            {{/* The type prefs sit under the preview they drive: it reads the same
-                 variables the page does, so a pick redraws it on the spot,
-                 including Interface, since the drawing wears the chrome face too.
-                 Each row is a face beside a size. fonts.js writes every name and
-                 builds the dot strips from its own option lists. */}}
-            <div class="stg__lbl stg__lbl--apart">Appearance</div>
-            <div class="fpick">
-              <div class="fpick__row">
-                <span class="fpick__lbl">Interface</span>
-                <div class="font-step" data-font-step="ui" role="group" aria-label="Interface face">
-                  <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous interface face">&#8249;</button>
-                  <div class="font-step__face">
-                    <span class="font-step__name" data-font-name aria-live="polite"></span>
-                    <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
-                  </div>
-                  <button type="button" class="font-step__arrow" data-font-next aria-label="Next interface face">&#8250;</button>
-                </div>
-                <div class="font-step font-step--size" data-font-step="uiSize" role="group" aria-label="Interface size">
-                  <button type="button" class="font-step__arrow" data-font-prev aria-label="Smaller interface">&#8249;</button>
-                  <div class="font-step__face">
-                    <span class="font-step__name" data-font-name aria-live="polite"></span>
-                    <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
-                  </div>
-                  <button type="button" class="font-step__arrow" data-font-next aria-label="Bigger interface">&#8250;</button>
-                </div>
-              </div>
-              <div class="fpick__row">
-                <span class="fpick__lbl">Titles</span>
-                <div class="font-step" data-font-step="title" role="group" aria-label="Titles face">
-                  <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous titles face">&#8249;</button>
-                  <div class="font-step__face">
-                    <span class="font-step__name" data-font-name aria-live="polite"></span>
-                    <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
-                  </div>
-                  <button type="button" class="font-step__arrow" data-font-next aria-label="Next titles face">&#8250;</button>
-                </div>
-                <div class="font-step font-step--size" data-font-step="titleSize" role="group" aria-label="Titles size">
-                  <button type="button" class="font-step__arrow" data-font-prev aria-label="Smaller titles">&#8249;</button>
-                  <div class="font-step__face">
-                    <span class="font-step__name" data-font-name aria-live="polite"></span>
-                    <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
-                  </div>
-                  <button type="button" class="font-step__arrow" data-font-next aria-label="Bigger titles">&#8250;</button>
-                </div>
-              </div>
-              <div class="fpick__row">
-                <span class="fpick__lbl">Text</span>
-                <div class="font-step" data-font-step="body" role="group" aria-label="Text face">
-                  <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous text face">&#8249;</button>
-                  <div class="font-step__face">
-                    <span class="font-step__name" data-font-name aria-live="polite"></span>
-                    <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
-                  </div>
-                  <button type="button" class="font-step__arrow" data-font-next aria-label="Next text face">&#8250;</button>
-                </div>
-                <div class="font-step font-step--size" data-font-step="bodySize" role="group" aria-label="Text size">
-                  <button type="button" class="font-step__arrow" data-font-prev aria-label="Smaller text">&#8249;</button>
-                  <div class="font-step__face">
-                    <span class="font-step__name" data-font-name aria-live="polite"></span>
-                    <span class="font-step__dots" data-font-dots aria-hidden="true"></span>
-                  </div>
-                  <button type="button" class="font-step__arrow" data-font-next aria-label="Bigger text">&#8250;</button>
-                </div>
-              </div>
-            </div>
-            <p class="look__note">Layout and type are saved in this browser.</p>
-          </section>
-          {{if .Chrome.Account.Mode}}
-          <section class="stg__sect stg__sect--account">{{template "accountSect" .Chrome.Account}}</section>
-          {{end}}
-        </div>
-      </div>
-
-      {{/* Config and sources stack over this in #modalTop, so Escape drops back
-           to settings — the same move the ingest runner makes. */}}
-      <div class="modal__foot modal__foot--acts">
-        <a class="modal__act modal__act--ext" href="https://github.com/DanielBlei/rabbithole"
-           target="_blank" rel="noopener noreferrer">&#8599; source code</a>
-        <a class="modal__act" href="#" hx-get="/config" hx-target="#modalTop" hx-swap="innerHTML">&#9881; view config</a>
-        <a class="modal__act" href="#" hx-get="/sources" hx-target="#modalTop" hx-swap="innerHTML">&#9636; edit sources</a>
-        {{/* The Account tab's log out, one click from any tab. */}}
-        {{if eq .Chrome.Account.Mode "enabled"}}
-        <form class="modal__actform" method="post" action="/logout"><button class="modal__act" type="submit">&#8676; log out</button></form>
-        {{end}}
-      </div>
-    </div>
-  </div>
   <!-- Every script is external so the page can carry a strict Content-Security-
        Policy: none of this is inline, and none of it is needed before the DOM
        is parsed. Each file says at the top what it owns. -->
@@ -466,7 +195,6 @@
   <script src="/static/js/tagput.js" defer></script>
   <script src="/static/js/sources.js" defer></script>
   <script src="/static/js/modal.js" defer></script>
-  <script src="/static/js/resize.js" defer></script>
   <script src="/static/js/profiles.js" defer></script>
   <script src="/static/js/welcome.js" defer></script>
   <script src="/static/js/ingest.js" defer></script>

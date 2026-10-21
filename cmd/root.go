@@ -66,7 +66,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "",
-		"config YAML applied to the store on every start; the file wins over changes made elsewhere (optional)")
+		"config YAML applied to the store when it changes since it was last applied; edits made elsewhere are kept until then (optional)")
 	rootCmd.PersistentFlags().StringVar(&envFile, "env-file", defaultEnvFile,
 		"env file read for RABBITHOLE_* variables the environment does not set")
 	rootCmd.PersistentFlags().StringVar(&dbFlag, "db", "",

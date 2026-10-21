@@ -47,8 +47,10 @@ func TestOtherExamplesLoad(t *testing.T) {
 	if _, err := LoadProfileFile(exampleFile(t, "prompts", "profile.md")); err != nil {
 		t.Errorf("prompts/profile.md: %v", err)
 	}
-	ov := SystemPromptSetting{Path: exampleFile(t, "prompts", "system.md")}
-	if _, err := ov.LoadOverride(); err != nil {
+	// The file the example's system_prompt line points at imports as text.
+	f := File{}
+	f.Inference.SystemPrompt.Text = exampleFile(t, "prompts", "system.md")
+	if err := f.InlineSystemPrompt(""); err != nil || f.Inference.SystemPrompt.Text == "" {
 		t.Errorf("prompts/system.md: %v", err)
 	}
 }

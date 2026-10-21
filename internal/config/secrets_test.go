@@ -43,17 +43,14 @@ func TestValidRef(t *testing.T) {
 
 func TestRefFor(t *testing.T) {
 	if RefFor("inference.api_key") != "RABBITHOLE_INFERENCE_API_KEY" ||
-		RefFor("inference.summary.api_key") != "RABBITHOLE_SUMMARY_API_KEY" ||
+		RefFor("inference.summary.api_key") != "" ||
 		RefFor("inference.host") != "" {
 		t.Error("RefFor mismatch")
 	}
 }
 
 func TestExtractLiterals(t *testing.T) {
-	r := Config{Inference: InferenceConfig{
-		APIKey:  "sk-abc",
-		Summary: SummaryConfig{APIKey: "$RABBITHOLE_MINE", Model: "m"},
-	}}
+	r := Config{Inference: InferenceConfig{APIKey: "sk-abc"}}
 	got := r.ExtractLiterals()
 	if len(got) != 1 ||
 		got[0] != (Secret{Field: "inference.api_key", Name: "RABBITHOLE_INFERENCE_API_KEY", Value: "sk-abc"}) {
@@ -62,9 +59,6 @@ func TestExtractLiterals(t *testing.T) {
 	if r.Inference.APIKey != "$RABBITHOLE_INFERENCE_API_KEY" {
 		t.Errorf("api_key = %q, want the canonical reference", r.Inference.APIKey)
 	}
-	if r.Inference.Summary.APIKey != "$RABBITHOLE_MINE" {
-		t.Errorf("summary reference was touched: %q", r.Inference.Summary.APIKey)
-	}
 	if again := r.ExtractLiterals(); len(again) != 0 {
 		t.Errorf("second extraction returned %+v", again)
 	}
@@ -72,16 +66,9 @@ func TestExtractLiterals(t *testing.T) {
 
 func TestResolvedAPIKey(t *testing.T) {
 	t.Setenv("RABBITHOLE_INFERENCE_API_KEY", "secret1")
-	t.Setenv("RABBITHOLE_SUMMARY_API_KEY", "secret2")
-	c := InferenceConfig{
-		APIKey:  "$RABBITHOLE_INFERENCE_API_KEY",
-		Summary: SummaryConfig{APIKey: "${RABBITHOLE_SUMMARY_API_KEY}"},
-	}
+	c := InferenceConfig{APIKey: "$RABBITHOLE_INFERENCE_API_KEY"}
 	if k, err := c.ResolvedAPIKey(); err != nil || k != "secret1" {
 		t.Errorf("ResolvedAPIKey = %q, %v", k, err)
-	}
-	if k, err := c.ResolvedSummaryAPIKey(); err != nil || k != "secret2" {
-		t.Errorf("ResolvedSummaryAPIKey = %q, %v", k, err)
 	}
 	t.Setenv("RABBITHOLE_INFERENCE_API_KEY", "")
 	if _, err := c.ResolvedAPIKey(); err == nil {

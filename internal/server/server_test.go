@@ -43,7 +43,7 @@ func newServer(t *testing.T, logger zerolog.Logger) (*Server, *store.Store) {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	return New(db, config.Static(*cfg), "127.0.0.1:0", mgr, logger), db
+	return New(db, config.Static(*cfg), "0.0.0.0:0", mgr, logger), db
 }
 
 func newTestServer(t *testing.T) (*Server, *store.Store) {
@@ -240,6 +240,58 @@ func TestCrossOriginPostsAreRefused(t *testing.T) {
 		routes.ServeHTTP(rec, req)
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("cross-site POST %s = %d, want 403", path, rec.Code)
+		}
+	}
+}
+
+// Same-origin and header-less POSTs pass the cross-origin check.
+func TestSameOriginPostsPass(t *testing.T) {
+	srv, _ := newTestServer(t)
+	routes := srv.Routes()
+	for _, site := range []string{"", "same-origin", "none"} {
+		req := httptest.NewRequest(http.MethodPost, "/todos", strings.NewReader("title=x"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if site != "" {
+			req.Header.Set("Sec-Fetch-Site", site)
+		}
+		rec := httptest.NewRecorder()
+		routes.ServeHTTP(rec, req)
+		if rec.Code == http.StatusForbidden {
+			t.Errorf("POST with Sec-Fetch-Site %q = 403, want it to pass", site)
+		}
+	}
+}
+
+// A loopback listener answers only to loopback Host names (DNS rebinding); a
+// listener on every interface answers to any.
+func TestLoopbackListenerChecksHost(t *testing.T) {
+	tests := []struct {
+		addr, host string
+		want       int
+	}{
+		{"127.0.0.1:8080", "localhost:8080", http.StatusOK},
+		{"127.0.0.1:8080", "LOCALHOST", http.StatusOK},
+		{"127.0.0.1:8080", "127.0.0.1:8080", http.StatusOK},
+		{"127.0.0.1:8080", "127.8.9.1", http.StatusOK},
+		{"[::1]:8080", "[::1]:8080", http.StatusOK},
+		{"localhost:8080", "[::1]", http.StatusOK},
+		{"127.0.0.1:8080", "", http.StatusOK},
+		{"127.0.0.1:8080", "evil.example:8080", http.StatusForbidden},
+		{"127.0.0.1:8080", "localhost.evil.example", http.StatusForbidden},
+		{"127.0.0.1:8080", "10.0.0.5:8080", http.StatusForbidden},
+		{"[::1]:8080", "rebind.example", http.StatusForbidden},
+		{"0.0.0.0:8080", "evil.example", http.StatusOK},
+		{":8080", "evil.example", http.StatusOK},
+	}
+	for _, tt := range tests {
+		srv, _ := newTestServer(t)
+		srv.addr = tt.addr
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		req.Host = tt.host
+		rec := httptest.NewRecorder()
+		srv.Routes().ServeHTTP(rec, req)
+		if rec.Code != tt.want {
+			t.Errorf("listen %q, Host %q = %d, want %d", tt.addr, tt.host, rec.Code, tt.want)
 		}
 	}
 }

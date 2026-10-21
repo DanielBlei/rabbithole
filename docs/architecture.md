@@ -95,7 +95,7 @@ next run without a restart:
 
 | Step | Knobs |
 |---|---|
-| What's eligible | `ingest.since`, a feed's own `since` and `max_items` |
+| What's eligible | a feed's own `since` and `max_items`, then the feed defaults, then 7d |
 | How much text | the 1,500-character cap (fixed), `model_tuning.num_ctx` for how much the model actually reads |
 | How it's split | `inference.batch_size`, `inference.max_parallel` |
 | How much reply | `model_tuning.tokens_per_item`, `tokens_overhead`, `reason_max_chars`, and `tokens_thinking` when `think` is on |

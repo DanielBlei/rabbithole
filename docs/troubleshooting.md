@@ -33,7 +33,7 @@ history rather than being stored with a made-up score.
      structured_output: false
    ```
 
-   Save it with `rabbithole config export -o config.yaml`, edit, then `rabbithole config import config.yaml`.
+   Change it in Settings, or save it with `rabbithole config export -o config.yaml`, edit, then `rabbithole config import config.yaml`.
 
    The model then writes the JSON from the system prompt's instructions, and the checks above
    still apply. Keep a system prompt that spells out the shape: the built-in one does, and so
@@ -141,3 +141,19 @@ which older OpenAI-compatible servers expect.
 
 **What to do.** Switch `inference.provider` to the other one: `openai` for OpenAI and gateways
 in front of it, `vllm` for a vLLM server you run.
+
+## `Host not allowed` (403) behind a reverse proxy
+
+**What you see.** The page or API answers `403 Host not allowed. Use localhost or 127.0.0.1.`
+when reached through a proxy or a domain name, though `serve` runs fine on `localhost`.
+
+**Why.** A server listening on a loopback address (the default `127.0.0.1:8080`) answers only
+requests whose `Host` header is `localhost` or a loopback IP address. This stops a web page on
+another domain from rebinding its DNS to your machine and reading your data. A proxy that
+forwards the public name (`Host: rabbit.example.com`) is refused for the same reason.
+
+**What to do.** Either make the proxy send `Host: localhost` to the upstream (nginx:
+`proxy_set_header Host localhost;`), or listen on a non-loopback address with `--addr`, which
+needs `--tls-cert` and `--tls-key`, or `--insecure-http` when a TLS proxy sits in front (see
+[auth.md](auth.md)). Cross-origin POSTs are refused as well, so the page and its
+requests must use the same public name.

@@ -1,13 +1,12 @@
-// The modal layers, bottom to top: the first-run welcome, the settings dialog,
-// then #modal for the base htmx dialog, then #modalTop for one stacked over it
-// (the runner and settings both open config/feeds there). This owns dismissal,
+// The modal layers, bottom to top: the first-run welcome, then #modal for the
+// base htmx dialog, then #modalTop for one stacked over it (the runner opens
+// config/feeds there). This owns dismissal,
 // the page scroll lock, and keeping focus inside the topmost open frame.
 //
 // The two htmx layers are containers htmx swaps a fragment into, so they are
-// open when they have a child and close by being emptied. Settings is rendered
-// with the page and only hides — its controls are bound once at load by
-// clock.js/weather.js/fonts.js and must survive. Hence isOpen/close per layer
-// rather than one hardcoded test.
+// open when they have a child and close by being emptied. The welcome is
+// rendered with the page and only hides. Hence isOpen/close per layer rather
+// than one hardcoded test.
 (function(){
   function htmxLayer(id){
     var el = document.getElementById(id);
@@ -29,7 +28,6 @@
   }
   var layers = [
     staticLayer('welcomeModal'),
-    staticLayer('settingsModal'),
     htmxLayer('modal'),
     htmxLayer('modalTop')
   ].filter(Boolean);

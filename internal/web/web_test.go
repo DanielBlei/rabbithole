@@ -324,7 +324,7 @@ func TestWelcomeDialog(t *testing.T) {
 			if !tt.welcome {
 				return
 			}
-			for _, want := range []string{`hx-get="/sources"`, `data-stg-open="profiles"`, `hx-get="/ingest"`} {
+			for _, want := range []string{`hx-get="/sources"`, `href="/settings/profiles"`, `hx-get="/ingest"`} {
 				if !strings.Contains(body, want) {
 					t.Errorf("welcome missing step %q", want)
 				}

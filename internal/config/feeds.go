@@ -103,7 +103,6 @@ type Origin string
 const (
 	OriginFeed     Origin = "feed"     // set on the feed itself
 	OriginDefaults Origin = "defaults" // from the feeds file's defaults block
-	OriginGlobal   Origin = "global"   // from the main config (ingest.since)
 	OriginBuiltin  Origin = "builtin"  // no one set it; the compiled-in fallback
 )
 
@@ -112,7 +111,7 @@ const (
 func (o Origin) Inherited() bool { return o != OriginFeed }
 
 // ResolvedFeed is a Feed with every knob resolved through the cascade
-// (feed → defaults → global config → built-in), carrying the provenance of each
+// (feed → defaults → built-in), carrying the provenance of each
 // resolved value alongside it. This is what the ingest cycle and the Sources
 // page both consume; nothing downstream re-implements the fallback rules.
 type ResolvedFeed struct {
@@ -263,15 +262,13 @@ func MarshalFeeds(doc FeedsDoc) (string, error) {
 	return out.String(), nil
 }
 
-// ResolveFeeds applies the defaults cascade to every entry in doc. globalSince
-// is the cascade's outermost fallback for `since` — the main config's
-// ingest.since — passed in rather than read from a Config so the resolver has
-// no opinion about where the feeds came from.
+// ResolveFeeds applies the defaults cascade to every entry in doc: feed, then the
+// set-wide defaults, then the built-in value.
 //
 // An empty doc resolves to an empty set. That is not an error: the store can
 // legitimately hold no feeds, on a fresh install or after the last one is
 // removed, and both the ingest cycle and the Sources page handle it.
-func ResolveFeeds(doc FeedsDoc, globalSince time.Duration) ([]ResolvedFeed, error) {
+func ResolveFeeds(doc FeedsDoc) ([]ResolvedFeed, error) {
 	if err := doc.Defaults.Validate(); err != nil {
 		return nil, err
 	}
@@ -286,7 +283,7 @@ func ResolveFeeds(doc FeedsDoc, globalSince time.Duration) ([]ResolvedFeed, erro
 		if err := f.Validate(); err != nil {
 			return nil, fmt.Errorf("feed %d (%q): %w", i, f.Name, err)
 		}
-		out = append(out, resolveFeed(f, doc.Defaults, globalSince))
+		out = append(out, resolveFeed(f, doc.Defaults))
 	}
 	return out, nil
 }
@@ -304,7 +301,7 @@ func EnabledFeeds(all []ResolvedFeed) []ResolvedFeed {
 
 // resolveFeed walks one feed through the cascade, recording where each value
 // came from.
-func resolveFeed(f Feed, d FeedDefaults, globalSince time.Duration) ResolvedFeed {
+func resolveFeed(f Feed, d FeedDefaults) ResolvedFeed {
 	// A stored feed carries the ID it was minted with; only one that has never
 	// been stored (straight from the seed file) needs one derived.
 	id := f.ID
@@ -331,9 +328,7 @@ func resolveFeed(f Feed, d FeedDefaults, globalSince time.Duration) ResolvedFeed
 	case d.Since != nil:
 		r.Since, r.SinceFrom = d.Since.Std(), OriginDefaults
 	default:
-		// The main config's ingest.since is the global lookback; it always has
-		// a value by this point (applyDefaults ran first).
-		r.Since, r.SinceFrom = globalSince, OriginGlobal
+		r.Since, r.SinceFrom = DefaultSince, OriginBuiltin
 	}
 
 	switch {
@@ -360,6 +355,15 @@ func (f Feed) Validate() error {
 		return fmt.Errorf("max_items must be zero (uncapped) or positive, got %d", *f.MaxItems)
 	}
 	return nil
+}
+
+// EffectiveSince is the lookback a feed inherits when it sets none: the defaults'
+// value, else the built-in one.
+func (d FeedDefaults) EffectiveSince() time.Duration {
+	if d.Since != nil {
+		return d.Since.Std()
+	}
+	return DefaultSince
 }
 
 // Validate checks the defaults block with the same rules as a feed entry.

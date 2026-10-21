@@ -312,8 +312,8 @@ func TestOpenSessionMissingStore(t *testing.T) {
 	}
 }
 
-// A boot with --config re-applies the unchanged file over a UI save and warns
-// with the undo command; a second boot is a no-op.
+// A boot with --config keeps a UI save while the file is unchanged; once the
+// file changes it wins and the log names the undo command.
 func TestOpenSessionReappliesConfigFile(t *testing.T) {
 	t.Chdir(t.TempDir())
 	home := isolatedHome(t)
@@ -354,12 +354,63 @@ func TestOpenSessionReappliesConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = db.Close()
+	if v := boot(); v.Version != 2 {
+		t.Fatalf("boot after a UI save: version = %d, want the UI save kept (2)", v.Version)
+	}
+	writeFile(t, "a.yaml", goodConfig+"user: ada\n")
 	buf.Reset()
 	if v := boot(); v.Version != 3 {
-		t.Fatalf("boot after a UI save: version = %d, want 3", v.Version)
+		t.Fatalf("boot after the file changed: version = %d, want 3", v.Version)
 	}
 	if !strings.Contains(buf.String(), "undo with: rabbithole config rollback 2") {
 		t.Errorf("no undo hint in %q", buf.String())
+	}
+}
+
+// A UI save is kept across restarts even after the file was edited to match an
+// earlier UI save.
+func TestOpenSessionKeepsUISavesUntilTheFileChanges(t *testing.T) {
+	t.Chdir(t.TempDir())
+	isolatedHome(t)
+	clearVar(t, "RABBITHOLE_INFERENCE_API_KEY")
+	writeFile(t, "a.yaml", goodConfig)
+	bootFlags(t, "a.yaml", "")
+	cmd := &cobra.Command{}
+	cmd.SetContext(t.Context())
+	boot := func(save string) int {
+		s, err := openSession(cmd, sessionOpts{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		v, _, err := s.db.ActiveConfig(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if save != "" {
+			sv, err := s.db.SaveConfig(t.Context(), save, "h-"+save, store.ConfigSourceUI, v.Version)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return sv.Version
+		}
+		return v.Version
+	}
+	if v := boot(""); v != 1 {
+		t.Fatalf("import A: version = %d, want 1", v)
+	}
+	if v := boot("user: bob\n"); v != 2 {
+		t.Fatalf("UI save B: version = %d, want 2", v)
+	}
+	writeFile(t, "a.yaml", "user: bob\n")
+	if v := boot(""); v != 2 {
+		t.Fatalf("file edited to B: version = %d, want a noop on 2", v)
+	}
+	if v := boot("user: carol\n"); v != 3 {
+		t.Fatalf("UI save C: version = %d, want 3", v)
+	}
+	if v := boot(""); v != 3 {
+		t.Fatalf("restart: version = %d, want C kept (3)", v)
 	}
 }
 
@@ -373,7 +424,8 @@ func TestLogManagedConfig(t *testing.T) {
 		t.Errorf("logged without --config: %q", buf.String())
 	}
 	logManagedConfig("a.yaml")
-	if !strings.Contains(buf.String(), "config is managed by a.yaml: it is re-applied on every start") {
+	if !strings.Contains(buf.String(),
+		"config imported from a.yaml; edits in Settings are kept until the file changes") {
 		t.Errorf("log = %q", buf.String())
 	}
 }

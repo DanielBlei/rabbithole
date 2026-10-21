@@ -571,3 +571,26 @@ func TestRenameSource(t *testing.T) {
 		t.Errorf("no-op rename moved %d rows (err %v)", moved, err)
 	}
 }
+
+func TestSetDefaultSinceKeepsTheOtherDefaults(t *testing.T) {
+	db := openTestStore(t)
+	if err := db.SetFeedDefaults(
+		t.Context(),
+		config.FeedDefaults{MaxItems: feedPtrInt(5), Tags: []string{"ai"}},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetDefaultSince(t.Context(), config.Duration(72*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetDefaultSince(t.Context(), config.Duration(48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	d, err := db.FeedDefaults(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Since == nil || d.Since.Std() != 48*time.Hour || d.MaxItems == nil || *d.MaxItems != 5 || len(d.Tags) != 1 {
+		t.Errorf("defaults = %+v, want since overwritten and the rest kept", d)
+	}
+}

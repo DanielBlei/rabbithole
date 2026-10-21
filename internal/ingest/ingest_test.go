@@ -62,10 +62,13 @@ func testConfig(t *testing.T, feeds ...config.Feed) *testCfg {
 // openStore below reopens that same file.
 func testConfigWith(t *testing.T, doc config.FeedsDoc) *testCfg {
 	t.Helper()
+	if doc.Defaults.Since == nil {
+		wide := config.Duration(365 * 24 * time.Hour)
+		doc.Defaults.Since = &wide
+	}
 	cfg := &testCfg{
 		Config: config.Config{
 			Inference: config.InferenceConfig{BatchSize: 2, MaxParallel: 2, Provider: "heuristic", Model: "test-model"},
-			Ingest:    config.IngestConfig{Since: config.Duration(365 * 24 * time.Hour)},
 		},
 		dbPath: filepath.Join(t.TempDir(), "test.db"),
 	}
@@ -225,11 +228,12 @@ func TestRunFetchedCountsOnlyItemsWithinAgeWindow(t *testing.T) {
   <item><title>Old item</title><link>https://x.test/old</link><guid>https://x.test/old</guid>
     <pubDate>%s</pubDate><description>summary</description></item>
 </channel></rss>`, recent, old)
-	feed := config.Feed{Name: "Mixed", URL: serveRSS(t, body)}
+	feed := config.Feed{
+		Name:  "Mixed",
+		URL:   serveRSS(t, body),
+		Since: durPtr(24 * time.Hour),
+	} // only the recent item survives
 	cfg := testConfig(t, feed)
-	// The feed sets no window of its own, so it inherits ingest.since — which
-	// the run resolves against, not load.
-	cfg.Ingest.Since = config.Duration(24 * time.Hour) // narrow window: only the recent item survives
 	db := openStore(t, cfg)
 
 	out, err := Run(ctx, cfg.Config, testProfile("test"), db, time.Now(), Options{Record: true})

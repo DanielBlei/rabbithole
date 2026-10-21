@@ -28,11 +28,11 @@
 
       {{/* Same rule as the feed pane: blank takes the fallback, and the
            placeholder is that fallback. Here the chain has run out, so it is
-           ingest.since and the built-in uncapped. */}}
+           the built-in 7d and uncapped. */}}
       <label class="sdet__f">
         <span class="sdet__lbl">since</span>
         <input class="sdet__in sdet__in--sm" type="text" name="since" value="{{.Since}}"
-               placeholder="{{.GlobalSince}}" autocomplete="off" spellcheck="false">
+               placeholder="{{.BuiltinSince}}" autocomplete="off" spellcheck="false">
       </label>
 
       <label class="sdet__f">

@@ -378,8 +378,8 @@ func resolvePruneFilter(now time.Time) (store.PruneFilter, error) {
 
 // reingestNote warns when a prune reaches into the window ingest still fetches,
 // where deleting an item its feed still lists means the next run re-fetches and
-// re-scores it. It reads the global window while feeds may override it, so the
-// note says "may" and is empty only when the prune stays clear of it entirely.
+// re-scores it. window is the feed defaults' lookback while feeds may override it,
+// so the note says "may" and is empty only when the prune stays clear of it entirely.
 func reingestNote(filter store.PruneFilter, now time.Time, window time.Duration) string {
 	if !filter.Before.IsZero() && !filter.Before.After(now.Add(-window)) {
 		return ""
@@ -400,7 +400,7 @@ func humanDuration(d time.Duration) string {
 }
 
 func runPrune(cmd *cobra.Command, _ []string) error {
-	return withStore(cmd, func(ctx context.Context, db *store.Store, src config.Source) error {
+	return withStore(cmd, func(ctx context.Context, db *store.Store, _ config.Source) error {
 		now := time.Now()
 		filter, err := resolvePruneFilter(now)
 		if err != nil {
@@ -434,11 +434,11 @@ func runPrune(cmd *cobra.Command, _ []string) error {
 			return nil
 		}
 		fmt.Printf("Pruned %d item(s).%s\n", result.Deleted, keptClause(result))
-		cfg, _, err := src.Active(ctx)
+		defaults, err := db.FeedDefaults(ctx)
 		if err != nil {
 			return err
 		}
-		if note := reingestNote(filter, now, cfg.Ingest.Since.Std()); note != "" {
+		if note := reingestNote(filter, now, defaults.EffectiveSince()); note != "" {
 			fmt.Println(note)
 		}
 		return nil

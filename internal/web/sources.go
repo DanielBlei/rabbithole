@@ -173,7 +173,7 @@ type defaultsData struct {
 	EnabledChoice string
 	Since         string
 	MaxItems      string
-	GlobalSince   string // ingest.since, the fallback when Since is blank
+	BuiltinSince  string // the fallback when Since is blank and no default is set
 	Err           string
 }
 
@@ -351,12 +351,7 @@ func (s *Web) handleSourceDefaults(w http.ResponseWriter, r *http.Request) {
 		httpFeedError(w, err)
 		return
 	}
-	cfg, err := s.runConfig(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	s.renderFragment(w, "sourceDefaults", defaultsForm(cfg.Ingest.Since.Std(), d, ""))
+	s.renderFragment(w, "sourceDefaults", defaultsForm(d, ""))
 }
 
 // handleSourceSaveDefaults writes the set-wide fallbacks. Every feed that
@@ -376,12 +371,7 @@ func (s *Web) handleSourceSaveDefaults(w http.ResponseWriter, r *http.Request) {
 		err = s.db.SetFeedDefaults(r.Context(), defaults)
 	}
 	if err != nil {
-		cfg, cfgErr := s.runConfig(r.Context())
-		if cfgErr != nil {
-			http.Error(w, cfgErr.Error(), http.StatusInternalServerError)
-			return
-		}
-		form := defaultsForm(cfg.Ingest.Since.Std(), defaults, err.Error())
+		form := defaultsForm(defaults, err.Error())
 		form.Since, form.MaxItems = r.FormValue("since"), r.FormValue("max_items")
 		s.renderFragment(w, "sourceDefaults", form)
 		return
@@ -400,6 +390,9 @@ func (s *Web) handleSourceSaveDefaults(w http.ResponseWriter, r *http.Request) {
 
 // sourceImportLimit caps an uploaded feeds file.
 const sourceImportLimit = 1 << 20
+
+// feedCountHeader carries the feed count on a sources dialog response.
+const feedCountHeader = "X-Feed-Count"
 
 // handleSourceImport adds the feeds of an uploaded seed file that the store has
 // never seen, the same operation as `rabbithole sources import`. A file that
@@ -475,7 +468,7 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 	if err != nil {
 		return sourcesData{}, err
 	}
-	resolved, err := config.ResolveFeeds(doc, cfg.Ingest.Since.Std())
+	resolved, err := config.ResolveFeeds(doc)
 	if err != nil {
 		return sourcesData{}, err
 	}
@@ -484,10 +477,10 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 		return sourcesData{}, err
 	}
 
-	defaultSince, defaultCap := blankFallbacks(doc.Defaults, cfg.Ingest.Since.Std())
+	defaultSince, defaultCap := blankFallbacks(doc.Defaults)
 	data := sourcesData{
 		PromptUser:   promptUser(cfg.User),
-		Defaults:     defaultsSummary(doc.Defaults, cfg.Ingest.Since.Std()),
+		Defaults:     defaultsSummary(doc.Defaults),
 		DefaultSince: defaultSince,
 		DefaultCap:   defaultCap,
 		Counts:       sourceCounts{Total: len(resolved), Deleted: len(deleted)},
@@ -517,10 +510,7 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 	if len(deleted) > 0 {
 		// Deleted feeds aren't in doc, so they go through the cascade here to
 		// render with the same effective values as the rest.
-		gone, err := config.ResolveFeeds(
-			config.FeedsDoc{Defaults: doc.Defaults, Feeds: deleted},
-			cfg.Ingest.Since.Std(),
-		)
+		gone, err := config.ResolveFeeds(config.FeedsDoc{Defaults: doc.Defaults, Feeds: deleted})
 		if err != nil {
 			return sourcesData{}, err
 		}
@@ -552,12 +542,12 @@ func stampDefaults(data *sourcesData) {
 // blankFallbacks resolves what a feed gets when it sets neither knob — the
 // values the detail form shows as greyed placeholders. It walks the same chain
 // resolveFeed does, minus the feed itself, which is exactly what a blank field
-// means: defaults, then the global ingest.since, then the built-in.
+// means: defaults, then the built-in.
 //
 // The cap reads as "uncapped" rather than capLabel's em dash: in a placeholder
 // a dash says "no value", where what's meant is "no limit".
-func blankFallbacks(d config.FeedDefaults, globalSince time.Duration) (since, cap string) {
-	since = shortDur(globalSince)
+func blankFallbacks(d config.FeedDefaults) (since, cap string) {
+	since = shortDur(config.DefaultSince)
 	if d.Since != nil {
 		since = d.Since.Short()
 	}
@@ -656,6 +646,8 @@ func (s *Web) writeSourcesBodyWith(
 		stampDefaults(&data)
 	}
 	data.Counts.OOB = true
+	// The settings page reads the feed count here instead of loading itself again.
+	w.Header().Set(feedCountHeader, strconv.Itoa(data.Counts.Total))
 	if err := feedTmpl.ExecuteTemplate(w, "sourcesBody", data); err != nil {
 		log.Error().Err(err).Msg("render sources body")
 	}
@@ -675,12 +667,7 @@ func (s *Web) renderFragment(w http.ResponseWriter, name string, data any) {
 // tags come from the feed, and an item already scored is never re-inserted, so
 // without this a retag would only ever reach items ingested afterwards.
 func (s *Web) afterFeedChange(ctx context.Context) {
-	cfg, err := s.runConfig(ctx)
-	if err != nil {
-		log.Warn().Err(err).Msg("reading config after an edit failed")
-		return
-	}
-	configured, err := ingest.ResolveFeeds(ctx, s.db, cfg)
+	configured, err := ingest.ResolveFeeds(ctx, s.db)
 	if err != nil {
 		log.Warn().Err(err).Msg("resolving feeds after an edit failed")
 		return
@@ -690,10 +677,10 @@ func (s *Web) afterFeedChange(ctx context.Context) {
 	}
 }
 
-func defaultsForm(since time.Duration, d config.FeedDefaults, errMsg string) defaultsData {
+func defaultsForm(d config.FeedDefaults, errMsg string) defaultsData {
 	form := defaultsData{
 		EnabledChoice: enabledChoice(d.Enabled),
-		GlobalSince:   shortDur(since),
+		BuiltinSince:  shortDur(config.DefaultSince),
 		Err:           errMsg,
 	}
 	if d.Since != nil {

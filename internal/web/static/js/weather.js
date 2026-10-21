@@ -17,10 +17,9 @@
 (function(){
   var CACHE_TTL = 30 * 60 * 1000;
 
-  // layout stepper cycle order + display names. This is the SHAPE the widget
+  // layout choices in order. This is the SHAPE the widget
   // takes on a page; which pages show it is a separate question, below.
   var MODES = ['subbar','inline','full'];
-  var MODE_NAMES = {'subbar':'Sub-bar','inline':'Inline','full':'Full'};
 
   // Two axes, and they are independent on purpose. The side menu is on every
   // page and carries its own read-out, so it answers "up, down or not at all"
@@ -38,12 +37,9 @@
     var m = migrate();
     return MODES.indexOf(m) < 0 ? 'subbar' : m;
   }
-  // The side menu's positions, as a cycle rather than a row of pills: three
-  // states with one of them chosen is the same shape of answer the layout is,
-  // and it reads better as the same control. Off leads because it is where the
-  // menu starts, and it is what an unreadable stored value falls back to.
+  // The side menu's positions. Off leads because it is where the menu starts,
+  // and it is what an unreadable stored value falls back to.
   var SIDES = ['off','up','down'];
-  var SIDE_NAMES = {'off':'Off','up':'Up','down':'Down'};
   function side(){ var s = wxGet('side','off'); return SIDES.indexOf(s) < 0 ? 'off' : s; }
   function onFeed(){ return wxOn('feed'); }
   function onMaze(){ return wxOn('maze'); }
@@ -86,7 +82,7 @@
     if (!wanted()) return null;
     var el = document.getElementById('wxSide');
     if (side() !== 'off' && el) return el;
-    var maze = document.querySelector('.maze');
+    var maze = document.querySelector('.maze, .stp-page');
     if (maze) return onMaze() ? maze : null;
     var feed = document.getElementById('wxFeedTile');
     return (feed && onFeed()) ? feed : null;
@@ -331,7 +327,7 @@
     // container that isn't the chosen one is emptied — the CSS hides an empty
     // one, so clearing is what turns a placement off rather than a second rule
     // somewhere saying so.
-    var sh = shape(), isFeed = !document.querySelector('.maze');
+    var sh = shape(), isFeed = !document.querySelector('.maze, .stp-page');
     var pageOn = isFeed ? onFeed() : onMaze();
     var sub  = pageOn && sh === 'subbar' ? el(isFeed ? 'wxFeedBar'  : 'wxMazeBar')  : null;
     var band = pageOn && sh === 'full'   ? el(isFeed ? 'wxFeedBand' : 'wxMazeBand') : null;
@@ -453,20 +449,12 @@
     var label = btn.querySelector('.wx-sw__txt');
     if (label) label.textContent = text; else btn.textContent = text;
   }
-  // A cycle's name, its position in the strip of dots, and whether it can be
-  // stepped at all. Shared by the two of them for the same reason the wiring
-  // is: they are one control appearing twice.
-  function syncStepper(name, values, labels, value, enabled){
-    var i = values.indexOf(value); if (i < 0) i = 0;
-    var face = document.querySelector('[data-wx-'+name+'-name]');
-    if (face) face.textContent = labels[values[i]];
-    var step = document.querySelector('[data-wx-'+name+'-step]');
-    if (step) step.classList.toggle('is-off', !enabled);
-    document.querySelectorAll('[data-wx-'+name+'-prev],[data-wx-'+name+'-next]').forEach(function(b){
-      b.disabled = !enabled;
-    });
-    document.querySelectorAll('[data-wx-'+name+'-dots] i').forEach(function(dot, j){
-      dot.classList.toggle('is-on', j === i);
+  // A segmented choice: the radio matching the stored value is checked, and
+  // all of them go quiet when there is nowhere for the choice to take effect.
+  function syncPick(name, value, enabled){
+    document.querySelectorAll('[data-wx-pick="'+name+'"]').forEach(function(r){
+      r.checked = r.value === value;
+      r.disabled = !enabled;
     });
   }
   function syncWxControls(){
@@ -475,27 +463,17 @@
       var k = btn.getAttribute('data-wx-toggle');
       var isOn = wxOn(k);
       // Everything under Weather is unavailable while Weather is off, because
-      // none of it has anywhere to take effect. Only the placements read as
-      // off with it, though: 24-hour is a format, and a format switch that
-      // says AM/PM while 24-hour is what is stored is reporting the wrong
-      // preference rather than reporting that it is idle.
+      // none of it has anywhere to take effect.
       if (k !== 'show') btn.disabled = !weatherOn;
       if (RIDES[k]) isOn = isOn && weatherOn;
-      setSwitch(btn, isOn, k === 'time24' ? (isOn ? '24-hour' : 'AM / PM')
-                                          : (isOn ? 'On' : 'Off'));
+      setSwitch(btn, isOn, isOn ? 'On' : 'Off');
     });
-    // Two named states is the shape of a switch too: it wears the unit in force
-    // and throws to the other. On rather than off is which side the knob is,
-    // not which of them counts as switched on — see .wx-sw--ab.
-    document.querySelectorAll('[data-wx-unit]').forEach(function(btn){
-      btn.disabled = !weatherOn;
-      var f = wxGet('unit','C') === 'F';
-      setSwitch(btn, f, f ? '\u00b0F' : '\u00b0C');
-    });
-    // The shape only has anything to say if a page is showing it; the side
+    // The layout only has anything to say if a page is showing it; the side
     // menu answers for itself.
-    syncStepper('layout', MODES, MODE_NAMES, shape(), weatherOn && (onFeed() || onMaze()));
-    syncStepper('side', SIDES, SIDE_NAMES, side(), weatherOn);
+    syncPick('unit', wxGet('unit','C'), weatherOn);
+    syncPick('time24', wxOn('time24') ? '24' : '12', weatherOn);
+    syncPick('layout', shape(), weatherOn && (onFeed() || onMaze()));
+    syncPick('side', side(), weatherOn);
     syncLocField();
   }
 
@@ -525,17 +503,27 @@
     pop.style.setProperty('--wx-ox', (e.clientX - left) + 'px');
   });
 
-  document.addEventListener('click', function(e){
-    var t = e.target.closest && e.target.closest('[data-wx-toggle],[data-wx-unit]');
-    if (!t || t.disabled) return;
-    if (t.hasAttribute('data-wx-unit')){
-      wxSet('unit', wxGet('unit','C') === 'C' ? 'F' : 'C');
+  document.addEventListener('change', function(e){
+    var r = e.target.closest && e.target.closest('[data-wx-pick]');
+    if (!r || !r.checked || r.disabled) return;
+    var name = r.getAttribute('data-wx-pick');
+    if (name === 'unit'){
+      wxSet('unit', r.value);
       wxSet('unitSet', '1');    // user chose; stop auto-setting by location
       wxSet('fetchedAt', '0');  // the reading itself is in the old unit
       fetchWeather(parseFloat(wxGet('lat','')), parseFloat(wxGet('lon','')));
       syncWxControls();
       return;
     }
+    if (name === 'time24') wxSet('time24', r.value === '24' ? '1' : '0');
+    else if (name === 'layout') wxSet('mode', r.value);
+    else if (name === 'side') wxSet('side', r.value);
+    applyMode(); syncWxControls(); maybeRefresh();
+  });
+
+  document.addEventListener('click', function(e){
+    var t = e.target.closest && e.target.closest('[data-wx-toggle]');
+    if (!t || t.disabled) return;
     var k = t.getAttribute('data-wx-toggle');
     wxSet(k, wxOn(k) ? '0' : '1');
     // Switching a placement on has to resume the load the gate skipped, not
@@ -782,26 +770,6 @@
       requestLocation();
     });
   }
-
-  // Both cycles are the same control, so they are wired by the same code and
-  // told apart by the name in their attributes. Stepping either one can be the
-  // first time this page has had anywhere to draw at all, so it goes through
-  // maybeRefresh rather than a redraw: it may have to fetch.
-  function wireStepper(name, values, store){
-    var dots = document.querySelector('[data-wx-'+name+'-dots]');
-    if (dots) values.forEach(function(){ dots.appendChild(document.createElement('i')); });
-    function step(dir){
-      var i = values.indexOf(store()); if (i < 0) i = 0;
-      store(values[(i + dir + values.length) % values.length]);
-      applyMode(); syncWxControls(); maybeRefresh();
-    }
-    var prev = document.querySelector('[data-wx-'+name+'-prev]');
-    var next = document.querySelector('[data-wx-'+name+'-next]');
-    if (prev) prev.addEventListener('click', function(){ step(-1); });
-    if (next) next.addEventListener('click', function(){ step(1); });
-  }
-  wireStepper('layout', MODES, function(v){ if (v === undefined) return shape(); wxSet('mode', v); });
-  wireStepper('side', SIDES, function(v){ if (v === undefined) return side(); wxSet('side', v); });
 
   syncWxControls();
   applyMode();

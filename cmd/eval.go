@@ -10,6 +10,7 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -269,10 +270,7 @@ func runBenchmark(cmd *cobra.Command, args []string) error {
 		Str("benchmark_hash", ds.Hash).
 		Msg("benchmark inputs")
 
-	systemPrompt, err := cfg.Inference.LoadSystemPrompt()
-	if err != nil {
-		return err
-	}
+	systemPrompt := cfg.Inference.EffectiveSystemPrompt()
 	scorer, err := resolveJudgeScorer(ctx, cfg.Inference, opts.Think, systemPrompt)
 	if err != nil {
 		return err
@@ -353,6 +351,9 @@ func benchmarkConfig(cmd *cobra.Command) (cfg config.Config, profilePath, profil
 	file, err := config.ReadFile(configPath)
 	if err != nil {
 		return cfg, "", "", err
+	}
+	if err := file.InlineSystemPrompt(filepath.Dir(configPath)); err != nil {
+		return cfg, "", "", fmt.Errorf("%s: %w", configPath, err)
 	}
 	cfg, _, legacy, _ := file.Split()
 	// A literal key is kept in this process only; the file is not imported.

@@ -105,7 +105,7 @@ type InferenceConfig struct {
 	// false leaves the shape to the system prompt, for endpoints whose guided decoding garbles it.
 	StructuredOutput *bool `yaml:"structured_output"`
 
-	// SystemPrompt: unset takes inference's built-in default, a path overrides it, false sends none.
+	// SystemPrompt: unset takes inference's built-in default, text replaces it, false sends none.
 	SystemPrompt SystemPromptSetting `yaml:"system_prompt"`
 
 	// How items are batched through the model. BatchSize also sizes the token
@@ -116,38 +116,18 @@ type InferenceConfig struct {
 	// ModelTuning carries the decoding limits.
 	// Omit the block, or any field in it, to take rank's defaults.
 	ModelTuning rank.ModelTuning `yaml:"model_tuning"`
-
-	// Summary is a placeholder for a separate summarization backend;
-	// nothing routes to it yet.
-	Summary SummaryConfig `yaml:"summary"`
 }
 
-// SummaryConfig overrides the model backend used for summarization tasks.
-// Unset fields fall back to the parent InferenceConfig; if any field here
-// is set, Model must be too, since a summary block that only tweaks the
-// endpoint without naming a model has no meaning.
-//
-// ModelTuning and SystemPrompt are not overridable here yet — they always
-// come from the parent InferenceConfig. Summarization will likely want its
-// own SystemPrompt eventually (a different task than profile scoring), but
-// that's for whoever wires up actual usage.
-type SummaryConfig struct {
-	Provider string `yaml:"provider"`
-	Host     string `yaml:"host"`
-	Model    string `yaml:"model"`
-	APIKey   string `yaml:"api_key"`
-	Think    *bool  `yaml:"think"`
-	Effort   string `yaml:"effort"`
-}
-
-// SystemPromptSetting is the inference.system_prompt config value: a path, false (disabled),
-// or unset (the built-in default).
+// SystemPromptSetting is the inference.system_prompt value: the prompt text, false
+// (disabled), or unset (the built-in default). A config file may name a prompt file
+// instead of the text; File.InlineSystemPrompt replaces the path with the file's
+// contents before anything is stored.
 type SystemPromptSetting struct {
-	Path     string
+	Text     string
 	Disabled bool
 }
 
-// UnmarshalYAML accepts a path string or the literal false; true is rejected.
+// UnmarshalYAML accepts text or the literal false; true is rejected.
 func (s *SystemPromptSetting) UnmarshalYAML(value *yaml.Node) error {
 	if value.Tag == "!!bool" {
 		var b bool
@@ -155,12 +135,41 @@ func (s *SystemPromptSetting) UnmarshalYAML(value *yaml.Node) error {
 			return err
 		}
 		if b {
-			return fmt.Errorf("system_prompt: true has no meaning; use a path, false, or omit it")
+			return fmt.Errorf("system_prompt: true has no meaning; use the prompt text, false, or omit it")
 		}
 		s.Disabled = true
 		return nil
 	}
-	return value.Decode(&s.Path)
+	return value.Decode(&s.Text)
+}
+
+// LooksLikePath reports whether a system_prompt value reads as a file path rather
+// than prompt text: one line that has no whitespace, or that starts with /, ./,
+// ../ or ~/. Prompt text is normally several words, so it never matches.
+func LooksLikePath(v string) bool {
+	v = strings.TrimSpace(v)
+	if v == "" || strings.ContainsAny(v, "\r\n") {
+		return false
+	}
+	if !strings.ContainsAny(v, " \t") {
+		return true
+	}
+	for _, p := range []string{"/", "./", "../", "~/"} {
+		if strings.HasPrefix(v, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// FileInference is the inference block of a config file: the stored settings plus
+// the keys that are accepted and dropped.
+type FileInference struct {
+	InferenceConfig `yaml:",inline"`
+
+	// Summary was a placeholder for a separate summarization backend. It is
+	// accepted so old files import, and ignored.
+	Summary map[string]any `yaml:"summary"`
 }
 
 // FileIngest is the ingest block of a config file. Feeds is a legacy import
@@ -365,9 +374,12 @@ const (
 	defaultModel       = "qwen3.5:4b"
 	defaultBatchSize   = 1
 	defaultMaxParallel = 1
-	defaultSince       = 7 * 24 * time.Hour
 	defaultEffort      = "medium"
 )
+
+// DefaultSince is the lookback window a feed gets when neither it nor the feed
+// defaults set one.
+const DefaultSince = 7 * 24 * time.Hour
 
 // efforts are the reasoning_effort levels inference.effort accepts. Lower ones
 // belong to think: false, which probes the model's own lowest.
@@ -479,61 +491,16 @@ func LoadProfileFile(path string) (string, error) {
 	return profile, nil
 }
 
-// LoadOverride reads Path, if set, stripping HTML comments like LoadProfileFile. Unset returns
-// ("", nil); the caller decides what that means.
-func (s *SystemPromptSetting) LoadOverride() (string, error) {
-	if s.Path == "" {
-		return "", nil
+// EffectiveSystemPrompt resolves inference.system_prompt: disabled returns "", text returns
+// itself, and unset returns the built-in default. The heuristic provider never looks at a
+// system prompt, so it always gets "".
+func (c InferenceConfig) EffectiveSystemPrompt() string {
+	switch {
+	case c.Provider == "heuristic" || c.SystemPrompt.Disabled:
+		return ""
+	case c.SystemPrompt.Text != "":
+		return c.SystemPrompt.Text
+	default:
+		return rank.DefaultSystemPrompt
 	}
-	prompt, err := loadTrimmedFile(s.Path)
-	if err != nil {
-		return "", fmt.Errorf("read system prompt %q: %w", s.Path, err)
-	}
-	if strings.TrimSpace(prompt) == "" {
-		return "", fmt.Errorf("system prompt %q is empty", s.Path)
-	}
-	return prompt, nil
-}
-
-// LoadSystemPrompt resolves the effective inference.system_prompt: disabled returns "", a path
-// returns that file's contents, and unset returns the built-in default. The heuristic provider
-// never looks at a system prompt, so it always gets "" without touching SystemPrompt at all —
-// a bad or missing override path must not block a heuristic run.
-func (c *InferenceConfig) LoadSystemPrompt() (string, error) {
-	if c.Provider == "heuristic" {
-		return "", nil
-	}
-	if c.SystemPrompt.Disabled {
-		return "", nil
-	}
-	if c.SystemPrompt.Path != "" {
-		return c.SystemPrompt.LoadOverride()
-	}
-	return rank.DefaultSystemPrompt, nil
-}
-
-// ResolveSummary returns the effective InferenceConfig for summarization
-// tasks: c with Provider/Host/Model/APIKey/Think/Effort overridden by any set
-// Summary fields. ModelTuning and SystemPrompt always come from c.
-func (c InferenceConfig) ResolveSummary() InferenceConfig {
-	resolved := c
-	if c.Summary.Provider != "" {
-		resolved.Provider = c.Summary.Provider
-	}
-	if c.Summary.Host != "" {
-		resolved.Host = c.Summary.Host
-	}
-	if c.Summary.Model != "" {
-		resolved.Model = c.Summary.Model
-	}
-	if c.Summary.APIKey != "" {
-		resolved.APIKey = c.Summary.APIKey
-	}
-	if c.Summary.Think != nil {
-		resolved.Think = c.Summary.Think
-	}
-	if c.Summary.Effort != "" {
-		resolved.Effort = c.Summary.Effort
-	}
-	return resolved
 }

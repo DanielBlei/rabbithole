@@ -30,6 +30,7 @@ var (
 	serveTLSKey       string
 	serveInsecureHTTP bool
 	serveDev          bool
+	serveNoEnvWrite   bool
 	serveProxies      []string
 )
 
@@ -50,6 +51,8 @@ func init() {
 		"networks whose X-Forwarded-For and X-Forwarded-Proto are believed; empty trusts none")
 	serveCmd.Flags().BoolVar(&serveDev, "dev", false,
 		"serve the CSS, scripts and fonts no-cache, so an edit shows on the next reload")
+	serveCmd.Flags().BoolVar(&serveNoEnvWrite, "no-env-write", false,
+		"never write a pasted API key to .env: hides the paste action in Settings and refuses it")
 	rootCmd.AddCommand(serveCmd)
 }
 
@@ -254,7 +257,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	defer s.Close()
 	db, src := s.db, s.src
 
-	cfg, version, err := src.Active(ctx)
+	_, version, err := src.Active(ctx)
 	if err != nil {
 		return err
 	}
@@ -264,7 +267,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// Items carry their feed's tags, which the feed page filters on. Syncing at
 	// startup means a tag edit reaches items recorded before it, rather than
 	// waiting for the next ingest run to notice.
-	configured, err := ingest.ResolveFeeds(ctx, db, cfg)
+	configured, err := ingest.ResolveFeeds(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -284,6 +287,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	srv.TrustProxies(proxies)
 	srv.Dev(serveDev)
 	srv.ManagedBy(configPath)
+	srv.EnvFile(s.env, serveNoEnvWrite)
+	srv.StoreInfo(s.storeInfo)
 	httpSrv := newHTTPServer(serveAddr, srv.Routes(), tlsConfig)
 	// Bound here rather than in the goroutine, so a taken port fails the command.
 	ln, err := net.Listen("tcp", serveAddr)
@@ -356,14 +361,13 @@ func logActiveConfig(ctx context.Context, db *store.Store, version int) {
 		Msg("config loaded from the store")
 }
 
-// logManagedConfig says that a --config file is re-applied on every start.
+// logManagedConfig says that a --config file is applied when it changes.
 // Without one there is nothing to say.
 func logManagedConfig(path string) {
 	if path == "" {
 		return
 	}
-	log.Info().Msgf("config is managed by %s: it is re-applied on every start, so changes made in the UI "+
-		"or with config import last until the next restart", path)
+	log.Info().Msgf("config imported from %s; edits in Settings are kept until the file changes", path)
 }
 
 // describeConfigSource turns a stored source into how the version was saved,
