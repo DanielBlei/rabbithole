@@ -19,7 +19,16 @@
 
   dialog.addEventListener('click', function(e){
     var button = e.target.closest('[data-welcome-step]');
-    if (!button || button.classList.contains('is-done')) return;
+    if (!button) return;
+    // A step that is a link leaves the page, so it is recorded first: a
+    // request still in flight would be cancelled by the navigation.
+    if (button.tagName === 'A' && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+      e.preventDefault();
+      button.classList.add('is-done');
+      record(button.dataset.welcomeStep).then(function(){ window.location.href = button.href; });
+      return;
+    }
+    if (button.classList.contains('is-done')) return;
     button.classList.add('is-done');
     record(button.dataset.welcomeStep);
   });

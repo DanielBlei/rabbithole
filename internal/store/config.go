@@ -38,6 +38,17 @@ CREATE TABLE IF NOT EXISTS config_versions (
 CREATE INDEX IF NOT EXISTS idx_config_versions_hash ON config_versions(content_hash);
 `
 
+// configImportSchema records, per --config file, the hash of what was last
+// applied from it. The history cannot say this: an import that matches the
+// active version saves nothing, and a UI save hides an earlier import.
+const configImportSchema = `
+CREATE TABLE IF NOT EXISTS config_imports (
+	source       TEXT PRIMARY KEY,
+	applied_hash TEXT NOT NULL,
+	applied_at   TEXT NOT NULL
+);
+`
+
 var (
 	// ErrConfigConflict means the save was based on a version that is no longer
 	// the latest.
@@ -198,6 +209,51 @@ func (s *Store) appendConfig(
 	}, nil
 }
 
+// ConfigImportMarker is what was last applied from one import source.
+type ConfigImportMarker struct {
+	Source      string
+	AppliedHash string
+	AppliedAt   time.Time
+}
+
+// ConfigImport returns the marker for source, and false when none was recorded.
+func (s *Store) ConfigImport(ctx context.Context, source string) (ConfigImportMarker, bool, error) {
+	var (
+		m       ConfigImportMarker
+		applied string
+	)
+	err := s.queryRow(ctx,
+		"SELECT source, applied_hash, applied_at FROM config_imports WHERE source = ?", source,
+	).Scan(&m.Source, &m.AppliedHash, &applied)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ConfigImportMarker{}, false, nil
+	}
+	if err != nil {
+		return ConfigImportMarker{}, false, fmt.Errorf("read config import marker: %w", err)
+	}
+	t, err := time.Parse(sqlTimeLayout, applied)
+	if err != nil {
+		return ConfigImportMarker{}, false, fmt.Errorf("parse config import applied_at %q: %w", applied, err)
+	}
+	m.AppliedAt = utcTime(t)
+	return m, true, nil
+}
+
+// RecordConfigImport sets the marker for source to hash.
+func (s *Store) RecordConfigImport(ctx context.Context, source, hash string) error {
+	if source == "" || hash == "" {
+		return errors.New("record config import: source and hash are required")
+	}
+	_, err := s.exec(ctx,
+		`INSERT INTO config_imports (source, applied_hash, applied_at) VALUES (?, ?, ?)
+		 ON CONFLICT(source) DO UPDATE SET applied_hash = excluded.applied_hash, applied_at = excluded.applied_at`,
+		source, hash, sqlTime(time.Now().UTC()))
+	if err != nil {
+		return fmt.Errorf("record config import: %w", err)
+	}
+	return nil
+}
+
 func validConfigSource(source string) bool {
 	if source == ConfigSourceUI {
 		return true
@@ -225,6 +281,29 @@ type dbConfigSource struct {
 	badSeen int // the unreadable version already logged
 }
 
+// ActiveCanonicalConfig returns the active version in canonical form (only what
+// was set, no defaults) and its number. With nothing saved it returns an empty
+// config at version 0.
+func (s *Store) ActiveCanonicalConfig(ctx context.Context) (config.Config, int, error) {
+	v, ok, err := s.ActiveConfig(ctx)
+	if err != nil {
+		return config.Config{}, 0, err
+	}
+	if !ok {
+		return config.Config{}, 0, nil
+	}
+	cfg, err := config.ParseStoredCanonical([]byte(v.Content), v.SchemaVersion)
+	if err != nil {
+		return config.Config{}, 0, unreadableConfig(v.Version, err)
+	}
+	return cfg, v.Version, nil
+}
+
+func unreadableConfig(version int, err error) error {
+	return fmt.Errorf("stored config version %d cannot be read: %w; "+
+		"import a fixed file with --config <file>", version, err)
+}
+
 // Active returns a private copy of the effective config and its version, 0 for
 // the defaults. A stored row that no longer parses is an error, never defaults.
 func (d *dbConfigSource) Active(ctx context.Context) (config.Config, int, error) {
@@ -240,8 +319,7 @@ func (d *dbConfigSource) Active(ctx context.Context) (config.Config, int, error)
 	if d.version != v.Version {
 		cfg, err := config.ParseStored([]byte(v.Content), v.SchemaVersion)
 		if err != nil {
-			err = fmt.Errorf("stored config version %d cannot be read: %w; "+
-				"import a fixed file with --config <file>", v.Version, err)
+			err = unreadableConfig(v.Version, err)
 			if d.badSeen != v.Version {
 				d.badSeen = v.Version
 				log.Error().Err(err).Msg("stored config unreadable")

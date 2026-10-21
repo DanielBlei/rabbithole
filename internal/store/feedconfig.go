@@ -359,6 +359,17 @@ func (s *Store) SetFeedDefaults(ctx context.Context, d config.FeedDefaults) erro
 	return nil
 }
 
+// SetDefaultSince sets the set-wide lookback and leaves the other defaults as
+// they are.
+func (s *Store) SetDefaultSince(ctx context.Context, since config.Duration) error {
+	d, err := s.FeedDefaults(ctx)
+	if err != nil {
+		return err
+	}
+	d.Since = &since
+	return s.SetFeedDefaults(ctx, d)
+}
+
 // SeedResult reports what a seeding pass did. Warnings name entries the file
 // declared but the store wouldn't take; they are worth surfacing but never
 // worth failing a boot over.

@@ -10,10 +10,7 @@ import (
 )
 
 // Canonical environment names for the api_key fields.
-const (
-	inferenceKeyField = "inference.api_key"
-	summaryKeyField   = "inference.summary.api_key"
-)
+const inferenceKeyField = "inference.api_key"
 
 // allowedNameRE matches every variable the .env loader reads (RABBITHOLE_DB and
 // RABBITHOLE_DB_PASSWORD included). keyRefRE is the narrower positive list for
@@ -27,14 +24,10 @@ var (
 // RefFor returns the canonical environment variable name for an api_key field,
 // or "" for any other field.
 func RefFor(field string) string {
-	switch field {
-	case inferenceKeyField:
+	if field == inferenceKeyField {
 		return "RABBITHOLE_INFERENCE_API_KEY"
-	case summaryKeyField:
-		return "RABBITHOLE_SUMMARY_API_KEY"
-	default:
-		return ""
 	}
+	return ""
 }
 
 // allowedName reports whether name may be referenced from a stored config or
@@ -68,32 +61,18 @@ type Secret struct {
 // a reference to its canonical variable, and returns the literals so the caller
 // can store them in .env. Run it before Prepare, which rejects literals.
 func (r *Config) ExtractLiterals() []Secret {
-	fields := []struct {
-		field string
-		key   *string
-	}{
-		{inferenceKeyField, &r.Inference.APIKey},
-		{summaryKeyField, &r.Inference.Summary.APIKey},
+	key := &r.Inference.APIKey
+	if *key == "" || strings.HasPrefix(*key, "$") {
+		return nil
 	}
-	var out []Secret
-	for _, f := range fields {
-		if *f.key == "" || strings.HasPrefix(*f.key, "$") {
-			continue
-		}
-		name := RefFor(f.field)
-		out = append(out, Secret{Field: f.field, Name: name, Value: *f.key})
-		*f.key = "$" + name
-	}
-	return out
+	name := RefFor(inferenceKeyField)
+	sec := Secret{Field: inferenceKeyField, Name: name, Value: *key}
+	*key = "$" + name
+	return []Secret{sec}
 }
 
 // ResolvedAPIKey resolves the inference api_key reference through the
 // environment at use time. An empty key resolves to "".
 func (c InferenceConfig) ResolvedAPIKey() (string, error) {
 	return expandEnvRef(inferenceKeyField, c.APIKey)
-}
-
-// ResolvedSummaryAPIKey resolves the summary api_key reference the same way.
-func (c InferenceConfig) ResolvedSummaryAPIKey() (string, error) {
-	return expandEnvRef(summaryKeyField, c.Summary.APIKey)
 }

@@ -18,7 +18,7 @@ GOLDEN   ?= ./docs/examples/golden.yaml
 DB       ?= ./data/rabbithole.db
 ENV_DB   := $(and $(filter file,$(origin DB)),$(RABBITHOLE_DB))
 DB_FLAG  := $(if $(ENV_DB),,--db '$(value DB)')
-DB_FROM  := $(if $(ENV_DB),from your shell environment,$(if $(filter file,$(origin DB)),the repo default,from DB=))
+DB_FROM  := $(if $(ENV_DB),from your shell environment,$(if $(filter file,$(origin DB)),the repo development default,from DB=))
 FORMAT   ?= text
 
 # Nearest git tag plus any commits past it.
@@ -38,11 +38,11 @@ USER_DATA_DIR := $(if $(filter Darwin,$(shell uname -s)),~/Library/Application S
 .PHONY: db-hint
 db-hint:
 	@printf '\033[33m▌\033[0m make keeps your data in \033[36m$(if $(ENV_DB),the store RABBITHOLE_DB names,$(DB))\033[0m ($(DB_FROM))\n'
-	@printf '\033[33m▌\033[0m   Use another local store:  \033[36mmake $(or $(firstword $(MAKECMDGOALS)),serve) DB=/path/to/rabbithole.db\033[0m\n'
-	@printf '\033[33m▌\033[0m   Use Postgres:             \033[36mmake $(or $(firstword $(MAKECMDGOALS)),serve) DB=postgres://user@host:5432/rabbithole\033[0m\n'
-	@printf '\033[33m▌\033[0m                             with \033[36mRABBITHOLE_DB_PASSWORD\033[0m set in .env or your shell profile\n'
-	@printf '\033[33m▌\033[0m                             (a password in the URL is accepted, but not recommended)\n'
-	@printf '\033[33m▌\033[0m   Run without make:         \033[36m./$(BINARY)\033[0m uses \033[36m$(USER_DATA_DIR)\033[0m, or RABBITHOLE_DB when set\n'
+	@printf '\033[33m▌\033[0m   Use another local store:         \033[36mmake $(or $(firstword $(MAKECMDGOALS)),serve) DB=/path/to/rabbithole.db\033[0m\n'
+	@printf '\033[33m▌\033[0m   Use Postgres:                    \033[36mmake $(or $(firstword $(MAKECMDGOALS)),serve) DB=postgres://user@host:5432/rabbithole\033[0m\n'
+	@printf '\033[33m▌\033[0m                                    with \033[36mRABBITHOLE_DB_PASSWORD\033[0m set in .env or your shell profile\n'
+	@printf '\033[33m▌\033[0m                                    (a password in the URL is accepted, but not recommended)\n'
+	@printf '\033[33m▌\033[0m   Run without make (prod):         \033[36m./$(BINARY)\033[0m uses \033[36m$(USER_DATA_DIR)\033[0m, or RABBITHOLE_DB (URL/Path) when set\n'
 
 .PHONY: setup
 setup: ## Create .env from .env.example (if missing); the binary reads it itself

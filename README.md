@@ -66,8 +66,8 @@ curl -fsSL https://raw.githubusercontent.com/DanielBlei/rabbithole/main/scripts/
 ```
 
 It verifies the download and installs the latest release binary to `~/.local/bin`. It writes no
-config: settings live in the app, and a bare `rabbithole serve` runs on the defaults. Archives are
-also on the [Releases page](https://github.com/DanielBlei/rabbithole/releases).
+config: you configure it in the UI (the gear, Settings), and a bare `rabbithole serve` runs on the
+defaults. Archives are also on the [Releases page](https://github.com/DanielBlei/rabbithole/releases).
 
 ### From source
 

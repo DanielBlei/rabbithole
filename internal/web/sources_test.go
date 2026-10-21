@@ -33,8 +33,7 @@ func sourcesTestWeb(t *testing.T, doc config.FeedsDoc) (*Web, *store.Store) {
 	if _, err := db.SeedFeeds(t.Context(), doc); err != nil {
 		t.Fatalf("SeedFeeds: %v", err)
 	}
-	cfg := config.Config{Ingest: config.IngestConfig{Since: config.Duration(globalSince)}}
-	w := New(db, config.Static(cfg), testIngestManager(t, db))
+	w := New(db, config.Static{}, testIngestManager(t, db))
 	return w, db
 }
 
@@ -113,9 +112,9 @@ func TestSourcesRendersResolvedValues(t *testing.T) {
 			why:  "the client filter matches on the url",
 		},
 		{
-			name: "global since as the placeholder",
+			name: "built-in since as the placeholder",
 			in:   detail,
-			want: `placeholder="9d"`,
+			want: `placeholder="7d"`,
 			why:  "Beta sets no window, so the empty box shows what it will use",
 		},
 		{
@@ -939,6 +938,11 @@ func mustFeed(t *testing.T, db *store.Store, name string) config.Feed {
 // postFile sends body as the multipart "file" field of an import.
 func postFile(t *testing.T, w *Web, body string) string {
 	t.Helper()
+	return postFileRec(t, w, body).Body.String()
+}
+
+func postFileRec(t *testing.T, w *Web, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	part, err := mw.CreateFormFile("file", "feeds.yaml")
@@ -958,7 +962,7 @@ func postFile(t *testing.T, w *Web, body string) string {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("POST /sources/import: status = %d, want 200; body=%s", rec.Code, rec.Body)
 	}
-	return rec.Body.String()
+	return rec
 }
 
 const importFeeds = `feeds:
@@ -992,6 +996,15 @@ func TestSourcesImportReportsCounts(t *testing.T) {
 	again := postFile(t, w, importFeeds)
 	if !strings.Contains(again, "added 0 feed(s), skipped 3 already known") {
 		t.Errorf("second import; body=%s", again)
+	}
+}
+
+func TestSourcesImportCarriesTheFeedCount(t *testing.T) {
+	w, _ := sourcesTestWeb(t, config.FeedsDoc{
+		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
+	})
+	if got := postFileRec(t, w, importFeeds).Header().Get(feedCountHeader); got != "3" {
+		t.Errorf("%s = %q, want 3", feedCountHeader, got)
 	}
 }
 

@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,21 +15,22 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 )
 
 // RunSchemaVersion is the schema version of a stored Config.
-const RunSchemaVersion = 1
+const RunSchemaVersion = 2
 
 // File is the import shape: the whole YAML file as written, including the keys
 // that are not stored (store, profile, ingest.feeds). It is decoded leniently,
 // so unknown keys are ignored.
 type File struct {
-	User      string          `yaml:"user"`
-	Profile   string          `yaml:"profile"`
-	Inference InferenceConfig `yaml:"inference"`
-	Ingest    FileIngest      `yaml:"ingest"`
-	Store     StoreConfig     `yaml:"store"`
+	User      string        `yaml:"user"`
+	Profile   string        `yaml:"profile"`
+	Inference FileInference `yaml:"inference"`
+	Ingest    FileIngest    `yaml:"ingest"`
+	Store     StoreConfig   `yaml:"store"`
 }
 
 // Config is the stored shape: what the config store keeps and what ingest
@@ -44,14 +44,67 @@ type Config struct {
 
 // IngestConfig is the stored part of the ingest block.
 type IngestConfig struct {
-	Since     Duration `yaml:"since,omitempty"`      // lookback window (e.g. 14d, 168h)
-	DigestDir string   `yaml:"digest_dir,omitempty"` // optional: where `ingest --markdown` writes the digest
+	// DigestDir is deprecated: `ingest --markdown --out <dir>` replaces it. Removed in v0.4.0.
+	DigestDir string `yaml:"digest_dir,omitempty"`
 }
 
-// Legacy holds the file paths named by an imported old-shape file.
+// Legacy holds the keys of an imported old-shape file that are not stored.
 type Legacy struct {
-	ProfilePath string // profile, as written
-	FeedsPath   string // ingest.feeds, as written
+	ProfilePath string   // profile, as written
+	FeedsPath   string   // ingest.feeds, as written
+	Since       Duration // ingest.since; written to the feed defaults on import, 0 when unset
+}
+
+// Deprecations lists one warning per deprecated key the file sets, each naming
+// where the setting lives now. They are returned, not logged, so a caller can
+// show them wherever the import happens.
+func (f File) Deprecations() []string {
+	var out []string
+	if f.Ingest.Since != 0 {
+		out = append(out, "ingest.since is deprecated: it is written to the feed defaults "+
+			"(Sources, Defaults, since) on import; removed in v0.4.0")
+	}
+	if f.Ingest.DigestDir != "" {
+		out = append(out, "ingest.digest_dir is deprecated: pass --out <dir> to ingest --markdown; removed in v0.4.0")
+	}
+	if len(f.Inference.Summary) > 0 {
+		out = append(out, "inference.summary is not used and is ignored; removed in v0.4.0")
+	}
+	return out
+}
+
+// InlineSystemPrompt replaces a system_prompt that names a file with the file's
+// text, read once. A relative path is taken from baseDir, the config file's
+// directory. The value counts as a path when LooksLikePath says so, or when it is
+// one line and names an existing file; anything else is the prompt text already.
+// Only the CLI calls this: a web upload never reads server paths.
+func (f *File) InlineSystemPrompt(baseDir string) error {
+	v := strings.TrimSpace(f.Inference.SystemPrompt.Text)
+	if v == "" {
+		return nil
+	}
+	path := v
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(baseDir, path)
+	}
+	if !LooksLikePath(v) {
+		if strings.ContainsAny(v, "\r\n") {
+			return nil
+		}
+		if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() {
+			return nil
+		}
+	}
+	text, err := loadTrimmedFile(path)
+	if err != nil {
+		return fmt.Errorf("inference.system_prompt %q looks like a file path but cannot be read "+
+			"(write the prompt text instead): %w", v, err)
+	}
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("inference.system_prompt file %q is empty", v)
+	}
+	f.Inference.SystemPrompt.Text = text
+	return nil
 }
 
 // ParseFile decodes a config file leniently.
@@ -77,18 +130,19 @@ func ReadFile(path string) (File, error) {
 }
 
 // Split separates the file into the stored run config, the bootstrap store
-// block and the legacy import paths. The run config is normalized but neither
+// block and the legacy import directives. The run config is normalized but neither
 // defaulted nor validated (see Prepare); dropped lists the dotted keys
 // normalization removed.
 func (f File) Split() (run Config, store StoreConfig, legacy Legacy, dropped []string) {
 	run = Config{
 		User:      f.User,
-		Inference: f.Inference,
-		Ingest:    IngestConfig{Since: f.Ingest.Since, DigestDir: f.Ingest.DigestDir},
+		Inference: f.Inference.InferenceConfig,
+		Ingest:    IngestConfig{DigestDir: f.Ingest.DigestDir},
 	}
 	dropped = run.Normalize()
 	legacy.ProfilePath = f.Profile
 	legacy.FeedsPath = f.Ingest.Feeds
+	legacy.Since = f.Ingest.Since
 	return run, f.Store, legacy, dropped
 }
 
@@ -105,7 +159,6 @@ func (r Config) Clone() Config {
 	c := r
 	c.Inference.Think = cloneBool(r.Inference.Think)
 	c.Inference.StructuredOutput = cloneBool(r.Inference.StructuredOutput)
-	c.Inference.Summary.Think = cloneBool(r.Inference.Summary.Think)
 	return c
 }
 
@@ -138,7 +191,7 @@ func (r *Config) Canonical() (dropped []string, err error) {
 }
 
 // Normalize clears inference fields the provider does not read and makes the
-// system prompt and digest paths absolute and clean. It returns the dotted names
+// digest path absolute and clean. It returns the dotted names
 // of the fields it cleared that were set. An unknown provider is left alone for
 // validate to report.
 func (r *Config) Normalize() (dropped []string) {
@@ -155,7 +208,6 @@ func (r *Config) Normalize() (dropped []string) {
 			}
 		}
 	}
-	in.SystemPrompt.Path = absClean(in.SystemPrompt.Path)
 	r.Ingest.DigestDir = absClean(r.Ingest.DigestDir)
 	return dropped
 }
@@ -202,9 +254,6 @@ func (r *Config) applyDefaults() {
 	if in.MaxParallel <= 0 {
 		in.MaxParallel = defaultMaxParallel
 	}
-	if r.Ingest.Since == 0 {
-		r.Ingest.Since = Duration(defaultSince)
-	}
 }
 
 // FieldError is one validation failure, keyed by the dotted field name so a UI
@@ -250,33 +299,13 @@ func (r *Config) validate() error {
 	if !slices.Contains(Providers, in.Provider) {
 		add("inference.provider", "invalid provider %q, must be ollama, openai, vllm or heuristic", in.Provider)
 	}
-	for _, e := range []struct{ field, value string }{
-		{"inference.effort", in.Effort},
-		{"inference.summary.effort", in.Summary.Effort},
-	} {
-		if e.value != "" && !slices.Contains(efforts, e.value) {
-			add(e.field, "%s %q, must be one of %s", e.field, e.value, strings.Join(efforts, ", "))
-		}
+	if in.Effort != "" && !slices.Contains(efforts, in.Effort) {
+		add("inference.effort", "inference.effort %q, must be one of %s", in.Effort, strings.Join(efforts, ", "))
 	}
-	if in.Summary != (SummaryConfig{}) && in.Summary.Model == "" {
-		add(
-			"inference.summary.model",
-			"inference.summary.model is required when other inference.summary fields are set",
-		)
-	}
-	for _, k := range []struct{ field, value string }{
-		{inferenceKeyField, in.APIKey},
-		{summaryKeyField, in.Summary.APIKey},
-	} {
-		if k.value == "" {
-			continue
+	if in.APIKey != "" {
+		if err := ValidRef(in.APIKey); err != nil {
+			add(inferenceKeyField, "%s: %s", inferenceKeyField, err)
 		}
-		if err := ValidRef(k.value); err != nil {
-			add(k.field, "%s: %s", k.field, err)
-		}
-	}
-	if r.Ingest.Since < 0 {
-		add("ingest.since", "since must be positive, got %s", r.Ingest.Since)
 	}
 	return errors.Join(errs...)
 }
@@ -286,12 +315,12 @@ func (r *Config) validate() error {
 func (c InferenceConfig) ThinkEnabled() bool { return c.Think != nil && *c.Think }
 
 // MarshalYAML writes the setting back as it was written: false when disabled,
-// the path when set.
+// the text when set.
 func (s SystemPromptSetting) MarshalYAML() (any, error) {
 	if s.Disabled {
 		return false, nil
 	}
-	return s.Path, nil
+	return s.Text, nil
 }
 
 // tuningYAML is ModelTuning with unset fields omitted.
@@ -318,16 +347,6 @@ type inferenceYAML struct {
 	BatchSize        int                 `yaml:"batch_size,omitempty"`
 	MaxParallel      int                 `yaml:"max_parallel,omitempty"`
 	ModelTuning      *tuningYAML         `yaml:"model_tuning,omitempty"`
-	Summary          summaryYAML         `yaml:"summary,omitempty"`
-}
-
-type summaryYAML struct {
-	Provider string `yaml:"provider,omitempty"`
-	Host     string `yaml:"host,omitempty"`
-	Model    string `yaml:"model,omitempty"`
-	APIKey   string `yaml:"api_key,omitempty"`
-	Think    *bool  `yaml:"think,omitempty"`
-	Effort   string `yaml:"effort,omitempty"`
 }
 
 // MarshalYAML renders the minimal form: unset optional fields are omitted.
@@ -336,7 +355,6 @@ func (c InferenceConfig) MarshalYAML() (any, error) {
 		Provider: c.Provider, Host: c.Host, Model: c.Model, APIKey: c.APIKey,
 		Think: c.Think, Effort: c.Effort, StructuredOutput: c.StructuredOutput,
 		SystemPrompt: c.SystemPrompt, BatchSize: c.BatchSize, MaxParallel: c.MaxParallel,
-		Summary: summaryYAML(c.Summary),
 	}
 	t := tuningYAML{
 		NumCtx: c.ModelTuning.NumCtx, MaxTokens: c.ModelTuning.MaxTokens,
@@ -363,70 +381,11 @@ func (r Config) Marshal() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// hashView is the fixed JSON shape Hash digests, independent of YAML encoding.
-type hashView struct {
-	User      string `json:"user,omitempty"`
-	Inference struct {
-		Provider         string `json:"provider,omitempty"`
-		Host             string `json:"host,omitempty"`
-		Model            string `json:"model,omitempty"`
-		APIKey           string `json:"api_key,omitempty"`
-		Think            *bool  `json:"think,omitempty"`
-		Effort           string `json:"effort,omitempty"`
-		StructuredOutput *bool  `json:"structured_output,omitempty"`
-		SystemPrompt     struct {
-			Path     string `json:"path,omitempty"`
-			Disabled bool   `json:"disabled,omitempty"`
-		} `json:"system_prompt"`
-		BatchSize   int        `json:"batch_size,omitempty"`
-		MaxParallel int        `json:"max_parallel,omitempty"`
-		ModelTuning tuningJSON `json:"model_tuning"`
-		Summary     struct {
-			Provider string `json:"provider,omitempty"`
-			Host     string `json:"host,omitempty"`
-			Model    string `json:"model,omitempty"`
-			APIKey   string `json:"api_key,omitempty"`
-			Think    *bool  `json:"think,omitempty"`
-			Effort   string `json:"effort,omitempty"`
-		} `json:"summary"`
-	} `json:"inference"`
-	Ingest struct {
-		SinceNS   int64  `json:"since_ns,omitempty"`
-		DigestDir string `json:"digest_dir,omitempty"`
-	} `json:"ingest"`
-}
-
-type tuningJSON struct {
-	NumCtx         int `json:"num_ctx,omitempty"`
-	MaxTokens      int `json:"max_tokens,omitempty"`
-	TokensPerItem  int `json:"tokens_per_item,omitempty"`
-	TokensOverhead int `json:"tokens_overhead,omitempty"`
-	TokensThinking int `json:"tokens_thinking,omitempty"`
-	ReasonMaxChars int `json:"reason_max_chars,omitempty"`
-}
-
-// Hash returns the hex sha256 of a fixed JSON form of the config, so equal
-// configs hash equal whatever their YAML spelling. Call it on a prepared config.
+// Hash returns the hex sha256 of the canonical YAML, so configs that set the same
+// fields hash equal whatever their spelling in the file. Call it on a canonical
+// config; EffectiveHash compares what a run would use.
 func (r Config) Hash() string {
-	var v hashView
-	v.User = r.User
-	in := r.Inference
-	v.Inference.Provider, v.Inference.Host, v.Inference.Model = in.Provider, in.Host, in.Model
-	v.Inference.APIKey, v.Inference.Think, v.Inference.Effort = in.APIKey, in.Think, in.Effort
-	v.Inference.StructuredOutput = in.StructuredOutput
-	v.Inference.SystemPrompt.Path, v.Inference.SystemPrompt.Disabled = in.SystemPrompt.Path, in.SystemPrompt.Disabled
-	v.Inference.BatchSize, v.Inference.MaxParallel = in.BatchSize, in.MaxParallel
-	v.Inference.ModelTuning = tuningJSON{
-		NumCtx: in.ModelTuning.NumCtx, MaxTokens: in.ModelTuning.MaxTokens,
-		TokensPerItem: in.ModelTuning.TokensPerItem, TokensOverhead: in.ModelTuning.TokensOverhead,
-		TokensThinking: in.ModelTuning.TokensThinking, ReasonMaxChars: in.ModelTuning.ReasonMaxChars,
-	}
-	v.Inference.Summary.Provider, v.Inference.Summary.Host = in.Summary.Provider, in.Summary.Host
-	v.Inference.Summary.Model, v.Inference.Summary.APIKey = in.Summary.Model, in.Summary.APIKey
-	v.Inference.Summary.Think, v.Inference.Summary.Effort = in.Summary.Think, in.Summary.Effort
-	v.Ingest.SinceNS = int64(r.Ingest.Since)
-	v.Ingest.DigestDir = r.Ingest.DigestDir
-	raw, err := json.Marshal(v)
+	raw, err := r.Marshal()
 	if err != nil { // a fixed struct of plain values cannot fail to marshal
 		panic(fmt.Sprintf("config hash: %v", err))
 	}
@@ -434,9 +393,40 @@ func (r Config) Hash() string {
 	return hex.EncodeToString(sum[:])
 }
 
+// EffectiveHash is the Hash of the prepared form: normalized with defaults filled
+// in. Two configs with equal EffectiveHash behave identically, even when one pins
+// a value the other leaves to the default.
+func (r Config) EffectiveHash() string {
+	eff := r.Clone()
+	_, _ = eff.Prepare() // an invalid config still hashes; callers validate separately
+	return eff.Hash()
+}
+
 // migrations upgrade stored YAML one schema version at a time: migrations[v]
 // turns a version v document into version v+1.
-var migrations = map[int]func(raw []byte) ([]byte, error){}
+var migrations = map[int]func(raw []byte) ([]byte, error){
+	1: migrateV1,
+}
+
+// migrateV1 rewrites a version 1 document: ingest.since and inference.summary are
+// gone, and a system_prompt that holds a file path becomes the file's text (an
+// unreadable file drops the setting with a warning). Everything else is kept.
+func migrateV1(raw []byte) ([]byte, error) {
+	f, err := ParseFile(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.InlineSystemPrompt(""); err != nil {
+		log.Warn().Err(err).Msg("stored config: system_prompt dropped while upgrading it")
+		f.Inference.SystemPrompt = SystemPromptSetting{}
+	}
+	c := Config{
+		User:      f.User,
+		Inference: f.Inference.InferenceConfig,
+		Ingest:    IngestConfig{DigestDir: f.Ingest.DigestDir},
+	}
+	return c.Marshal()
+}
 
 // ParseStored strictly decodes a stored config and returns the effective
 // config: ParseStoredCanonical, then Prepare.

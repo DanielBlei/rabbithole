@@ -28,7 +28,6 @@ func TestAppliesMatrix(t *testing.T) {
 		"model_tuning.tokens_overhead":  {o: true, v: true, a: true},
 		"model_tuning.tokens_thinking":  {o: true, v: true, a: true},
 		"model_tuning.reason_max_chars": {o: true, v: true, a: true},
-		"summary":                       {o: true, v: true, a: true, h: true},
 	}
 	fields := InferenceFields()
 	if len(fields) != len(want) {

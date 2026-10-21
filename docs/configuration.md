@@ -1,9 +1,8 @@
 # Configuration
 
 You do not need a config file. Run `rabbithole serve` and it starts on sensible defaults. Settings
-you change are saved in the app's store as numbered versions that you can list and roll back. For
-now you change them from the command line (export, edit, import, below). The web UI shows the
-active settings read-only (gear menu, View config).
+you change are saved in the app's store as numbered versions that you can list and roll back. You
+change them on the Settings page (the gear in the top bar), or from the command line (export, edit, import).
 
 ## Quick start
 
@@ -22,7 +21,8 @@ curl -fsSLO https://raw.githubusercontent.com/DanielBlei/rabbithole/main/docs/ex
 rabbithole sources import feeds.yaml
 ```
 
-**Change settings.** Export what is saved, edit it, and import it back:
+**Change settings.** Click the gear, see [The Settings page](#the-settings-page).
+Or from the command line, export what is saved, edit it, and import it back:
 
 ```sh
 rabbithole config export -o my.yaml
@@ -41,14 +41,48 @@ lists every setting with its default, to copy lines from.
 
 | What | Where | Changed with |
 |---|---|---|
-| Run settings: model, scoring, lookback window, your name | The store | `config export` and `config import`, or `serve --config` |
+| Run settings: model, scoring, your name | The store | The Settings page, `config import`, or `serve --config` |
 | Feeds (sources) | The store | The Sources page, `sources import` |
 | Interest profiles | The store | Settings → Profiles |
 | Where the store is, the listen address, TLS | Flags and the environment | `--db` or `RABBITHOLE_DB`, `--addr`, the `--tls-*` flags |
 | Secrets (API keys, the Postgres password) | The environment or `./.env` | Your shell profile, or editing `.env` |
-| System prompt text | A file on disk, named by a setting | Any editor; see [System prompt](#system-prompt) |
+| System prompt text | The store, with the run settings | The Settings page; see [System prompt](#system-prompt) |
 
 No file is read unless you name it.
+
+## The Settings page
+
+Click the gear in the top bar. The tabs are General, Profiles, Scoring, Appearance, Widgets, Account
+(only when sign-in is on) and Advanced. General, Scoring and Advanced hold the run settings in the
+table below; Profiles holds your interest profiles, and Appearance and Widgets are saved in this
+browser only (local storage), not in the store, so they do not follow you to another browser or
+device.
+
+**Saving.** Edits are staged. A bar at the bottom counts the unsaved changes, with Discard and
+Review and save. Review shows each change old to new and which version saving creates; confirming
+writes one version. Saving with nothing changed writes nothing. Leave a field blank to use its
+default.
+
+- **Another change landed first.** If the settings changed elsewhere (another tab, `config import`)
+  while you were editing, saving says "Settings changed elsewhere". Reload to see the latest.
+- **Leaving with unsaved edits** asks first. Switching tabs does not.
+- **Moving the host.** If you change the inference host while an API key is set, the review asks
+  before the key is sent to the new host.
+
+**API key.** Paste a key in the page and it is written to `./.env` (never echoed back), and the
+settings store only the `$RABBITHOLE_INFERENCE_API_KEY` reference. Start `serve` with
+`--no-env-write` to turn this off. A key already set in the environment cannot be overwritten from
+the page. Restart `serve` after a key changes, see [Known limitations](#known-limitations).
+
+**Test connection** builds the scorer from the values on screen, saved or not, and checks the
+model. It writes nothing.
+
+**System prompt.** Choose Built-in, Custom text or None, see [System prompt](#system-prompt).
+
+**Advanced.** Saved versions: compare any version with the active one and roll back (a rollback
+that moves the inference host while an API key is set asks first, like a host change). Import: choose a config file, read the
+preview (what will change, plus notes for deprecated keys, see [Deprecated keys](#deprecated-keys)),
+then apply. Export downloads the saved settings as an import file.
 
 ## Settings
 
@@ -64,13 +98,14 @@ Every field is optional. A setting you leave out takes its default, now and in l
 | `inference.think` | Allow model reasoning before scoring, with fallback | `true` |
 | `inference.structured_output` | Send the verdict schema for the server to enforce. Keep it on; set `false` only for an endpoint that returns scores with reasons that make no sense, see [troubleshooting](troubleshooting.md#scores-of-0-with-reasons-that-make-no-sense) | `true` |
 | `inference.effort` | `openai` only: `reasoning_effort` while thinking, `low` \| `medium` \| `high` \| `xhigh` | `medium` |
-| `inference.system_prompt` | Path to a system-prompt override, or `false` to send none, see [System prompt](#system-prompt) | built-in |
+| `inference.system_prompt` | The prompt text, or `false` to send none, see [System prompt](#system-prompt) | built-in |
 | `inference.batch_size` | Articles per scoring request | `1` |
 | `inference.max_parallel` | Scoring requests in flight | `1` |
 | `inference.model_tuning.*` | Decoding limits, see [model_tuning](#inferencemodel_tuning) | see below |
-| `inference.summary.*` | A separate summarization backend. Validated and stored, not used for scoring yet | none |
-| `ingest.since` | Fallback lookback window, used when neither the feed nor the [feed defaults](#feeds) set `since` | `7d` |
-| `ingest.digest_dir` | Output directory for `ingest --markdown` | none, required by that flag |
+| `ingest.digest_dir` | Deprecated, removed in v0.4.0. Output directory for `ingest --markdown`; use `--out <dir>` instead | none |
+
+A file may also carry `ingest.since`, which is not a stored setting. It is an import-only alias for the
+[feed defaults](#feeds) `since`: importing the file sets it there. See [Deprecated keys](#deprecated-keys).
 
 Durations accept a `d` (days) suffix in addition to the standard `h`, `m` and `s`, for example
 `14d`, `168h`, `1h30m`.
@@ -91,9 +126,8 @@ It is never an error, so an old file keeps importing after you switch provider.
 | `batch_size`, `max_parallel` | yes | yes | yes | yes |
 | `model_tuning.num_ctx` | yes | | | |
 | other `model_tuning.*` | yes | yes | yes | |
-| `summary.*` | stored as written for every provider | | | |
 
-`user`, `ingest.since` and `ingest.digest_dir` apply whatever the provider.
+`user` and `ingest.digest_dir` apply whatever the provider.
 
 ### Providers
 
@@ -173,7 +207,6 @@ config references. The error suggests the fix: `export RABBITHOLE_INFERENCE_API_
   name, not a secret. The value is never shown or logged.
 - An unset variable is a warning after `config import`, naming the variable, and a clear error when
   a run needs the key. It is never an unexplained 401 later.
-- `inference.summary.api_key` follows the same rule, with `RABBITHOLE_SUMMARY_API_KEY`.
 
 ### Setting the value
 
@@ -196,7 +229,7 @@ is kept. Lines starting with `#` are comments.
 ### A literal key in an import
 
 If an imported file has a literal `api_key: sk-...`, rabbithole moves it to `./.env` under
-`RABBITHOLE_INFERENCE_API_KEY` (or `RABBITHOLE_SUMMARY_API_KEY` for the summary block), stores only
+`RABBITHOLE_INFERENCE_API_KEY`, stores only
 the reference, and warns with the variable name. The file is created `0600`, and your other lines
 in it are kept as they are. If the real environment already sets that variable, it wins and the
 file's value is ignored with a warning. A key that is not a safe single-line value is refused.
@@ -219,18 +252,25 @@ itself be rolled back.
 ### The --config file
 
 If the file is your source of truth (a container, a systemd unit, a cron job), pass
-`--config <file>` to any command. The file is applied again every time rabbithole starts, so edits
-made in the app or with `config import` last only until the next restart. In detail:
+`--config <file>` to any command. The file is applied when it changes since it was last applied.
+Edits made in the app or with `config import` are kept until then. In detail:
 
-- If the file equals the active settings, nothing happens.
-- Otherwise it is saved as a new version. If that replaces a version saved somewhere else, a
-  warning names that version and the command to undo it.
+- If the file has not changed since it was last applied, nothing happens on start.
+- When it has changed, it replaces the whole settings document. There is no per-field merge: a
+  field you set in the app and left out of the file goes back to its default.
+- If the file equals the active settings, no version is saved. Otherwise it is saved as a new
+  version, and if that replaces a version saved somewhere else, a warning names that version and
+  the command to undo it.
+- A feeds file, a profile or `ingest.since` named in the file are applied again when the file or
+  the files it names change. The feeds file only adds feeds the store has not seen.
 - There is no prompt and no force flag. The last writer wins, and the history keeps everything.
+- With a shared Postgres store, pass `--config` on one instance only. The record of what was
+  applied is kept per file path.
 
-`serve` says so in its log, and the config viewer shows the same note:
+`serve` says so in its log, and the settings page shows the same note:
 
 ```
-INF config is managed by ./config.yaml: it is re-applied on every start, so changes made in the UI or with config import last until the next restart
+INF config imported from ./config.yaml; edits in Settings are kept until the file changes
 WRN config version 3 (from import of ./other.yaml, saved 14:02) replaced by ./config.yaml; undo with: rabbithole config rollback 3
 ```
 
@@ -245,8 +285,7 @@ feed (`type: rss`, the default), or a saved search on arXiv, Crossref or Semanti
 (`type: academic`, see [Academic sources](#academic-sources)). `blog` and `news` are reserved
 for source types still to come and are skipped by ingest for now.
 
-Feeds live in the store and are managed from the **Sources** page (side menu → Sources, or the
-gear menu → Edit sources). You can add, edit, enable, disable and delete feeds there, pick each
+Feeds live in the store and are managed from the **Sources** page (side menu → Sources). You can add, edit, enable, disable and delete feeds there, pick each
 one's type, edit the set-wide defaults, and search the list. Changes take effect on the next
 ingest run, with no restart.
 
@@ -313,7 +352,7 @@ feeds:
 | `url` | RSS or Atom URL, or an academic search URL for `type: academic`; a missing scheme becomes `https://` | **required, unique** |
 | `type` | Source kind: `rss`, `blog`, `news` or `academic`. RSS and academic are implemented; blog and news are not yet implemented | `rss` |
 | `enabled` | `false` retains the feed but never fetches it | `true` |
-| `since` | Lookback window for this feed | defaults, then `ingest.since` |
+| `since` | Lookback window for this feed | defaults, then `7d` |
 | `max_items` | Maximum items contributed per run; `0` is uncapped | defaults, then uncapped |
 | `tags` | Free-form labels, used for filtering in the UI | defaults' tags |
 
@@ -349,7 +388,7 @@ The defaults accept `since`, `max_items`, `enabled` and `tags`, applying each to
 that does not set it. Values resolve through the following chain:
 
 ```
-feed  →  feed defaults  →  the ingest.since setting  →  built-in
+feed  →  feed defaults  →  built-in (7d for `since`)
 ```
 
 Tags are the exception: a feed's tags are added to the defaults rather than replacing them.
@@ -595,6 +634,20 @@ not read again, so edit the local copy under Settings → Profiles.
 [`docs/examples/prompts/profile.md`](https://github.com/DanielBlei/rabbithole/blob/main/docs/examples/prompts/profile.md)
 is the built-in Default as a file, for pasting into a new profile.
 
+## Deprecated keys
+
+An old config file still imports. Each deprecated key logs one warning naming its new home, and is
+removed in v0.4.0.
+
+| Key | Now |
+|---|---|
+| `ingest.since` | Written to the feed defaults `since` when the file is imported. A feeds file's `defaults.since` wins over it. Change it later on the Sources page |
+| `ingest.digest_dir` | `rabbithole ingest --markdown --out <dir>`. Still honoured when `--out` is not given |
+| `inference.summary.*` | Not used. Ignored |
+
+A feed's lookback (`since`) is the feed's own value, else the feed defaults, else the built-in 7
+days.
+
 ## System prompt
 
 Where the profile describes what the reader wants, `inference.system_prompt` controls how the
@@ -605,13 +658,17 @@ in). Unlike the profile, it is optional: leave it unset and a built-in default i
 
 ```yaml
 inference:
-  # system_prompt: ./prompts/system.md   # override: this file's contents
-  # system_prompt: false                         # send no system message at all
+  # system_prompt: ./prompts/system.md   # your own prompt (a file path works on a CLI import)
+  # system_prompt: false                 # send no system message at all
 ```
 
 - **Unset** (the default): the built-in prompt is used.
-- **A path**: that file's contents are used instead, verbatim. HTML comments (`<!-- ... -->`)
-  are stripped first, same as `profile.md`. [`docs/examples/prompts/system.md`](https://github.com/DanielBlei/rabbithole/blob/main/docs/examples/prompts/system.md) carries the
+- **Your own text**: the prompt is stored with the settings and used verbatim. Choose Custom text
+  on the Settings page and write it there. In a config file you may give a path instead: `rabbithole config import` and
+  `--config` read the file once (a relative path is taken from the config file's folder), strip HTML
+  comments (`<!-- ... -->`) and store its text, so editing the file later changes nothing until you
+  import again. A file uploaded in the web UI must hold the text itself, never a path.
+  [`docs/examples/prompts/system.md`](https://github.com/DanielBlei/rabbithole/blob/main/docs/examples/prompts/system.md) carries the
   built-in prompt's exact text as a starting point to copy from.
 - **`false`**: no system message is sent at all. Useful for a model whose own Modelfile or chat
   template already bakes one in: any system message the app sends, the built-in default or an
@@ -623,14 +680,10 @@ The built-in prompt already tells the model that article titles/summaries are da
 instructions, worth keeping if you write your own override. See
 [SECURITY.md](../SECURITY.md#untrusted-content) for why that matters.
 
-
-The path is made absolute when the config is saved, so it keeps working wherever you run
-rabbithole from. The file stays on disk: edit it in place, and the next ingest run reads it.
-
 ## The weather widget
 
 The Feed and Maze pages carry a weather and pollen read-out, on by default. None of it lives in
-the config files: every setting is in the browser, under Settings → Weather.
+the config files: every setting is in the browser, under Settings → Widgets.
 
 | Setting | What it does |
 |---|---|
@@ -650,7 +703,7 @@ sent.
 
 ## Upgrading from v0.2.x
 
-Earlier releases read `config.yaml` at every start. Now the settings live in the store, and no file
+Earlier releases read `config.yaml` at every start. Settings now live in the store, and no file
 is read unless you name it.
 
 1. **Import your old config once.** Pass it on a start, or import it by itself:
@@ -665,8 +718,8 @@ is read unless you name it.
    only the reference. Fields your provider does not read are dropped with a warning. A
    `ingest.feeds` or `profile` written in the file is imported once, with that import. If the file
    also has a `store` block, it keeps locating your store.
-2. **Decide whether to keep passing `--config`.** If you do, the file is re-applied on every start
-   (see [The --config file](#the---config-file)). If you do not, drop it after the first import
+2. **Decide whether to keep passing `--config`.** If you do, the file is applied again whenever it
+   changes (see [The --config file](#the---config-file)). If you do not, drop it after the first import
    and edit with `config export` and `config import`.
 3. **Your data.** The store is found in this order: the per-user directory, then `./data/rabbithole.db`,
    then `./rabbithole/data/rabbithole.db`. A legacy store is still used, with a deprecation warning,
@@ -681,7 +734,7 @@ is read unless you name it.
    Move the `-wal` and `-shm` files beside it too, if they exist, with `serve` stopped. On macOS
    the target is `~/Library/Application Support/rabbithole/`.
 4. **Makefile users.** The `make` targets pin `--db ./data/rabbithole.db`, so your data stays in
-   `./data`. Run `make serve DB=...` to use another store. `make setup` now only creates `.env`.
+   `./data`. Run `make serve DB=...` to use another store.
 
 The `store.url` password reference (`$RABBITHOLE_DB_PASSWORD`) in an old config still works as a
 store locator. A Postgres user should move to `RABBITHOLE_DB` and `RABBITHOLE_DB_PASSWORD` in `.env`.
@@ -697,6 +750,6 @@ store locator. A Postgres user should move to `RABBITHOLE_DB` and `RABBITHOLE_DB
 - **An explicit `think: true` differs from leaving `think` out.** Both run with thinking on, but
   the stored form is hashed differently, so a file that spells out the default counts as a new
   version the first time you import it over one that omits it.
-- **The settings editor is not in the UI yet.** The config viewer is read-only. Edit with
-  `config export` and `config import`.
+- **One `--config` per shared store.** With Postgres shared by several instances, pass `--config`
+  on one of them, see [The --config file](#the---config-file).
 

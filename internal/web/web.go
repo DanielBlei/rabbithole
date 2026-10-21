@@ -44,7 +44,7 @@ var (
 // pageTmpl builds the template set for one page: the shared layout and partials
 // plus the named page file under templates/.
 func pageTmpl(page string) *template.Template {
-	return template.Must(template.New(page).ParseFS(
+	return template.Must(template.New(page).Funcs(template.FuncMap{"tip": tipFor}).ParseFS(
 		templatesFS,
 		"templates/layout.html",
 		"templates/partials/*.html",
@@ -94,7 +94,15 @@ type Web struct {
 	trusted  []netip.Prefix // proxies whose forwarding headers are believed
 	dev      bool           // serve assets no-cache, for editing them live
 
-	managedBy string // the --config file re-applied on every start, "" without one
+	managedBy string // the --config file, "" without one
+
+	env       EnvSource  // where api key variables came from, for the settings page
+	storeInfo *StoreInfo // what boot knew about the store, nil when not reported
+
+	envFile    *config.EnvFile // the .env a pasted key is written to
+	noEnvWrite bool            // --no-env-write: pasting a key is refused
+	// scorerCheck builds the scorer for "Test connection"; nil uses the real one.
+	scorerCheck func(context.Context, config.Config) error
 }
 
 // New returns a Web backed by db, reading the run config from src once per request. ing owns the
@@ -140,7 +148,18 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.handleFeed)
 	mux.HandleFunc("GET /feed", s.handleFeed)
 	mux.HandleFunc("GET /maze", s.handleMaze)
-	mux.HandleFunc("GET /config", s.handleConfig)
+	mux.HandleFunc("GET /settings", s.handleSettingsIndex)
+	mux.HandleFunc("GET /settings/{tab}", s.handleSettings)
+	mux.HandleFunc("POST /settings/review", s.handleSettingsReview)
+	mux.HandleFunc("POST /settings/save", s.handleSettingsSave)
+	mux.HandleFunc("POST /settings/test", s.handleSettingsTest)
+	mux.HandleFunc("POST /settings/key", s.handleSettingsKey)
+	mux.HandleFunc("POST /settings/rollback", s.handleSettingsRollback)
+	mux.HandleFunc("GET /settings/versions/{n}/diff", s.handleSettingsVersionDiff)
+	mux.HandleFunc("GET /settings/export", s.handleSettingsExport)
+	mux.HandleFunc("GET /settings/import", s.handleSettingsImportDialog)
+	mux.HandleFunc("POST /settings/import/preview", s.handleSettingsImportPreview)
+	mux.HandleFunc("POST /settings/import/apply", s.handleSettingsImportApply)
 	mux.HandleFunc("GET /login", s.handleLoginPage)
 	mux.HandleFunc("POST /login", s.handleLogin)
 	mux.HandleFunc("POST /logout", s.handleLogout)
@@ -253,8 +272,8 @@ func (s *Web) staticControl() string {
 // cache window.
 func (s *Web) SetDev(on bool) { s.dev = on }
 
-// SetManagedBy names the config file the server re-applies on every start, so
-// the config viewer can say that edits made elsewhere last until the next restart.
+// SetManagedBy names the --config file, so the settings page can say that edits
+// made there are kept until the file changes.
 func (s *Web) SetManagedBy(path string) { s.managedBy = path }
 
 // contentTags hashes every embedded asset once, at startup. The whole tree is

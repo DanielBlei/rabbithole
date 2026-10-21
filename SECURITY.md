@@ -123,7 +123,7 @@ your coordinates for the forecast and pollen, and their geocoding endpoint when 
 city. When you allow the browser's location prompt, the coordinates are also sent to
 BigDataCloud to name the place they fall in. Coordinates come from the browser's location prompt or that search, stay in
 `localStorage`, and never reach the server. Decline the prompt and nothing is requested; it is
-asked once, not on every visit. Switching the widget off in Settings → Weather stops all of
+asked once, not on every visit. Switching the widget off in Settings → Widgets stops all of
 it. See `internal/web/static/js/weather.js`.
 
 ## Supported versions

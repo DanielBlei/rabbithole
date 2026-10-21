@@ -29,7 +29,8 @@ inference:
   think: true                     # model reasoning before scoring (vllm: false switches it off)
   structured_output: true         # send the verdict schema; false only if the endpoint garbles it
   # api_key: $RABBITHOLE_INFERENCE_API_KEY   # bearer token, if the endpoint needs one: a reference, never the value
-  # system_prompt: ./docs/examples/prompts/system.md   # model instructions; omit for the built-in default
+  # system_prompt: ./docs/examples/prompts/system.md   # your own instructions: the text itself, or a file path
+  #                                                     # (read once on import, relative to this file); omit for the built-in
   # system_prompt: false                               # send no system message
 
   # openai only
@@ -48,11 +49,7 @@ inference:
     tokens_thinking: 2048         # extra reply budget when think is on
     reason_max_chars: 512         # longest "why" the model may write
 
-  # A separate summarization backend. Validated and stored, not used for scoring yet.
-  # summary:
-  #   model: qwen3.5:4b           # required when any summary field is set
-  #   host: http://localhost:11434
-
-ingest:
-  since: 7d                       # lookback window for feed items (14d, 168h)
-  # digest_dir: ./digests         # required by `ingest --markdown`; no default
+# Deprecated, removed in v0.4.0. Importing them still works and logs a warning.
+# ingest:
+#   since: 7d                     # now the feed defaults' since: set it on the Sources page
+#   digest_dir: ./digests         # now `rabbithole ingest --markdown --out ./digests`

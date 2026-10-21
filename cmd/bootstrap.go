@@ -17,6 +17,7 @@ import (
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/store"
+	"github.com/DanielBlei/rabbithole/internal/web"
 )
 
 const (
@@ -260,6 +261,8 @@ type session struct {
 	env *config.EnvFile
 	src config.Source
 
+	storeInfo web.StoreInfo // what the settings page shows about the store
+
 	missing string // the SQLite path that does not exist, as shown to people, for an optional session
 }
 
@@ -310,9 +313,9 @@ func openSession(cmd *cobra.Command, o sessionOpts) (*session, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &session{db: db, env: env, src: db.ConfigSource()}
+	s := &session{db: db, env: env, src: db.ConfigSource(), storeInfo: describeStoreInfo(b)}
 	if b.filePath != "" && !o.noImport {
-		res, err := importConfig(ctx, db, env, b.filePath, importOpts{})
+		res, err := importConfig(ctx, db, env, b.filePath, importOpts{onStart: true})
 		if err != nil {
 			s.Close()
 			return nil, err
@@ -430,4 +433,30 @@ func logLegacyStore(b boot) {
 	for _, p := range b.def.Ignored {
 		log.Info().Msgf("legacy store %s is ignored; using %s", p, tildePath(b.def.Path, b.home))
 	}
+}
+
+// describeStoreInfo is the store as the settings page shows it: the engine, a
+// location with the home directory shortened and no password, and where the
+// location came from in words.
+func describeStoreInfo(b boot) web.StoreInfo {
+	info := web.StoreInfo{Engine: "SQLite", Location: tildePath(b.store.DBPath, b.home)}
+	if b.store.IsPostgres() {
+		info.Engine, info.Location = "Postgres", ""
+		if pg, err := b.store.ResolvePostgres(); err == nil {
+			info.Location = pg.Label
+		}
+	}
+	switch b.origin {
+	case originFlag:
+		info.Origin = "the --db flag"
+	case originEnv:
+		info.Origin = "the " + dbEnv + " variable"
+	case originFile:
+		info.Origin = "the --config file"
+	case originLegacy:
+		info.Origin = "an older default location"
+	default:
+		info.Origin = "the default location"
+	}
+	return info
 }

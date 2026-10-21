@@ -485,7 +485,7 @@ was never configured picks up new defaults on upgrade.
 
 Rows are never updated or deleted. A rollback copies an old row forward as a new latest version.
 The table is added to an existing database on the first start of a release that has it, with no
-schema bump, and nothing else changes. Written by `rabbithole config import`, `config rollback`
+schema bump, and nothing else changes. Written by the Settings page, `rabbithole config import`, `config rollback`
 and `--config`; read on every ingest run and web request, cached by version.
 
 ## An ingest run, end to end

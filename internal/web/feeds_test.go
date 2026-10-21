@@ -12,10 +12,6 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
-// globalSince is the ingest.since these tests resolve "inherited from global"
-// against.
-const globalSince = 9 * 24 * time.Hour
-
 // intPtr / boolPtr build the optional per-feed knobs.
 func intPtr(n int) *int    { return &n }
 func boolPtr(b bool) *bool { return &b }
@@ -137,8 +133,8 @@ func TestDefaultsSummary(t *testing.T) {
 		want     string
 	}{
 		{
-			name: "no defaults names the global fallback",
-			want: "since 9d (from ingest.since) · uncapped",
+			name: "no defaults names the built-in fallback",
+			want: "since 7d (built-in) · uncapped",
 		},
 		{
 			name:     "defaults set",
@@ -148,12 +144,12 @@ func TestDefaultsSummary(t *testing.T) {
 		{
 			name:     "disabled by default is called out",
 			defaults: config.FeedDefaults{Enabled: boolPtr(false)},
-			want:     "since 9d (from ingest.since) · uncapped · disabled by default",
+			want:     "since 7d (built-in) · uncapped · disabled by default",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := defaultsSummary(c.defaults, globalSince); got != c.want {
+			if got := defaultsSummary(c.defaults); got != c.want {
 				t.Errorf("defaultsSummary = %q, want %q", got, c.want)
 			}
 		})

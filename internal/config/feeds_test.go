@@ -11,10 +11,8 @@ import (
 	"time"
 )
 
-// baseConfig is a valid config with no feeds of its own. ingest.since is the
-// outermost fallback in the cascade, so 10d is what "inherited from global"
-// resolves to in these tests.
-const baseConfig = "profile: ./p.md\nstore:\n  db_path: ./test.db\ningest:\n  since: 10d\n"
+// baseConfig is a valid config with no feeds of its own.
+const baseConfig = "profile: ./p.md\nstore:\n  db_path: ./test.db\n"
 
 // writeConfigWithFeeds writes a config file and, when feedsBody is non-empty, a
 // feeds.yaml beside it, which the tests read by explicit path. Returns the config
@@ -52,21 +50,16 @@ func ptrDuration(d time.Duration) *Duration {
 	return &v
 }
 
-// resolveFeedsBody parses a feeds document and walks it through the cascade
-// against baseConfig's ingest.since, which is what these tests assert against.
+// resolveFeedsBody parses a feeds document and walks it through the cascade.
 func resolveFeedsBody(t *testing.T, feedsBody string) []ResolvedFeed {
 	t.Helper()
 	confFile := writeConfigWithFeeds(t, baseConfig, feedsBody)
-	cfg, err := loadFile(confFile)
-	if err != nil {
-		t.Fatalf("loadFile: %v", err)
-	}
 	path := filepath.Join(filepath.Dir(confFile), "feeds.yaml")
 	doc, found, err := ReadFeedsFile(path)
 	if err != nil || !found {
 		t.Fatalf("ReadFeedsFile(%s): found=%v err=%v", path, found, err)
 	}
-	resolved, err := ResolveFeeds(*doc, cfg.Ingest.Since.Std())
+	resolved, err := ResolveFeeds(*doc)
 	if err != nil {
 		t.Fatalf("ResolveFeeds: %v", err)
 	}
@@ -86,7 +79,7 @@ func feedByName(t *testing.T, feeds []ResolvedFeed, name string) ResolvedFeed {
 }
 
 // The cascade is the core of the feature: a per-feed value wins, then the
-// file's defaults, then the global config, then the built-in.
+// file's defaults, then the built-in.
 func TestResolveFeedCascade(t *testing.T) {
 	const feedsBody = `
 defaults:
@@ -178,7 +171,7 @@ func TestResolveFeedOutermostFallbacks(t *testing.T) {
 		gotOn      Origin
 		wantOrigin Origin
 	}{
-		{"Since", f.Since, 10 * 24 * time.Hour, f.SinceFrom, OriginGlobal},
+		{"Since", f.Since, DefaultSince, f.SinceFrom, OriginBuiltin},
 		{"MaxItems", f.MaxItems, 0, f.MaxItemsFrom, OriginBuiltin},
 		{"Enabled", f.Enabled, true, f.EnabledFrom, OriginBuiltin},
 	}
@@ -223,7 +216,7 @@ func TestResolveFeedsRejectsUnknownType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFeedsFile: %v", err)
 	}
-	_, err = ResolveFeeds(*doc, 10*24*time.Hour)
+	_, err = ResolveFeeds(*doc)
 	if err == nil || !strings.Contains(err.Error(), "not a recognized feed type") {
 		t.Fatalf("err = %v, want one naming the bad type", err)
 	}
@@ -294,7 +287,7 @@ func TestFeedID(t *testing.T) {
 	// Once stored, the ID is carried rather than re-derived, so changing the
 	// URL keeps the feed (and its history) instead of forking a new one.
 	stored := Feed{ID: "frozen00id00", Name: "Stored", URL: "https://moved.test/feed"}
-	if got := resolveFeed(stored, FeedDefaults{}, time.Hour).ID; got != stored.ID {
+	if got := resolveFeed(stored, FeedDefaults{}).ID; got != stored.ID {
 		t.Errorf("stored ID = %q, want the frozen %q", got, stored.ID)
 	}
 }
@@ -309,7 +302,7 @@ func TestLegacyFeedsPathExplicit(t *testing.T) {
 		t.Fatal(err)
 	}
 	confFile := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(confFile, []byte(baseConfig+"  feeds: "+feedsPath+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(confFile, []byte(baseConfig+"ingest:\n  feeds: "+feedsPath+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -404,7 +397,7 @@ func TestResolveFeedsValidation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ReadFeedsFile: %v", err)
 			}
-			_, err = ResolveFeeds(*doc, 10*24*time.Hour)
+			_, err = ResolveFeeds(*doc)
 			if err == nil || !strings.Contains(err.Error(), c.wantErr) {
 				t.Fatalf("err = %v, want one containing %q", err, c.wantErr)
 			}
@@ -416,7 +409,7 @@ func TestResolveFeedsValidation(t *testing.T) {
 // a fresh install or after the last one is deleted — the ingest cycle and the
 // Sources page both handle it, so the resolver has no business refusing.
 func TestResolveFeedsAllowsAnEmptySet(t *testing.T) {
-	resolved, err := ResolveFeeds(FeedsDoc{Defaults: FeedDefaults{Since: ptrDuration(72 * time.Hour)}}, time.Hour)
+	resolved, err := ResolveFeeds(FeedsDoc{Defaults: FeedDefaults{Since: ptrDuration(72 * time.Hour)}})
 	if err != nil {
 		t.Fatalf("ResolveFeeds on an empty set: %v", err)
 	}
@@ -549,7 +542,7 @@ func TestFeedsExampleFileLoads(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("docs/examples/feeds.yaml does not parse: found=%v err=%v", found, err)
 	}
-	resolved, err := ResolveFeeds(*doc, 10*24*time.Hour)
+	resolved, err := ResolveFeeds(*doc)
 	if err != nil {
 		t.Fatalf("docs/examples/feeds.yaml does not resolve: %v", err)
 	}
@@ -641,5 +634,14 @@ func TestReadFeedsFileMissingAndEmpty(t *testing.T) {
 	}
 	if _, _, err := ReadFeedsFile(empty); err == nil || !strings.Contains(err.Error(), empty) {
 		t.Errorf("empty file err = %v, want one naming the file", err)
+	}
+}
+
+func TestFeedDefaultsEffectiveSince(t *testing.T) {
+	if got := (FeedDefaults{}).EffectiveSince(); got != DefaultSince {
+		t.Errorf("unset = %s, want the built-in %s", got, DefaultSince)
+	}
+	if got := (FeedDefaults{Since: ptrDuration(36 * time.Hour)}).EffectiveSince(); got != 36*time.Hour {
+		t.Errorf("set = %s, want 36h", got)
 	}
 }

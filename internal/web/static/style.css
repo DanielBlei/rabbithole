@@ -93,14 +93,6 @@
   --sel-on-fill:linear-gradient(180deg, rgba(128,203,196,.22), rgba(128,203,196,.09) 70%), rgba(128,203,196,.05);
   --sel-on-shadow:inset 0 0 0 1px rgba(128,203,196,.34), inset 0 1px 0 rgba(255,255,255,.10),
                   0 1px 2px rgba(0,0,0,.24), 0 0 14px rgba(128,203,196,.10);
-  /* One width for the settings dialog's content, and it is a centred column,
-     not a left margin. A stepper stretched to the full pane puts its two arrows
-     a hand apart; capped but pinned left, all the slack piles up on one side
-     instead. Labels and controls share the column's left edge, so the block
-     reads as a column rather than as things that happen to line up.
-     Pinned in px, not rem: the interface size below scales the rem base, and a
-     dialog that resized while you picked a size in it would be unusable. */
-  --stg-col:300px;
 
   /* User type prefs (settings → Theme → Appearance). Three layers, three prefs: the
      chrome reads --font-ui and --ui-scale, titles read --font-title/--fs-title,
@@ -180,6 +172,10 @@
   --r-xl:26px;
   --r-full:999px;
 
+  /* A card's edge: the Feed row and the Settings group share it. */
+  --card-shadow:inset 0 1px 0 rgba(255,255,255,.045), 0 1px 3px rgba(0,0,0,.30);
+  --line-strong:#546E7A;
+
   /* The two curves the interface moves on: --ease for anything that travels,
      --spring for surfaces that arrive. */
   --ease:cubic-bezier(.2,.9,.3,1.05);
@@ -187,6 +183,9 @@
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;}
+/* Every page reserves the scrollbar's lane, so pane edges line up whether or
+   not the page scrolls. */
+html{scrollbar-gutter:stable;}
 /* [hidden] means hidden. The browser's own rule for the attribute is a plain
    display:none at the same specificity as any class, so an author class that
    sets a display quietly outranks it — which is how the ingest chip, the
@@ -326,246 +325,17 @@ header.topbar{
 .settings-btn:hover{color:var(--accent);background:var(--tint);}
 .settings-btn:hover .gear svg{transform:rotate(35deg);}
 .settings-btn:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
-/* Lit while its dialog is up. The button no longer controls a popup, so there
-   is no aria-expanded to hang this on. */
-body:has(#settingsModal:not([hidden])) .settings-btn{color:var(--accent);background:var(--tint);}
-body:has(#settingsModal:not([hidden])) .settings-btn .gear svg{transform:rotate(90deg);}
 
 /* floating surfaces enter with a small spring. */
 @keyframes pop-in{from{opacity:0;transform:scale(.96) translateY(-4px);}}
 
-/* --- Settings: the prefs dialog ------------------------------------------ */
-/* Settings was the one config surface that wasn't a window: a narrow dropdown
-   with three hover-only flyouts, unreachable by touch and colliding with the
-   screen edge on a laptop. It is a dialog now, in the same frame Config,
-   Sources and Ingest use — a section rail on the left, one section's controls
-   on the right. The rail is a radio group rather than an ARIA tablist: the
-   question really is "which section am I looking at", and arrow keys then work
-   without a line of script.
-   The markup lives in layout.html and stays in the DOM hidden, because
-   clock.js, weather.js and fonts.js bind their controls once at load. */
-/* One under the htmx layer, so the config and sources dialogs this one opens
-   always land on top of it whichever way the document is ordered. */
-.modal--stg{z-index:calc(var(--z-modal) - 1);}
-.modal__frame--stg{width:min(720px,94vw);}
-/* One height for every section, so switching never resizes the dialog under
-   the pointer — Theme (preview, look radios and the font menus) is the tallest
-   and the rest carry the slack. Set as a height with flex-shrink live, the same
-   trick the sources columns use: this tall, but give way when 84vh says
-   otherwise.
-   Sized to the tallest section's content rather than to a round number, so the
-   preview and the menus that redraw it are on screen together. */
-.stg{
-  display:grid;grid-template-columns:180px minmax(0,1fr);
-  height:528px;min-height:0;flex:1 1 auto;
-}
-/* Drag handles along every edge and corner (static/js/resize.js). Once dragged,
-   the frame is pinned where it stands and the inline size wins over 84vh. */
-.modal__frame--stg.is-sized{position:fixed;max-height:none;}
-.rsz{position:absolute;z-index:2;}
-.rsz--n,.rsz--s{left:10px;right:10px;height:6px;cursor:ns-resize;}
-.rsz--e,.rsz--w{top:10px;bottom:10px;width:6px;cursor:ew-resize;}
-.rsz--n{top:0;}
-.rsz--s{bottom:0;}
-.rsz--e{right:0;}
-.rsz--w{left:0;}
-.rsz--ne,.rsz--nw,.rsz--se,.rsz--sw{width:18px;height:18px;}
-.rsz--ne{top:0;right:0;cursor:nesw-resize;}
-.rsz--sw{bottom:0;left:0;cursor:nesw-resize;}
-.rsz--nw{top:0;left:0;cursor:nwse-resize;}
-.rsz--se{bottom:0;right:0;cursor:nwse-resize;}
-/* The one visible cue: a faint grip, set in from the rounded corner. */
-.rsz--se::after{
-  content:"";position:absolute;right:6px;bottom:6px;width:9px;height:9px;
-  background:linear-gradient(135deg,transparent 46%,var(--text-dim) 46% 56%,transparent 56% 72%,var(--text-dim) 72% 82%,transparent 82%);
-  opacity:.45;transition:opacity .14s var(--ease);
-}
-.rsz--se:hover::after{opacity:1;}
-/* On a narrow window the dialog already takes the width there is. */
-@media (max-width:760px){ .rsz{display:none;} }
-/* On a phone the tab column would leave the section a sliver, so the tabs
-   become a scrolling row above it. */
-@media (max-width:600px){
-  .stg{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);}
-  .stg .stg__rail{
-    flex-direction:row;overflow-x:auto;scrollbar-width:none;padding:8px;gap:4px;
-    border-right:0;border-bottom:1px solid var(--hairline);
-  }
-  .stg .stg__tab span{padding:6px 10px;white-space:nowrap;}
-  .stg__rail .stg__tab--acct{margin-top:0;padding-top:0;border-top:0;}
-}
-.stg__rail{
-  display:flex;flex-direction:column;gap:2px;min-width:0;min-height:0;
-  margin:0;padding:10px 8px;border:0;border-right:1px solid var(--hairline);
-}
-/* The group needs a name for screen readers; on screen the title bar says it. */
-.stg__legend{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
-.stg__tab{position:relative;display:block;cursor:pointer;}
-.stg__tab input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;}
-/* The four names are the way into the dialog, so they are set to be read
-   rather than to be quiet — the tab you are on is told by the accent and the
-   tint behind it, which leaves the other three no reason to be dimmed as well.
-   Hover is the fill alone for the same reason: there is no brighter to go. */
-.stg__tab span{
-  display:block;padding:8px 12px;border-radius:var(--r-sm);
-  font-size:1.3rem;color:var(--title);
-  transition:color .14s var(--ease),background .14s var(--ease);
-}
-.stg__tab input:hover ~ span{background:var(--fill-hover);}
-.stg__tab input:checked ~ span{color:var(--accent);background:var(--tint);}
-.stg__tab input:focus-visible ~ span{outline:1px solid var(--accent);outline-offset:-2px;}
-/* Weather is the one section tall enough to scroll on a short window, and a
-   scrollbar appearing there alone would inset its controls relative to every
-   other section. The gutter is reserved either way. */
-.stg__pane{
-  min-height:0;padding:12px 6px 16px;
-  overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;
-}
-/* The column: capped, centred, and the same width in every section so the
-   block does not shift under the pointer when the tab changes. */
-.stg__sect{display:none;width:min(100%, var(--stg-col));margin:0 auto;}
-.stg:has(#stgProfiles:checked) .stg__sect--profiles{display:block;width:100%;}
-.stg:has(#stgTime:checked)  .stg__sect--time {display:block;}
-.stg:has(#stgWx:checked)    .stg__sect--wx   {display:block;}
-.stg:has(#stgTheme:checked) .stg__sect--theme{display:block;}
-/* The section label, at the same 12px inset every control row below it uses.
-   Set in the brightest text there is: it is the only thing in the pane that
-   names what the controls under it are, so it heads the block rather than
-   sitting quieter than the rows it introduces. */
-.stg__lbl{
-  padding:6px 0 5px;font-size:1.05rem;letter-spacing:0.084em;
-  text-transform:uppercase;color:var(--title);
-}
-/* A second block under one that ends in a line of text needs air above it, or
-   the heading reads as a caption for what came before. */
-.stg__lbl--apart{padding-top:18px;}
-/* The title bar wears the open section as the command it just ran, the way the
-   sources dialog wears its counts. */
-.modal__frame--stg:has(#stgProfiles:checked) .stg__cmd::after{content:"profiles";}
-.modal__frame--stg:has(#stgTime:checked)  .stg__cmd::after{content:"date-time";}
-.modal__frame--stg:has(#stgWx:checked)    .stg__cmd::after{content:"weather";}
-.modal__frame--stg:has(#stgTheme:checked) .stg__cmd::after{content:"theme";}
-
-/* --- Settings → Profiles ------------------------------------------------- */
-.prof{display:flex;flex-direction:column;gap:8px;padding:0 4px 8px;}
-.prof__head{
-  display:flex;align-items:center;gap:8px;padding:4px 0 0;
-  font-size:1.3rem;color:var(--text-dim);
-}
-.prof__head strong{color:var(--accent);font-weight:600;}
-.prof__new,.prof__rescore{
-  border:0;border-radius:var(--r-full);padding:6px 10px;
-  background:var(--tint);color:var(--accent);font:inherit;cursor:pointer;
-}
-.prof__rescore{margin-left:auto;}
-.prof__rescore:disabled{opacity:.45;cursor:default;color:var(--text-dim);background:var(--fill);}
-.prof__note{margin:0;color:var(--text-dim);font-size:1.2rem;line-height:1.45;}
-.prof__error,.prof-form__err{margin:0;color:var(--warn);font-size:1.25rem;}
-.prof__grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;}
-.prof__list{display:flex;flex-direction:column;gap:5px;}
-.prof__row{
-  display:flex;align-items:center;gap:8px;padding:8px 9px;border-radius:var(--r-sm);
-  background:var(--sel-fill);box-shadow:var(--sel-shadow);
-}
-.prof__row.is-active{box-shadow:inset 3px 0 0 var(--accent),var(--sel-shadow);}
-.prof__identity{display:flex;flex:1;min-width:0;flex-direction:column;}
-.prof__identity strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--title);}
-.prof__identity strong{font-size:1.3rem;}
-.prof__identity span{font-size:1.15rem;color:var(--text-dim);}
-.prof__actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px;}
-.prof__actions form{display:contents;}
-.prof__actions button,.prof-form__bar button,.prof-confirm__actions button{
-  border:0;border-radius:var(--r-full);padding:4px 7px;background:var(--fill);
-  color:var(--text);font:inherit;font-size:1.15rem;cursor:pointer;
-}
-.prof__actions button:hover,.prof__actions button:focus-visible,
-.prof-form__bar button:hover,.prof-form__bar button:focus-visible{color:var(--accent);}
-.prof__danger{color:var(--warn)!important;}
-.prof__editor{min-height:112px;}
-.prof__empty{
-  display:flex;flex-direction:column;gap:4px;padding:14px;border:1px dashed var(--line);
-  border-radius:var(--r-sm);color:var(--text-dim);font-size:1.05rem;
-}
-.prof__empty strong{color:var(--title);}
-.prof-form{padding:10px;border-radius:var(--r-sm);background:var(--sel-fill);box-shadow:var(--sel-shadow);}
-.prof-form__bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;color:var(--title);font-size:1.3rem;}
-.prof-form__bar button{font-size:1.6rem;line-height:1;padding:0 4px;background:transparent;}
-.prof-form__ok{margin:0 0 6px;color:var(--score-high);font-size:1.2rem;}
-.prof-form__err{margin-bottom:6px;}
-.prof-field{display:flex;flex-direction:column;gap:5px;margin:0 0 10px;}
-.prof-field > span{color:var(--title);font-size:1.3rem;}
-.prof-field small{color:var(--text-dim);font-weight:400;}
-/* The writing surface reads at the body size the Theme settings pick. */
-.prof-field input,.prof-field textarea{
-  width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:var(--r-sm);
-  padding:8px 10px;background:var(--bg);color:var(--text);font:inherit;
-  font-size:var(--fs-body);line-height:1.5;resize:vertical;
-}
-.prof-field input:focus-visible,.prof-field textarea:focus-visible{
-  outline:1px solid var(--accent);outline-offset:1px;border-color:var(--accent-dim);
-}
-.prof-field input:disabled,.prof-field textarea:read-only{opacity:.78;}
-.prof-form__mode{display:inline-block;margin:0 8px 8px 0;color:var(--accent-dim);font-size:1.2rem;}
-.prof-form__save{
-  border:0;border-radius:var(--r-full);padding:8px 16px;background:var(--tint);
-  color:var(--accent);font:inherit;font-size:1.3rem;cursor:pointer;
-}
-/* Save stays in reach however long the profile runs. */
-.prof-form__foot{
-  position:sticky;bottom:-16px;z-index:1;display:flex;justify-content:flex-end;
-  margin:0 -10px -10px;padding:10px;border-top:1px solid var(--hairline);
-  background:var(--e3-fill);border-radius:0 0 var(--r-sm) var(--r-sm);
-  -webkit-backdrop-filter:var(--e3-blur);backdrop-filter:var(--e3-blur);
-}
-.prof-confirm{padding:18px;color:var(--text);font-size:1.3rem;line-height:1.5;}
-.prof-confirm p{margin:0 0 9px;}
-.prof-confirm__actions{display:flex;justify-content:flex-end;gap:8px;}
-
-/* --- Settings → Date format ----------------------------------------------- */
-/* The six date styles are choices, not a scale, and a slider showed you only
-   the one you had landed on — you had to sweep it to find out what the others
-   were. As tiles each one renders today's date in its own style, so the setting
-   is picked by reading rather than by trial. One per row: the longest style
-   ("Monday 25th August 2026") gets the column whole rather than being clipped
-   into half of it, and stacked they read as the list of options they are. */
-.dfmt{display:grid;grid-template-columns:minmax(0,1fr);gap:5px;padding:2px 0 6px;}
-/* The clock is two tiles of a few characters each, so they pair across. */
-.dfmt--pair{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}
-.dfmt--pair span{text-align:center;font-variant-numeric:tabular-nums;}
-.dfmt__opt{position:relative;display:block;cursor:pointer;}
-.dfmt__opt input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;}
-.dfmt__opt span{
-  display:block;padding:8px 10px;border-radius:var(--r-sm);
-  background:var(--sel-fill);box-shadow:var(--sel-shadow);color:var(--text-dim);
-  font-size:1.15rem;line-height:1.2;white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis;
-  transition:color .14s var(--ease),background .14s var(--ease),box-shadow .14s var(--ease);
-}
-.dfmt__opt input:hover ~ span{background:var(--sel-fill-hover);color:var(--text);}
-.dfmt__opt input:checked ~ span{color:var(--accent);background:var(--sel-on-fill);box-shadow:var(--sel-on-shadow);}
-.dfmt__opt input:focus-visible ~ span{outline:1px solid var(--accent);outline-offset:2px;}
-/* "No date" is the absence of a sample, not a sample — set apart so it doesn't
-   read as a sixth format. */
-.dfmt__opt--off span{font-style:italic;opacity:.8;}
-
-/* --- Settings → Theme ----------------------------------------------------- */
+/* --- Look picker ---------------------------------------------------------- */
 /* Picks the chrome layout, not the palette. A layout is the one setting you
    can't name your way out of, so it is shown rather than described.
    Settings shows the same picker the first run does (partials/look.html): the
    preview over the two radios. It has more room than the setup card, so the
    drawing is larger here, stopping short of the column's full width so the
    panel keeps its margins. */
-.stg__sect--theme{width:min(100%, 420px);}
-.look--stg{display:flex;flex-direction:column;gap:12px;padding:4px 0 2px;}
-.look--stg .look__pv{height:250px;}
-/* Side by side, as on the setup card. Pinned height, like every other control
-   the two layouts share: the faces differ in height, and a row that resized
-   under the pointer would read as a glitch rather than a restyle.
-   In px, not rem: rem rides --ui-scale, which both the layout switch and the
-   Interface size step move, so a rem height is not pinned against either. The
-   steppers under this row are clicked repeatedly, and they have to stay put. */
-.look--stg .look__opts{height:46px;}
-.look--stg .look__opt-body{height:46px;}
 .look__note{margin:0;font-size:1.1rem;color:var(--text-dim);}
 
 /* button rows / slider / location share the label's 12px left inset so the
@@ -1302,7 +1072,7 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
   position:relative;
   background:var(--card);border:1px solid transparent;border-radius:14px;
   padding:14px 16px;margin-bottom:14px;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.045), 0 1px 3px rgba(0,0,0,.30);
+  box-shadow:var(--card-shadow);
   transition:transform .12s, box-shadow .12s, opacity .12s;
 }
 .row:hover{transform:translateY(-1px);box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 0 8px 22px rgba(0,0,0,.42);}
@@ -1585,6 +1355,17 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
   .feed-empty__acts{flex-direction:column;gap:8px;}
 }
 
+/* A phone cannot hold the wordmark, the page switch, the ingest chip, the clock
+   and the gear at once: the wordmark and the date give way so the bar never
+   scrolls the page sideways. */
+@media (max-width: 520px){
+  .topbar__in{gap:8px;}
+  .topbar__left{gap:6px;min-width:0;}
+  .topbar__left .wordmark,.topbar__left .breaker,.clock__date{display:none;}
+  .topbar__right{gap:8px;min-width:0;}
+  .topbar__amb{gap:8px;padding:5px 10px;min-width:0;}
+}
+
 /* Config viewer — a terminal-style frame that drops in over a dimmed page. */
 .modal{position:fixed;inset:0;z-index:var(--z-modal);display:flex;align-items:center;justify-content:center;padding:24px;}
 /* The page scrolls on the root element, so the modal lock must land there:
@@ -1635,11 +1416,6 @@ html.modal-open body{overflow:hidden;}
    content overflows the clipped frame and cannot scroll. */
 pre.yml{margin:0;min-height:0;overflow:auto;overscroll-behavior:contain;padding:16px 18px;font-size:1.25rem;line-height:1.65;color:var(--text);}
 pre.yml code{font-family:inherit;}
-.yml-comment{color:var(--text-dim);font-style:italic;}
-.yml-key{color:var(--accent);}
-.yml-string{color:var(--score-high);}
-.yml-num{color:var(--score-mid);}
-.yml-bool{color:var(--warn);}
 
 /* --- Hidden side menu ---------------------------------------------------- */
 /* Nothing lives on screen but a slim 3-line tab hugging the left edge below
@@ -3078,36 +2854,49 @@ button.src__act{border:0;font-family:inherit;cursor:pointer;}
    sliding teal thumb (the ::before below) rather than per-tab fills. Equal
    grid columns keep the thumb's transform math exact for both tabs. The
    tabs/panels live inside .maze-grid, so the radio combinators descend
-   through it rather than matching direct siblings. */
+   through it rather than matching direct siblings. The Settings tab bar
+   (.stp-tabs) shares this recipe for N tabs, in both looks: the same bar,
+   tab and thumb, with the thumb placed by settings.js through
+   --thumb-x/--thumb-w instead of by the radios. */
 .maze-tab-radio{position:absolute;opacity:0;pointer-events:none;}
 /* the tab row: the hugging segmented control + (inline mode) the weather chip
    pushed to the gutter on the right. */
 .maze-tabline{display:flex;align-items:center;margin:0 0 16px;}
-.maze-tabs{
+.maze-tabs,.stp-tabs{
   position:relative;
   display:inline-grid;grid-auto-flow:column;grid-auto-columns:1fr;
   align-items:center;gap:3px;padding:3px;
   background:var(--bg);border:1px solid var(--hairline);border-radius:9px;
 }
-.maze-tab{
+.maze-tab,.stp-tab{
   position:relative;z-index:1;text-align:center;min-width:96px;
   padding:7px 18px;border-radius:6px;color:var(--text-dim);cursor:pointer;
   font-size:1.35rem;user-select:none;transition:color .13s ease;
 }
-.maze-tab:hover{color:var(--text);}
+.maze-tab:hover,.stp-tab:hover{color:var(--text);}
 /* the thumb: a teal pill that springs between the two equal columns. Inset
    ring traces its rounded box so the edges read crisp, plus a soft bloom. */
-.maze-tabs::before{
-  content:"";position:absolute;top:3px;bottom:3px;left:3px;width:calc(50% - 4.5px);
+.maze-tabs::before,.stp-tabs::before{
+  content:"";position:absolute;top:3px;bottom:3px;left:3px;
   border-radius:6px;background:rgba(128,203,196,.20);
   box-shadow:inset 0 0 0 1px rgba(128,203,196,.30), 0 0 10px 1px rgba(128,203,196,.18);
-  transition:transform .28s cubic-bezier(.32,1.35,.36,1);
+  transition:transform .28s cubic-bezier(.32,1.35,.36,1),width .28s cubic-bezier(.32,1.35,.36,1);
 }
+.maze-tabs::before{width:calc(50% - 4.5px);}
+.stp-tabs::before{left:0;width:var(--thumb-w,0);transform:translateX(var(--thumb-x,0));}
+.stp-tabs:not(.is-set)::before{transition:none;}
 #mazeTabIdeas:checked ~ .maze-grid .maze-tabs::before{transform:translateX(calc(100% + 3px));}
 #mazeTabTodos:checked ~ .maze-grid .maze-tab[for=mazeTabTodos],
-#mazeTabIdeas:checked ~ .maze-grid .maze-tab[for=mazeTabIdeas]{
+#mazeTabIdeas:checked ~ .maze-grid .maze-tab[for=mazeTabIdeas],
+.stp-tab.is-on{
   color:var(--accent);
 }
+/* The Settings tabs are links: no pill fill of their own, the thumb is the fill. */
+.stp-tab,.stp-tab:hover,.stp-tab.is-on{display:inline-flex;align-items:center;box-sizing:border-box;background:none;box-shadow:none;justify-content:center;min-width:0;padding:7px 16px;text-decoration:none;white-space:nowrap;}
+.stp-tab:focus-visible{outline-offset:-2px;}
+.stp-tabs{order:0;z-index:15;top:auto;scrollbar-width:none;min-width:0;grid-auto-columns:minmax(max-content,1fr);max-width:100%;overflow:visible;}
+.stp-tabs::-webkit-scrollbar{display:none;}
+@media (max-width:760px){ .stp-tabs{overflow-x:auto;} }
 .maze-panel{display:none;}
 #mazeTabTodos:checked ~ .maze-grid .maze-panel--todos,
 #mazeTabIdeas:checked ~ .maze-grid .maze-panel--ideas{display:block;}
@@ -3222,7 +3011,7 @@ button.src__act{border:0;font-family:inherit;cursor:pointer;}
   .popmenu__panel,
   .tagput__suggest,
   .modal__frame{animation:none;}
-  .maze-tabs::before{transition:none;}
+  .maze-tabs::before,.stp-tabs::before{transition:none;}
 }
 
 /* ══════════════ user type layer (settings gear → Theme → Appearance) ═════════════
@@ -3786,13 +3575,11 @@ button.src__act{border:0;font-family:inherit;cursor:pointer;}
 :root[data-theme="minimal"] .modal__title .pane__path{
   font-size:1.2rem;font-weight:400;color:var(--text-dim);
 }
-:root[data-theme="minimal"] .modal__frame--stg .modal__title::before{content:"Settings";}
 :root[data-theme="minimal"] .modal__frame--ingest .modal__title::before{content:"Ingest";}
 :root[data-theme="minimal"] .modal__frame--sources .modal__title::before{content:"Sources";}
 :root[data-theme="minimal"] .modal__frame--welcome .modal__title::before{content:"Welcome";}
 /* Their paths were the title; now the ::before is, and "~" or "~/sources" said
    twice is just noise. */
-:root[data-theme="minimal"] .modal__frame--stg .modal__title .pane__path,
 :root[data-theme="minimal"] .modal__frame--ingest .modal__title .pane__path,
 :root[data-theme="minimal"] .modal__frame--ingest .modal__title .pane__cmd,
 :root[data-theme="minimal"] .modal__frame--sources .modal__title .modal__path,
@@ -3802,13 +3589,13 @@ button.src__act{border:0;font-family:inherit;cursor:pointer;}
 /* --- maze -----------------------------------------------------------------
    The boards follow the feed: the segmented control flattens to underlined
    tabs, and a task stops being a card for the same reason a row did. */
-:root[data-theme="minimal"] .maze-tabline{
+:root[data-theme="minimal"] :is(.maze-tabline,.stp-tabline){
   border-bottom:1px solid var(--hairline);margin-bottom:22px;
 }
-:root[data-theme="minimal"] .maze-tabs{
+:root[data-theme="minimal"] :is(.maze-tabs,.stp-tabs){
   background:none;border:0;border-radius:0;padding:3px 3px 0;margin-bottom:-1px;
 }
-:root[data-theme="minimal"] .maze-tab{border-radius:0;}
+:root[data-theme="minimal"] :is(.maze-tab,.stp-tab){border-radius:0;}
 /* The weather band gives up its tray with every other tray in this layout, and
    is separated by a rule along the side facing what it sits above — the same
    hairline that separates a task from the task above it. */
@@ -3825,7 +3612,7 @@ button.src__act{border:0;font-family:inherit;cursor:pointer;}
 :root[data-theme="minimal"] .tile--wx .wx-pop__btn{
   display:flex;align-items:baseline;gap:7px;
 }
-:root[data-theme="minimal"] .maze-tabs::before{
+:root[data-theme="minimal"] :is(.maze-tabs,.stp-tabs)::before{
   top:auto;bottom:0;height:2px;border-radius:1px;
   background:var(--accent);box-shadow:none;
 }
@@ -4277,7 +4064,6 @@ button.src__act{border:0;font-family:inherit;cursor:pointer;}
 }
 .look__pvt-why{margin:7px 8px 0;padding:0 8px;font-size:calc(var(--fs-body) * .6);}
 .look__pvm-why{margin-top:9px;font-size:calc(var(--fs-body) * .75);}
-.look--stg .look__pvt-why,.look--stg .look__pvm-why{display:-webkit-box;}
 
 /* The two looks sit side by side in both layouts, in the same place; only
    their shape changes: a terminal radio in Default, a soft card with a dot in
@@ -4343,32 +4129,400 @@ button.src__act{border:0;font-family:inherit;cursor:pointer;}
   :root[data-theme="minimal"] .gate__pick{padding-top:20px;}
 }
 
-/* --- Settings → Account --------------------------------------------------
-   Who is signed in, at the top of the column as a card of its own, the one
-   place in the dialog that is about you rather than about the page. The bunny
-   hops in each time the tab opens (the section goes from display:none to
-   block, which restarts the animation), then blinks like the topbar's. */
-.stg:has(#stgAccount:checked) .stg__sect--account{display:block;}
-.modal__frame--stg:has(#stgAccount:checked) .stg__cmd::after{content:"whoami";}
-/* Set apart from the four preference tabs: this one is about the login. */
-.stg__tab--acct{margin-top:auto;padding-top:8px;border-top:1px solid var(--hairline);}
+
+/* --- Settings page ---------------------------------------------------------
+   /settings/{tab}: one markup, two looks, switched on :root[data-theme].
+   Default is a triage panel: the page sits in a Feed-style .pane under the same
+   prompt readout, tabs are pills, each group is a row card (the Feed row's
+   surface) with a header strip, and every control is a pill. Minimal inherits
+   all of it and restyles only what it restyles elsewhere (the Minimal block at
+   the end). Every tab is a pane of the one document;
+   static/js/settings.js shows one at a time. Type follows Feed and Maze (the
+   page's rem base already puts Default a step under Minimal). Controls are
+   pinned in px (--stp-h), so a look switch never resizes one mid-page. --stp-btn-r is the one knob for button corners. */
+:root{--stp-h:32px;--stp-sh:28px;--stp-btn-r:var(--r-full);}
+.stp-page{position:relative;display:flex;flex-direction:column;margin:0 auto;}
+.stp{--stp-c:400px;position:relative;display:flex;flex-direction:column;order:1;}
+/* The tab row, like the Maze's: the bar at the left, the weather chip in the gutter. */
+.stp-tabline{position:relative;display:flex;align-items:center;margin:0 0 16px;}
+.stp [hidden]{display:none!important;}
+.stp code{font-family:var(--font-mono);color:var(--accent);font-size:.95em;}
+.stp-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);margin:0;}
+.stp-bar{order:0;min-height:46px;}
+.stp .cmd__arg>span{border-bottom:1px dashed rgba(128,203,196,.42);}
+.stp-search{position:absolute;top:calc(100% + 26px);right:15px;z-index:16;display:block;width:210px;max-width:calc(100% - 28px);}
+.stp-search__in{display:block;width:100%;height:var(--stp-sh);padding:0 30px;border:0;border-radius:var(--r-full);
+  background:var(--sel-fill);box-shadow:var(--sel-shadow);color:var(--text);font:inherit;font-size:1.2rem;}
+.stp-search__in::placeholder{color:var(--text-dim);}
+.stp-search__in:focus{outline:0;box-shadow:0 0 0 1px var(--accent),0 0 12px rgba(128,203,196,.25);}
+.stp-search__in::-webkit-search-cancel-button{display:none;}
+.stp-search__i{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--text-dim);pointer-events:none;}
+.stp-kbd{position:absolute;right:8px;top:50%;transform:translateY(-50%);pointer-events:none;
+  padding:1px 6px;border-radius:5px;background:var(--fill);color:var(--text-dim);font:inherit;font-size:1.05rem;}
+/* Margin arrows between tabs; settings.js unhides them when there is room. */
+[data-stp-step]{display:none;}
+[data-stp-step]:not([hidden]){
+  display:grid;place-items:center;position:fixed;top:35%;transform:translateY(-50%);z-index:5;
+  width:32px;height:32px;padding:0 0 2px;border:0;border-radius:var(--r-full);cursor:pointer;
+  background:var(--fill);color:var(--text-dim);font:inherit;font-size:2rem;line-height:1;opacity:.55;
+  transition:opacity .15s var(--ease),color .15s var(--ease),background .15s var(--ease);
+}
+[data-stp-step]:not([hidden]):hover,
+[data-stp-step]:not([hidden]):focus-visible{opacity:1;color:var(--accent);background:var(--fill-hover);}
+.stp-nomatch{margin:20px 0;color:var(--text-dim);font-size:1.3rem;}
+.stp-body{order:4;min-width:0;padding:14px 22px 32px;}
+body:has(.stp-savebar:not([hidden])) .stp-body{padding-bottom:88px;}
+.stp-pane{min-width:0;}
+.stp--searching .stp-pane+.stp-pane,.stp--searching .stp-form+.stp-pane,.stp--searching .stp-pane+.stp-foot{margin-top:14px;}
+:is(.stp--searching .stp-pane+.stp-pane,.stp--searching .stp-form+.stp-pane,.stp--searching .stp-pane+.stp-foot){margin-top:28px;}
+
+/* groups: the Feed row's card, with a header strip */
+/* Section tone: one colour per kind of setting (teal identity, blue behaviour, green live
+   state, slate system). Templates only name the tone; this table is the one place that maps it.
+   Amber and red stay out: they mean modified/locked and destructive. */
+.stp-group{--tone:var(--accent);}
+.stp-group[data-tone="blue"]{--tone:var(--blue);}
+.stp-group[data-tone="green"]{--tone:var(--score-high);}
+.stp-group[data-tone="slate"]{--tone:var(--text);}
+.stp-group .hint{color:var(--tone);}
+:root:not([data-theme="minimal"]) .stp-group .hint{color:color-mix(in srgb,var(--tone) 65%,var(--title));}
+.stp-group{margin-top:14px;border:1px solid transparent;border-radius:14px;background:var(--card);box-shadow:var(--card-shadow);overflow:clip;}
+.stp-group:not(:first-child){margin-top:28px;}
+.stp-box:not(.stp-hist){padding:6px 0;}
+.stp-callout+.stp-group,.stp-pane>.stp-group:first-child,.prof>.stp-group:first-child,.acct__card>.stp-group:first-child{margin-top:0;}
+.stp-group__h{display:flex;align-items:center;gap:12px;min-height:44px;box-sizing:border-box;margin:0;padding:6px 16px;
+  background:color-mix(in srgb,var(--tone) 5%,var(--card));border-bottom:1px solid color-mix(in srgb,var(--tone) 22%,transparent);}
+.stp-group__h>div{display:flex;align-items:baseline;gap:8px;min-width:0;flex-wrap:wrap;margin-right:auto;}
+.stp-group__h h3{display:flex;align-items:center;margin:0;font-size:1.3rem;font-weight:600;color:var(--title);text-transform:lowercase;}
+.stp-group__h h3::before{content:"./";content:"./" / "";color:var(--tone);}
+.stp-group__t{position:relative;display:flex;align-items:center;}
+.stp-group__h h3 :is(.stp-chip,.hint){margin-left:8px;align-self:center;}
+.stp-group__h h3 .stp-chip{text-transform:none;}
+.stp-group__h p{margin:0;font-size:1.15rem;line-height:1.45;color:var(--text);}
+.stp-group__h p::before{content:"# ";content:"# " / "";}
+.stp-group__h--act .clk-btn{margin:0;}
+.stp .stp-group__h .clk-btn{height:24px;padding:0 10px;font-size:1.15rem;}
+.stp-group__a{display:inline-flex;align-items:center;gap:8px;flex:none;margin-left:auto;}
+.stp-box{display:flex;flex-direction:column;margin:0;padding:0;list-style:none;}
+.stp-box:has(.stp-row.is-off):not(:has(.stp-row:not(.is-off))){display:none;}
+.stp-group>.stp-note,.stp-group>.stp-fold{margin:12px 16px 14px;}
+.stp-group>.stp-callout{margin:12px 16px 14px;}
+.stp-group>.stp-callout--in{margin-bottom:0;}
+.stp-callout--kw{margin-top:0;}
+
+/* rows: label and helper left, control right */
+.stp-row{display:grid;grid-template-columns:minmax(0,1fr) var(--stp-c);gap:6px 20px;align-items:center;
+  min-height:52px;box-sizing:border-box;padding:10px 16px;box-shadow:0 -1px 0 var(--hairline);}
+.stp-row:first-child{box-shadow:none;}
+.stp-row.is-off{display:none;}
+.stp-row.is-mod{background:rgba(255,203,107,.04);}
+.stp-row.is-bad{background:rgba(255,83,112,.04);}
+.stp-row__l{min-width:0;max-width:68rem;}
+.stp-row__nl{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px;}
+.stp-row__tags{display:contents;}
+.stp-row__n{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px 8px;font-size:1.4rem;line-height:1.35;color:var(--title);}
+.stp-row__nl .stp-row__n{min-width:0;}
+.stp-row__h{margin:3px 0 0;font-size:1.2rem;line-height:1.45;color:var(--text-dim);}
+.stp-row__h--status{color:var(--accent);}
+.stp-row__h--status.is-bad{color:var(--warn);}
+.stp-row__err{margin:6px 0 0;font-size:1.2rem;line-height:1.4;color:var(--warn);}
+.stp-row--top{align-items:start;}
+.stp-row--top .stp-row__nl,.stp-row--top .stp-row__l>.stp-row__n{min-height:var(--stp-h);}
+.stp-row--top .stp-row__h{margin-top:0;}
+.stp-row__note{font-size:1.15rem;font-weight:400;color:var(--caution);}
+.stp-row__c{min-width:0;display:flex;flex-direction:column;align-items:flex-end;gap:8px;}
+.stp-row__c--btns,.stp-row__c--duo{flex-direction:row;flex-wrap:wrap;justify-content:flex-end;align-items:center;}
+.stp-row--ro{grid-template-columns:150px minmax(0,1fr);min-height:44px;}
+.stp-row--ro .stp-row__c{align-items:flex-start;}
+.stp-row__v{font-size:1.35rem;color:var(--text);overflow-wrap:anywhere;text-align:right;}
+.stp-row--ro .stp-row__v{text-align:left;}
+.stp .stp-row__v--mono{font-family:var(--font-mono);font-size:1.25rem;color:var(--tone);}
+.stp-row--wide,.stp-row--stack{grid-template-columns:minmax(0,1fr);}
+.stp-row--wide .stp-row__c,.stp-row--stack .stp-row__c{align-items:stretch;}
+.stp-row--stack .stp-sys{align-items:stretch;}
+.stp-mod{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--caution);box-shadow:0 0 6px rgba(255,203,107,.55);}
+
+/* fields: pills with a lit focus ring */
+.stp-in,.stp-menu__btn,.stp .wx-loc__input{display:block;width:100%;height:var(--stp-h);box-sizing:border-box;padding:0 14px;border:0;border-radius:var(--r-full);
+  background:var(--sel-fill);box-shadow:var(--sel-shadow);color:var(--text);font:inherit;font-size:1.25rem;font-weight:400;}
+.stp-in:focus,.stp .wx-loc__input:focus,.stp-menu__btn:focus-visible,.stp-menu__btn[aria-expanded="true"]{
+  outline:0;background:var(--sel-fill);color:var(--title);box-shadow:0 0 0 1px var(--accent),0 0 12px rgba(128,203,196,.25);}
+.stp-in::placeholder{color:var(--text-dim);opacity:.8;}
+.stp-in:disabled{opacity:.6;}
+.stp-in--num{max-width:160px;}
+/* Values read like a config listing: numbers blue, strings green (Minimal keeps strings plain). */
+.stp-in--num:not(:focus){color:var(--blue);}
+:root:not([data-theme="minimal"]) .stp-in:not(.stp-in--num,:focus){color:var(--score-high);}
+.stp-area{display:block;width:100%;padding:10px 14px;border:0;border-radius:var(--r-md);resize:vertical;
+  background:var(--sel-fill);box-shadow:var(--sel-shadow);color:var(--text);font:inherit;font-size:var(--fs-body);line-height:1.5;}
+.stp-area:focus{outline:0;box-shadow:0 0 0 1px var(--accent),0 0 12px rgba(128,203,196,.25);}
+.stp-area,.stp-diff,.stp-dlg{color-scheme:dark;scrollbar-width:thin;scrollbar-color:var(--line) transparent;}
+.stp-area--sys{min-height:calc(16 * 1.5em + 20px);max-width:100%;font-family:var(--font-mono);font-size:1.2rem;line-height:1.55;}
+.stp-area--sys[readonly]{cursor:default;}
+.stp-area--sys.is-none{color:var(--text-dim);font-style:italic;}
+.stp-area--sys.is-none::placeholder{color:var(--text-dim);opacity:1;}
+.stp-menu{position:relative;width:100%;}
+.stp-menu__btn{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;text-align:left;font-variant-numeric:tabular-nums;}
+.stp-menu__btn:hover{background:var(--sel-fill-hover);}
+.stp-menu__btn svg{flex:none;color:var(--text-dim);transition:transform .14s var(--ease);}
+.stp-menu__btn[aria-expanded="true"] svg{transform:rotate(180deg);}
+.stp-menu__cur{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.stp-menu__list{position:fixed;z-index:60;margin:0;padding:4px;list-style:none;box-sizing:border-box;max-height:min(320px,60vh);overflow-y:auto;
+  background:var(--overlay);border:1px solid var(--hairline-strong);border-radius:var(--r-md);backdrop-filter:blur(18px) saturate(1.5);
+  box-shadow:0 1px 2px rgba(0,0,0,.30),0 12px 26px rgba(0,0,0,.32);outline:0;animation:pop-in .14s var(--ease);}
+.stp-menu__list [role="option"]{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:34px;box-sizing:border-box;
+  padding:6px 10px;border-radius:var(--r-sm);font-size:1.25rem;color:var(--text);cursor:pointer;}
+.stp-menu__list [role="option"].is-active{background:var(--fill-hover);}
+.stp-menu__list [role="option"][aria-selected="true"]{color:var(--accent);background:var(--tint);}
+.stp-menu__n{flex:none;}
+.stp-menu__p{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim);font-variant-numeric:tabular-nums;}
+.stp-menu__list [role="option"][aria-selected="true"] .stp-menu__p{color:var(--accent);}
+@media (prefers-reduced-motion:reduce){ .stp-menu__list{animation:none;} .stp-menu__btn svg{transition:none;} }
+.stp-row--wide .wx-loc{padding:0;}
+.wx-loc__line{display:flex;gap:8px;align-items:center;}
+.stp .wx-loc__note{font-size:1.15rem;padding:0 2px;}
+
+/* choices: separate pills, the chosen one lit */
+.stp-seg{display:flex;flex-wrap:wrap;gap:6px;}
+.stp-row__c .stp-seg{justify-content:flex-end;}
+.stp-seg__o{position:relative;min-width:0;}
+.stp-seg__o input{position:absolute;opacity:0;width:0;height:0;}
+.stp-seg__o span{display:flex;align-items:center;justify-content:center;height:calc(var(--stp-h) - 4px);padding:0 14px;box-sizing:border-box;
+  border-radius:var(--r-full);background:var(--fill);color:var(--text-dim);font-size:1.2rem;cursor:pointer;white-space:nowrap;
+  font-variant-numeric:tabular-nums;transition:background .15s var(--ease),color .15s var(--ease),box-shadow .15s var(--ease);}
+.stp-seg__o span:hover{background:var(--fill-hover);color:var(--text);}
+.stp-seg__o input:checked+span{background:var(--tint);box-shadow:inset 0 0 0 1px rgba(128,203,196,.34);color:var(--accent);}
+.stp-seg__o input:focus-visible+span{outline:1px solid var(--accent);outline-offset:2px;}
+.stp-seg__o input:disabled+span{opacity:.45;cursor:default;}
+.stp-sys{display:flex;flex-direction:column;gap:8px;width:100%;}
+.stp-sys .stp-seg{justify-content:flex-start;}
+.is-locked .stp-seg,.is-locked .wx-sw{pointer-events:none;opacity:.55;}
+.is-locked [data-stp-usedefault]{display:none;}
+
+/* switch and steppers */
+.stp .wx-sw{--sw-w:52px;flex:none;height:28px;padding:0;background:var(--fill);box-shadow:var(--sel-shadow);}
+.stp .wx-sw__txt{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
+.stp .wx-sw__knob{left:4px;width:20px;height:20px;margin-top:-10px;background:var(--text-dim);}
+.stp .wx-sw.is-on{background:var(--tint);box-shadow:inset 0 0 0 1px rgba(128,203,196,.34);}
+.stp .wx-sw.is-on .wx-sw__knob{transform:translateX(24px);background:var(--accent);box-shadow:0 0 8px rgba(128,203,196,.45);}
+.stp .font-step{width:auto;flex:none;gap:6px;padding:0;}
+.stp .font-step__arrow{width:calc(var(--stp-h) - 4px);height:calc(var(--stp-h) - 4px);font-size:1.4rem;color:var(--text);}
+.stp .font-step__name{font-size:1.25rem;}
+.stp .font-step__dots{display:none;}
+.stp-row .font-step{width:176px;}
+.stp-row .font-step--size{width:124px;}
+.stp-row .stp-step{width:auto;gap:4px;}
+.stp-row .stp-step .font-step__face{flex:none;min-width:44px;}
+.stp-row .stp-step .font-step__name{font-family:var(--font-mono);font-size:1.35rem;color:var(--title);}
+
+/* buttons: secondary, primary, destructive */
+.stp .clk-btn,.stp-dlg .clk-btn,.stp-dlg__foot .clk-btn,.prof-confirm__actions .clk-btn,.stp-save,.stp-savebar__discard,.acct__go{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;height:var(--stp-h);box-sizing:border-box;padding:0 16px;
+  border:0;border-radius:var(--stp-btn-r);font:inherit;font-size:1.2rem;white-space:nowrap;text-decoration:none;cursor:pointer;
+  transition:background .15s var(--ease),color .15s var(--ease),box-shadow .15s var(--ease),transform .1s var(--ease);}
+.stp .clk-btn,.stp-dlg .clk-btn,.stp-dlg__foot .clk-btn,.prof-confirm__actions .clk-btn{background:var(--sel-fill);box-shadow:var(--sel-shadow);color:var(--text);}
+.stp .clk-btn:hover:not(:disabled),.stp-dlg .clk-btn:hover:not(:disabled),.stp-dlg__foot .clk-btn:hover:not(:disabled),.prof-confirm__actions .clk-btn:hover:not(:disabled){
+  background:var(--sel-fill-hover);color:var(--title);}
+.stp .clk-btn:active,.stp-save:active,.acct__go:active{transform:scale(.98);}
+.stp .clk-btn--go,.stp-dlg .clk-btn--go,.stp-dlg__foot .clk-btn--go,.prof-confirm__actions .clk-btn--go,.stp-save,.acct__go{
+  background:var(--tint);box-shadow:inset 0 0 0 1px rgba(128,203,196,.34);color:var(--accent);font-weight:500;}
+.stp .clk-btn--go:hover:not(:disabled),.stp-dlg .clk-btn--go:hover:not(:disabled),.stp-dlg__foot .clk-btn--go:hover:not(:disabled),
+.prof-confirm__actions .clk-btn--go:hover:not(:disabled),.stp-save:hover,.acct__go:hover{background:rgba(128,203,196,.22);color:var(--accent);}
+.stp .clk-btn--danger,.stp-dlg .clk-btn--danger,.stp-dlg__foot .clk-btn--danger,.prof-confirm__actions .clk-btn--danger,.stp .clk-btn.prof__danger{
+  background:rgba(255,83,112,.12);box-shadow:inset 0 0 0 1px rgba(255,83,112,.3);color:var(--warn);}
+.stp .clk-btn--danger:hover:not(:disabled),.stp-dlg .clk-btn--danger:hover:not(:disabled),.stp-dlg__foot .clk-btn--danger:hover:not(:disabled),
+.prof-confirm__actions .clk-btn--danger:hover:not(:disabled),.stp .clk-btn.prof__danger:hover:not(:disabled){background:rgba(255,83,112,.2);color:var(--warn);}
+:root:not([data-theme="minimal"]) .stp [data-stp-replylock]{color:color-mix(in srgb,var(--warn) 30%,var(--title));}
+.acct__go--out{background:rgba(255,83,112,.12);box-shadow:inset 0 0 0 1px rgba(255,83,112,.3);color:var(--warn);}
+.acct__go.acct__go--out:hover{background:rgba(255,83,112,.2);color:var(--warn);}
+.clk-btn:disabled,.stp-save:disabled{opacity:.4;cursor:default;}
+.clk-btn:focus-visible,.stp-link:focus-visible,.stp-fold>summary:focus-visible,.stp-save:focus-visible,.stp-savebar__discard:focus-visible,.acct__go:focus-visible{
+  outline:1px solid var(--accent);outline-offset:2px;}
+.stp-row__c--btns .stp-test{order:-1;}
+.prof__actions form,.prof-confirm__actions form{display:contents;margin:0;}
+.prof__actions .clk-btn{min-width:84px;}
+
+/* small links: row-level "Use default", and the per-group reset as a pill */
+.stp-link{border:0;background:none;padding:0;font:inherit;font-size:1.2rem;color:var(--accent-dim);cursor:pointer;text-decoration:none;}
+.stp-link:hover{color:var(--accent);text-decoration:underline;}
+.stp-row__nl .stp-link{font-size:1.1rem;opacity:0;transition:opacity .12s var(--ease);}
+.stp-row:hover .stp-row__nl .stp-link,.stp-row:focus-within .stp-row__nl .stp-link{opacity:1;}
+@media (hover:none){.stp-row__nl .stp-link{opacity:.7;}}
+.stp-link--reset{display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:var(--r-full);background:var(--fill);
+  color:var(--text-dim);font-size:1.15rem;white-space:nowrap;}
+.stp-link--reset:hover{background:var(--fill-hover);color:var(--text);text-decoration:none;}
+.stp-link--reset:disabled{opacity:.4;cursor:default;}
+.stp-note{margin:10px 2px 0;font-size:1.2rem;line-height:1.5;color:var(--text-dim);}
+.stp-note a{color:var(--accent-dim);}
+
+/* chips and the key field */
+.stp-chip{display:inline-flex;align-items:center;flex:none;height:20px;box-sizing:border-box;padding:0 9px;border-radius:var(--r-full);
+  background:var(--fill);color:var(--text-dim);font-size:1.05rem;font-weight:400;line-height:1;white-space:nowrap;}
+.stp-chip--ok{background:var(--tint);color:var(--accent);}
+.stp-chip--warn{background:rgba(255,203,107,.14);color:var(--caution);}
+.stp-chip--def{background:transparent;box-shadow:inset 0 0 0 1px var(--hairline);}
+.stp-key{display:flex;flex-wrap:wrap;align-items:center;gap:8px;width:100%;}
+.stp-in--ref{flex:1 1 150px;width:auto;min-width:0;font-family:var(--font-mono);font-size:1.15rem;}
+.stp-paste{flex:1 0 100%;display:flex;flex-direction:column;align-items:flex-end;gap:8px;}
+.stp-paste .stp-row__h,.stp-paste .stp-row__err{margin:0;text-align:right;}
+.stp-test{display:inline-flex;align-items:center;flex:none;height:22px;box-sizing:border-box;padding:0 10px;border-radius:var(--r-full);
+  font-size:1.15rem;line-height:1;white-space:nowrap;}
+.stp-test.is-ok{background:var(--tint);color:var(--accent);}
+.stp-test.is-bad{background:rgba(255,83,112,.12);color:var(--warn);}
+.stp-test.is-wait{background:var(--fill);color:var(--text-dim);}
+.stp-test__msg{overflow-wrap:anywhere;}
+.stp-test__msg.is-bad{color:var(--warn);}
+
+/* "?" help bubble: hover or focus opens it, a tap toggles it (settings.js), and
+   the bubble is fixed-positioned by settings.js so the group's clip cannot cut it. */
+.hint{flex:none;box-sizing:border-box;width:18px;height:18px;padding:0;border:0;border-radius:50%;cursor:pointer;
+  font:inherit;font-size:1.05rem;font-weight:600;line-height:18px;text-align:center;
+  color:var(--text-dim);background:var(--fill);transition:background .14s var(--ease),color .14s var(--ease);}
+.stp-group__h .hint{width:24px;height:24px;font-size:1.15rem;line-height:24px;}
+.hint:hover,.hint.is-open{background:var(--tint);color:var(--accent);}
+.hint:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
+.hint__tip{position:fixed;left:0;top:0;z-index:60;box-sizing:border-box;width:max-content;max-width:min(320px,80vw);
+  font-size:1.2rem;font-weight:400;line-height:1.5;color:var(--text);text-align:left;white-space:normal;
+  background:var(--overlay);border:1px solid var(--hairline-strong);border-radius:var(--r-sm);
+  padding:8px 11px;backdrop-filter:blur(18px) saturate(1.5);
+  box-shadow:0 1px 2px rgba(0,0,0,.30), 0 10px 22px rgba(0,0,0,.30);
+  opacity:0;visibility:hidden;pointer-events:none;transition:opacity .14s;}
+.hint:hover + .hint__tip,.hint:focus-visible + .hint__tip,.hint.is-open + .hint__tip{opacity:1;visibility:visible;}
+@media (prefers-reduced-motion: reduce){.hint,.hint__tip{transition:none;}}
+
+/* callouts, folds, history */
+.stp-callout{display:flex;align-items:flex-start;gap:10px;margin:0 0 14px;padding:12px 14px;border-radius:var(--r-md);
+  background:rgba(128,203,196,.07);box-shadow:inset 0 0 0 1px rgba(128,203,196,.2);}
+.stp-callout--warn{background:rgba(255,203,107,.08);box-shadow:inset 0 0 0 1px rgba(255,203,107,.28);}
+.stp-callout.is-off{display:none;}
+.stp-callout svg{flex:none;margin-top:1px;color:var(--accent);}
+.stp-callout--warn svg{color:var(--caution);}
+.stp-callout .stp-link{margin-left:6px;color:var(--accent);}
+.stp-callout p{margin:0;font-size:1.25rem;line-height:1.5;color:var(--text);}
+.stp-callout b{font-weight:500;color:var(--title);}
+.stp-applied{margin:0 0 14px;padding:0 2px;font-size:1.25rem;color:var(--accent);}
+.stp-fold>summary{display:flex;align-items:baseline;gap:8px;padding:6px 2px 10px;list-style:none;cursor:pointer;font-size:1.35rem;color:var(--title);}
+.stp-fold>summary::-webkit-details-marker{display:none;}
+.stp-fold>summary::before{content:"\203A";display:inline-block;width:1.2ch;color:var(--text-dim);transition:transform .12s var(--ease);}
+.stp-fold[open]>summary::before{transform:rotate(90deg);}
+.stp-fold>summary:hover{color:var(--accent);}
+.stp-fold--how{font-size:1.25rem;}
+.stp-how{padding:2px 4px 6px;font-size:1.2rem;line-height:1.55;color:var(--text-dim);}
+.stp-how p{margin:0 0 10px;}
+.stp-how code{color:var(--text);}
+.stp-how pre{margin:0 0 10px;padding:10px 12px;border-radius:var(--r-sm);background:var(--fill);overflow-x:auto;}
+.stp-fold--in>summary{font-size:1.25rem;color:var(--text-dim);}
+.stp-hist{--stp-hist-row:64px;max-height:calc(var(--stp-hist-row) * 5);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line) transparent;}
+.stp-hist__i{flex:none;grid-template-columns:minmax(0,1fr) auto;min-height:var(--stp-hist-row);box-sizing:border-box;}
+.stp-hist__d{grid-column:1 / -1;}
+.stp-foot{margin:28px 2px 0;font-size:1.2rem;}
+.stp-foot a{color:var(--text-dim);text-decoration:none;}
+.stp-foot a:hover{color:var(--accent);}
+.stp-resetwarn{color:var(--caution);}
+
+/* Replies: a fenced group. Locked reads as set apart, unlocked as live. */
+.stp-group.is-locked{border:1px dashed rgba(255,203,107,.4);}
+.stp-group[data-stp-replies]:not(.is-locked){border:1px solid rgba(255,203,107,.55);}
+
+/* diffs and dialogs */
+.stp-diff{margin:8px 0 0;padding:8px 0;border-radius:var(--r-sm);background:var(--bg);font-family:var(--font-mono);font-size:1.2rem;line-height:1.65;overflow:auto;max-height:320px;}
+.stp-diff__l{position:relative;display:block;padding:0 14px 0 32px;white-space:pre;color:var(--text-dim);}
+.stp-diff__l i{position:absolute;left:12px;font-style:normal;}
+.stp-diff__l--add{background:rgba(195,232,141,.1);color:var(--score-high);}
+.stp-diff__l--del{background:rgba(255,83,112,.1);color:var(--warn);}
+.stp-diff__gap{display:block;padding:0 32px;color:var(--text-dim);opacity:.5;}
+.stp-vdiff{padding:4px 0 6px;}
+.modal__frame--stp{width:min(620px,94vw);}
+.modal__frame--ask{width:min(460px,94vw);}
+.modal__frame--stp .modal__foot{padding:12px 20px;}
+.stp-dlg{display:flex;flex-direction:column;gap:12px;padding:16px 20px;min-height:0;overflow-y:auto;overscroll-behavior:contain;color:var(--text);}
+.stp-dlg__lead{margin:0;font-size:1.35rem;line-height:1.5;color:var(--title);}
+.stp-dlg__note{margin:0;font-size:1.2rem;color:var(--text-dim);}
+.stp-dlg__row{display:flex;gap:8px;}
+.stp-dlg__foot,.prof-confirm__actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;}
+.stp-dlg__sum{margin:0;padding:10px 14px;border-radius:var(--r-md);background:var(--fill);font-size:1.25rem;line-height:1.45;color:var(--text);}
+.stp-chg{display:flex;flex-direction:column;}
+.stp-chg__r{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:9px 0;border-top:1px solid var(--hairline);font-size:1.3rem;}
+.stp-chg__r:first-child{border-top:0;}
+.stp-chg__n{color:var(--title);}
+.stp-chg__v{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;min-width:0;}
+.stp-chg__v del,.stp-chg__v ins{padding:2px 8px;border-radius:var(--r-xs);font-family:var(--font-mono);font-size:1.2rem;text-decoration:none;overflow-wrap:anywhere;}
+.stp-chg__v del{background:rgba(255,83,112,.1);color:var(--warn);text-decoration:line-through;}
+.stp-chg__v ins{background:rgba(195,232,141,.1);color:var(--score-high);}
+.stp-chg__a{font-style:normal;color:var(--text-dim);}
+.stp-confirm{display:flex;align-items:center;gap:10px;align-self:flex-start;padding:0;border:0;background:none;color:var(--text);font:inherit;font-size:1.25rem;cursor:pointer;}
+.stp-confirm:focus-visible{outline:1px solid var(--accent);outline-offset:3px;border-radius:6px;}
+.prof-confirm{display:flex;flex-direction:column;gap:10px;padding:16px 20px;color:var(--text);font-size:1.25rem;line-height:1.5;}
+.prof-confirm p{margin:0;}
+.stp-check__box,.stp-confirm__box{flex:none;display:grid;place-items:center;width:18px;height:18px;border-radius:6px;box-sizing:border-box;
+  background:var(--fill);box-shadow:inset 0 0 0 1px var(--hairline-strong);transition:background .12s var(--ease),box-shadow .12s var(--ease);}
+.stp-confirm[aria-checked="true"] .stp-confirm__box,.stp-check input:checked+.stp-check__box,.stp-check input:indeterminate+.stp-check__box{
+  background:var(--tint);box-shadow:inset 0 0 0 1px var(--accent);}
+.stp-confirm[aria-checked="true"] .stp-confirm__box::after,.stp-check input:checked+.stp-check__box::after{
+  content:"";display:block;width:5px;height:9px;margin-top:-2px;border:solid var(--accent);border-width:0 2px 2px 0;transform:rotate(45deg);}
+.stp-check input:indeterminate+.stp-check__box::after{content:"";display:block;width:8px;height:2px;border-radius:1px;background:var(--accent);}
+.stp-checks{display:flex;flex-direction:column;margin:0;padding:0;min-width:0;border:0;border-radius:14px;background:var(--card);
+  box-shadow:var(--card-shadow);overflow:clip;}
+.stp-checks__list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--hairline);}
+.stp-check{position:relative;display:flex;align-items:center;gap:12px;min-height:48px;box-sizing:border-box;padding:8px 14px;
+  background:var(--card);cursor:pointer;transition:background .12s var(--ease);}
+.stp-check:hover{background:var(--fill-hover);}
+.stp-check input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer;}
+.stp-check input:focus-visible+.stp-check__box{outline:1px solid var(--accent);outline-offset:2px;}
+.stp-check__t{display:flex;flex-direction:column;gap:1px;min-width:0;font-size:1.35rem;line-height:1.3;color:var(--title);}
+.stp-check__t small{font-size:1.15rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.stp-check--all{border-bottom:1px solid var(--hairline);}
+.stp-check--all .stp-check__t{font-weight:500;}
+@media (max-width:520px){ .stp-checks__list{grid-template-columns:minmax(0,1fr);} }
+
+/* the save bar */
+.stp-savebar{position:fixed;left:50%;bottom:24px;z-index:45;display:flex;align-items:center;gap:16px;max-width:calc(100vw - 16px);
+  padding:7px 7px 7px 16px;border:1px solid var(--e3-line);border-radius:var(--r-md);background:var(--e3-fill);
+  -webkit-backdrop-filter:var(--e3-blur);backdrop-filter:var(--e3-blur);box-shadow:var(--e3-shadow);
+  transform:translateX(-50%);animation:stp-bar-in .26s var(--spring);}
+@keyframes stp-bar-in{from{opacity:0;transform:translate(-50%,18px);}}
+.stp-savebar__t{display:inline-flex;align-items:center;font-size:1.25rem;color:var(--title);white-space:nowrap;}
+.stp-dot{display:inline-block;width:7px;height:7px;margin:0 8px 0 0;border-radius:50%;background:var(--caution);box-shadow:0 0 6px rgba(255,203,107,.55);}
+.stp-savebar__a{display:inline-flex;align-items:center;gap:4px;}
+.stp-savebar__discard{padding:0 14px;background:none;color:var(--text-dim);}
+.stp-savebar__discard:hover{background:var(--fill-hover);color:var(--text);}
+@media (prefers-reduced-motion:reduce){.stp-savebar{animation:none;}}
+
+/* Appearance: the choice on the left, what it looks like on the right */
+.stp-look{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr);gap:16px;align-items:start;padding:16px;}
+.stp-look .look__opts{display:flex;flex-direction:column;height:auto;gap:10px;}
+.stp-look .look__opt-body{height:64px;}
+.stp-look .look__pv{height:400px;}
+.stp-look .look__pvt-why,.stp-look .look__pvm-why{display:-webkit-box;}
+.look__x{display:none;}
+.stp-look .look__pvt-row.look__x{display:grid;}
+.stp-look .look__pvm-row.look__x{display:grid;}
+
+/* Profiles */
+.prof{display:flex;flex-direction:column;}
+.prof__error{margin:0 0 14px;}
+.prof__rescore:disabled{opacity:.4;cursor:default;}
+.prof__row.is-active{box-shadow:inset 3px 0 0 var(--accent);}
+.prof__row.is-active:not(:first-child){box-shadow:inset 3px 0 0 var(--accent),0 -1px 0 var(--hairline);}
+.prof-form{display:flex;flex-direction:column;}
+.prof-form__ok{margin:0 0 8px;color:var(--score-high);}
+.prof-form__mode{display:inline-block;margin:10px 16px 0;}
+/* Save stays in reach however long the profile runs. */
+.prof-form__foot{position:sticky;bottom:0;z-index:1;display:flex;justify-content:flex-end;margin:0;padding:10px 16px;background:var(--card);}
+.prof-form__err{margin:0 16px;color:var(--warn);font-size:1.2rem;}
+.prof-form>.stp-note,.prof-form>form>.stp-note{margin:12px 16px 0;}
+.prof-form .prof-form__ok{margin:12px 16px 0;}
+.prof-form>.stp-callout{margin:12px 16px 0;}
+
+/* Account: an identity card, then the session rows, in the same groups */
 .acct{display:flex;flex-direction:column;}
-.acct__card{
-  display:flex;flex-direction:column;align-items:center;gap:3px;
-  margin:4px 0 10px;padding:16px 14px 14px;text-align:center;
-  border-radius:var(--r-md);
-  background:radial-gradient(90% 120% at 50% 0%, rgba(128,203,196,.10), transparent 70%), var(--sel-fill);
-  box-shadow:var(--sel-shadow), inset 0 0 0 1px var(--hairline);
-}
-.acct__bunny{
-  margin:0 0 6px;font-family:var(--font-mono);font-size:1.7rem;line-height:1.08;
-  letter-spacing:1px;color:var(--text-dim);user-select:none;
-}
+.acct__card{display:flex;flex-direction:column;}
+.acct__note{margin:0 0 10px;font-size:1.2rem;color:var(--accent);}
+.acct__id{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px 20px 20px;text-align:center;
+  background:radial-gradient(90% 120% at 0% 0%, rgba(128,203,196,.10), transparent 70%);}
+.acct__bunny{flex:none;margin:0;font-family:var(--font-mono);font-size:2.2rem;line-height:1.08;letter-spacing:1px;color:var(--text-dim);user-select:none;}
 .acct__bunny .bunny__ears{color:var(--accent);}
-.acct__bunny .bunny__eye{
-  display:inline-block;font-style:normal;color:var(--accent);
-  animation:bunny-blink 7s ease-in-out infinite;
-}
+.acct__bunny .bunny__eye{display:inline-block;font-style:normal;color:var(--accent);animation:bunny-blink 7s ease-in-out infinite;}
 @media (prefers-reduced-motion: no-preference){
   .acct__bunny{animation:acct-hop .75s var(--spring) both;}
 }
@@ -4379,43 +4533,94 @@ button.src__act{border:0;font-family:inherit;cursor:pointer;}
   70%{transform:translateY(1px) scaleY(.95);}
   100%{transform:none;}
 }
-.acct__name{font-size:1.6rem;font-weight:600;color:var(--title);overflow-wrap:anywhere;}
-.acct__meta{
-  display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px;
-  font-size:1.1rem;line-height:1.5;color:var(--text-dim);
-}
-.acct__tag{
-  padding:1px 8px;border-radius:var(--r-full);
-  font-size:1rem;color:var(--accent);background:var(--tint);
-}
-.acct__hint{display:block;margin-top:1px;font-size:1rem;color:var(--text-dim);}
-/* On a narrow pane the control drops under its label rather than squeezing
-   it, and a pill's label never breaks inside the pill. */
-.acct .wx-switch{flex-wrap:wrap;row-gap:4px;}
-.acct .wx-switch > span{flex:1 1 11rem;}
-.acct .wx-switch > button{margin-left:auto;white-space:nowrap;}
-.acct__note{margin:0 0 8px;font-size:1.1rem;color:var(--accent);text-align:center;}
-.acct__forgot{margin:0 0 6px;}
-.acct__forgot summary{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:3px 0;list-style:none;cursor:pointer;font-size:1.1rem;color:var(--text);
-}
+.acct__who{min-width:0;display:flex;flex-direction:column;align-items:center;gap:4px;}
+.acct__name{font-size:1.9rem;font-weight:600;color:var(--title);overflow-wrap:anywhere;}
+.acct__meta{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 8px;font-size:1.2rem;line-height:1.5;color:var(--text-dim);}
+.acct__tag{padding:1px 9px;border-radius:var(--r-full);font-size:1.05rem;color:var(--accent);background:var(--tint);}
+.acct__act{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;min-height:52px;padding:10px 16px;margin:0;
+  border-top:1px solid var(--hairline);}
+.acct__act:first-child{border-top:0;}
+.acct__lbl{flex:1 1 14rem;font-size:1.4rem;color:var(--title);}
+.acct__lbl small{display:block;margin-top:2px;font-size:1.2rem;color:var(--text-dim);}
+.acct__lbl .hint{margin-left:6px;vertical-align:middle;}
+.acct__forgot{padding:6px 16px;border-top:1px solid var(--hairline);}
+.acct__forgot summary{display:flex;align-items:center;justify-content:space-between;padding:4px 0;list-style:none;cursor:pointer;font-size:1.25rem;color:var(--text);}
 .acct__forgot summary::-webkit-details-marker{display:none;}
 .acct__forgot summary::after{content:"\203A";color:var(--text-dim);transition:transform .15s var(--ease);}
 .acct__forgot[open] summary::after{transform:rotate(90deg);}
 .acct__forgot summary:hover{color:var(--accent);}
 .acct__forgot summary:focus-visible{outline:1px solid var(--accent);outline-offset:2px;border-radius:4px;}
-.acct__forgot p{margin:4px 0 0;font-size:1.1rem;line-height:1.55;color:var(--text-dim);}
-.acct__forgot code{font-family:var(--font-mono);color:var(--accent);user-select:all;white-space:nowrap;}
-/* The section's one primary action, the width of the column. */
+.acct__forgot p{margin:4px 0 2px;font-size:1.2rem;line-height:1.55;color:var(--text-dim);}
+.acct__forgot code{font-family:var(--font-mono);color:var(--accent);user-select:all;overflow-wrap:anywhere;}
+.acct__foot{display:flex;justify-content:center;padding:12px 16px 14px;border-top:1px solid var(--hairline);}
 .acct__out{margin:0;}
-.acct__go{
-  display:flex;align-items:center;justify-content:center;gap:8px;
-  width:100%;margin-top:12px;padding:9px 14px;border:0;border-radius:var(--r-sm);cursor:pointer;
-  font:inherit;font-size:1.25rem;font-weight:500;color:var(--accent);text-decoration:none;
-  background:var(--tint);box-shadow:inset 0 0 0 1px rgba(128,203,196,.3);
-  transition:background .15s var(--ease),transform .1s var(--ease);
+.acct__go{min-width:160px;}
+
+/* The gear is lit on the page it opens. */
+.settings-btn[aria-current]{color:var(--accent);background:var(--tint);}
+.settings-btn[aria-current] .gear svg{transform:rotate(90deg);}
+a.settings-btn{text-decoration:none;}
+a.navrail__item--cmd{text-decoration:none;}
+a.welcome__step{text-decoration:none;}
+
+/* --- Minimal ---------------------------------------------------------------
+   Default's page plus what Minimal changes elsewhere: the pane is flat, the tab
+   row is the Maze's underline tabs with the search at its right end, groups are
+   hairline-headed sections and fields are outlined instead of filled. */
+:root[data-theme="minimal"] .stp-search{position:relative;top:auto;right:auto;margin-left:auto;}
+:root[data-theme="minimal"] .stp-search__in:not(:focus),:root[data-theme="minimal"] .stp-kbd{background:none;box-shadow:inset 0 0 0 1px var(--line);}
+:root[data-theme="minimal"] .stp-tabline #wxChip{margin-left:16px;}
+:root[data-theme="minimal"] .stp-body{padding-inline:0;}
+:root[data-theme="minimal"] .stp-group{background:none;box-shadow:none;}
+:root[data-theme="minimal"] .stp-group:is(.is-locked,[data-stp-replies]){padding-inline:16px;}
+:root[data-theme="minimal"] .stp-group__h{align-items:flex-end;background:none;padding:0;border-bottom-color:var(--line);}
+:root[data-theme="minimal"] .stp-group__h h3{align-items:stretch;font-size:1.7rem;text-transform:none;}
+:root[data-theme="minimal"] .stp-group__h :is(h3,p)::before{content:none;}
+:root[data-theme="minimal"] .stp-group__h p{color:var(--text-dim);}
+:root[data-theme="minimal"] .stp-group__h>*{margin-bottom:10px;}
+:root[data-theme="minimal"] .stp-group__t::after{content:"";position:absolute;left:0;right:0;bottom:-11px;height:2px;border-radius:2px;background:var(--accent);}
+:root[data-theme="minimal"] .stp-group:not(:first-child){margin-top:36px;}
+:root[data-theme="minimal"] :is(.stp-row,.stp-look,.acct__act,.acct__forgot,.acct__foot,.prof-form__foot){padding-inline:0;}
+:root[data-theme="minimal"] .stp-row:is(.is-mod,.is-bad){background:none;}
+:root[data-theme="minimal"] .prof__row.is-active{padding-left:12px;}
+:root[data-theme="minimal"] .acct__id{background:none;}
+:root[data-theme="minimal"] .stp-group>:is(.stp-note,.stp-fold,.stp-callout),
+:root[data-theme="minimal"] :is(.prof-form__mode,.prof-form__err,.prof-form .prof-form__ok,.prof-form>.stp-note,.prof-form>form>.stp-note,.prof-form>.stp-callout){margin-inline:0;}
+:root[data-theme="minimal"] :is(.stp-in,.stp-area,.stp-menu__btn,.stp .wx-loc__input):not(:focus,:focus-visible,[aria-expanded="true"]){
+  background:none;box-shadow:inset 0 0 0 1px var(--line);}
+:root[data-theme="minimal"] .prof-form__foot{background:linear-gradient(180deg,transparent,var(--bg) 40%);}
+:root[data-theme="minimal"] .stp-checks{background:none;border-radius:var(--r-md);box-shadow:inset 0 0 0 1px var(--line);}
+:root[data-theme="minimal"] .stp-checks__list{background:var(--line);}
+:root[data-theme="minimal"] .stp-check{background:var(--bg);}
+
+@media (max-width:820px){ .stp{--stp-c:300px;} .stp-look{grid-template-columns:minmax(0,200px) minmax(0,1fr);} }
+@media (max-width:640px){
+  .stp-tabline{flex-wrap:wrap;}
+  .stp-tabs{flex:1 1 0;}
+  .stp-search,:root[data-theme="minimal"] .stp-search{position:relative;top:auto;right:auto;order:-1;flex:1 0 100%;width:auto;max-width:none;margin:0 0 12px;}
+  .stp-row{grid-template-columns:minmax(0,1fr);gap:8px;}
+  .stp-row--ro{grid-template-columns:110px minmax(0,1fr);}
+  .stp-row__c,.stp-row__c--btns,.stp-row__c--duo{align-items:stretch;}
+  .stp-row__c--btns,.stp-row__c--duo{justify-content:flex-start;}
+  .stp-row__c .stp-seg{justify-content:flex-start;}
+  .stp-row__v{text-align:left;}
+  .stp-row .wx-sw{align-self:flex-start;}
+  .stp-row .font-step,.stp-row .font-step--size{width:auto;flex:1 1 130px;}
+  .stp-row .stp-step{flex:0 0 auto;align-self:flex-start;}
+  .stp-row__c--duo .font-step--size{flex:0 0 124px;}
+  .stp-paste{align-items:flex-start;}
+  .stp-paste .stp-row__h,.stp-paste .stp-row__err,.stp-test{text-align:left;}
+  .stp-in--num{max-width:none;}
+  .stp-look{grid-template-columns:minmax(0,1fr);}
+  .stp-look .look__opts{flex-direction:row;}
+  .stp-look .look__opt{flex:1 1 0;}
+  .stp-savebar{gap:8px;padding-left:12px;}
+  .stp-savebar__t{font-size:1.2rem;}
+  .stp-chg__r{flex-direction:column;align-items:flex-start;gap:4px;}
+  .stp-chg__v{justify-content:flex-start;}
+  .wx-loc__line{flex-direction:column;align-items:stretch;}
+  .acct__foot{justify-content:stretch;}
+  .acct__out,.acct__go{width:100%;}
+  .stp-group__h--act{flex-wrap:wrap;}
+  :root[data-theme="minimal"] .stp-group__t::after{bottom:-4px;}
 }
-.acct__go:hover{background:rgba(128,203,196,.22);}
-.acct__go:active{transform:scale(.99);}
-.acct__go:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}

@@ -11,8 +11,10 @@
 package server
 
 import (
+	"net"
 	"net/http"
 	"net/netip"
+	"strings"
 	"sync/atomic"
 
 	"github.com/rs/zerolog"
@@ -37,8 +39,11 @@ type Server struct {
 
 	proxies    []netip.Prefix // set by TrustProxies
 	proxiesSet bool
-	dev        bool   // set by Dev: serve assets no-cache
-	managedBy  string // set by ManagedBy: the --config file re-applied on every start
+	dev        bool            // set by Dev: serve assets no-cache
+	managedBy  string          // set by ManagedBy: the --config file, applied when it changes
+	env        *config.EnvFile // set by EnvFile: where api key variables come from and pasted keys go
+	noEnvWrite bool            // set by EnvFile: refuse pasted keys
+	storeInfo  *web.StoreInfo  // set by StoreInfo: what boot knew about the store
 }
 
 // New returns a Server backed by db, reading the run config from src. addr is the
@@ -57,8 +62,16 @@ func (s *Server) TrustProxies(nets []netip.Prefix) {
 	s.proxies, s.proxiesSet = nets, true
 }
 
-// ManagedBy names the config file applied on every start, shown in the config viewer.
+// ManagedBy names the --config file, shown on the settings page.
 func (s *Server) ManagedBy(path string) { s.managedBy = path }
+
+// EnvFile gives the settings page the .env file: it tells an api key variable
+// from the environment apart from one read out of .env, and takes a pasted key
+// unless noWrite is set.
+func (s *Server) EnvFile(e *config.EnvFile, noWrite bool) { s.env, s.noEnvWrite = e, noWrite }
+
+// StoreInfo hands the settings page the store boot opened.
+func (s *Server) StoreInfo(i web.StoreInfo) { s.storeInfo = &i }
 
 // Dev serves the embedded assets no-cache, so an edited stylesheet or script
 // shows on the next reload instead of after the normal cache window.
@@ -74,6 +87,10 @@ func (s *Server) Routes() http.Handler {
 	}
 	w.SetDev(s.dev)
 	w.SetManagedBy(s.managedBy)
+	w.SetEnvFile(s.env, s.noEnvWrite)
+	if s.storeInfo != nil {
+		w.SetStoreInfo(*s.storeInfo)
+	}
 	app := http.NewServeMux()
 	app.Handle("/api/", api.New(s.db).Routes())
 	// The web mux owns "/" (digest page) and "/static/" (embedded assets);
@@ -91,7 +108,49 @@ func (s *Server) Routes() http.Handler {
 	// page makes on a logged-in browser's behalf; SameSite=Lax on the session
 	// cookie is the second line.
 	protected := http.NewCrossOriginProtection().Handler(root)
+	// A loopback listener also answers only to loopback names: a page on
+	// another domain that rebinds its DNS to 127.0.0.1 would otherwise read the
+	// app as same-origin.
+	if loopbackAddr(s.addr) {
+		protected = loopbackHostOnly(protected)
+	}
 	// Compression sits inside the access log, so the bytes a request reports
 	// are the bytes that went on the wire rather than the ones a handler wrote.
 	return httplog.Middleware(s.log)(httpgzip.Middleware(protected))
+}
+
+// loopbackAddr reports whether a listen address binds only the loopback
+// interface. A bare port or an unspecified address binds every interface.
+func loopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	return loopbackName(host)
+}
+
+// loopbackName reports whether a host is localhost or a loopback IP literal.
+func loopbackName(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.IsLoopback()
+}
+
+// loopbackHostOnly refuses a request whose Host header names anything but a
+// loopback host. A missing Host (HTTP/1.0) passes.
+func loopbackHostOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		host = strings.Trim(host, "[]")
+		if host != "" && !loopbackName(host) {
+			http.Error(w, "Host not allowed. Use localhost or 127.0.0.1.", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

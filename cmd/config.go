@@ -284,20 +284,15 @@ func warnMissingKeys(ctx context.Context, s *session, w io.Writer) error {
 	if err != nil {
 		return nil // the command already reported what it did; an unreadable row is surfaced elsewhere
 	}
-	for _, ref := range []string{cfg.Inference.APIKey, cfg.Inference.Summary.APIKey} {
-		name, ok := config.RefName(ref)
-		if !ok {
-			continue
-		}
-		if s.env.Source(name) == config.SourceMissing {
-			if _, err := fmt.Fprintf(
-				w,
-				"warning: the config uses $%s, which is not set; set it in the environment or %s\n",
-				name,
-				s.env.Path,
-			); err != nil {
-				return err
-			}
+	name, ok := config.RefName(cfg.Inference.APIKey)
+	if ok && s.env.Source(name) == config.SourceMissing {
+		if _, err := fmt.Fprintf(
+			w,
+			"warning: the config uses $%s, which is not set; set it in the environment or %s\n",
+			name,
+			s.env.Path,
+		); err != nil {
+			return err
 		}
 	}
 	return nil

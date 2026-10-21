@@ -1,0 +1,505 @@
+{{/* SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+     SPDX-License-Identifier: Apache-2.0 */}}
+
+{{/* The Settings page. Every tab is a pane of the same document: the server
+     opens the one in the URL, static/js/settings.js switches between them and
+     keeps the address in step, and the tab bar is plain links so everything
+     works without it. General, Scoring and Advanced sit inside ONE form, kept
+     in the page whichever tab is showing, so edits made across them are saved
+     together as a single new config version. The other tabs save on their own
+     or are only preferences for this browser. Rows are name and one helper line
+     on the left, the control on the right. */}}
+
+{{define "stpRow"}}
+<div class="stp-row stp-row--ro">
+  <div class="stp-row__l">
+    <span class="stp-row__n">{{.Name}}{{if .Tag}} <span class="stp-chip stp-chip--def">{{.Tag}}</span>{{end}}</span>
+    {{if .Help}}<p class="stp-row__h">{{.Help}}</p>{{end}}
+  </div>
+  <div class="stp-row__c">
+    {{if .Mono}}<code class="stp-row__v stp-row__v--mono">{{.Value}}</code>{{else}}<span class="stp-row__v">{{.Value}}</span>{{end}}
+    {{if .Chip}}<span class="stp-chip stp-chip--{{.Tone}}">{{.Chip}}</span>{{end}}
+  </div>
+</div>
+{{end}}
+
+{{/* One editable run-config field. data-fld names it in the form, data-kind picks
+     its control, data-default and data-raw let the page tell a pinned value from
+     the default, and data-applies lists the providers that read it. */}}
+{{define "stpField"}}
+<div class="stp-row{{if eq .Kind "sys"}} stp-row--stack{{end}}{{if eq .Kind "key"}} stp-row--top{{end}}{{if .Hidden}} is-off{{end}}" data-fld="{{.Key}}" data-kind="{{.Kind}}" data-default="{{.Default}}"{{if .Defaults}} data-defaults="{{.Defaults}}"{{end}} data-raw="{{.Raw}}"{{if .Applies}} data-applies="{{.Applies}}"{{end}} data-name="{{.Name}}">
+  <div class="stp-row__l">
+    <div class="stp-row__nl">
+      <label class="stp-row__n" for="f-{{.Key}}">{{.Name}}</label>
+      {{with .Tip}}{{template "stpHint" .}}{{end}}
+      <span class="stp-row__tags">{{if eq .Kind "key"}}<span class="stp-chip stp-chip--{{.Tone}}" data-stp-keychip>{{.Chip}}</span>{{end}}<span class="stp-chip stp-chip--def" data-stp-tag{{if not .Tag}} hidden{{end}}>Default</span><i class="stp-mod" data-stp-mod title="Changed since the last save" hidden></i>{{if eq .Kind "key"}}<span class="stp-row__note" data-stp-keynote hidden>Key saved to .env. Review and save to start using it.</span>{{end}}</span>
+      {{if ne .Kind "key"}}{{if ne .Kind "sys"}}<button type="button" class="stp-link" data-stp-usedefault{{if not .Raw}} hidden{{end}}>Use default</button>{{end}}{{end}}</div>
+    {{if .Help}}<p class="stp-row__h">{{.Help}}</p>{{end}}
+    {{if .Note}}<p class="stp-row__h">{{.Note}}</p>{{end}}
+    <p class="stp-row__err" role="alert" data-stp-err hidden></p>
+  </div>
+  <div class="stp-row__c">
+  {{if and (ne .Kind "key") (ne .Kind "sys")}}<input type="hidden" name="{{.Key}}__reset" value="0" data-stp-reset>{{end}}
+  {{if eq .Kind "text"}}
+    <input class="stp-in" type="text" id="f-{{.Key}}" name="{{.Key}}" value="{{.Value}}" placeholder="{{.Hint}}" autocomplete="off" spellcheck="false">
+  {{else if eq .Kind "num"}}
+    <input class="stp-in stp-in--num" type="text" inputmode="numeric" id="f-{{.Key}}" name="{{.Key}}" value="{{.Value}}" placeholder="{{.Hint}}" autocomplete="off">
+  {{else if eq .Kind "bool"}}
+    <input type="hidden" name="{{.Key}}" value="{{.Value}}">
+    <button type="button" class="wx-sw{{if .On}} is-on{{end}}" id="f-{{.Key}}" role="switch" aria-checked="{{if .On}}true{{else}}false{{end}}" aria-label="{{.Name}}" data-stp-switch><span class="wx-sw__knob" aria-hidden="true"></span><span class="wx-sw__txt">{{if .On}}On{{else}}Off{{end}}</span></button>
+  {{else if eq .Kind "choice"}}
+    <div class="stp-seg" role="radiogroup" aria-label="{{.Name}}" id="f-{{.Key}}">
+      {{range .Options}}<label class="stp-seg__o"><input type="radio" name="{{$.Key}}" value="{{.Value}}"{{if .On}} checked{{end}}><span>{{.Label}}</span></label>{{end}}
+    </div>
+  {{else if eq .Kind "step"}}
+    <input type="hidden" name="{{.Key}}" value="{{.Value}}">
+    <div class="font-step stp-step" role="group" aria-label="{{.Name}}" id="f-{{.Key}}" data-min="{{.Min}}" data-max="{{.Max}}">
+      <button type="button" class="font-step__arrow" data-stp-less aria-label="Fewer">-</button>
+      <div class="font-step__face"><span class="font-step__name" data-stp-stepval aria-live="polite">{{.Value}}</span></div>
+      <button type="button" class="font-step__arrow" data-stp-more aria-label="More">+</button>
+    </div>
+  {{else if eq .Kind "sys"}}
+    <div class="stp-sys">
+      <div class="stp-seg" role="radiogroup" aria-label="{{.Name}}" id="f-{{.Key}}">
+        <label class="stp-seg__o"><input type="radio" name="{{.Key}}" value="default"{{if eq .SysMode "default"}} checked{{end}}><span>Built-in</span></label>
+        <label class="stp-seg__o"><input type="radio" name="{{.Key}}" value="custom"{{if eq .SysMode "custom"}} checked{{end}}><span>Custom</span></label>
+        <label class="stp-seg__o"><input type="radio" name="{{.Key}}" value="none"{{if eq .SysMode "none"}} checked{{end}}><span>None</span></label>
+      </div>
+      <textarea class="stp-area stp-area--sys" name="{{.Key}}_text" rows="16" data-builtin="{{.SysBuiltin}}" data-draft="{{.SysText}}" placeholder="No instructions are sent." aria-label="Instructions" spellcheck="false" readonly>{{if eq .SysMode "custom"}}{{.SysText}}{{else if eq .SysMode "default"}}{{.SysBuiltin}}{{end}}</textarea>
+    </div>
+  {{else if eq .Kind "key"}}
+    <div class="stp-key">
+      <input class="stp-in stp-in--ref" type="text" id="f-{{.Key}}" name="{{.Key}}" value="{{.Raw}}" placeholder="$RABBITHOLE_INFERENCE_API_KEY" aria-label="Variable that holds the key" autocomplete="off" spellcheck="false">
+      {{if .Pasteable}}<button type="button" class="clk-btn" data-stp-paste>Paste a key</button>{{end}}
+      {{if .Pasteable}}
+      <div class="stp-paste" data-stp-pastebox hidden>
+        <input class="stp-in" type="password" data-stp-pasteval placeholder="Paste the key here" aria-label="API key" autocomplete="new-password" spellcheck="false">
+        <button type="button" class="clk-btn clk-btn--go" data-stp-pastesave>Save to .env</button>
+        <p class="stp-row__h">Saved to <code>{{.EnvPath}}</code>. The config only names the variable.</p>
+        <p class="stp-row__err" role="alert" data-stp-pasteerr hidden></p>
+      </div>
+      {{end}}
+    </div>
+  {{end}}
+  </div>
+</div>
+{{end}}
+
+{{/* The small per-group action: puts every field of the group back on its default in the form. */}}
+{{define "stpReset"}}<button type="button" class="stp-link stp-link--reset" data-stp-groupreset>Reset to default</button>{{end}}
+
+{{/* The same pill for the groups kept in this browser: one reset for the whole tab. */}}
+{{define "stpResetLocal"}}<button type="button" class="stp-link stp-link--reset" data-stp-resetlocal="{{.}}">Reset to default</button>{{end}}
+
+{{define "stpManaged"}}
+{{if .Managed}}
+<div class="stp-callout" role="note">
+  <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v3.6M8 5.2v.1"/></svg>
+  <p><b>Managed by <code>{{.Managed}}</code>.</b> Changes saved here are kept until that file changes; then it replaces the whole settings document.</p>
+</div>
+{{end}}
+{{end}}
+
+{{define "stpConfigError"}}
+{{if .ConfigError}}
+<div class="stp-callout stp-callout--warn" role="alert">
+  <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v3.6M8 5.2v.1"/></svg>
+  <p><b>The saved configuration cannot be read.</b> {{.ConfigError}} The values below are the built-in defaults, and saving is off until you import a fixed file or roll back to an earlier version on Advanced.</p>
+</div>
+{{end}}
+{{end}}
+
+{{define "content"}}
+<div class="stp-page" data-stp>
+  <h1 class="stp-sr">Settings</h1>
+  {{/* Weather takes the Maze's slots, so the page reads the same coming from either. */}}
+  <div class="wx-subbar" id="wxMazeBar"></div>
+  <aside class="wx-band wx-full" id="wxMazeBand"></aside>
+  <div class="stp-tabline">
+  <nav class="stp-tabs" aria-label="Settings sections">
+    {{range .Tabs}}<a class="stp-tab{{if eq .Slug $.Tab}} is-on{{end}}" href="/settings/{{.Slug}}" data-stp-tab="{{.Slug}}"{{if eq .Slug $.Tab}} aria-current="page"{{end}}>{{.Title}}</a>{{end}}
+  </nav>
+  <label class="stp-search">
+    <span class="stp-sr">Search settings</span>
+    <svg class="stp-search__i" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg>
+    <input type="search" class="stp-search__in" data-stp-search placeholder="Search settings" autocomplete="off" spellcheck="false">
+    <kbd class="stp-kbd" aria-hidden="true">/</kbd>
+  </label>
+  <div class="wx-chip" id="wxChip"></div>
+  </div>
+<button type="button" class="stp-step stp-step--prev" data-stp-step="-1" aria-label="Previous section" hidden>&#8249;</button>
+<button type="button" class="stp-step stp-step--next" data-stp-step="1" aria-label="Next section" hidden>&#8250;</button>
+<div class="stp pane">
+  <div class="pane__bar stp-bar">
+    <span class="pane__ps"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~/settings</span><span class="sh">$&nbsp;</span><span class="pane__cmd">settings</span></span>
+    <span class="cmd__arg"><i>--tab</i><span data-stp-cmdtab>{{.Tab}}</span></span>
+    <span class="blink">_</span>
+  </div>
+  <div class="stp-body">
+  <p class="stp-nomatch" data-stp-nomatch role="status" hidden>No settings match that.</p>
+  <div class="stp-callout stp-callout--warn" data-stp-banner role="alert" hidden>
+    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v3.6M8 5.2v.1"/></svg>
+    <p><span data-stp-bannertext></span> <button type="button" class="stp-link" data-stp-reload>Reload</button></p>
+  </div>
+  <p class="stp-applied" data-stp-applied role="status" hidden></p>
+
+  <form class="stp-form" id="settingsForm" data-stp-form data-version="{{.Version}}" autocomplete="off" novalidate>
+    <input type="hidden" name="expected_version" value="{{.Version}}">
+
+    <section class="stp-pane" data-stp-pane="general"{{if ne .Tab "general"}} hidden{{end}}>
+      {{template "stpConfigError" .}}
+      <section class="stp-group" data-tone="teal">
+        <header class="stp-group__h stp-group__h--act"><div><h3><span class="stp-group__t">Basics</span></h3></div>{{template "stpReset"}}</header>
+        <div class="stp-box">
+          {{template "stpField" index .F "user"}}
+          <div class="stp-row" data-stp-sources>
+            <div class="stp-row__l">
+              <div class="stp-row__nl"><span class="stp-row__n"><span><span data-stp-feedcount>{{.Feeds}}</span> {{if eq .Feeds 1}}feed{{else}}feeds{{end}}</span></span>{{with tip "feeds"}}{{template "stpHint" .}}{{end}}</div>
+              <p class="stp-row__h">The feeds you read, how each is tagged and how far back to look.</p>
+              <p class="stp-row__h stp-row__h--status" data-stp-importmsg role="status" hidden></p>
+            </div>
+            <div class="stp-row__c stp-row__c--btns">
+              <button class="clk-btn" type="button" hx-get="/sources" hx-target="#modal" hx-swap="innerHTML">Open sources</button>
+              <button class="clk-btn" type="button" data-stp-import>Import</button>
+              <input type="file" accept=".yaml,.yml" hidden data-stp-importfile aria-label="Import feeds file">
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="stp-group" data-tone="slate">
+        <header class="stp-group__h"><h3><span class="stp-group__t">Configuration</span></h3><p>What is saved right now.</p></header>
+        <div class="stp-box">
+          <div class="stp-row stp-row--ro"><div class="stp-row__l"><span class="stp-row__n">Version</span></div><div class="stp-row__c"><span class="stp-row__v">{{.VersionLabel}}</span></div></div>
+          <div class="stp-row stp-row--ro"><div class="stp-row__l"><span class="stp-row__n">Last saved from</span></div><div class="stp-row__c"><span class="stp-row__v">{{.LastSource}}</span></div></div>
+          <div class="stp-row stp-row--ro"><div class="stp-row__l"><span class="stp-row__n">Last saved</span></div><div class="stp-row__c"><span class="stp-row__v">{{.LastSaved}}</span></div></div>
+        </div>
+      </section>
+      <section class="stp-group" data-tone="slate">
+        <header class="stp-group__h"><h3><span class="stp-group__t">Reset to defaults</span></h3></header>
+        <div class="stp-box">
+          <div class="stp-row">
+            <div class="stp-row__l"><div class="stp-row__nl"><span class="stp-row__n">Choose what to reset</span>{{with tip "reset-all"}}{{template "stpHint" .}}{{end}}</div>
+              <p class="stp-row__h">Settings, profile, look and widgets. Your account is never touched.</p></div>
+            <div class="stp-row__c stp-row__c--btns"><button class="clk-btn" type="button" data-stp-resetall>Reset to defaults</button></div>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section class="stp-pane" data-stp-pane="scoring"{{if ne .Tab "scoring"}} hidden{{end}}>
+      {{template "stpManaged" .}}
+      {{template "stpConfigError" .}}
+      <section class="stp-group" data-tone="teal">
+        <header class="stp-group__h stp-group__h--act"><div><h3><span class="stp-group__t">Model</span></h3><p>Where scoring runs and what runs it.</p></div>{{template "stpReset"}}</header>
+        <div class="stp-box">
+          {{template "stpField" index .F "inference.provider"}}
+          {{template "stpField" index .F "inference.host"}}
+          {{template "stpField" index .F "inference.model"}}
+          {{template "stpField" index .F "inference.api_key"}}
+          <div class="stp-row stp-row--top{{if (index .F "inference.host").Hidden}} is-off{{end}}" data-stp-testrow data-applies="ollama vllm openai">
+            <div class="stp-row__l">
+              <div class="stp-row__nl"><span class="stp-row__n">Test connection</span>{{with tip "test"}}{{template "stpHint" .}}{{end}}</div>
+              <p class="stp-row__h">Checks the current address, model and key.</p>
+              <p class="stp-row__h stp-test__msg" data-stp-testmsg role="status" aria-live="polite" hidden></p>
+            </div>
+            <div class="stp-row__c stp-row__c--btns">
+              <span class="stp-test" data-stp-testout hidden></span>
+              <button class="clk-btn clk-btn--go" type="button" data-stp-test>Run test</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="stp-group" data-tone="blue">
+        <header class="stp-group__h stp-group__h--act"><div><h3><span class="stp-group__t">Behavior</span></h3></div>{{template "stpReset"}}</header>
+        <div class="stp-box">
+          {{template "stpField" index .F "inference.think"}}
+          {{template "stpField" index .F "inference.effort"}}
+        </div>
+        <div class="stp-callout stp-callout--kw{{if ne (index .F "inference.provider").Value "heuristic"}} is-off{{end}}" role="note" data-applies="heuristic">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v3.6M8 5.2v.1"/></svg>
+          <p>Keywords scores by counting your profile's words in each title and summary. No model, no server, works offline. Meant for development and trying the app, not for real reading.</p>
+        </div>
+      </section>
+      <section class="stp-group" data-tone="green">
+        <header class="stp-group__h stp-group__h--act"><div><h3><span class="stp-group__t">Performance</span></h3></div>{{template "stpReset"}}</header>
+        <div class="stp-box">
+          {{template "stpField" index .F "inference.batch_size"}}
+          {{template "stpField" index .F "inference.max_parallel"}}
+        </div>
+      </section>
+    </section>
+
+    <section class="stp-pane" data-stp-pane="advanced"{{if ne .Tab "advanced"}} hidden{{end}}>
+      {{template "stpManaged" .}}
+      {{template "stpConfigError" .}}
+      <section class="stp-group" data-tone="blue">
+        <header class="stp-group__h stp-group__h--act"><div><h3><span class="stp-group__t">Model tuning</span>{{with tip "tuning"}}{{template "stpHint" .}}{{end}}</h3></div>{{template "stpReset"}}</header>
+        <div class="stp-box">
+          {{template "stpField" index .F "inference.model_tuning.num_ctx"}}
+          {{template "stpField" index .F "inference.model_tuning.max_tokens"}}
+          {{template "stpField" index .F "inference.model_tuning.tokens_per_item"}}
+          {{template "stpField" index .F "inference.model_tuning.tokens_overhead"}}
+          {{template "stpField" index .F "inference.model_tuning.tokens_thinking"}}
+          {{template "stpField" index .F "inference.model_tuning.reason_max_chars"}}
+        </div>
+      </section>
+      <section class="stp-group is-locked" data-tone="slate" data-stp-replies>
+        <header class="stp-group__h stp-group__h--act"><div><h3><span class="stp-group__t">Replies</span><span class="stp-chip" data-stp-lockchip>Locked</span></h3><p>How the model is told to answer.</p></div>
+          <span class="stp-group__a">{{template "stpReset"}}<button type="button" class="clk-btn clk-btn--danger" data-stp-replylock aria-pressed="false">Edit</button></span></header>
+        <div class="stp-callout stp-callout--warn stp-callout--in" role="note">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v3.6M8 5.2v.1"/></svg>
+          <p>Changes here can stop scoring from working. Most setups never need them.</p>
+        </div>
+        <div class="stp-box">
+          {{template "stpField" index .F "inference.structured_output"}}
+          {{template "stpField" index .F "inference.system_prompt"}}
+        </div>
+      </section>
+      <section class="stp-group" data-tone="teal">
+        <header class="stp-group__h"><h3><span class="stp-group__t">Saved versions</span>{{with tip "versions"}}{{template "stpHint" .}}{{end}}</h3><p>Every save is kept, newest first.</p></header>
+        {{if .History}}
+        <ol class="stp-box stp-hist">
+          {{range .History}}
+          <li class="stp-row stp-hist__i" data-stp-ver="{{.Version}}">
+            <div class="stp-row__l"><span class="stp-row__n">Version {{.Version}}{{if .Active}} <span class="stp-chip stp-chip--ok">Active</span>{{end}}</span>
+              <p class="stp-row__h">{{.Source}} &middot; {{.When}}</p></div>
+            <div class="stp-row__c stp-row__c--btns">
+              {{if not .Active}}
+              <button class="clk-btn" type="button" data-stp-compare="{{.Version}}" aria-expanded="false">Compare</button>
+              <button class="clk-btn" type="button" data-stp-rollback="{{.Version}}">Roll back</button>
+              {{end}}
+            </div>
+            <div class="stp-hist__d" data-stp-diffhost hidden></div>
+          </li>
+          {{end}}
+        </ol>
+        {{else}}
+        <div class="stp-box"><div class="stp-row"><div class="stp-row__l"><span class="stp-row__n">Nothing saved yet</span>
+          <p class="stp-row__h">The built-in defaults are in use.</p></div></div></div>
+        {{end}}
+      </section>
+      <section class="stp-group" data-tone="green">
+        <header class="stp-group__h"><h3><span class="stp-group__t">Backup</span></h3></header>
+        <div class="stp-box">
+          <div class="stp-row">
+            <div class="stp-row__l"><div class="stp-row__nl"><span class="stp-row__n">Configuration file</span>{{with tip "backup"}}{{template "stpHint" .}}{{end}}</div>
+              <p class="stp-row__h">Export what is saved, or load a file and review it first.</p></div>
+            <div class="stp-row__c stp-row__c--btns">
+              <a class="clk-btn" href="/settings/export" download>Export</a>
+              <button class="clk-btn" type="button" data-stp-importcfg>Import</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="stp-group" data-tone="slate">
+        <header class="stp-group__h"><h3><span class="stp-group__t">Storage</span></h3><p>Chosen before the app starts, so shown here but not editable.</p></header>
+        <div class="stp-box">{{range .Store}}{{template "stpRow" .}}{{end}}</div>
+        <details class="stp-fold stp-fold--how">
+          <summary>Use Postgres or another location</summary>
+          <div class="stp-how">
+            <p>The store is picked when rabbithole starts, so changing it takes a restart. Set these in your shell profile or in <code>.env</code>, then start rabbithole again:</p>
+            <pre><code>RABBITHOLE_DB=postgres://user@host:5432/rabbithole
+RABBITHOLE_DB_PASSWORD=your-password</code></pre>
+            <p>The database must already exist; rabbithole creates its tables on first start. A password in the URL also works, but is not recommended.</p>
+            <p>For a SQLite file somewhere else, set <code>RABBITHOLE_DB=/path/to/rabbithole.db</code> or start with <code>--db /path/to/rabbithole.db</code>.</p>
+            <p>A new store starts empty. Run <code>rabbithole config export</code> and <code>rabbithole sources export</code> first to carry your settings and feeds over.</p>
+          </div>
+        </details>
+      </section>
+    </section>
+
+    {{/* The one save bar for the three config tabs above. It appears only while
+         the form differs from what is saved, on whichever tab is showing. */}}
+    <div class="stp-savebar" data-stp-savebar role="region" aria-label="Unsaved changes" hidden>
+      <span class="stp-savebar__t"><i class="stp-dot" aria-hidden="true"></i><span data-stp-count>0</span>&nbsp;<span data-stp-counttxt>unsaved changes</span></span>
+      <span class="stp-savebar__a">
+        <button class="stp-savebar__discard" type="button" data-stp-discard>Discard</button>
+        <button class="stp-save" type="button" data-stp-review>Review and save</button>
+      </span>
+    </div>
+  </form>
+
+  <section class="stp-pane" data-stp-pane="profiles"{{if ne .Tab "profiles"}} hidden{{end}}>
+    {{template "profileSettings" .Profiles}}
+  </section>
+
+  <section class="stp-pane" data-stp-pane="appearance"{{if ne .Tab "appearance"}} hidden{{end}}>
+    <section class="stp-group" data-tone="teal">
+      <header class="stp-group__h"><h3><span class="stp-group__t">Layout</span></h3><p>Default is a dense terminal style. Minimal is quieter.</p></header>
+      <div class="stp-look">
+        <div class="stp-look__pick">{{template "lookOptions"}}</div>
+        <div class="stp-look__pv">{{template "lookPreview"}}</div>
+      </div>
+    </section>
+    <section class="stp-group" data-tone="blue">
+      <header class="stp-group__h stp-group__h--act"><div><h3><span class="stp-group__t">Type</span>{{with tip "type"}}{{template "stpHint" .}}{{end}}</h3><p>Face and size for each part of the page.</p></div>{{template "stpResetLocal" "appearance"}}</header>
+      <div class="stp-box">
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Interface</span><p class="stp-row__h">Dense text around the page: bars, filters, menus.</p></div>
+          <div class="stp-row__c stp-row__c--duo">
+            <div class="font-step" data-font-step="ui" role="group" aria-label="Interface face">
+              <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous interface face">&#8249;</button>
+              <div class="font-step__face"><span class="font-step__name" data-font-name aria-live="polite"></span><span class="font-step__dots" data-font-dots aria-hidden="true"></span></div>
+              <button type="button" class="font-step__arrow" data-font-next aria-label="Next interface face">&#8250;</button>
+            </div>
+            <div class="font-step font-step--size" data-font-step="uiSize" role="group" aria-label="Interface size">
+              <button type="button" class="font-step__arrow" data-font-prev aria-label="Smaller interface">&#8249;</button>
+              <div class="font-step__face"><span class="font-step__name" data-font-name aria-live="polite"></span><span class="font-step__dots" data-font-dots aria-hidden="true"></span></div>
+              <button type="button" class="font-step__arrow" data-font-next aria-label="Bigger interface">&#8250;</button>
+            </div>
+          </div>
+        </div>
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Titles</span><p class="stp-row__h">Article and task titles.</p></div>
+          <div class="stp-row__c stp-row__c--duo">
+            <div class="font-step" data-font-step="title" role="group" aria-label="Titles face">
+              <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous titles face">&#8249;</button>
+              <div class="font-step__face"><span class="font-step__name" data-font-name aria-live="polite"></span><span class="font-step__dots" data-font-dots aria-hidden="true"></span></div>
+              <button type="button" class="font-step__arrow" data-font-next aria-label="Next titles face">&#8250;</button>
+            </div>
+            <div class="font-step font-step--size" data-font-step="titleSize" role="group" aria-label="Titles size">
+              <button type="button" class="font-step__arrow" data-font-prev aria-label="Smaller titles">&#8249;</button>
+              <div class="font-step__face"><span class="font-step__name" data-font-name aria-live="polite"></span><span class="font-step__dots" data-font-dots aria-hidden="true"></span></div>
+              <button type="button" class="font-step__arrow" data-font-next aria-label="Bigger titles">&#8250;</button>
+            </div>
+          </div>
+        </div>
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Text</span><p class="stp-row__h">Everything you read inside cards.</p></div>
+          <div class="stp-row__c stp-row__c--duo">
+            <div class="font-step" data-font-step="body" role="group" aria-label="Text face">
+              <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous text face">&#8249;</button>
+              <div class="font-step__face"><span class="font-step__name" data-font-name aria-live="polite"></span><span class="font-step__dots" data-font-dots aria-hidden="true"></span></div>
+              <button type="button" class="font-step__arrow" data-font-next aria-label="Next text face">&#8250;</button>
+            </div>
+            <div class="font-step font-step--size" data-font-step="bodySize" role="group" aria-label="Text size">
+              <button type="button" class="font-step__arrow" data-font-prev aria-label="Smaller text">&#8249;</button>
+              <div class="font-step__face"><span class="font-step__name" data-font-name aria-live="polite"></span><span class="font-step__dots" data-font-dots aria-hidden="true"></span></div>
+              <button type="button" class="font-step__arrow" data-font-next aria-label="Bigger text">&#8250;</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </section>
+
+  <section class="stp-pane" data-stp-pane="widgets"{{if ne .Tab "widgets"}} hidden{{end}}>
+    <section class="stp-group" data-tone="blue">
+      <header class="stp-group__h stp-group__h--act"><div><h3><span class="stp-group__t">Clock</span></h3><p>Shown at the right of the top bar.</p></div>{{template "stpResetLocal" "clock"}}</header>
+      <div class="stp-box">
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Time format</span><p class="stp-row__h">24-hour or AM/PM, as it reads now.</p></div>
+          <div class="stp-row__c"><div class="stp-seg" role="radiogroup" aria-label="Time format">
+            <label class="stp-seg__o"><input type="radio" name="clkHours" value="24" data-clk-hours><span data-clk-tsample="24"></span></label>
+            <label class="stp-seg__o"><input type="radio" name="clkHours" value="12" data-clk-hours><span data-clk-tsample="12"></span></label></div></div>
+        </div>
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Seconds</span><p class="stp-row__h">Tick every second instead of every minute.</p></div>
+          <div class="stp-row__c"><button type="button" class="wx-sw" data-clk-toggle="seconds" role="switch" aria-checked="false" aria-label="Seconds"><span class="wx-sw__knob" aria-hidden="true"></span><span class="wx-sw__txt">Off</span></button></div>
+        </div>
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n" id="stpDateLbl">Date format</span><p class="stp-row__h">Each option shows today's date as it would read.</p></div>
+          <div class="stp-row__c">
+            <div class="stp-menu" data-stp-menu>
+              <button type="button" class="stp-menu__btn" data-stp-menubtn aria-haspopup="listbox" aria-expanded="false" aria-labelledby="stpDateLbl"><span class="stp-menu__cur" data-stp-menucur></span><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg></button>
+              <ul class="stp-menu__list" role="listbox" tabindex="-1" aria-labelledby="stpDateLbl" hidden>
+                <li role="option" data-value="numeric" aria-selected="false"><span class="stp-menu__n">Numeric</span><span class="stp-menu__p" data-clk-sample="numeric"></span></li>
+                <li role="option" data-value="short" aria-selected="false"><span class="stp-menu__n">Short</span><span class="stp-menu__p" data-clk-sample="short"></span></li>
+                <li role="option" data-value="medium" aria-selected="false"><span class="stp-menu__n">Medium</span><span class="stp-menu__p" data-clk-sample="medium"></span></li>
+                <li role="option" data-value="long" aria-selected="false"><span class="stp-menu__n">Long</span><span class="stp-menu__p" data-clk-sample="long"></span></li>
+                <li role="option" data-value="ordinal" aria-selected="false"><span class="stp-menu__n">Ordinal</span><span class="stp-menu__p" data-clk-sample="ordinal"></span></li>
+                <li role="option" data-value="hidden" aria-selected="false"><span class="stp-menu__n">None</span><span class="stp-menu__p">No date</span></li>
+              </ul>
+              <div class="stp-sr" hidden>
+                <input type="radio" name="clkDateFmt" value="numeric" data-clk-fmt aria-label="Numeric">
+                <input type="radio" name="clkDateFmt" value="short" data-clk-fmt aria-label="Short">
+                <input type="radio" name="clkDateFmt" value="medium" data-clk-fmt aria-label="Medium">
+                <input type="radio" name="clkDateFmt" value="long" data-clk-fmt aria-label="Long">
+                <input type="radio" name="clkDateFmt" value="ordinal" data-clk-fmt aria-label="Ordinal">
+                <input type="radio" name="clkDateFmt" value="hidden" data-clk-fmt aria-label="None">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="stp-group" data-tone="green">
+      <header class="stp-group__h stp-group__h--act"><div><h3><span class="stp-group__t">Weather</span>{{with tip "weather"}}{{template "stpHint" .}}{{end}}</h3><p>Current conditions and a short forecast.</p></div>{{template "stpResetLocal" "weather"}}</header>
+      <div class="stp-box">
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Show weather</span><p class="stp-row__h">Turns every weather display on or off.</p></div>
+          <div class="stp-row__c"><button type="button" class="wx-sw" data-wx-toggle="show" role="switch" aria-checked="false" aria-label="Show weather"><span class="wx-sw__knob" aria-hidden="true"></span><span class="wx-sw__txt">On</span></button></div>
+        </div>
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Temperature</span><p class="stp-row__h">Celsius or Fahrenheit.</p></div>
+          <div class="stp-row__c"><div class="stp-seg" role="radiogroup" aria-label="Temperature units">
+            <label class="stp-seg__o"><input type="radio" name="wxUnit" value="C" data-wx-pick="unit"><span>&deg;C</span></label>
+            <label class="stp-seg__o"><input type="radio" name="wxUnit" value="F" data-wx-pick="unit"><span>&deg;F</span></label></div></div>
+        </div>
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Forecast hours</span><p class="stp-row__h">Time format used in the hourly forecast.</p></div>
+          <div class="stp-row__c"><div class="stp-seg" role="radiogroup" aria-label="Forecast hour format">
+            <label class="stp-seg__o"><input type="radio" name="wxHours" value="24" data-wx-pick="time24"><span>24-hour</span></label>
+            <label class="stp-seg__o"><input type="radio" name="wxHours" value="12" data-wx-pick="time24"><span>AM / PM</span></label></div></div>
+        </div>
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Pollen</span><p class="stp-row__h">Add the pollen level for your location.</p></div>
+          <div class="stp-row__c"><button type="button" class="wx-sw" data-wx-toggle="showPollen" role="switch" aria-checked="false" aria-label="Pollen"><span class="wx-sw__knob" aria-hidden="true"></span><span class="wx-sw__txt">On</span></button></div>
+        </div>
+        <div class="stp-row stp-row--wide">
+          <div class="stp-row__l"><span class="stp-row__n">Location</span><p class="stp-row__h">Search for a city, or use this device's location.</p></div>
+          <div class="stp-row__c"><div class="wx-loc">
+            <div class="wx-loc__line">
+              <input type="text" class="wx-loc__input" id="wxLocSearch" placeholder="Search a city" autocomplete="off" spellcheck="false" aria-label="Location" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="wxLocResults">
+              <button type="button" class="clk-btn" id="wxLocBtn">Use my location</button>
+            </div>
+            <div class="wx-loc__results" id="wxLocResults" role="listbox" aria-label="Matching places" hidden></div>
+            <p class="wx-loc__note" id="wxLocNote" role="status" hidden></p></div></div>
+        </div>
+      </div>
+    </section>
+    <section class="stp-group" data-tone="teal">
+      <header class="stp-group__h stp-group__h--act"><div><h3><span class="stp-group__t">Placement</span></h3><p>Where the weather shows up.</p></div>{{template "stpResetLocal" "placement"}}</header>
+      <div class="stp-box">
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Show on Feed</span></div>
+          <div class="stp-row__c"><button type="button" class="wx-sw" data-wx-toggle="feed" role="switch" aria-checked="true" aria-label="Weather on the Feed"><span class="wx-sw__knob" aria-hidden="true"></span><span class="wx-sw__txt">On</span></button></div>
+        </div>
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Show on Maze and Settings</span></div>
+          <div class="stp-row__c"><button type="button" class="wx-sw" data-wx-toggle="maze" role="switch" aria-checked="true" aria-label="Weather on the Maze"><span class="wx-sw__knob" aria-hidden="true"></span><span class="wx-sw__txt">On</span></button></div>
+        </div>
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Layout</span><p class="stp-row__h">The shape the weather takes on those pages.</p></div>
+          <div class="stp-row__c"><div class="stp-seg" role="radiogroup" aria-label="Weather layout">
+            <label class="stp-seg__o"><input type="radio" name="wxLayout" value="subbar" data-wx-pick="layout"><span>Sub-bar</span></label>
+            <label class="stp-seg__o"><input type="radio" name="wxLayout" value="inline" data-wx-pick="layout"><span>Inline</span></label>
+            <label class="stp-seg__o"><input type="radio" name="wxLayout" value="full" data-wx-pick="layout"><span>Full</span></label></div></div>
+        </div>
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Side menu</span><p class="stp-row__h">Where the weather sits in the side menu, or off.</p></div>
+          <div class="stp-row__c"><div class="stp-seg" role="radiogroup" aria-label="Side menu position">
+            <label class="stp-seg__o"><input type="radio" name="wxSide" value="off" data-wx-pick="side"><span>Off</span></label>
+            <label class="stp-seg__o"><input type="radio" name="wxSide" value="up" data-wx-pick="side"><span>Up</span></label>
+            <label class="stp-seg__o"><input type="radio" name="wxSide" value="down" data-wx-pick="side"><span>Down</span></label></div></div>
+        </div>
+      </div>
+      <p class="stp-note">Weather and pollen data by <a href="https://open-meteo.com" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a>, place names by <a href="https://www.bigdatacloud.com" target="_blank" rel="noopener noreferrer">BigDataCloud</a>.</p>
+    </section>
+  </section>
+
+  {{if .Chrome.Account.Mode}}
+  <section class="stp-pane" data-stp-pane="account"{{if ne .Tab "account"}} hidden{{end}}>
+    <div class="stp-free">{{template "accountSect" .Chrome.Account}}</div>
+  </section>
+  {{end}}
+
+  <template data-stp-resettpl>{{template "settingsResetAll" .}}</template>
+
+  <p class="stp-foot"><a href="https://github.com/DanielBlei/rabbithole" target="_blank" rel="noopener noreferrer">Source code &#8599;</a></p>
+  </div>
+</div>
+</div>
+{{end}}
+
+{{define "scripts"}}<script src="/static/js/settings.js" defer></script>{{end}}

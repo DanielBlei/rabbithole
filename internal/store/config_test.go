@@ -5,7 +5,9 @@ package store
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -212,8 +214,7 @@ func TestConfigSourceDefaultsWhenEmpty(t *testing.T) {
 	if err != nil || version != 0 {
 		t.Fatalf("Active = version %d, err %v; want 0, nil", version, err)
 	}
-	if want := config.RunDefaults(); cfg.Inference.Provider != want.Inference.Provider ||
-		cfg.Ingest.Since != want.Ingest.Since {
+	if want := config.RunDefaults(); cfg.Inference.Provider != want.Inference.Provider {
 		t.Errorf("Active = %+v, want the defaults %+v", cfg, want)
 	}
 }
@@ -226,8 +227,8 @@ func TestConfigSourceParsesActiveVersion(t *testing.T) {
 	if err != nil || version != 1 || cfg.User != "ada" || cfg.Inference.Provider != "heuristic" {
 		t.Fatalf("Active = %+v, version %d, err %v; want ada/heuristic at 1", cfg, version, err)
 	}
-	if cfg.Ingest.Since == 0 {
-		t.Error("Since is zero; the effective config must carry the defaults")
+	if cfg.Inference.BatchSize == 0 {
+		t.Error("BatchSize is zero; the effective config must carry the defaults")
 	}
 }
 
@@ -280,5 +281,75 @@ func TestConfigSourceParseErrorIsReturned(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q lacks %q", err, want)
 		}
+	}
+}
+
+func TestConfigSourceMigratesAVersionOneRow(t *testing.T) {
+	s := openTestStore(t)
+	prompt := filepath.Join(t.TempDir(), "system.md")
+	if err := os.WriteFile(prompt, []byte("Be strict."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := "user: ada\ninference:\n  provider: openai\n  system_prompt: " + prompt + "\n  summary:\n    model: s\n" +
+		"ingest:\n  since: 14d\n  digest_dir: /var/d\n"
+	if _, err := s.appendConfig(t.Context(), 1, old, "h", ConfigSourceUI, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, version, err := s.ConfigSource().Active(t.Context())
+	if err != nil || version != 1 {
+		t.Fatalf("Active = version %d, err %v", version, err)
+	}
+	if cfg.User != "ada" || cfg.Inference.Provider != "openai" || cfg.Inference.SystemPrompt.Text != "Be strict." ||
+		cfg.Ingest.DigestDir != "/var/d" {
+		t.Errorf("migrated config = %+v", cfg)
+	}
+	canon, _, err := s.ActiveCanonicalConfig(t.Context())
+	if err != nil || canon.Inference.Host != "" || canon.Inference.Effort != "" {
+		t.Errorf("canonical = %+v, %v; want the set-only form", canon.Inference, err)
+	}
+
+	// A rollback copies the old row forward unchanged and it still reads.
+	rolled, err := s.RollbackConfig(t.Context(), 1, 1)
+	if err != nil || rolled.SchemaVersion != 1 {
+		t.Fatalf("rollback = %+v, %v", rolled, err)
+	}
+	if _, _, err := s.ConfigSource().Active(t.Context()); err != nil {
+		t.Errorf("Active after rollback: %v", err)
+	}
+}
+
+func TestActiveCanonicalConfigWithNothingSaved(t *testing.T) {
+	s := openTestStore(t)
+	cfg, version, err := s.ActiveCanonicalConfig(t.Context())
+	if err != nil || version != 0 || !reflect.DeepEqual(cfg, config.Config{}) {
+		t.Errorf("= %+v, %d, %v; want an empty config at version 0", cfg, version, err)
+	}
+}
+
+func TestConfigImportMarker(t *testing.T) {
+	s := openTestStore(t)
+	ctx := t.Context()
+	if _, ok, err := s.ConfigImport(ctx, "import:/a.yaml"); err != nil || ok {
+		t.Fatalf("ConfigImport on an empty table = ok %v, err %v; want not found", ok, err)
+	}
+	if err := s.RecordConfigImport(ctx, "import:/a.yaml", "h1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordConfigImport(ctx, "import:/a.yaml", "h2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordConfigImport(ctx, "import:/b.yaml", "hb"); err != nil {
+		t.Fatal(err)
+	}
+	m, ok, err := s.ConfigImport(ctx, "import:/a.yaml")
+	if err != nil || !ok || m.AppliedHash != "h2" || m.AppliedAt.IsZero() {
+		t.Errorf("marker = %+v, ok %v, err %v; want h2", m, ok, err)
+	}
+	if m, _, _ := s.ConfigImport(ctx, "import:/b.yaml"); m.AppliedHash != "hb" {
+		t.Errorf("other source marker = %q, want hb", m.AppliedHash)
+	}
+	if err := s.RecordConfigImport(ctx, "", "h"); err == nil {
+		t.Error("an empty source was accepted")
 	}
 }

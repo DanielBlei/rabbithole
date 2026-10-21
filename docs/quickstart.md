@@ -91,7 +91,8 @@ cost.
 
 ## 6. Change settings
 
-Settings live in the store, not in a file. Today you edit them from the command line:
+Click the gear in the top bar to open Settings: model, scoring, profiles, appearance and more.
+Changes are staged, and Review and save writes them as one new version. From the command line:
 
 ```sh
 rabbithole config export -o my.yaml   # the saved settings
@@ -100,8 +101,8 @@ rabbithole config import my.yaml      # saved as a new version
 ```
 
 A running server uses the new version on its next ingest. `rabbithole config history` lists the
-versions and `rabbithole config rollback <version>` goes back. The web UI shows the active
-config read-only (gear menu, View config). Every setting and its default is in
+versions and `rabbithole config rollback <version>` goes back (Settings → Advanced does the same).
+Every setting and its default is in
 [`docs/examples/config.yaml`](https://github.com/DanielBlei/rabbithole/blob/main/docs/examples/config.yaml),
 to copy lines from.
 

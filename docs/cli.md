@@ -27,7 +27,7 @@ run uses the defaults.
 | Flag | Description | Default |
 |---|---|---|
 | `--db` | Where the store is: a SQLite path or a `postgres://` URL. Also `RABBITHOLE_DB` | a file in your user data dir, see [Store location](configuration.md#store-location) |
-| `--config` | A config file to import on start. It is re-applied on every start: unchanged is a no-op, otherwise a new version is saved. A `store` block in it only locates the store. Optional | none |
+| `--config` | A config file to import on start. It is applied when it changes since it was last applied; edits made in Settings are kept until then. A change saves a new version. A `store` block in it only locates the store. Optional | none |
 | `--env-file` | The env file read for `RABBITHOLE_*` variables the environment does not set | `./.env` |
 | `--db-max-conns` | Postgres only: cap the connection pool | `10` |
 | `--db-conn-max-lifetime` | Postgres only: how long one pooled connection may live, e.g. `30m` | `30m` |
@@ -45,7 +45,7 @@ store is created and a hint is logged. A Postgres password comes from `RABBITHOL
 ## ingest
 
 ```
-rabbithole ingest [--dry-run] [--provider P] [--no-think] [--markdown]
+rabbithole ingest [--dry-run] [--provider P] [--no-think] [--markdown [--out DIR]]
 ```
 
 Fetches the feeds in the store, scores new items against the active interest profile, and records
@@ -57,13 +57,14 @@ and are never saved.
 | `--dry-run` | Print the digest to stdout without writing files or recording items. Feed health is still recorded. |
 | `--provider` | Override the configured provider for this run (`ollama`, `openai`, `vllm`, `heuristic`) |
 | `--no-think` | Disable model reasoning for this run, for models without a thinking mode or for a faster pass |
-| `--markdown` | Also write `YYYY-MM-DD.md` to `ingest.digest_dir`; fails if that setting is empty |
+| `--markdown` | Also write `YYYY-MM-DD.md` to `--out`, else `ingest.digest_dir` if a config set it, else `./digests` |
+| `--out DIR` | Folder for `--markdown` |
 
 ## serve
 
 ```
 rabbithole serve [--addr ADDR] [--tls-cert FILE --tls-key FILE] [--insecure-http]
-                 [--trusted-proxies NETS] [--dev]
+                 [--trusted-proxies NETS] [--no-env-write] [--dev]
 ```
 
 Serves the web UI and the JSON API (see [docs/api.md](api.md)), both behind the login
@@ -77,10 +78,11 @@ to finish.
 | `--tls-cert`, `--tls-key` | Serve HTTPS with this PEM certificate and key; give both or neither |
 | `--insecure-http` | Allow plain HTTP on an address other than loopback, for a TLS proxy on another host |
 | `--trusted-proxies` | Comma-separated networks or addresses whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed; default `127.0.0.0/8,::1/128`, empty trusts none |
+| `--no-env-write` | Settings never writes a pasted API key to `.env`: the paste action is hidden and the endpoint refuses |
 | `--dev` | Serve the CSS, scripts and fonts `no-cache`, so an edit shows on the next reload instead of up to 5 minutes later. For working on them; `DEV=1 make serve` passes it |
 
-With `--config`, the log says `config is managed by <file>: it is re-applied on every start`, and
-the config viewer shows the same note. A running `serve` reads the active settings at the start of
+With `--config`, the log says `config imported from <file>; edits in Settings are kept until the file changes`, and
+the settings page shows the same note. A running `serve` reads the active settings at the start of
 each ingest run, so `config import` and `config rollback` from another terminal apply to the next
 run with no restart. Its environment is fixed at start, so restart it after changing an API key.
 

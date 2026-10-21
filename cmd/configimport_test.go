@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -139,7 +140,10 @@ func TestImportValidationFailureKeepsActive(t *testing.T) {
 	if _, err := e.do(e.write("good.yaml", goodConfig), importOpts{}); err != nil {
 		t.Fatal(err)
 	}
-	bad := e.write("bad.yaml", "inference:\n  provider: openai\n  effort: max\n  api_key: sk-secret-1234\n")
+	bad := e.write(
+		"bad.yaml",
+		"inference:\n  provider: openai\n  effort: max\n  api_key: sk-secret-1234\n",
+	)
 	_, err := e.do(bad, importOpts{})
 	if err == nil || !strings.Contains(err.Error(), "inference.effort") {
 		t.Fatalf("err = %v, want the field error", err)
@@ -185,17 +189,29 @@ func TestImportSeedsLegacyFeedsOnce(t *testing.T) {
 		t.Fatalf("feeds after import = %d, want 1", count())
 	}
 
-	writeFile(t, feeds, "feeds:\n  - name: A\n    url: http://a.test/feed\n  - name: B\n    url: http://b.test/feed\n")
+	// Unchanged since it was applied: the start-up re-apply does nothing.
 	e.log.Reset()
-	out, err = e.do(path, importOpts{})
-	if err != nil || out.Saved {
-		t.Fatalf("second import = %+v, %v; want a noop", out, err)
+	out, err = e.do(path, importOpts{onStart: true})
+	if err != nil || !out.Unchanged {
+		t.Fatalf("unchanged import = %+v, %v; want Unchanged", out, err)
 	}
-	if count() != 1 {
-		t.Errorf("feeds after the noop = %d, want 1: the seed file is read only on import", count())
+	if strings.Contains(e.log.String(), "ingest.feeds") ||
+		strings.Contains(e.log.String(), "deprecated") {
+		t.Errorf("an unchanged file logged: %q", e.log.String())
 	}
-	if !strings.Contains(e.log.String(), "ingest.feeds") {
-		t.Errorf("no note that ingest.feeds is import-only: %q", e.log.String())
+
+	// Editing the feeds file re-applies the seed.
+	writeFile(
+		t,
+		feeds,
+		"feeds:\n  - name: A\n    url: http://a.test/feed\n  - name: B\n    url: http://b.test/feed\n",
+	)
+	out, err = e.do(path, importOpts{onStart: true})
+	if err != nil || out.Saved || out.Unchanged {
+		t.Fatalf("after a feeds edit = %+v, %v; want applied without a new version", out, err)
+	}
+	if count() != 2 {
+		t.Errorf("feeds after the edit = %d, want 2", count())
 	}
 }
 
@@ -264,7 +280,8 @@ func TestImportReappliesFileOverUISave(t *testing.T) {
 	if err != nil || !out.Saved || out.Version != 3 || out.Previous != 2 {
 		t.Fatalf("import = %+v, %v; want version 3 replacing 2", out, err)
 	}
-	if out.Replaced == nil || out.Replaced.Version != 2 || out.Replaced.Source != store.ConfigSourceUI {
+	if out.Replaced == nil || out.Replaced.Version != 2 ||
+		out.Replaced.Source != store.ConfigSourceUI {
 		t.Errorf("Replaced = %+v, want the UI version 2", out.Replaced)
 	}
 }
@@ -437,6 +454,218 @@ func TestImportSymlinkIsTheSameOwner(t *testing.T) {
 	writeFile(t, path, goodConfig+"user: ada\n")
 	out, err := e.do(link, importOpts{})
 	if err != nil || !out.Saved || out.Replaced != nil {
-		t.Fatalf("import via the link = %+v, %v; want the owner's silent update: %q", out, err, e.log.String())
+		t.Fatalf(
+			"import via the link = %+v, %v; want the owner's silent update: %q",
+			out,
+			err,
+			e.log.String(),
+		)
+	}
+}
+
+func TestImportWarnsOnceAboutDeprecatedKeysAndMovesSince(t *testing.T) {
+	e := newImportEnv(t)
+	path := e.write(
+		"c.yaml",
+		"inference:\n  provider: vllm\n  host: http://gpu:8000\n  model: m1\n  summary:\n    model: s\n"+
+			"ingest:\n  since: 3d\n  digest_dir: ./out\n",
+	)
+	if _, err := e.do(path, importOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	logged := e.log.String()
+	for _, want := range []string{"ingest.since is deprecated", "ingest.digest_dir is deprecated", "--out", "inference.summary is not used", "v0.4.0"} {
+		if strings.Count(logged, want) < 1 {
+			t.Errorf("log lacks %q: %s", want, logged)
+		}
+	}
+	if n := strings.Count(logged, "ingest.since is deprecated"); n != 1 {
+		t.Errorf("since warning logged %d times, want once", n)
+	}
+	v, _ := e.active()
+	if strings.Contains(v.Content, "since") || strings.Contains(v.Content, "summary") ||
+		!strings.Contains(v.Content, "digest_dir:") {
+		t.Errorf("stored %q: since and summary must be gone, digest_dir kept", v.Content)
+	}
+	d, err := e.db.FeedDefaults(t.Context())
+	if err != nil || d.Since == nil || d.Since.Std() != 72*time.Hour {
+		t.Errorf("feed defaults since = %v, %v; want 3d", d.Since, err)
+	}
+}
+
+func TestImportSinceOverwritesExistingFeedDefaultsSince(t *testing.T) {
+	e := newImportEnv(t)
+	five := config.Duration(5 * 24 * time.Hour)
+	if err := e.db.SetFeedDefaults(t.Context(), config.FeedDefaults{Since: &five}); err != nil {
+		t.Fatal(err)
+	}
+	path := e.write("c.yaml", goodConfig+"ingest:\n  since: 2d\n")
+	if _, err := e.do(path, importOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := e.db.FeedDefaults(t.Context())
+	if d.Since == nil || d.Since.Std() != 48*time.Hour {
+		t.Errorf("feed defaults since = %v, want 2d", d.Since)
+	}
+}
+
+func TestImportInlinesSystemPromptRelativeToTheConfigFile(t *testing.T) {
+	e := newImportEnv(t)
+	if err := os.MkdirAll(filepath.Join(e.dir, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e.write("prompts/system.md", "<!-- note -->Be strict.")
+	// The test runs from the cmd directory, so only a file-relative read can find it.
+	path := e.write("c.yaml", goodConfig+"  system_prompt: ./prompts/system.md\n")
+	if _, err := e.do(path, importOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := e.active()
+	if !strings.Contains(v.Content, "system_prompt: Be strict.") ||
+		strings.Contains(v.Content, "prompts/system.md") {
+		t.Errorf("stored %q: want the file's text inlined", v.Content)
+	}
+
+	missing := e.write("m.yaml", goodConfig+"  system_prompt: ./prompts/missing.md\n")
+	if _, err := e.do(missing, importOpts{}); err == nil ||
+		!strings.Contains(err.Error(), "looks like a file path") {
+		t.Errorf("missing prompt file error = %v", err)
+	}
+}
+
+func TestImportEquivalentFileIsANoop(t *testing.T) {
+	e := newImportEnv(t)
+	first := e.write("a.yaml", "inference:\n  provider: ollama\n")
+	if out, err := e.do(first, importOpts{}); err != nil || !out.Saved {
+		t.Fatalf("first = %+v, %v", out, err)
+	}
+	// Pinning the defaults changes the file but not the behaviour.
+	pinned := e.write(
+		"b.yaml",
+		"inference:\n  provider: ollama\n  model: "+config.RunDefaults().Inference.Model+"\n  think: true\n",
+	)
+	if out, err := e.do(pinned, importOpts{}); err != nil || out.Saved {
+		t.Errorf("equivalent file = %+v, %v; want a no-op", out, err)
+	}
+}
+
+func TestImportOnStartKeepsUISaveUntilFileChanges(t *testing.T) {
+	e := newImportEnv(t)
+	path := e.write("c.yaml", goodConfig)
+	if _, err := e.do(path, importOpts{onStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.SaveConfig(t.Context(), "user: bob\n", "ui-hash", store.ConfigSourceUI, 1); err != nil {
+		t.Fatal(err)
+	}
+	out, err := e.do(path, importOpts{onStart: true})
+	if err != nil || out.Saved || !out.Unchanged || out.Version != 2 {
+		t.Fatalf("restart = %+v, %v; want the UI version 2 kept", out, err)
+	}
+	writeFile(t, path, goodConfig+"user: ada\n")
+	out, err = e.do(path, importOpts{onStart: true})
+	if err != nil || !out.Saved || out.Version != 3 || out.Replaced == nil ||
+		out.Replaced.Version != 2 {
+		t.Fatalf("after the edit = %+v, %v; want version 3 replacing the UI version 2", out, err)
+	}
+}
+
+// A file edited to match a UI save records the marker without a new version, so
+// a later UI save is not reverted.
+func TestImportOnStartEditToMatchActiveRecordsMarker(t *testing.T) {
+	e := newImportEnv(t)
+	path := e.write("c.yaml", goodConfig)
+	if _, err := e.do(path, importOpts{onStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.SaveConfig(t.Context(), "user: bob\n", "ui-b", store.ConfigSourceUI, 1); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, "user: bob\n")
+	out, err := e.do(path, importOpts{onStart: true})
+	if err != nil || out.Saved || out.Unchanged || out.Version != 2 {
+		t.Fatalf("file edited to B = %+v, %v; want a noop on 2 that applies", out, err)
+	}
+	if _, err := e.db.SaveConfig(t.Context(), "user: carol\n", "ui-c", store.ConfigSourceUI, 2); err != nil {
+		t.Fatal(err)
+	}
+	out, err = e.do(path, importOpts{onStart: true})
+	if err != nil || out.Saved || !out.Unchanged || out.Version != 3 {
+		t.Fatalf("restart = %+v, %v; want C (3) kept", out, err)
+	}
+}
+
+func TestImportOnStartKeepsRollbackToImportedVersion(t *testing.T) {
+	e := newImportEnv(t)
+	path := e.write("c.yaml", goodConfig)
+	if _, err := e.do(path, importOpts{onStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.SaveConfig(t.Context(), "user: bob\n", "ui-b", store.ConfigSourceUI, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.RollbackConfig(t.Context(), 1, 2); err != nil {
+		t.Fatal(err)
+	}
+	out, err := e.do(path, importOpts{onStart: true})
+	if err != nil || out.Saved || !out.Unchanged || out.Version != 3 {
+		t.Fatalf("restart after rollback = %+v, %v; want version 3 kept", out, err)
+	}
+}
+
+func TestImportSinceOnlyEditReachesFeedDefaultsWithoutAVersion(t *testing.T) {
+	e := newImportEnv(t)
+	path := e.write("c.yaml", goodConfig+"ingest:\n  since: 2d\n")
+	if _, err := e.do(path, importOpts{onStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, goodConfig+"ingest:\n  since: 5d\n")
+	out, err := e.do(path, importOpts{onStart: true})
+	if err != nil || out.Saved || out.Unchanged || out.Version != 1 {
+		t.Fatalf("since edit = %+v, %v; want applied with no new version", out, err)
+	}
+	d, _ := e.db.FeedDefaults(t.Context())
+	if d.Since == nil || d.Since.Std() != 5*24*time.Hour {
+		t.Errorf("feed defaults since = %v, want 5d", d.Since)
+	}
+}
+
+func TestImportCommandReappliesEvenWhenTheMarkerMatches(t *testing.T) {
+	e := newImportEnv(t)
+	path := e.write("c.yaml", goodConfig)
+	if _, err := e.do(path, importOpts{onStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.SaveConfig(t.Context(), "user: bob\n", "ui-b", store.ConfigSourceUI, 1); err != nil {
+		t.Fatal(err)
+	}
+	out, err := e.do(path, importOpts{})
+	if err != nil || !out.Saved || out.Version != 3 || out.Unchanged {
+		t.Fatalf("config import = %+v, %v; want version 3", out, err)
+	}
+}
+
+// A feeds file that sets defaults.since wins over ingest.since; otherwise
+// ingest.since is written.
+func TestImportSinceCascadeWithFeedsFile(t *testing.T) {
+	for _, tc := range []struct {
+		name, feeds string
+		want        time.Duration
+	}{
+		{"feeds file sets since", "defaults:\n  since: 4d\nfeeds:\n  - name: A\n    url: http://a.test/feed\n", 96 * time.Hour},
+		{"feeds file without since", "feeds:\n  - name: A\n    url: http://a.test/feed\n", 48 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newImportEnv(t)
+			feeds := e.write("feeds.yaml", tc.feeds)
+			path := e.write("c.yaml", goodConfig+"ingest:\n  since: 2d\n  feeds: "+feeds+"\n")
+			if _, err := e.do(path, importOpts{}); err != nil {
+				t.Fatal(err)
+			}
+			d, err := e.db.FeedDefaults(t.Context())
+			if err != nil || d.Since == nil || d.Since.Std() != tc.want {
+				t.Errorf("feed defaults since = %v, %v; want %s", d.Since, err, tc.want)
+			}
+		})
 	}
 }

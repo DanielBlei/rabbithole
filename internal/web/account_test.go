@@ -198,31 +198,30 @@ func TestAccountSectionFollowsTheMode(t *testing.T) {
 	w := gatedWeb(t)
 	b := newBrowser(t, w)
 	b.login("alice", "correct horse")
-	body := b.get("/feed").Body.String()
+	body := b.get("/settings/account").Body.String()
 	for _, want := range []string{
-		`id="stgAccount"`, `class="acct__name">alice`, "signed in just now",
-		"Stay signed in after a restart", "log out everywhere", "rabbithole auth reset", `action="/logout"`,
+		`data-stp-pane="account"`, `class="acct__name">alice`, "signed in just now",
+		"Stay signed in after a restart", "Log out everywhere", `class="acct__card"`, "Forgot password?", "rabbithole auth reset", `action="/logout"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("account section lacks %q", want)
 		}
 	}
-	// The Account tab's button, and the settings footer's shortcut.
-	if n := strings.Count(body, `action="/logout"`); n != 2 {
-		t.Errorf("page has %d log out forms, want 2", n)
+	if n := strings.Count(body, `action="/logout"`); n != 1 {
+		t.Errorf("page has %d log out forms, want 1", n)
 	}
 
 	if err := w.db.DisableAuth(context.Background()); err != nil {
 		t.Fatalf("DisableAuth: %v", err)
 	}
 	open := newBrowser(t, w)
-	body = open.get("/feed").Body.String()
-	for _, want := range []string{"Open instance", `href="/setup"`} {
+	body = open.get("/settings/account").Body.String()
+	for _, want := range []string{"Open instance", `href="/setup"`, "Set a password"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("open account section lacks %q", want)
 		}
 	}
-	for _, unwanted := range []string{"log out everywhere", "Stay signed in", `action="/logout"`} {
+	for _, unwanted := range []string{"Log out everywhere", "Stay signed in", `action="/logout"`} {
 		if strings.Contains(body, unwanted) {
 			t.Errorf("open account section offers %q", unwanted)
 		}
@@ -234,10 +233,12 @@ func TestAccountSectionFollowsTheMode(t *testing.T) {
 
 func TestNoGateMeansNoAccountTab(t *testing.T) {
 	w := newTestWeb(t)
-	rec := getPage(t, w, "/feed")
-	if strings.Contains(rec, `id="stgAccount"`) {
+	rec := getPage(t, w, "/settings/general")
+	if strings.Contains(rec, `data-stp-pane="account"`) || strings.Contains(rec, `data-stp-tab="account"`) {
 		t.Error("the account tab rendered with no gate in front")
 	}
+	b := &browser{t: t, h: w.Routes(), header: http.Header{}}
+	wantStatus(t, b.get("/settings/account"), http.StatusNotFound)
 }
 
 func getPage(t *testing.T, w *Web, path string) string {
@@ -246,4 +247,16 @@ func getPage(t *testing.T, w *Web, path string) string {
 	rec := b.get(path)
 	wantStatus(t, rec, http.StatusOK)
 	return rec.Body.String()
+}
+
+func TestAccountSessionRowsCarryBubbles(t *testing.T) {
+	w := gatedWeb(t)
+	me := newBrowser(t, w)
+	me.login("alice", "correct horse")
+	body := me.get("/settings/account").Body.String()
+	for _, key := range []string{"stay", "everywhere"} {
+		if !strings.Contains(body, `id="`+tipFor(key).ID+`" role="tooltip"`) {
+			t.Errorf("Account lacks bubble %s", key)
+		}
+	}
 }

@@ -29,18 +29,17 @@ func TestNormalizeDropsNonApplicable(t *testing.T) {
 			t.Errorf("effort = %q, want cleared", r.Inference.Effort)
 		}
 	})
-	t.Run("heuristic drops model fields and keeps summary", func(t *testing.T) {
+	t.Run("heuristic drops model fields and keeps batch size", func(t *testing.T) {
 		r := Config{Inference: InferenceConfig{
-			Provider: "heuristic", Host: "http://x", Model: "m", Think: boolp(true),
-			BatchSize: 4, Summary: SummaryConfig{Model: "s", Host: "http://s"},
+			Provider: "heuristic", Host: "http://x", Model: "m", Think: boolp(true), BatchSize: 4,
 		}}
 		dropped := r.Normalize()
 		want := []string{"inference.host", "inference.model", "inference.think"}
 		if !slices.Equal(dropped, want) {
 			t.Errorf("dropped = %v, want %v", dropped, want)
 		}
-		if r.Inference.BatchSize != 4 || r.Inference.Summary.Model != "s" || r.Inference.Summary.Host != "http://s" {
-			t.Errorf("batch size or summary changed: %+v", r.Inference)
+		if r.Inference.BatchSize != 4 {
+			t.Errorf("batch size changed: %+v", r.Inference)
 		}
 	})
 	t.Run("unset fields are not reported", func(t *testing.T) {
@@ -68,13 +67,13 @@ func TestNormalizeDropsNonApplicable(t *testing.T) {
 
 func TestNormalizeAbsolutisesPaths(t *testing.T) {
 	r := Config{
-		Inference: InferenceConfig{Provider: "ollama", SystemPrompt: SystemPromptSetting{Path: "prompts/../sys.md"}},
+		Inference: InferenceConfig{Provider: "ollama", SystemPrompt: SystemPromptSetting{Text: "prompts/../sys.md"}},
 		Ingest:    IngestConfig{DigestDir: "out/digests/"},
 	}
 	r.Normalize()
 	wd, _ := os.Getwd()
-	if want := filepath.Join(wd, "sys.md"); r.Inference.SystemPrompt.Path != want {
-		t.Errorf("system prompt = %q, want %q", r.Inference.SystemPrompt.Path, want)
+	if r.Inference.SystemPrompt.Text != "prompts/../sys.md" {
+		t.Errorf("system prompt text was rewritten: %q", r.Inference.SystemPrompt.Text)
 	}
 	if want := filepath.Join(wd, "out", "digests"); r.Ingest.DigestDir != want {
 		t.Errorf("digest dir = %q, want %q", r.Ingest.DigestDir, want)
@@ -112,9 +111,8 @@ func TestPrepareDefaultsAreProviderAware(t *testing.T) {
 			if in.ThinkEnabled() != tt.think {
 				t.Errorf("ThinkEnabled = %v", in.ThinkEnabled())
 			}
-			if in.BatchSize != defaultBatchSize || in.MaxParallel != defaultMaxParallel ||
-				r.Ingest.Since.Std() != defaultSince {
-				t.Errorf("shared defaults missing: %+v %v", in, r.Ingest.Since)
+			if in.BatchSize != defaultBatchSize || in.MaxParallel != defaultMaxParallel {
+				t.Errorf("shared defaults missing: %+v", in)
 			}
 		})
 	}
@@ -135,9 +133,7 @@ func TestValidateFieldErrors(t *testing.T) {
 		Inference: InferenceConfig{
 			Provider: "gpt",
 			Effort:   "max",
-			Summary:  SummaryConfig{Host: "http://s", Effort: "bogus"},
 		},
-		Ingest: IngestConfig{Since: Duration(-time.Hour)},
 	}
 	_, err := r.Prepare()
 	if err == nil {
@@ -148,11 +144,8 @@ func TestValidateFieldErrors(t *testing.T) {
 		got[fe.Field] = fe.Error()
 	}
 	want := map[string]string{
-		"inference.provider":       `invalid provider "gpt", must be ollama, openai, vllm or heuristic`,
-		"inference.effort":         `inference.effort "max", must be one of low, medium, high, xhigh`,
-		"inference.summary.effort": `inference.summary.effort "bogus", must be one of low, medium, high, xhigh`,
-		"inference.summary.model":  "inference.summary.model is required when other inference.summary fields are set",
-		"ingest.since":             "since must be positive, got -1h0m0s",
+		"inference.provider": `invalid provider "gpt", must be ollama, openai, vllm or heuristic`,
+		"inference.effort":   `inference.effort "max", must be one of low, medium, high, xhigh`,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("field errors = %v\nwant %v", got, want)
@@ -190,11 +183,10 @@ func TestMarshalRoundTrip(t *testing.T) {
 		Inference: InferenceConfig{
 			Provider: "openai", Host: "https://api.example", Model: "m", APIKey: "$RABBITHOLE_INFERENCE_API_KEY",
 			Think: boolp(false), Effort: "high", StructuredOutput: boolp(false),
-			SystemPrompt: SystemPromptSetting{Path: "/etc/sys.md"},
+			SystemPrompt: SystemPromptSetting{Text: "Score each article.\nBe strict.\n"},
 			BatchSize:    5, MaxParallel: 2,
-			Summary: SummaryConfig{Model: "s", Think: boolp(false)},
 		},
-		Ingest: IngestConfig{Since: Duration(14 * 24 * time.Hour), DigestDir: "/var/digests"},
+		Ingest: IngestConfig{DigestDir: "/var/digests"},
 	}
 	r.Inference.ModelTuning.MaxTokens = 900
 	if _, err := r.Canonical(); err != nil {
@@ -255,7 +247,7 @@ func TestMarshalRoundTrip(t *testing.T) {
 				if string(raw) != tt.want {
 					t.Errorf("yaml =\n%s\nwant\n%s", raw, tt.want)
 				}
-				back, err := ParseStored(raw, 1)
+				back, err := ParseStored(raw, RunSchemaVersion)
 				eff := tt.in
 				_, _ = eff.Prepare()
 				if err != nil || !reflect.DeepEqual(back, eff) {
@@ -271,7 +263,7 @@ func TestMarshalRoundTrip(t *testing.T) {
 		if !strings.Contains(string(raw), "system_prompt: false") {
 			t.Errorf("yaml =\n%s", raw)
 		}
-		back, err := ParseStored(raw, 1)
+		back, err := ParseStored(raw, RunSchemaVersion)
 		if err != nil || !back.Inference.SystemPrompt.Disabled {
 			t.Errorf("round trip: %v %+v", err, back.Inference.SystemPrompt)
 		}
@@ -284,14 +276,14 @@ func TestMarshalRoundTrip(t *testing.T) {
 		}
 		ok := Config{Inference: InferenceConfig{Provider: "openai"}}
 		_, _ = ok.Canonical()
-		if ok.Inference.Effort != "" || ok.Inference.Host != "" || ok.Ingest.Since != 0 {
+		if ok.Inference.Effort != "" || ok.Inference.Host != "" {
 			t.Errorf("Canonical applied defaults: %+v", ok)
 		}
 	})
 }
 
 func TestParseStoredRejects(t *testing.T) {
-	if _, err := ParseStored([]byte("inference:\n  provider: ollama\n  bogus: 1\n"), 1); err == nil {
+	if _, err := ParseStored([]byte("inference:\n  provider: ollama\n  bogus: 1\n"), RunSchemaVersion); err == nil {
 		t.Error("unknown key accepted")
 	}
 	if _, err := ParseStored(
@@ -304,7 +296,7 @@ func TestParseStoredRejects(t *testing.T) {
 	if _, err := ParseStored([]byte("user: x\n"), 0); err == nil {
 		t.Error("schema 0 accepted")
 	}
-	r, err := ParseStored(nil, 1)
+	r, err := ParseStored(nil, RunSchemaVersion)
 	if err != nil || r.Inference.Provider != "ollama" {
 		t.Errorf("empty document = %+v, %v", r, err)
 	}
@@ -313,14 +305,14 @@ func TestParseStoredRejects(t *testing.T) {
 func TestHash(t *testing.T) {
 	parse := func(doc string) Config {
 		t.Helper()
-		r, err := ParseStoredCanonical([]byte(doc), 1)
+		r, err := ParseStoredCanonical([]byte(doc), RunSchemaVersion)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return r
 	}
-	a := parse("user: dan\ninference:\n  provider: ollama\n  model: m1\ningest:\n  since: 7d\n")
-	b := parse("# a comment\ningest: {since: 168h}\n\ninference:\n  model: m1\n  provider: ollama\nuser: dan\n")
+	a := parse("user: dan\ninference:\n  provider: ollama\n  model: m1\n")
+	b := parse("# a comment\n\ninference:\n  model: m1\n  provider: ollama\nuser: dan\n")
 	if a.Hash() != b.Hash() {
 		t.Error("equal configs with different spelling hash differently")
 	}
@@ -336,6 +328,24 @@ func TestHash(t *testing.T) {
 	}
 	if parse("{}").Hash() == parse("inference:\n  model: "+defaultModel+"\n").Hash() {
 		t.Error("a pinned default must hash differently from an unset one")
+	}
+}
+
+func TestEffectiveHash(t *testing.T) {
+	unset := Config{}
+	pinned := Config{Inference: InferenceConfig{Provider: "ollama", Model: defaultModel, Think: boolp(true)}}
+	if unset.Hash() == pinned.Hash() {
+		t.Fatal("canonical hashes should differ for a pinned default")
+	}
+	if unset.EffectiveHash() != pinned.EffectiveHash() {
+		t.Error("a pinned default must behave like an unset one")
+	}
+	other := Config{Inference: InferenceConfig{Model: "m2"}}
+	if unset.EffectiveHash() == other.EffectiveHash() {
+		t.Error("effective hash ignores a changed value")
+	}
+	if unset.Inference.Provider != "" {
+		t.Error("EffectiveHash defaulted the receiver")
 	}
 }
 
@@ -371,7 +381,7 @@ store:
 	if !slices.Equal(dropped, []string{"inference.effort"}) {
 		t.Errorf("dropped = %v", dropped)
 	}
-	if run.User != "dan" || run.Inference.Model != "m" || run.Ingest.Since.Std() != 72*time.Hour ||
+	if run.User != "dan" || run.Inference.Model != "m" || legacy.Since.Std() != 72*time.Hour ||
 		!filepath.IsAbs(run.Ingest.DigestDir) {
 		t.Errorf("run = %+v", run)
 	}
@@ -387,4 +397,57 @@ store:
 	if _, err := ReadFile(filepath.Join(dir, "missing.yaml")); err == nil {
 		t.Error("missing file accepted")
 	}
+}
+
+func TestMigrateV1(t *testing.T) {
+	dir := t.TempDir()
+	prompt := filepath.Join(dir, "system.md")
+	if err := os.WriteFile(prompt, []byte("Be strict."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("drops since and summary, inlines the prompt file, keeps the rest", func(t *testing.T) {
+		old := "user: dan\ninference:\n  provider: openai\n  model: m\n  system_prompt: " + prompt + "\n" +
+			"  summary:\n    model: s\ningest:\n  since: 14d\n  digest_dir: /var/d\n"
+		got, err := ParseStoredCanonical([]byte(old), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := Config{
+			User: "dan",
+			Inference: InferenceConfig{
+				Provider: "openai", Model: "m", SystemPrompt: SystemPromptSetting{Text: "Be strict."},
+			},
+			Ingest: IngestConfig{DigestDir: "/var/d"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("migrated = %+v\nwant %+v", got, want)
+		}
+	})
+	t.Run("an unreadable prompt file is dropped", func(t *testing.T) {
+		old := "inference:\n  system_prompt: " + filepath.Join(dir, "gone.md") + "\n  model: m\n"
+		got, err := ParseStoredCanonical([]byte(old), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Inference.SystemPrompt != (SystemPromptSetting{}) || got.Inference.Model != "m" {
+			t.Errorf("migrated = %+v", got.Inference)
+		}
+	})
+	t.Run("false stays disabled", func(t *testing.T) {
+		got, err := ParseStoredCanonical([]byte("inference:\n  system_prompt: false\n"), 1)
+		if err != nil || !got.Inference.SystemPrompt.Disabled {
+			t.Errorf("migrated = %+v, %v", got.Inference.SystemPrompt, err)
+		}
+	})
+	t.Run("current documents are not migrated and stay strict", func(t *testing.T) {
+		if _, err := ParseStoredCanonical([]byte("ingest:\n  since: 7d\n"), RunSchemaVersion); err == nil {
+			t.Error("ingest.since accepted in a current document")
+		}
+		if _, err := ParseStoredCanonical(
+			[]byte("inference:\n  summary:\n    model: s\n"),
+			RunSchemaVersion,
+		); err == nil {
+			t.Error("inference.summary accepted in a current document")
+		}
+	})
 }

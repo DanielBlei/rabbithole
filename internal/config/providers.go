@@ -33,11 +33,6 @@ type inferenceField struct {
 	clear     func(*InferenceConfig)
 }
 
-// summaryField is listed so a UI iterating the table sees it, but it applies to
-// every provider: the block is validated and checked by inference.Resolve and is
-// round-tripped untouched.
-const summaryField = "summary"
-
 // inferenceFields is the single source of truth for which inference fields each
 // provider reads. Normalize clears the rest; the settings UI iterates it.
 var inferenceFields = []inferenceField{
@@ -88,14 +83,14 @@ var inferenceFields = []inferenceField{
 		func(c *InferenceConfig) { c.ModelTuning.ReasonMaxChars = 0 }},
 }
 
-// InferenceFields returns the inference field names in display order, ending
-// with "summary". Names carry no "inference." prefix.
+// InferenceFields returns the inference field names in display order. Names carry
+// no "inference." prefix.
 func InferenceFields() []string {
-	out := make([]string, 0, len(inferenceFields)+1)
+	out := make([]string, 0, len(inferenceFields))
 	for _, f := range inferenceFields {
 		out = append(out, f.name)
 	}
-	return append(out, summaryField)
+	return out
 }
 
 // Applies reports whether the inference field (e.g. "effort",
@@ -104,9 +99,6 @@ func InferenceFields() []string {
 func Applies(provider, field string) bool {
 	if provider == "" {
 		provider = defaultProvider
-	}
-	if field == summaryField {
-		return slices.Contains(Providers, provider)
 	}
 	for _, f := range inferenceFields {
 		if f.name == field {

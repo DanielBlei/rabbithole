@@ -29,7 +29,7 @@ JSON API has no page to send anyone to and answers `401` until the choice is mad
 The same setup card also picks the look: **Default** (terminal chrome, dense feed) or
 **Minimal** (no shell, hairline chrome), with an example feed drawn in each. Picking one
 restyles the page on the spot. It is saved in the browser, like every other display setting,
-and Settings → Theme changes it later. Later logins show the plain login card in that look.
+and Settings → Appearance changes it later. Later logins show the plain login card in that look.
 
 ## Sessions
 
