@@ -255,6 +255,32 @@ func TestConfigSourceCachesByVersion(t *testing.T) {
 	}
 }
 
+func TestConfigSourceDoesNotReloadContentForACachedVersion(t *testing.T) {
+	s := openTestStore(t)
+	src := s.ConfigSource()
+	ctx := t.Context()
+	saveRun(t, s, config.Config{User: "one"}, 0)
+	if _, _, err := src.Active(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Garbage under the same version number: only a content reload would notice.
+	if _, err := s.exec(
+		ctx,
+		"UPDATE config_versions SET content = ? WHERE version = ?",
+		"bogus_key: 1\n",
+		1,
+	); err != nil {
+		t.Fatal(err)
+	}
+	cfg, version, err := src.Active(ctx)
+	if err != nil || version != 1 || cfg.User != "one" {
+		t.Fatalf("Active = %q, version %d, err %v; want the cached parse, content untouched", cfg.User, version, err)
+	}
+	if n, err := s.ActiveConfigNumber(ctx); err != nil || n != 1 {
+		t.Errorf("ActiveConfigNumber = %d, %v; want 1", n, err)
+	}
+}
+
 func TestConfigSourceReturnsPrivateCopies(t *testing.T) {
 	s := openTestStore(t)
 	src := s.ConfigSource()

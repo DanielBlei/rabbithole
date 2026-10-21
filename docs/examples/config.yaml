@@ -29,8 +29,8 @@ inference:
   think: true                     # model reasoning before scoring (vllm: false switches it off)
   structured_output: true         # send the verdict schema; false only if the endpoint garbles it
   # api_key: $RABBITHOLE_INFERENCE_API_KEY   # bearer token, if the endpoint needs one: a reference, never the value
-  # system_prompt: ./docs/examples/prompts/system.md   # your own instructions: the text itself, or a file path
-  #                                                     # (read once on import, relative to this file); omit for the built-in
+  # system_prompt: ./prompts/system.md               # your own instructions: the text itself, or a file path
+  #                                                  # (read once on import, relative to this file); omit for the built-in
   # system_prompt: false                               # send no system message
 
   # openai only

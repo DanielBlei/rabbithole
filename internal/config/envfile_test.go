@@ -282,3 +282,33 @@ func TestEnvFileSetOverwritesEmptyVariable(t *testing.T) {
 		t.Error("value not applied")
 	}
 }
+
+func TestEnvFileSourceAndSetConcurrent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	e, err := LoadEnvFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RABBITHOLE_INFERENCE_API_KEY", "")
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 20; j++ {
+				_ = e.Source("RABBITHOLE_INFERENCE_API_KEY")
+				_ = e.Loaded()
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 20; j++ {
+				_ = e.Set("RABBITHOLE_INFERENCE_API_KEY", fmt.Sprintf("k%d", j))
+			}
+		}()
+	}
+	wg.Wait()
+	if got := e.Source("RABBITHOLE_INFERENCE_API_KEY"); got != SourceEnvFile {
+		t.Errorf("source = %q", got)
+	}
+}

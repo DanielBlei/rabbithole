@@ -60,6 +60,7 @@ var rootCmd = &cobra.Command{
 		invoked = cmd.CommandPath()
 		log = logger.New(debug, trace)
 		zerolog.DefaultContextLogger = &log
+		logLegacyConfigFile()
 		return nil
 	},
 }

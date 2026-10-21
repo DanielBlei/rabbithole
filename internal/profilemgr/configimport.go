@@ -30,6 +30,10 @@ type ImportOpts struct {
 	Log zerolog.Logger
 	// Mode says how the import was asked for; the zero value is an upload.
 	Mode ImportMode
+	// ExpectedVersion, when set, is the active version the caller reviewed. An
+	// upload whose active version differs fails with store.ErrConfigConflict,
+	// and an upload never retries a conflicting save.
+	ExpectedVersion *int
 }
 
 // ImportOutcome reports what an import did.
@@ -38,6 +42,9 @@ type ImportOutcome struct {
 	// was done beyond refreshing secrets.
 	Unchanged bool
 	Saved     bool
+	// FeedSince is true when the upload's ingest.since was applied to the feed
+	// defaults without saving a config version.
+	FeedSince bool
 	Version   int // the version saved, or the active one when nothing was
 	Previous  int // the version that was active before a save, 0 when there was none
 	// Replaced is the version a save displaced when it came from somewhere other
@@ -180,6 +187,10 @@ func ApplyImport(
 		return ImportOutcome{}, err
 	}
 
+	if opts.Mode == ImportUpload && opts.ExpectedVersion != nil && cur.Version != *opts.ExpectedVersion {
+		return ImportOutcome{}, store.ErrConfigConflict
+	}
+
 	marked := opts.Mode != ImportUpload
 	applied := p.AppliedHash()
 	changed := false
@@ -202,6 +213,16 @@ func ApplyImport(
 		}
 	}
 
+	// An upload keeps no marker, so a changed ingest.since is what makes it a
+	// change when the config itself matches.
+	sinceChanged := false
+	if opts.Mode == ImportUpload {
+		if _, sinceChanged, err = SinceChange(ctx, db, p); err != nil {
+			return ImportOutcome{}, err
+		}
+		changed = sinceChanged
+	}
+
 	// finish runs the directives for a save or a changed file, then records the
 	// marker.
 	finish := func(saved bool) error {
@@ -221,7 +242,7 @@ func ApplyImport(
 				return ImportOutcome{}, err
 			}
 		}
-		out := ImportOutcome{Version: cur.Version}
+		out := ImportOutcome{Version: cur.Version, FeedSince: sinceChanged}
 		equal := haveCur && activeEffectiveHash(cur) == p.EffectiveHash
 		if equal && !changed {
 			lg.Debug().Msgf("config unchanged (version %d)", cur.Version)
@@ -255,8 +276,11 @@ func ApplyImport(
 		}
 		saved, err := db.SaveConfig(ctx, string(p.Content), p.Hash, source, expected)
 		if errors.Is(err, store.ErrConfigConflict) {
-			if attempt == 0 {
+			if attempt == 0 && opts.Mode != ImportUpload {
 				continue
+			}
+			if opts.Mode == ImportUpload {
+				return out, store.ErrConfigConflict
 			}
 			return out, errors.New(
 				"the stored config changed while importing; run the command again",
@@ -280,6 +304,23 @@ func ApplyImport(
 		}
 		return out, finish(true)
 	}
+}
+
+// SinceChange reports the feed defaults lookback an upload would replace. changed
+// is false when the upload sets no ingest.since or it already matches; from is
+// the current value, zero when none is set.
+func SinceChange(ctx context.Context, db *store.Store, p Prepared) (from config.Duration, changed bool, err error) {
+	if p.Legacy.Since <= 0 {
+		return 0, false, nil
+	}
+	d, err := db.FeedDefaults(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	if d.Since != nil {
+		from = *d.Since
+	}
+	return from, from != p.Legacy.Since, nil
 }
 
 // activeEffectiveHash is the EffectiveHash of a stored version, "" when it

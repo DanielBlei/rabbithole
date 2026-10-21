@@ -460,10 +460,6 @@ func (s *Web) handleSourceExport(w http.ResponseWriter, r *http.Request) {
 // sourcesData assembles the dialog: the resolved feed set joined with each feed's
 // fetch history, plus whichever feed the detail pane is showing.
 func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, error) {
-	cfg, err := s.runConfig(ctx)
-	if err != nil {
-		return sourcesData{}, err
-	}
 	doc, err := s.db.FeedsDoc(ctx)
 	if err != nil {
 		return sourcesData{}, err
@@ -479,7 +475,7 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 
 	defaultSince, defaultCap := blankFallbacks(doc.Defaults)
 	data := sourcesData{
-		PromptUser:   promptUser(cfg.User),
+		PromptUser:   s.pagePromptUser(ctx),
 		Defaults:     defaultsSummary(doc.Defaults),
 		DefaultSince: defaultSince,
 		DefaultCap:   defaultCap,

@@ -116,10 +116,16 @@ func New(db *store.Store, src config.Source, ing *ingest.Manager) *Web {
 	}
 }
 
-// runConfig takes the request's one snapshot of the run config.
-func (s *Web) runConfig(ctx context.Context) (config.Config, error) {
+// pagePromptUser is the shell-prompt name the pages wear. A stored config that
+// cannot be read is logged and the default name is used: these pages need
+// nothing else from it, so they keep rendering.
+func (s *Web) pagePromptUser(ctx context.Context) string {
 	cfg, _, err := s.src.Active(ctx)
-	return cfg, err
+	if err != nil {
+		log.Warn().Err(err).Msg("run config unreadable; using the default prompt user")
+		return promptUser("")
+	}
+	return promptUser(cfg.User)
 }
 
 // osUser looks the OS login name up once: it is a syscall and never changes.
@@ -528,18 +534,13 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	cfg, err := s.runConfig(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	items := toRows(rows)
 	chrome := s.chrome(r.Context())
 	data := pageData{
 		Title:      "The Rabbit Hole",
 		Active:     "feed",
 		Chrome:     chrome,
-		PromptUser: promptUser(cfg.User),
+		PromptUser: s.pagePromptUser(r.Context()),
 		Stats: s.stats(
 			r,
 			rows,

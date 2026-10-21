@@ -203,7 +203,7 @@ config file cannot point at `$AWS_SECRET_ACCESS_KEY` and a changed `host` cannot
 unrelated variable to another server. `RABBITHOLE_DB` and `RABBITHOLE_DB_PASSWORD` can never be
 config references. The error suggests the fix: `export RABBITHOLE_INFERENCE_API_KEY=$YOUR_VAR`.
 
-- The reference is shown in the config viewer, in `config export` and in `config history`. It is a
+- The reference is shown in Settings, Advanced, in `config export` and in `config history`. It is a
   name, not a secret. The value is never shown or logged.
 - An unset variable is a warning after `config import`, naming the variable, and a clear error when
   a run needs the key. It is never an unexplained 401 later.

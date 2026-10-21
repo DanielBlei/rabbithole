@@ -38,6 +38,7 @@ type EnvFile struct {
 	// never kept or logged.
 	Skipped int
 
+	mu       sync.RWMutex    // guards supplied
 	supplied map[string]bool // names this file put into the process environment
 }
 
@@ -111,8 +112,13 @@ func parseEnvLine(line string) (key, value string, ok bool) {
 // file supplied it, SourceEnvironment when the process had it already, and
 // SourceMissing when it is unset or empty.
 func (e *EnvFile) Source(name string) string {
-	if e != nil && e.supplied[name] {
-		return SourceEnvFile
+	if e != nil {
+		e.mu.RLock()
+		supplied := e.supplied[name]
+		e.mu.RUnlock()
+		if supplied {
+			return SourceEnvFile
+		}
 	}
 	if v, ok := os.LookupEnv(name); ok && v != "" {
 		return SourceEnvironment
@@ -142,6 +148,8 @@ func (e *EnvFile) Set(name, value string) error {
 
 	envWriteMu.Lock()
 	defer envWriteMu.Unlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
 	if v, set := os.LookupEnv(name); set && v != "" && !e.supplied[name] {
 		return fmt.Errorf("%s is set in the environment; change it where it is set", name)
@@ -246,5 +254,7 @@ func (e *EnvFile) Loaded() int {
 	if e == nil {
 		return 0
 	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	return len(e.supplied)
 }

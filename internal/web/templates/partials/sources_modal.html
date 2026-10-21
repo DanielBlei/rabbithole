@@ -44,8 +44,7 @@
           </details>
         </div>
 
-        {{/* Defaults and export stack over this dialog rather than replacing it —
-             the same move the runner makes for its config viewer. */}}
+        {{/* Defaults and export stack over this dialog rather than replacing it. */}}
         <div class="src__acts">
           <a class="src__act src__act--add" href="#" hx-get="/sources/new" hx-target="#srcBody" hx-swap="outerHTML">+ add feed</a>
           <a class="src__act" href="#" hx-get="/sources/defaults" hx-target="#modalTop" hx-swap="innerHTML">&#9881; defaults</a>
