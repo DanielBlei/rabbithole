@@ -712,3 +712,26 @@ func TestResolveJudgeScorerGate(t *testing.T) {
 		t.Errorf("error = %v, want an unknown-provider error", err)
 	}
 }
+
+func TestBenchmarkConfigUsesFileLiteralKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	body := "inference:\n  provider: openai\n  host: https://api.example.com/v1\n  model: m\n  api_key: sk-from-file\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RABBITHOLE_INFERENCE_API_KEY", "sk-from-env")
+	oldCfg, oldEnv := configPath, envFile
+	configPath, envFile = path, filepath.Join(dir, ".env")
+	t.Cleanup(func() { configPath, envFile = oldCfg, oldEnv })
+
+	if _, _, _, err := benchmarkConfig(&cobra.Command{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("RABBITHOLE_INFERENCE_API_KEY"); got != "sk-from-file" {
+		t.Errorf("key used = %q, want the file's literal", got)
+	}
+	if _, err := os.Stat(envFile); err == nil {
+		t.Error("eval wrote an env file")
+	}
+}

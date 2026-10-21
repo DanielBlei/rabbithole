@@ -241,18 +241,13 @@ func (s *Web) handleIngest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Web) renderIngestModal(w http.ResponseWriter, r *http.Request, fresh bool) {
-	cfg, err := s.runConfig(r.Context())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	body, err := s.ingestBody(r.Context(), histPageFromQuery(r), fresh)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	data := ingestModalData{Body: body, PromptUser: promptUser(cfg.User)}
+	data := ingestModalData{Body: body, PromptUser: s.pagePromptUser(r.Context())}
 	if err := feedTmpl.ExecuteTemplate(w, "ingestModal", data); err != nil {
 		// The response is already partially written; log rather than double-write.
 		log.Error().Err(err).Msg("render ingest modal")

@@ -4,6 +4,7 @@
 package profilemgr
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -170,5 +171,47 @@ func TestApplyImportUploadKeepsNoMarker(t *testing.T) {
 	}
 	if _, ok, err := db.ConfigImport(t.Context(), source); err != nil || ok {
 		t.Errorf("marker after an upload = ok %v, err %v; want none", ok, err)
+	}
+}
+
+func TestApplyImportUploadConflictIsNotRetried(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	p, err := PrepareRun(config.Config{User: "mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := PrepareRun(config.Config{User: "theirs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := ImportOpts{BeforeSave: func() {
+		if _, err := db.SaveConfig(
+			t.Context(),
+			string(other.Content),
+			other.Hash,
+			store.ConfigSourceUI,
+			0,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	_, err = ApplyImport(t.Context(), db, nil, p, "an uploaded file", store.ConfigSourceImport+"upload", opts)
+	if !errors.Is(err, store.ErrConfigConflict) {
+		t.Fatalf("err = %v, want ErrConfigConflict", err)
+	}
+	if v, _, _ := db.ActiveConfig(t.Context()); v.Source != store.ConfigSourceUI {
+		t.Errorf("active source = %q: the concurrent save was overwritten", v.Source)
+	}
+
+	// A reviewed version that is no longer active is refused before anything is read.
+	zero := 0
+	_, err = ApplyImport(t.Context(), db, nil, p, "an uploaded file", store.ConfigSourceImport+"upload",
+		ImportOpts{ExpectedVersion: &zero})
+	if !errors.Is(err, store.ErrConfigConflict) {
+		t.Errorf("stale expected version: err = %v", err)
 	}
 }

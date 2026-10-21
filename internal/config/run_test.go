@@ -451,3 +451,30 @@ func TestMigrateV1(t *testing.T) {
 		}
 	})
 }
+
+func TestExampleSystemPromptPathIsRelativeToTheFile(t *testing.T) {
+	path := filepath.Join("..", "..", "docs", "examples", "config.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Replace(
+		string(raw),
+		"# system_prompt: ./prompts/system.md",
+		"system_prompt: ./prompts/system.md",
+		1,
+	)
+	if text == string(raw) {
+		t.Fatal("the example no longer carries the system_prompt line")
+	}
+	file, err := ParseFile([]byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.InlineSystemPrompt(filepath.Dir(path)); err != nil {
+		t.Fatalf("the example's system_prompt does not resolve from the file's folder: %v", err)
+	}
+	if file.Inference.SystemPrompt.Text == "./prompts/system.md" {
+		t.Error("the prompt file was not read")
+	}
+}

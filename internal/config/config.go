@@ -229,7 +229,7 @@ type Postgres struct {
 	// PasswordInConfigFile records that store.url carries a password, in either
 	// of the two forms the drivers take. It stays true when DBPasswordEnv
 	// overrides the value, because what deserves a warning is a secret sitting in
-	// a file that gets copied around and shown in the config viewer — not which
+	// a file that gets copied around and shown in Settings, Advanced — not which
 	// of the two sources won.
 	PasswordInConfigFile bool
 

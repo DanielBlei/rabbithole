@@ -735,3 +735,15 @@ func TestPromptUserResolvedPerRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestPagesRenderWhenTheStoredConfigIsUnreadable(t *testing.T) {
+	w, db := configTestWeb(t)
+	if _, err := db.SaveConfig(t.Context(), "bogus_key: 1\n", "h", store.ConfigSourceUI, 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/feed", "/maze", "/sources", "/ingest"} {
+		if body := get(t, w, path); !strings.Contains(body, "@rabbithole") {
+			t.Errorf("GET %s rendered without the prompt:\n%.300s", path, body)
+		}
+	}
+}

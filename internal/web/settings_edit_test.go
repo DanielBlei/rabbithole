@@ -23,6 +23,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/profilemgr"
 	"github.com/DanielBlei/rabbithole/internal/rank"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -1055,5 +1056,36 @@ inference:
 		if strings.Contains(got, key) {
 			t.Errorf("stored config still pins %s: %q", key, got)
 		}
+	}
+}
+
+func TestSettingsImportSinceOnlyChangeIsPreviewedAndApplied(t *testing.T) {
+	w, db := configTestWeb(t)
+	if err := db.SetDefaultSince(t.Context(), config.Duration(7*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	file := "ingest:\n  since: 14d\n"
+	// The config itself matches the active one.
+	base, err := profilemgr.PrepareRun(config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SaveConfig(t.Context(), string(base.Content), base.Hash, store.ConfigSourceUI, 0); err != nil {
+		t.Fatal(err)
+	}
+	_, preview := send(t, w, "/settings/import/preview", url.Values{"yaml": {file}, "expected_version": {"1"}})
+	if strings.Contains(preview, "data-nochange") || !strings.Contains(preview, "Feed defaults since: 7d -> 14d") {
+		t.Errorf("preview must show the since change:\n%s", preview)
+	}
+	code, r := sendJSON(t, w, "/settings/import/apply", url.Values{"yaml": {file}, "expected_version": {"1"}})
+	if code != http.StatusOK || !r.OK || !r.NoOp || versionOf(t, db) != 1 {
+		t.Fatalf("apply = %d %+v, version %d; want ok, no new version", code, r, versionOf(t, db))
+	}
+	if d, _ := db.FeedDefaults(t.Context()); d.Since == nil || d.Since.Std() != 14*24*time.Hour {
+		t.Errorf("feed defaults since = %v, want 14d", d.Since)
+	}
+	_, preview = send(t, w, "/settings/import/preview", url.Values{"yaml": {file}, "expected_version": {"1"}})
+	if !strings.Contains(preview, "data-nochange") {
+		t.Errorf("a matching since is no change:\n%s", preview)
 	}
 }

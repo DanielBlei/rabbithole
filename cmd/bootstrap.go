@@ -435,6 +435,19 @@ func logLegacyStore(b boot) {
 	}
 }
 
+// legacyConfigFile is where earlier releases read the config from by default.
+const legacyConfigFile = "./configs/config.yaml"
+
+// logLegacyConfigFile warns once when the old default config file is present and
+// no --config names a file. It is never read: files are explicit imports.
+func logLegacyConfigFile() {
+	if configPath != "" || !fileExists(legacyConfigFile) {
+		return
+	}
+	log.Warn().Msgf("%s is no longer read automatically; import it once with "+
+		"`rabbithole config import %s` or pass --config", legacyConfigFile, legacyConfigFile)
+}
+
 // describeStoreInfo is the store as the settings page shows it: the engine, a
 // location with the home directory shortened and no password, and where the
 // location came from in words.

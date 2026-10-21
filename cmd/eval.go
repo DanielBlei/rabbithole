@@ -356,12 +356,11 @@ func benchmarkConfig(cmd *cobra.Command) (cfg config.Config, profilePath, profil
 		return cfg, "", "", fmt.Errorf("%s: %w", configPath, err)
 	}
 	cfg, _, legacy, _ := file.Split()
-	// A literal key is kept in this process only; the file is not imported.
+	// The file's literal key is the one this run uses: it replaces any value of
+	// the variable in this process only, and is never written to .env.
 	for _, sec := range cfg.ExtractLiterals() {
-		if _, set := os.LookupEnv(sec.Name); !set {
-			if err := os.Setenv(sec.Name, sec.Value); err != nil {
-				return cfg, "", "", fmt.Errorf("set %s: %w", sec.Name, err)
-			}
+		if err := os.Setenv(sec.Name, sec.Value); err != nil {
+			return cfg, "", "", fmt.Errorf("set %s: %w", sec.Name, err)
 		}
 	}
 	if _, err := cfg.Prepare(); err != nil {

@@ -99,10 +99,13 @@
 {{else}}
 <div data-stp-importok{{if .NoChange}} data-nochange{{end}}{{if .HostMoved}} data-hostmoved{{end}}>
   {{if .NoChange}}<p class="stp-dlg__lead">No changes to save. This file matches the active configuration.</p>
+  {{else if .SinceOnly}}
+  <p class="stp-dlg__lead">Applying this file changes the feed defaults only. No new version is saved.</p>
   {{else}}
   <p class="stp-dlg__lead">Applying this file saves version {{.NextVersion}}.</p>
   {{template "stpDiff" .Diff}}
   {{end}}
+  {{if .SinceTo}}<p class="stp-row__h">Feed defaults since: {{.SinceFrom}} -> {{.SinceTo}}</p>{{end}}
   {{range .Warnings}}<p class="stp-row__h">Deprecated: {{.}}.</p>{{end}}
   {{if .Dropped}}<p class="stp-row__h">Ignored because the provider does not read them: {{range $i, $d := .Dropped}}{{if $i}}, {{end}}{{$d}}{{end}}.</p>{{end}}
   {{if .Moves}}<p class="stp-row__h">The API key in this file moves to <code>.env</code>. The saved configuration keeps only the name of its variable.</p>{{end}}

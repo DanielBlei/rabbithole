@@ -574,6 +574,9 @@ type importData struct {
 	Moves       bool     // a literal key in the file would be moved to .env
 	Ignored     bool     // import-only keys in the file are not applied from the page
 	NoChange    bool
+	SinceOnly   bool // only ingest.since differs: applying saves no version
+	SinceFrom   string
+	SinceTo     string
 	Diff        []diffLine
 	NextVersion int
 	HostFrom    string
@@ -669,11 +672,29 @@ func (s *Web) handleSettingsImportPreview(w http.ResponseWriter, r *http.Request
 	d.Dropped = p.Dropped
 	d.Moves = len(p.Secrets) > 0
 	d.Ignored = uploadHasImportOnlyKeys(text)
-	d.NoChange = p.EffectiveHash == st.base.EffectiveHash()
+	same := p.EffectiveHash == st.base.EffectiveHash()
+	from, sinceChanged, err := profilemgr.SinceChange(r.Context(), s.db, p)
+	if err != nil {
+		refuse(w, http.StatusInternalServerError, "Could not read the saved settings.")
+		return
+	}
+	if sinceChanged {
+		d.SinceFrom, d.SinceTo = sinceText(from), p.Legacy.Since.Short()
+	}
+	d.NoChange = same && !sinceChanged
+	d.SinceOnly = same && sinceChanged
 	d.Warnings = p.Warnings
 	d.Diff = diffLines(st.shown(), yamlWithoutIngest(p.Run))
 	d.HostFrom, d.HostTo, d.HostMoved = hostMove(st.base, p.Run)
 	s.renderSettings(w, "settingsImportPreview", d)
+}
+
+// sinceText is a feed defaults lookback for display, "none" when unset.
+func sinceText(d config.Duration) string {
+	if d == 0 {
+		return "none"
+	}
+	return d.Short()
 }
 
 // importMessage keeps an import failure to words a person can act on.
@@ -716,17 +737,22 @@ func (s *Web) handleSettingsImportApply(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	out, err := profilemgr.ApplyImport(r.Context(), s.db, s.envFile, p, "an uploaded file",
-		store.ConfigSourceImport+"upload", profilemgr.ImportOpts{Log: log.Logger})
+		store.ConfigSourceImport+"upload",
+		profilemgr.ImportOpts{Log: log.Logger, ExpectedVersion: &st.version})
+	if errors.Is(err, store.ErrConfigConflict) {
+		stale(w)
+		return
+	}
 	if err != nil {
 		refuse(w, http.StatusUnprocessableEntity, importMessage(err))
 		return
 	}
 	if !out.Saved {
-		writeReply(
-			w,
-			http.StatusOK,
-			editReply{OK: true, NoOp: true, Version: out.Version, Message: "No changes to save."},
-		)
+		msg := "No changes to save."
+		if out.FeedSince {
+			msg = "Feed defaults updated. No new version was saved."
+		}
+		writeReply(w, http.StatusOK, editReply{OK: true, NoOp: true, Version: out.Version, Message: msg})
 		return
 	}
 	writeReply(w, http.StatusOK, editReply{OK: true, Version: out.Version,

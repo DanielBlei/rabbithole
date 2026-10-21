@@ -4,6 +4,7 @@
 package web
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -492,5 +493,25 @@ func TestSettingsWidgetsUseThemedChoices(t *testing.T) {
 		if strings.Contains(body, gone) {
 			t.Errorf("Widgets still has %q", gone)
 		}
+	}
+}
+
+func TestTemplatesDoNotReferenceTheRemovedConfigRoute(t *testing.T) {
+	removed := regexp.MustCompile(`(?:hx-(?:get|post)|href|action)\s*=\s*["']/config(?:["'/?#])`)
+	err := fs.WalkDir(templatesFS, "templates", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		raw, err := templatesFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if m := removed.Find(raw); m != nil {
+			t.Errorf("%s links the removed /config route: %s", path, m)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

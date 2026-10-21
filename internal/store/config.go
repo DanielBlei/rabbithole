@@ -105,6 +105,16 @@ func (s *Store) ActiveConfig(ctx context.Context) (ConfigVersion, bool, error) {
 	return v, true, nil
 }
 
+// ActiveConfigNumber returns the highest saved version number, 0 when none has
+// been saved. It reads no content.
+func (s *Store) ActiveConfigNumber(ctx context.Context) (int, error) {
+	var n int
+	if err := s.queryRow(ctx, "SELECT COALESCE(MAX(version), 0) FROM config_versions").Scan(&n); err != nil {
+		return 0, fmt.Errorf("read active config version: %w", err)
+	}
+	return n, nil
+}
+
 // ConfigVersion returns one saved version.
 func (s *Store) ConfigVersion(ctx context.Context, version int) (ConfigVersion, error) {
 	v, err := scanConfigVersion(s.queryRow(ctx,
@@ -278,7 +288,8 @@ type dbConfigSource struct {
 	mu      sync.Mutex
 	version int
 	cfg     config.Config
-	badSeen int // the unreadable version already logged
+	badSeen int   // the unreadable version, kept so it is not loaded again
+	badErr  error // why badSeen cannot be read
 }
 
 // ActiveCanonicalConfig returns the active version in canonical form (only what
@@ -306,24 +317,31 @@ func unreadableConfig(version int, err error) error {
 
 // Active returns a private copy of the effective config and its version, 0 for
 // the defaults. A stored row that no longer parses is an error, never defaults.
+// The version is checked on every call and the content loaded only when it
+// differs from the cached one.
 func (d *dbConfigSource) Active(ctx context.Context) (config.Config, int, error) {
-	v, ok, err := d.s.ActiveConfig(ctx)
+	n, err := d.s.ActiveConfigNumber(ctx)
 	if err != nil {
 		return config.Config{}, 0, err
 	}
-	if !ok {
+	if n == 0 {
 		return config.RunDefaults(), 0, nil
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.version != v.Version {
+	if d.badSeen == n {
+		return config.Config{}, 0, d.badErr
+	}
+	if d.version != n {
+		v, err := d.s.ConfigVersion(ctx, n)
+		if err != nil {
+			return config.Config{}, 0, err
+		}
 		cfg, err := config.ParseStored([]byte(v.Content), v.SchemaVersion)
 		if err != nil {
 			err = unreadableConfig(v.Version, err)
-			if d.badSeen != v.Version {
-				d.badSeen = v.Version
-				log.Error().Err(err).Msg("stored config unreadable")
-			}
+			d.badSeen, d.badErr = v.Version, err
+			log.Error().Err(err).Msg("stored config unreadable")
 			return config.Config{}, 0, err
 		}
 		d.version, d.cfg = v.Version, cfg

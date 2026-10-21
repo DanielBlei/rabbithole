@@ -429,3 +429,34 @@ func TestLogManagedConfig(t *testing.T) {
 		t.Errorf("log = %q", buf.String())
 	}
 }
+
+func TestLogLegacyConfigFile(t *testing.T) {
+	buf := &bytes.Buffer{}
+	old, oldCfg := log, configPath
+	log = zerolog.New(buf)
+	t.Cleanup(func() { log, configPath = old, oldCfg })
+	t.Chdir(t.TempDir())
+
+	configPath = ""
+	logLegacyConfigFile()
+	if buf.Len() != 0 {
+		t.Errorf("logged with no legacy file: %q", buf.String())
+	}
+	if err := os.MkdirAll("configs", 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyConfigFile, []byte("user: x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath = "other.yaml"
+	logLegacyConfigFile()
+	if buf.Len() != 0 {
+		t.Errorf("logged although --config was given: %q", buf.String())
+	}
+	configPath = ""
+	logLegacyConfigFile()
+	if !strings.Contains(buf.String(), "./configs/config.yaml is no longer read automatically") ||
+		!strings.Contains(buf.String(), "rabbithole config import ./configs/config.yaml") {
+		t.Errorf("log = %q", buf.String())
+	}
+}
