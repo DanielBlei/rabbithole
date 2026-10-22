@@ -92,7 +92,7 @@ is refused, since the login would cross the network unencrypted.
 ## config
 
 ```
-rabbithole config export [-o FILE]
+rabbithole config export [-o FILE] [-f yaml|json] [--defaults]
 rabbithole config import <file>
 rabbithole config history [--limit N]
 rabbithole config rollback <version>
@@ -101,11 +101,14 @@ rabbithole config rollback <version>
 The settings live in the store as a numbered history; the highest version is in force, and no
 saved version means the defaults. See [configuration.md](configuration.md#import-and-export).
 
-- **`export`** writes the active version as YAML to stdout, or to `-o FILE`, with a header comment
-  naming the version. It holds only `$RABBITHOLE_*_API_KEY` references, never a key. With no saved
+- **`export`** writes the active version to stdout, or to `-o FILE`, with a header comment naming the
+  version. It lists only the settings you changed, so it can be `{}`. `--defaults` writes every
+  setting with its value in force instead. `-f json` writes JSON (also when `-o` ends in `.json`),
+  without a header. It holds only `$RABBITHOLE_*_API_KEY` references, never a key. With no saved
   version it writes a comment only, which is still a valid import file. It never creates a store.
 - **`import <file>`** saves the file as the new active version. It never asks: the file wins. A file
-  equal to the active config changes nothing. If it replaces a version saved elsewhere, it prints
+  equal to the active config changes nothing. Values equal to a default are not saved and stay
+  defaults; the command prints how many. YAML and JSON are both read. If it replaces a version saved elsewhere, it prints
   the undo command. An invalid file saves nothing. A literal `api_key` is moved to `./.env`. The
   file's `store` block locates the store unless `--db` or `RABBITHOLE_DB` is set.
 - **`history`** lists versions, newest first, with their source and time. `*` marks the active one.

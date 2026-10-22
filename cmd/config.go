@@ -11,8 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -20,12 +20,15 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
-const exampleConfigHint = "Every setting and its default: https://github.com/DanielBlei/rabbithole/blob/main/docs/configuration.md"
+// configTimeLayout is how a config version's time is shown, in local time.
+const configTimeLayout = "2006-01-02 15:04:05"
 
 var (
-	configExportOut  string
-	configHistoryMax int
-	sourcesExportOut string
+	configExportOut      string
+	configExportFormat   string
+	configExportDefaults bool
+	configHistoryMax     int
+	sourcesExportOut     string
 )
 
 var configGroupCmd = &cobra.Command{
@@ -44,21 +47,29 @@ var sourcesGroupCmd = &cobra.Command{
 func init() {
 	exportCmd := &cobra.Command{
 		Use:   "export",
-		Short: "Write the active config as YAML to stdout or a file",
-		Long: "Writes the active config version as an import file. It holds only $RABBITHOLE_*_API_KEY " +
-			"references, never a key. With no saved config the output is a comment saying so, which is " +
+		Short: "Write the active config as YAML or JSON to stdout or a file",
+		Long: "Writes the active config version as an import file: the settings you changed, which can be " +
+			"short or even {}. --defaults writes every setting with the value in force instead; values that " +
+			"equal a default stay defaults when the file is imported. YAML is the default format; JSON is " +
+			"used when -o ends in .json, and carries no comment header. It holds only $RABBITHOLE_*_API_KEY " +
+			"references, never a key. With no saved config the YAML output is a comment saying so, which is " +
 			"still a valid import file.",
 		Args: cobra.NoArgs,
 		RunE: runConfigExport,
 	}
 	exportCmd.Flags().StringVarP(&configExportOut, "output", "o", "", "write to this file instead of stdout")
+	exportCmd.Flags().
+		StringVarP(&configExportFormat, "format", "f", "", "yaml or json (default yaml, or json when -o ends in .json)")
+	exportCmd.Flags().
+		BoolVar(&configExportDefaults, "defaults", false, "include every setting at its default, not only the saved ones")
 
 	importCmd := &cobra.Command{
 		Use:   "import <file>",
 		Short: "Save a config file as the new active version",
 		Long: "Saves the file as a new config version and makes it active. It never asks: the file wins, and " +
 			"a version saved elsewhere that it replaces is named with the command to undo it. A file equal " +
-			"to the active config changes nothing. The file's store block locates the store unless --db or " +
+			"to the active config changes nothing. YAML and JSON files are both read. Values equal to a " +
+			"default are not saved, so they stay defaults. The file's store block locates the store unless --db or " +
 			dbEnv + " is given.",
 		Args: cobra.ExactArgs(1),
 		RunE: runConfigImport,
@@ -111,6 +122,10 @@ func openReadOnly(cmd *cobra.Command) (*session, error) {
 }
 
 func runConfigExport(cmd *cobra.Command, _ []string) error {
+	format, err := exportFormat(configExportFormat, configExportOut)
+	if err != nil {
+		return err
+	}
 	s, err := openReadOnly(cmd)
 	if err != nil {
 		return err
@@ -125,18 +140,30 @@ func runConfigExport(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 	}
-	return writeOutput(cmd, configExportOut, renderConfigExport(cur, have))
+	var ev *config.ExportVersion
+	if have {
+		ev = &config.ExportVersion{Content: cur.Content, SchemaVersion: cur.SchemaVersion,
+			Version: cur.Version, Source: cur.Source, CreatedAt: cur.CreatedAt}
+	}
+	text, err := config.RenderExport(ev, format, configExportDefaults)
+	if err != nil {
+		return err
+	}
+	return writeOutput(cmd, configExportOut, text)
 }
 
-// renderConfigExport is the import file for the active version. The header is a
-// comment, so the output parses as a config either way.
-func renderConfigExport(cur store.ConfigVersion, have bool) string {
-	if !have {
-		return "# rabbithole: no config is saved, so every setting uses its default. " + exampleConfigHint + "\n"
+// exportFormat picks yaml or json: the flag when given, else json for an output
+// file ending in .json, else yaml.
+func exportFormat(flag, out string) (string, error) {
+	switch f := strings.ToLower(flag); {
+	case f == "yaml" || f == "json":
+		return f, nil
+	case f != "":
+		return "", fmt.Errorf("unknown format %q: use yaml or json", flag)
+	case strings.EqualFold(filepath.Ext(out), ".json"):
+		return "json", nil
 	}
-	header := fmt.Sprintf("# rabbithole config version %d (%s, %s). %s\n",
-		cur.Version, cur.Source, cur.CreatedAt.UTC().Format(time.RFC3339), exampleConfigHint)
-	return header + cur.Content
+	return "yaml", nil
 }
 
 func runConfigImport(cmd *cobra.Command, args []string) error {
@@ -188,6 +215,15 @@ func runConfigImport(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if n := len(res.Defaulted); n > 0 {
+		verb := "values equal the default and stay defaults"
+		if n == 1 {
+			verb = "value equals the default and stays a default"
+		}
+		if _, err := fmt.Fprintf(out, "%d %s\n", n, verb); err != nil {
+			return err
+		}
+	}
 	return warnMissingKeys(ctx, s, cmd.ErrOrStderr())
 }
 
@@ -216,7 +252,7 @@ func runConfigHistory(cmd *cobra.Command, _ []string) error {
 			marker = "*"
 		}
 		_, _ = fmt.Fprintf(tw, "%s%d\t%s\t%s\t%s\n", marker, v.Version, v.Source,
-			v.CreatedAt.Local().Format("2006-01-02 15:04:05"), shortHash(v.ContentHash))
+			v.CreatedAt.Local().Format(configTimeLayout), shortHash(v.ContentHash))
 	}
 	return tw.Flush()
 }

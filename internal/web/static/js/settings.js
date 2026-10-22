@@ -28,7 +28,13 @@
   }
   placeThumb();
   requestAnimationFrame(function(){ if (tabBar) tabBar.classList.add('is-set'); });
-  window.addEventListener('resize', placeThumb);
+  // Tab widths follow the rem base, so a look switch resizes the tabs without
+  // a window resize: observe the bar and every tab.
+  if (tabBar) {
+    var tabRO = new ResizeObserver(placeThumb);
+    tabRO.observe(tabBar);
+    tabs.forEach(function(t){ tabRO.observe(t); });
+  }
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(placeThumb);
   if (tabBar) tabBar.addEventListener('keydown', function(e){
     var i = tabs.indexOf(document.activeElement), n = tabs.length, to;

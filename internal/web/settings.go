@@ -139,8 +139,9 @@ type settingsData struct {
 	LastSource   string
 	LastSaved    string
 
-	History []historyRow
-	Store   []settingRow
+	History    []historyRow
+	AtDefaults bool // nothing saved differs from the defaults
+	Store      []settingRow
 }
 
 func (s *Web) settingsTabs(ctx context.Context) []settingsTab {
@@ -228,6 +229,7 @@ func (s *Web) settingsData(ctx context.Context, tab string, tabs []settingsTab) 
 		d.LastSource = configSourceLabel(st.active.Source)
 		d.LastSaved = st.active.CreatedAt.Local().Format("2 Jan 2006, 15:04")
 	}
+	d.AtDefaults = st.parseErr == nil && yamlOf(st.base) == yamlOf(config.Config{})
 	d.Store = s.storeRows()
 	return d, nil
 }

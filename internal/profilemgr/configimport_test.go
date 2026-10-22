@@ -4,6 +4,7 @@
 package profilemgr
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/rank"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -100,19 +102,75 @@ func TestPrepareReturnsDeprecationWarningsAndTheSinceDirective(t *testing.T) {
 }
 
 func TestPreparedEffectiveHashIgnoresPinnedDefaults(t *testing.T) {
-	a, _ := config.ParseFile([]byte("inference:\n  provider: ollama\n"))
-	b, _ := config.ParseFile([]byte("inference:\n  provider: ollama\n  think: true\n"))
-	pa, err := Prepare(a, "a", zerolog.Nop())
+	unset, _ := PrepareRun(config.Config{})
+	pinned, err := PrepareRun(config.Config{Inference: config.InferenceConfig{Provider: "ollama"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	pb, err := Prepare(b, "b", zerolog.Nop())
-	if err != nil {
-		t.Fatal(err)
+	if unset.Hash == pinned.Hash || unset.EffectiveHash != pinned.EffectiveHash {
+		t.Errorf("hash equal %v, effective %v/%v: want different hashes, equal effective hashes",
+			unset.Hash == pinned.Hash, unset.EffectiveHash, pinned.EffectiveHash)
 	}
-	if pa.Hash == pb.Hash || pa.EffectiveHash != pb.EffectiveHash {
-		t.Errorf("hash %v/%v effective %v/%v: want different hashes, equal effective hashes",
-			pa.Hash == pb.Hash, "", pa.EffectiveHash, pb.EffectiveHash)
+}
+
+func TestPrepareDropsValuesEqualToTheDefault(t *testing.T) {
+	prompt, _ := json.Marshal(rank.DefaultSystemPrompt + "\n")
+	tests := []struct {
+		name, yaml  string
+		want        string // the stored form
+		wantDropped int
+	}{
+		{"nothing set", "{}\n", "{}\n", 0},
+		{"pins only", "inference:\n  provider: ollama\n  think: true\n  batch_size: 1\n", "{}\n", 3},
+		{"mixed keeps the change", "inference:\n  provider: ollama\n  model: other\n  think: true\n  max_parallel: 4\n",
+			"inference:\n  model: other\n  max_parallel: 4\n", 2},
+		{"tuning default", "inference:\n  model_tuning:\n    tokens_per_item: 1024\n    num_ctx: 8192\n",
+			"inference:\n  model_tuning:\n    num_ctx: 8192\n", 1},
+		{"system prompt equal to the built-in", "inference:\n  system_prompt: " + string(prompt) + "\n", "{}\n", 1},
+		{
+			"system prompt off is kept",
+			"inference:\n  system_prompt: false\n",
+			"inference:\n  system_prompt: false\n",
+			0,
+		},
+		{"another provider keeps its own", "inference:\n  provider: openai\n  effort: medium\n  think: true\n",
+			"inference:\n  provider: openai\n", 2},
+		{"heuristic reads few", "inference:\n  provider: heuristic\n  batch_size: 1\n",
+			"inference:\n  provider: heuristic\n", 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := config.ParseFile([]byte(tc.yaml))
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, err := Prepare(file, "t.yaml", zerolog.Nop())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(p.Content) != tc.want || len(p.Defaulted) != tc.wantDropped {
+				t.Errorf(
+					"stored %q, defaulted %v; want %q and %d dropped",
+					p.Content,
+					p.Defaulted,
+					tc.want,
+					tc.wantDropped,
+				)
+			}
+		})
+	}
+	user := config.DefaultUser()
+	if user == "" {
+		t.Skip("no OS login to compare the user against")
+	}
+	file, _ := config.ParseFile([]byte("user: " + user + "\n"))
+	if p, err := Prepare(
+		file,
+		"t.yaml",
+		zerolog.Nop(),
+	); err != nil || string(p.Content) != "{}\n" ||
+		len(p.Defaulted) != 1 {
+		t.Errorf("user equal to the OS login: %q, %v, %v", p.Content, p.Defaulted, err)
 	}
 }
 

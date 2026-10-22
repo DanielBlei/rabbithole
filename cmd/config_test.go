@@ -5,8 +5,10 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -57,7 +59,8 @@ func (e *cliEnv) run(args ...string) (string, string, error) {
 	e.t.Helper()
 	configPath, dbFlag, dbMaxConns, dbLifetime = "", "", 0, ""
 	envFile = e.path(".env")
-	configExportOut, configHistoryMax, sourcesExportOut = "", 20, ""
+	configExportOut, configExportFormat, configExportDefaults = "", "", false
+	configHistoryMax, sourcesExportOut = 20, ""
 	e.t.Setenv(dbEnv, "")
 	var stdout, stderr bytes.Buffer
 	rootCmd.SetOut(&stdout)
@@ -344,4 +347,253 @@ func openTestDB(t *testing.T, path string) *store.Store {
 		t.Fatal(err)
 	}
 	return db
+}
+
+func TestConfigExportForms(t *testing.T) {
+	const saved = "inference:\n  provider: vllm\n  host: http://gpu:8000\n  model: m1\n  api_key: $RABBITHOLE_INFERENCE_API_KEY\n"
+	tests := []struct {
+		name  string
+		saved bool
+		args  []string
+		check func(t *testing.T, out string)
+	}{
+		{"empty store yaml", false, []string{"export"}, func(t *testing.T, out string) {
+			if !strings.HasPrefix(out, "# rabbithole: no config is saved") || strings.Count(out, "\n") != 1 {
+				t.Errorf("out = %q", out)
+			}
+		}},
+		{"empty store json", false, []string{"export", "--format", "json"}, func(t *testing.T, out string) {
+			if out != "{}\n" {
+				t.Errorf("out = %q", out)
+			}
+		}},
+		{"empty store defaults yaml", false, []string{"export", "--defaults"}, func(t *testing.T, out string) {
+			for _, want := range []string{"# rabbithole: every setting", "provider: ollama", "host: http://localhost:11434",
+				"think: true", "batch_size: 1", "tokens_per_item: 1024", "system_prompt:", "user:"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("missing %q in:\n%s", want, out)
+				}
+			}
+			if strings.Contains(out, "effort") || strings.Contains(out, "api_key") {
+				t.Errorf("ollama reads neither effort nor api_key in a default export:\n%s", out)
+			}
+		}},
+		{
+			"empty store defaults json",
+			false,
+			[]string{"export", "--defaults", "-f", "json"},
+			func(t *testing.T, out string) {
+				var got struct {
+					Inference struct {
+						Provider    string `json:"provider"`
+						BatchSize   int    `json:"batch_size"`
+						ModelTuning struct {
+							Per int `json:"tokens_per_item"`
+						} `json:"model_tuning"`
+					} `json:"inference"`
+				}
+				if err := json.Unmarshal([]byte(out), &got); err != nil {
+					t.Fatalf("not json: %v\n%s", err, out)
+				}
+				if got.Inference.Provider != "ollama" || got.Inference.BatchSize != 1 ||
+					got.Inference.ModelTuning.Per != 1024 {
+					t.Errorf("got %+v", got)
+				}
+			},
+		},
+		{"saved yaml", true, []string{"export"}, func(t *testing.T, out string) {
+			if !strings.HasPrefix(out, "# rabbithole config version 1 (import:") ||
+				!strings.Contains(out, "model: m1") ||
+				strings.Contains(out, "batch_size") {
+				t.Errorf("out:\n%s", out)
+			}
+		}},
+		{"saved json", true, []string{"export", "-f", "json"}, func(t *testing.T, out string) {
+			want := "{\n  \"inference\": {\n    \"provider\": \"vllm\",\n    \"host\": \"http://gpu:8000\",\n" +
+				"    \"model\": \"m1\",\n    \"api_key\": \"$RABBITHOLE_INFERENCE_API_KEY\"\n  }\n}\n"
+			if out != want {
+				t.Errorf("out:\n%s\nwant:\n%s", out, want)
+			}
+		}},
+		{
+			"json inferred from the file name",
+			true,
+			[]string{"export", "-o", "OUT.json"},
+			func(t *testing.T, out string) {
+				if !strings.HasPrefix(out, "{\n") {
+					t.Errorf("out:\n%s", out)
+				}
+			},
+		},
+		{
+			"format flag beats the file name",
+			true,
+			[]string{"export", "-f", "yaml", "-o", "OUT.json"},
+			func(t *testing.T, out string) {
+				if !strings.HasPrefix(out, "# rabbithole config version") {
+					t.Errorf("out:\n%s", out)
+				}
+			},
+		},
+		{"saved defaults yaml", true, []string{"export", "--defaults"}, func(t *testing.T, out string) {
+			for _, want := range []string{"# rabbithole config version 1 (import:", "stays a default", "provider: vllm",
+				"model: m1", "api_key: $RABBITHOLE_INFERENCE_API_KEY", "think: true", "batch_size: 1", "structured_output: true"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("missing %q in:\n%s", want, out)
+				}
+			}
+			if strings.Contains(out, "num_ctx") || strings.Contains(out, "effort") {
+				t.Errorf("vllm reads neither num_ctx nor effort:\n%s", out)
+			}
+		}},
+		{"saved defaults json", true, []string{"export", "--defaults", "-f", "json"}, func(t *testing.T, out string) {
+			if strings.HasPrefix(out, "#") || !json.Valid([]byte(out)) ||
+				!strings.Contains(
+					out,
+					`"api_key": "$RABBITHOLE_INFERENCE_API_KEY"`,
+				) || !strings.Contains(out, `"batch_size": 1`) {
+				t.Errorf("out:\n%s", out)
+			}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newCLIEnv(t)
+			if tc.saved {
+				e.mustRun("config", "import", e.write("a.yaml", saved))
+			}
+			args := slices.Clone(tc.args)
+			for i, a := range args {
+				if a == "OUT.json" {
+					args[i] = e.path("out.json")
+				}
+			}
+			out := e.mustRun(append([]string{"config"}, args...)...)
+			if i := slices.Index(args, "-o"); i >= 0 {
+				raw, err := os.ReadFile(args[i+1])
+				if err != nil {
+					t.Fatal(err)
+				}
+				out = string(raw)
+			}
+			tc.check(t, out)
+		})
+	}
+	e := newCLIEnv(t)
+	if _, _, err := e.run(
+		"config",
+		"export",
+		"-f",
+		"toml",
+	); err == nil ||
+		!strings.Contains(err.Error(), "yaml or json") {
+		t.Errorf("unknown format error = %v", err)
+	}
+}
+
+func TestConfigJSONExportRoundTripsToTheSameSparseConfig(t *testing.T) {
+	e := newCLIEnv(t)
+	prompt := "Score each item.\nBe terse."
+	e.mustRun(
+		"config",
+		"import",
+		e.write("a.yaml", goodConfig+"  system_prompt: |-\n    Score each item.\n    Be terse.\n  batch_size: 4\n"),
+	)
+	want := e.mustRun("config", "export", "-f", "json")
+	if !strings.Contains(want, `"system_prompt": "`+strings.ReplaceAll(prompt, "\n", `\n`)+`"`) {
+		t.Fatalf("json lacks the prompt:\n%s", want)
+	}
+	other := newCLIEnv(t)
+	out := other.mustRun("config", "import", other.write("a.json", want))
+	if !strings.Contains(out, "first saved version") {
+		t.Errorf("import = %q", out)
+	}
+	if got := other.mustRun("config", "export", "-f", "json"); got != want {
+		t.Errorf("round trip changed the config:\n%s\nwant:\n%s", got, want)
+	}
+	if out := other.mustRun(
+		"config",
+		"import",
+		other.write("b.json", want),
+	); !strings.Contains(
+		out,
+		"config unchanged",
+	) {
+		t.Errorf("reimport = %q", out)
+	}
+}
+
+func TestConfigDefaultsExportImportsAsNothingPinned(t *testing.T) {
+	for _, format := range []string{"yaml", "json"} {
+		t.Run(format, func(t *testing.T) {
+			// The default store: the full export pins nothing and changes nothing.
+			e := newCLIEnv(t)
+			full := e.write("full."+format, e.mustRun("config", "export", "--defaults", "-f", format))
+			out := e.mustRun("config", "import", full)
+			if !strings.Contains(out, "equal the default and stay defaults") ||
+				!strings.Contains(out, "first saved version") {
+				t.Errorf("import = %q", out)
+			}
+			if got := e.mustRun("config", "export", "-f", "json"); got != "{}\n" {
+				t.Errorf("sparse config after import = %q, want {}", got)
+			}
+			if out := e.mustRun("config", "import", full); !strings.Contains(out, "config unchanged") {
+				t.Errorf("second import = %q", out)
+			}
+
+			// A store with changes: moving it through the full export keeps only them.
+			a := newCLIEnv(t)
+			a.mustRun("config", "import", a.write("a.yaml", goodConfig))
+			want := a.mustRun("config", "export", "-f", "json")
+			full = a.write("full."+format, a.mustRun("config", "export", "--defaults", "-f", format))
+			b := newCLIEnv(t)
+			b.mustRun("config", "import", full)
+			if got := b.mustRun("config", "export", "-f", "json"); got != want {
+				t.Errorf("sparse config = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+func TestConfigImportReportsValuesEqualToTheDefault(t *testing.T) {
+	e := newCLIEnv(t)
+	file := e.write("a.yaml", "inference:\n  provider: ollama\n  think: true\n  batch_size: 1\n  model: other\n")
+	out := e.mustRun("config", "import", file)
+	if !strings.Contains(out, "3 values equal the default and stay defaults") {
+		t.Errorf("import = %q", out)
+	}
+	exported := e.mustRun("config", "export")
+	if !strings.Contains(exported, "model: other") || strings.Contains(exported, "think") ||
+		strings.Contains(exported, "provider") || strings.Contains(exported, "batch_size") {
+		t.Errorf("export keeps more than the change:\n%s", exported)
+	}
+	one := e.write("b.yaml", "inference:\n  provider: ollama\n  model: third\n")
+	if out := e.mustRun(
+		"config",
+		"import",
+		one,
+	); !strings.Contains(
+		out,
+		"1 value equals the default and stays a default",
+	) {
+		t.Errorf("import = %q", out)
+	}
+	plain := e.write("c.yaml", "inference:\n  model: fourth\n")
+	if out := e.mustRun("config", "import", plain); strings.Contains(out, "default") {
+		t.Errorf("import with no defaults mentions them: %q", out)
+	}
+}
+
+func TestConfigExportFormsNeverPrintASecret(t *testing.T) {
+	e := newCLIEnv(t)
+	const literal = "sk-literal-abc123XYZ"
+	e.mustRun("config", "import", e.write("a.yaml", goodConfig+"  api_key: "+literal+"\n"))
+	for _, args := range [][]string{
+		{"export"}, {"export", "-f", "json"}, {"export", "--defaults"}, {"export", "--defaults", "-f", "json"},
+	} {
+		out := e.mustRun(append([]string{"config"}, args...)...)
+		if strings.Contains(out, literal) || !strings.Contains(out, "$RABBITHOLE_INFERENCE_API_KEY") {
+			t.Errorf("%v:\n%s", args, out)
+		}
+	}
 }

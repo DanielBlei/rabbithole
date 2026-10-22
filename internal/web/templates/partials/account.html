@@ -8,24 +8,32 @@
   <article class="acct__card">
     <section class="stp-group" data-tone="teal">
       <header class="stp-group__h"><div><h3><span class="stp-group__t">{{if eq .Mode "enabled"}}Signed in{{else}}Access{{end}}</span></h3></div></header>
-      <div class="acct__id">
+      <div class="stp-box">
+        <div class="stp-row">
+          <div class="stp-row__l acct__who">
 <pre class="acct__bunny" aria-hidden="true"><span class="bunny__ears">(\_/)</span>
 (<i class="bunny__eye">&bull;</i>_<i class="bunny__eye">&bull;</i>)</pre>
-        <div class="acct__who">
-          {{if eq .Mode "enabled"}}
-          <b class="acct__name">{{.Username}}</b>
-          <span class="acct__meta">{{.Since}}{{if .Remembered}}<span class="acct__tag">stays signed in</span>{{end}}</span>
-          {{else}}
-          <b class="acct__name">Open instance</b>
-          <span class="acct__meta">No login: anyone who can reach this address can use it.</span>
-          {{end}}
+            <div class="acct__text">
+              {{if eq .Mode "enabled"}}
+              <b class="acct__name">{{.Username}}</b>
+              <p class="stp-row__h acct__meta">{{.Since}}{{if .Remembered}}<span class="acct__tag">stays signed in</span>{{end}}</p>
+              {{else}}
+              <b class="acct__name">Open instance</b>
+              <p class="stp-row__h">No login: anyone who can reach this address can use it.</p>
+              {{end}}
+            </div>
+          </div>
+          <div class="stp-row__c">
+            {{if eq .Mode "enabled"}}
+            <form class="acct__out" method="post" action="/logout">
+              <button class="clk-btn clk-btn--danger" type="submit">Log out</button>
+            </form>
+            {{else}}
+            <a class="clk-btn clk-btn--go" href="/setup">&#10033; Set a password</a>
+            {{end}}
+          </div>
         </div>
       </div>
-      {{if ne .Mode "enabled"}}
-      <footer class="acct__foot">
-        <a class="acct__go" href="/setup">&#10033; Set a password</a>
-      </footer>
-      {{end}}
     </section>
     {{if eq .Mode "enabled"}}
     <section class="stp-group" data-tone="blue">
@@ -49,11 +57,6 @@
           <p>CLI only. On the server, run <code>rabbithole auth reset</code>.</p>
         </details>
       </div>
-      <footer class="acct__foot">
-        <form class="acct__out" method="post" action="/logout">
-          <button class="acct__go acct__go--out" type="submit">&#8676; Log out</button>
-        </form>
-      </footer>
     </section>
     {{end}}
   </article>

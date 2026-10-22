@@ -107,6 +107,7 @@
   {{end}}
   {{if .SinceTo}}<p class="stp-row__h">Feed defaults since: {{.SinceFrom}} -> {{.SinceTo}}</p>{{end}}
   {{range .Warnings}}<p class="stp-row__h">Deprecated: {{.}}.</p>{{end}}
+  {{if .Defaulted}}<p class="stp-row__h">{{.Defaulted}} {{if eq .Defaulted 1}}value equals{{else}}values equal{{end}} the default and {{if eq .Defaulted 1}}stays a default{{else}}stay defaults{{end}}.</p>{{end}}
   {{if .Dropped}}<p class="stp-row__h">Ignored because the provider does not read them: {{range $i, $d := .Dropped}}{{if $i}}, {{end}}{{$d}}{{end}}.</p>{{end}}
   {{if .Moves}}<p class="stp-row__h">The API key in this file moves to <code>.env</code>. The saved configuration keeps only the name of its variable.</p>{{end}}
   {{if .Ignored}}<p class="stp-row__h">The store, profile and feeds paths in this file are not applied from here.</p>{{end}}

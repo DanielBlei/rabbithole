@@ -30,6 +30,9 @@ $EDITOR my.yaml
 rabbithole config import my.yaml
 ```
 
+The export holds only what you changed, so it can be short or just `{}` when everything is at its
+default. To see every setting with its value, add `--defaults`.
+
 Keep only the lines you want to change in `my.yaml`. A setting you leave out keeps its default,
 now and in later releases. A running `serve` uses the new version on its next ingest run, with no
 restart.
@@ -82,7 +85,7 @@ model. It writes nothing.
 **Advanced.** Saved versions: compare any version with the active one and roll back (a rollback
 that moves the inference host while an API key is set asks first, like a host change). Import: choose a config file, read the
 preview (what will change, plus notes for deprecated keys, see [Deprecated keys](#deprecated-keys)),
-then apply. Export downloads the saved settings as an import file.
+then apply. Export downloads the saved settings as an import file. A value in an imported file that equals its default is not saved, so it stays a default.
 
 ## Settings
 
@@ -240,10 +243,20 @@ Four commands manage the saved settings. [cli.md](cli.md#config) has the details
 
 ```sh
 rabbithole config export -o my.yaml   # the saved settings, as an import file
+rabbithole config export --defaults   # every setting with the value in force
+rabbithole config export -f json      # the same as JSON (also when -o ends in .json)
 rabbithole config import my.yaml      # save a file as the new active version
 rabbithole config history             # versions, newest first
 rabbithole config rollback 3          # go back to version 3
 ```
+
+A plain export lists only what you changed. `--defaults` adds every other setting at its default for
+your provider, and leaves out the ones your provider does not read. API keys stay `$RABBITHOLE_*_API_KEY`
+references. JSON has no comment header; both formats import the same way.
+
+Import saves only what differs from the defaults. A value in the file that equals its default (a full
+`--defaults` export, or a line copied from the example) is not saved and stays a default, and the command
+says how many it skipped. Later releases can still improve those defaults for you.
 
 Import never asks: the file wins, a file equal to the active settings changes nothing, and an
 invalid file saves nothing. Every change is a new version, so nothing is lost and a rollback can

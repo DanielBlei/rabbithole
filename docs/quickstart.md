@@ -95,7 +95,7 @@ Click the gear in the top bar to open Settings: model, scoring, profiles, appear
 Changes are staged, and Review and save writes them as one new version. From the command line:
 
 ```sh
-rabbithole config export -o my.yaml   # the saved settings
+rabbithole config export -o my.yaml   # the saved settings (add --defaults to see every setting)
 $EDITOR my.yaml                       # keep only the lines you want to change
 rabbithole config import my.yaml      # saved as a new version
 ```
