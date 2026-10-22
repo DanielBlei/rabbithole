@@ -117,6 +117,15 @@ Or write the literal key in the file once: it is moved to `./.env` and only the 
 
 **What to do.** Nothing, or remove the line, or change the provider.
 
+## `config export` prints `{}`
+
+**What you see.** `rabbithole config export` prints `{}`, or only a comment.
+
+**Why.** Everything is at its default. Export lists only the settings you changed. Look, fonts and
+widgets are kept in the browser, not in the saved settings.
+
+**What to do.** Run `rabbithole config export --defaults` to see every setting with its value.
+
 ## The store is not where I expect
 
 **What you see.** An empty feed after an upgrade, or `Create a new SQLite store` on a machine that

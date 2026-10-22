@@ -7,16 +7,22 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
+
+	"github.com/DanielBlei/rabbithole/internal/rank"
 )
 
 // RunSchemaVersion is the schema version of a stored Config.
@@ -151,6 +157,78 @@ func RunDefaults() Config {
 	var r Config
 	_, _ = r.Prepare()
 	return r
+}
+
+// DefaultUser is the shell-prompt name used when user is not set: the OS login
+// name, looked up once because it is a syscall and never changes. It is empty when
+// the login cannot be read.
+var DefaultUser = sync.OnceValue(func() string {
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return ""
+})
+
+// DefaultsFor is the config a provider runs with when nothing is set: every
+// setting at its default value, fields the provider does not read left out. It is
+// the single answer to "what is the default of X" for the CLI, the import and the
+// settings page.
+func DefaultsFor(provider string) Config {
+	var d Config
+	d.Inference.Provider = provider
+	return d.Effective()
+}
+
+// Effective is r as a run sees it: every unset setting takes its default for the
+// provider, settings the provider does not read are cleared, and an unset user or
+// system prompt takes its built-in value (a system prompt set to false stays
+// off). r is not changed, and it is not validated, so an invalid config still has
+// an effective form.
+func (r Config) Effective() Config {
+	eff := r.Clone()
+	_, _ = eff.Prepare()
+	eff.Inference.ModelTuning = eff.Inference.ModelTuning.Normalize()
+	eff.Normalize()
+	if eff.User == "" {
+		eff.User = DefaultUser()
+	}
+	if Applies(eff.Inference.Provider, "system_prompt") && eff.Inference.SystemPrompt == (SystemPromptSetting{}) {
+		eff.Inference.SystemPrompt.Text = rank.DefaultSystemPrompt
+	}
+	return eff
+}
+
+// DropDefaults clears every setting that equals its default for the provider, so
+// it stays a default and later releases' defaults still reach it. It returns the
+// dotted names it cleared. A provider set to the default provider counts, and so
+// does a system prompt equal to the built-in one apart from surrounding space.
+func (r *Config) DropDefaults() (dropped []string) {
+	in := &r.Inference
+	if t := in.SystemPrompt.Text; !in.SystemPrompt.Disabled && t != "" &&
+		strings.TrimSpace(t) == strings.TrimSpace(rank.DefaultSystemPrompt) {
+		in.SystemPrompt.Text = rank.DefaultSystemPrompt
+	}
+	want := r.EffectiveHash()
+	try := func(name string, clear func(*Config)) {
+		trial := r.Clone()
+		clear(&trial)
+		if trial.EffectiveHash() == want {
+			clear(r)
+			dropped = append(dropped, name)
+		}
+	}
+	if r.User != "" {
+		try("user", func(c *Config) { c.User = "" })
+	}
+	if in.Provider != "" {
+		try("inference.provider", func(c *Config) { c.Inference.Provider = "" })
+	}
+	for _, f := range inferenceFields {
+		if f.isSet(in) {
+			try("inference."+f.name, func(c *Config) { f.clear(&c.Inference) })
+		}
+	}
+	return dropped
 }
 
 // Clone returns a copy that shares no pointers with r, so a caller can adjust
@@ -381,6 +459,73 @@ func (r Config) Marshal() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// MarshalIndentJSON renders the same document as Marshal as JSON: keys in the
+// same order, two-space indent and a trailing newline.
+func (r Config) MarshalIndentJSON() ([]byte, error) {
+	raw, err := r.Marshal()
+	if err != nil {
+		return nil, err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
+	}
+	var compact bytes.Buffer
+	if err := writeJSONNode(&compact, doc.Content[0]); err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
+	}
+	var out bytes.Buffer
+	if err := json.Indent(&out, compact.Bytes(), "", "  "); err != nil {
+		return nil, fmt.Errorf("marshal config: %w", err)
+	}
+	out.WriteByte('\n')
+	return out.Bytes(), nil
+}
+
+// writeJSONNode writes a YAML node as compact JSON, keeping mapping order.
+func writeJSONNode(buf *bytes.Buffer, n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.MappingNode:
+		buf.WriteByte('{')
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			if i > 0 {
+				buf.WriteByte(',')
+			}
+			if err := writeJSONNode(buf, n.Content[i]); err != nil {
+				return err
+			}
+			buf.WriteByte(':')
+			if err := writeJSONNode(buf, n.Content[i+1]); err != nil {
+				return err
+			}
+		}
+		buf.WriteByte('}')
+	case yaml.SequenceNode:
+		buf.WriteByte('[')
+		for i, c := range n.Content {
+			if i > 0 {
+				buf.WriteByte(',')
+			}
+			if err := writeJSONNode(buf, c); err != nil {
+				return err
+			}
+		}
+		buf.WriteByte(']')
+	default:
+		var v any
+		if err := n.Decode(&v); err != nil {
+			return err
+		}
+		enc := json.NewEncoder(buf)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(v); err != nil {
+			return err
+		}
+		buf.Truncate(buf.Len() - 1) // Encode appends a newline
+	}
+	return nil
+}
+
 // Hash returns the hex sha256 of the canonical YAML, so configs that set the same
 // fields hash equal whatever their spelling in the file. Call it on a canonical
 // config; EffectiveHash compares what a run would use.
@@ -397,9 +542,7 @@ func (r Config) Hash() string {
 // in. Two configs with equal EffectiveHash behave identically, even when one pins
 // a value the other leaves to the default.
 func (r Config) EffectiveHash() string {
-	eff := r.Clone()
-	_, _ = eff.Prepare() // an invalid config still hashes; callers validate separately
-	return eff.Hash()
+	return r.Effective().Hash()
 }
 
 // migrations upgrade stored YAML one schema version at a time: migrations[v]
@@ -473,4 +616,66 @@ func ParseStoredCanonical(raw []byte, schemaVersion int) (Config, error) {
 		return Config{}, err
 	}
 	return r, nil
+}
+
+// ConfigDocsHint points an exported file at the list of every setting.
+const ConfigDocsHint = "Every setting and its default: https://github.com/DanielBlei/rabbithole/blob/main/docs/configuration.md"
+
+// ExportVersion is the saved config version an export describes.
+type ExportVersion struct {
+	Content       string
+	SchemaVersion int
+	Version       int
+	Source        string
+	CreatedAt     time.Time
+}
+
+// RenderExport is the import file for the active version (nil when nothing is
+// saved): the saved settings, or with defaults every setting with the value in
+// force. YAML starts with a comment header, so it parses as a config either
+// way; JSON has none.
+func RenderExport(cur *ExportVersion, format string, defaults bool) (string, error) {
+	var saved Config
+	if cur != nil && (defaults || format == "json") {
+		var err error
+		if saved, err = ParseStoredCanonical([]byte(cur.Content), cur.SchemaVersion); err != nil {
+			return "", fmt.Errorf("config version %d cannot be read: %w", cur.Version, err)
+		}
+	}
+	shown := saved
+	if defaults {
+		shown = saved.Effective()
+	}
+	if format == "json" {
+		raw, err := shown.MarshalIndentJSON()
+		return string(raw), err
+	}
+	var body string
+	if defaults || cur == nil {
+		raw, err := shown.Marshal()
+		if err != nil {
+			return "", err
+		}
+		body = string(raw)
+	} else {
+		body = cur.Content
+	}
+	const layout = "2006-01-02 15:04:05"
+	var header string
+	switch {
+	case cur == nil && !defaults:
+		return "# rabbithole: no config is saved, so every setting uses its default. " + ConfigDocsHint + "\n", nil
+	case cur == nil:
+		header = "# rabbithole: every setting with its value in force (nothing is saved, so these are the defaults)."
+	case defaults:
+		header = fmt.Sprintf("# rabbithole config version %d (%s, %s): every setting with its value in force.",
+			cur.Version, cur.Source, cur.CreatedAt.Local().Format(layout))
+	default:
+		header = fmt.Sprintf("# rabbithole config version %d (%s, %s).",
+			cur.Version, cur.Source, cur.CreatedAt.Local().Format(layout))
+	}
+	if defaults {
+		header += " A value equal to its default stays a default when this file is imported."
+	}
+	return header + " " + ConfigDocsHint + "\n" + body, nil
 }

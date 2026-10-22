@@ -549,20 +549,43 @@ func (s *Web) handleSettingsVersionDiff(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// handleSettingsExport downloads the active config. It holds references to key
+// handleSettingsExport downloads the active config as yaml (default) or json,
+// the saved settings or with defaults (?defaults=1). It holds references to key
 // variables, never keys.
 func (s *Web) handleSettingsExport(w http.ResponseWriter, r *http.Request) {
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "yaml"
+	}
+	if format != "yaml" && format != "json" {
+		http.Error(w, "format must be yaml or json", http.StatusBadRequest)
+		return
+	}
+	defaults := r.URL.Query().Get("defaults") == "1"
 	st, err := s.editState(r.Context())
 	if err != nil {
 		http.Error(w, "could not read the saved settings", http.StatusInternalServerError)
 		return
 	}
-	body := yamlOf(config.Config{})
+	var cur *config.ExportVersion
 	if st.has {
-		body = st.active.Content
+		cur = &config.ExportVersion{Content: st.active.Content, SchemaVersion: st.active.SchemaVersion,
+			Version: st.active.Version, Source: st.active.Source, CreatedAt: st.active.CreatedAt}
 	}
-	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="rabbithole-config.yaml"`)
+	body, err := config.RenderExport(cur, format, defaults)
+	if err != nil {
+		http.Error(w, "could not read the saved settings", http.StatusInternalServerError)
+		return
+	}
+	name, ctype := "rabbithole-config", "application/yaml; charset=utf-8"
+	if defaults {
+		name += "-defaults"
+	}
+	if format == "json" {
+		ctype = "application/json; charset=utf-8"
+	}
+	w.Header().Set("Content-Type", ctype)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.%s"`, name, format))
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = io.WriteString(w, body)
 }
@@ -570,6 +593,7 @@ func (s *Web) handleSettingsExport(w http.ResponseWriter, r *http.Request) {
 type importData struct {
 	Error       string
 	Dropped     []string
+	Defaulted   int      // settings equal to their default, which stay defaults
 	Warnings    []string // deprecated keys the file uses
 	Moves       bool     // a literal key in the file would be moved to .env
 	Ignored     bool     // import-only keys in the file are not applied from the page
@@ -670,6 +694,7 @@ func (s *Web) handleSettingsImportPreview(w http.ResponseWriter, r *http.Request
 		return
 	}
 	d.Dropped = p.Dropped
+	d.Defaulted = len(p.Defaulted)
 	d.Moves = len(p.Secrets) > 0
 	d.Ignored = uploadHasImportOnlyKeys(text)
 	same := p.EffectiveHash == st.base.EffectiveHash()

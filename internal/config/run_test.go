@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/DanielBlei/rabbithole/internal/rank"
 )
 
 func boolp(b bool) *bool { return &b }
@@ -476,5 +478,112 @@ func TestExampleSystemPromptPathIsRelativeToTheFile(t *testing.T) {
 	}
 	if file.Inference.SystemPrompt.Text == "./prompts/system.md" {
 		t.Error("the prompt file was not read")
+	}
+}
+
+func TestEffectiveFillsDefaultsPerProvider(t *testing.T) {
+	tests := []struct {
+		provider string
+		set      func(Config) bool
+		name     string
+	}{
+		{
+			"ollama",
+			func(c Config) bool { return c.Inference.ModelTuning.TokensPerItem == 1024 && c.Inference.Host != "" },
+			"ollama has host and tuning",
+		},
+		{"openai", func(c Config) bool { return c.Inference.Effort == "medium" }, "openai has effort"},
+		{
+			"vllm",
+			func(c Config) bool { return c.Inference.Effort == "" && c.Inference.ModelTuning.NumCtx == 0 },
+			"vllm has neither effort nor num_ctx",
+		},
+		{"heuristic", func(c Config) bool {
+			in := c.Inference
+			return in.Host == "" && in.ModelTuning == (rank.ModelTuning{}) &&
+				in.SystemPrompt == (SystemPromptSetting{}) &&
+				in.BatchSize == 1
+		}, "heuristic keeps only batching"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.provider, func(t *testing.T) {
+			d := DefaultsFor(tc.provider)
+			if d.Inference.Provider != tc.provider || !tc.set(d) {
+				t.Errorf("%s: %+v", tc.name, d.Inference)
+			}
+		})
+	}
+	if d := DefaultsFor(
+		"ollama",
+	); d.User != DefaultUser() ||
+		d.Inference.SystemPrompt.Text != rank.DefaultSystemPrompt {
+		t.Errorf("user %q, prompt set %v", d.User, d.Inference.SystemPrompt.Text != "")
+	}
+	off := Config{Inference: InferenceConfig{SystemPrompt: SystemPromptSetting{Disabled: true}}}
+	if !off.Effective().Inference.SystemPrompt.Disabled {
+		t.Error("Effective turned a disabled system prompt back on")
+	}
+}
+
+func TestDropDefaults(t *testing.T) {
+	tests := []struct {
+		name string
+		in   Config
+		want []string
+		left Config
+	}{
+		{"unset", Config{}, nil, Config{}},
+		{"pinned default provider and think",
+			Config{Inference: InferenceConfig{Provider: "ollama", Think: boolp(true)}},
+			[]string{"inference.provider", "inference.think"}, Config{}},
+		{"changed think stays",
+			Config{Inference: InferenceConfig{Think: boolp(false), BatchSize: 1}},
+			[]string{"inference.batch_size"}, Config{Inference: InferenceConfig{Think: boolp(false)}}},
+		{
+			"trailing space on the built-in prompt",
+			Config{
+				Inference: InferenceConfig{SystemPrompt: SystemPromptSetting{Text: rank.DefaultSystemPrompt + "\n\n"}},
+			},
+			[]string{"inference.system_prompt"},
+			Config{},
+		},
+		{"effort default only counts for openai",
+			Config{Inference: InferenceConfig{Provider: "openai", Effort: "medium"}},
+			[]string{"inference.effort"}, Config{Inference: InferenceConfig{Provider: "openai"}}},
+		{
+			"tuning",
+			Config{Inference: InferenceConfig{ModelTuning: rank.ModelTuning{TokensPerItem: 1024, ReasonMaxChars: 100}}},
+			[]string{
+				"inference.model_tuning.tokens_per_item",
+			},
+			Config{Inference: InferenceConfig{ModelTuning: rank.ModelTuning{ReasonMaxChars: 100}}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.in.DropDefaults()
+			if !slices.Equal(got, tc.want) || tc.in.Hash() != tc.left.Hash() {
+				t.Errorf("dropped %v, left %+v; want %v and %+v", got, tc.in, tc.want, tc.left)
+			}
+		})
+	}
+	if u := DefaultUser(); u != "" {
+		c := Config{User: u}
+		if got := c.DropDefaults(); !slices.Equal(got, []string{"user"}) || c.User != "" {
+			t.Errorf("user equal to the OS login: dropped %v, left %q", got, c.User)
+		}
+	}
+}
+
+func TestMarshalIndentJSON(t *testing.T) {
+	c := Config{User: "ada", Inference: InferenceConfig{Provider: "vllm", Think: boolp(false),
+		SystemPrompt: SystemPromptSetting{Text: "a <b>\n\"c\""}, BatchSize: 2}}
+	want := "{\n  \"user\": \"ada\",\n  \"inference\": {\n    \"provider\": \"vllm\",\n    \"think\": false,\n" +
+		"    \"system_prompt\": \"a <b>\\n\\\"c\\\"\",\n    \"batch_size\": 2\n  }\n}\n"
+	if got, err := c.MarshalIndentJSON(); err != nil || string(got) != want {
+		t.Errorf("json = %q, %v; want %q", got, err, want)
+	}
+	if got, _ := (Config{}).MarshalIndentJSON(); string(got) != "{}\n" {
+		t.Errorf("empty = %q", got)
 	}
 }

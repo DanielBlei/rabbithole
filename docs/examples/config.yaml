@@ -11,8 +11,9 @@
 #   (edit my.yaml)
 #   rabbithole config import my.yaml
 #
-# Importing this whole file would pin every default, so later releases could not
-# improve them for you.
+# A value that equals its default is not saved on import, so it stays a default and
+# later releases can still improve it for you. `config export --defaults` writes
+# every setting with its value.
 #
 # Active lines show the default. Commented lines are optional and have no default,
 # or only apply to one provider. Fields a provider does not read are dropped on

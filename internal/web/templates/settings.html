@@ -175,12 +175,12 @@
         </div>
       </section>
       <section class="stp-group" data-tone="slate">
-        <header class="stp-group__h"><h3><span class="stp-group__t">Reset to defaults</span></h3></header>
+        <header class="stp-group__h"><h3><span class="stp-group__t">Reset to defaults</span></h3><p>Start over, one part at a time.</p></header>
         <div class="stp-box">
           <div class="stp-row">
             <div class="stp-row__l"><div class="stp-row__nl"><span class="stp-row__n">Choose what to reset</span>{{with tip "reset-all"}}{{template "stpHint" .}}{{end}}</div>
               <p class="stp-row__h">Settings, profile, look and widgets. Your account is never touched.</p></div>
-            <div class="stp-row__c stp-row__c--btns"><button class="clk-btn" type="button" data-stp-resetall>Reset to defaults</button></div>
+            <div class="stp-row__c stp-row__c--btns"><button class="clk-btn" type="button" data-stp-resetall>Choose…</button></div>
           </div>
         </div>
       </section>
@@ -282,10 +282,22 @@
         <header class="stp-group__h"><h3><span class="stp-group__t">Backup</span></h3></header>
         <div class="stp-box">
           <div class="stp-row">
-            <div class="stp-row__l"><div class="stp-row__nl"><span class="stp-row__n">Configuration file</span>{{with tip "backup"}}{{template "stpHint" .}}{{end}}</div>
-              <p class="stp-row__h">Export what is saved, or load a file and review it first.</p></div>
+            <div class="stp-row__l"><div class="stp-row__nl"><span class="stp-row__n">Export</span>{{with tip "backup"}}{{template "stpHint" .}}{{end}}</div>
+              <p class="stp-row__h">{{if .AtDefaults}}Everything is at its default. Choose With defaults to see the values.{{else}}Saved is what you changed. With defaults lists every setting with its value.{{end}}</p></div>
+            <div class="stp-row__c stp-row__c--btns stp-row__c--export">
+              <div class="stp-seg" role="radiogroup" aria-label="What to export">
+                <label class="stp-seg__o"><input type="radio" name="defaults" value="0" form="exportForm" checked><span>Saved</span></label>
+                <label class="stp-seg__o"><input type="radio" name="defaults" value="1" form="exportForm"><span>With defaults</span></label></div>
+              <div class="stp-seg" role="radiogroup" aria-label="File format">
+                <label class="stp-seg__o"><input type="radio" name="format" value="yaml" form="exportForm" checked><span>YAML</span></label>
+                <label class="stp-seg__o"><input type="radio" name="format" value="json" form="exportForm"><span>JSON</span></label></div>
+              <button class="clk-btn" type="submit" form="exportForm">Export</button>
+            </div>
+          </div>
+          <div class="stp-row">
+            <div class="stp-row__l"><span class="stp-row__n">Import</span>
+              <p class="stp-row__h">Load a file and review it before anything is saved.</p></div>
             <div class="stp-row__c stp-row__c--btns">
-              <a class="clk-btn" href="/settings/export" download>Export</a>
               <button class="clk-btn" type="button" data-stp-importcfg>Import</button>
             </div>
           </div>
@@ -311,13 +323,14 @@ RABBITHOLE_DB_PASSWORD=your-password</code></pre>
     {{/* The one save bar for the three config tabs above. It appears only while
          the form differs from what is saved, on whichever tab is showing. */}}
     <div class="stp-savebar" data-stp-savebar role="region" aria-label="Unsaved changes" hidden>
-      <span class="stp-savebar__t"><i class="stp-dot" aria-hidden="true"></i><span data-stp-count>0</span>&nbsp;<span data-stp-counttxt>unsaved changes</span></span>
+      <span class="stp-savebar__t"><i class="stp-dot" aria-hidden="true"></i><span class="stp-savebar__v"><span data-stp-count>0</span>&nbsp;<span data-stp-counttxt>unsaved changes</span></span></span>
       <span class="stp-savebar__a">
         <button class="stp-savebar__discard" type="button" data-stp-discard>Discard</button>
         <button class="stp-save" type="button" data-stp-review>Review and save</button>
       </span>
     </div>
   </form>
+  <form id="exportForm" method="get" action="/settings/export"></form>
 
   <section class="stp-pane" data-stp-pane="profiles"{{if ne .Tab "profiles"}} hidden{{end}}>
     {{template "profileSettings" .Profiles}}
@@ -335,7 +348,7 @@ RABBITHOLE_DB_PASSWORD=your-password</code></pre>
       <header class="stp-group__h stp-group__h--act"><div><h3><span class="stp-group__t">Type</span>{{with tip "type"}}{{template "stpHint" .}}{{end}}</h3><p>Face and size for each part of the page.</p></div>{{template "stpResetLocal" "appearance"}}</header>
       <div class="stp-box">
         <div class="stp-row">
-          <div class="stp-row__l"><span class="stp-row__n">Interface</span><p class="stp-row__h">Dense text around the page: bars, filters, menus.</p></div>
+          <div class="stp-row__l"><span class="stp-row__n">Interface</span><p class="stp-row__h">Bars, filters and menus.</p></div>
           <div class="stp-row__c stp-row__c--duo">
             <div class="font-step" data-font-step="ui" role="group" aria-label="Interface face">
               <button type="button" class="font-step__arrow" data-font-prev aria-label="Previous interface face">&#8249;</button>

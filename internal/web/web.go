@@ -13,10 +13,8 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"os/user"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -128,14 +126,6 @@ func (s *Web) pagePromptUser(ctx context.Context) string {
 	return promptUser(cfg.User)
 }
 
-// osUser looks the OS login name up once: it is a syscall and never changes.
-var osUser = sync.OnceValue(func() string {
-	if u, err := user.Current(); err == nil {
-		return u.Username
-	}
-	return ""
-})
-
 // promptUser picks the shell-prompt name: the configured user, or the OS login
 // name when config leaves it blank. If even that can't be read, it stays empty
 // and the prompt renders as just "@rabbithole".
@@ -143,7 +133,7 @@ func promptUser(configured string) string {
 	if configured != "" {
 		return configured
 	}
-	return osUser()
+	return config.DefaultUser()
 }
 
 // Routes returns the web handler: the digest ("feed") page — the landing page,

@@ -471,6 +471,84 @@ func TestSettingsExportHoldsReferencesOnly(t *testing.T) {
 	}
 }
 
+func TestSettingsExportFormats(t *testing.T) {
+	w, db := configTestWeb(t)
+	saveConfig(
+		t, db, "inference:\n  api_key: $RABBITHOLE_INFERENCE_API_KEY\n  batch_size: 7\n",
+		store.ConfigSourceUI, 0,
+	)
+	t.Setenv("RABBITHOLE_INFERENCE_API_KEY", "sk-export-secret")
+	tests := []struct {
+		name, query, file, ctype string
+		code                     int
+		want, not                []string
+	}{
+		{"default is saved yaml", "", "rabbithole-config.yaml", "application/yaml", 200,
+			[]string{"# rabbithole config version 1", "batch_size: 7"}, []string{"sk-export-secret", "value in force"}},
+		{"saved json", "?format=json", "rabbithole-config.json", "application/json", 200,
+			[]string{`"batch_size": 7`, "$RABBITHOLE_INFERENCE_API_KEY"}, []string{"sk-export-secret", "# rabbithole"}},
+		{"defaults yaml", "?defaults=1", "rabbithole-config-defaults.yaml", "application/yaml", 200,
+			[]string{"value in force", "batch_size: 7", "$RABBITHOLE_INFERENCE_API_KEY"}, []string{"sk-export-secret"}},
+		{"defaults json", "?format=json&defaults=1", "rabbithole-config-defaults.json", "application/json", 200,
+			[]string{"$RABBITHOLE_INFERENCE_API_KEY", `"batch_size": 7`}, []string{"sk-export-secret"}},
+		{"defaults=0 is saved", "?defaults=0", "rabbithole-config.yaml", "application/yaml", 200,
+			[]string{"# rabbithole config version 1"}, []string{"value in force"}},
+		{"bad format", "?format=toml", "", "", http.StatusBadRequest, nil, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/settings/export"+tc.query, nil))
+			if rec.Code != tc.code {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.code)
+			}
+			if tc.code != 200 {
+				return
+			}
+			if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, `filename="`+tc.file+`"`) {
+				t.Errorf("Content-Disposition = %q, want %s", cd, tc.file)
+			}
+			if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, tc.ctype) {
+				t.Errorf("Content-Type = %q, want %s", ct, tc.ctype)
+			}
+			body := rec.Body.String()
+			for _, x := range tc.want {
+				if !strings.Contains(body, x) {
+					t.Errorf("body lacks %q:\n%s", x, body)
+				}
+			}
+			for _, x := range tc.not {
+				if strings.Contains(body, x) {
+					t.Errorf("body has %q:\n%s", x, body)
+				}
+			}
+			if strings.HasSuffix(tc.file, ".json") && !json.Valid([]byte(body)) {
+				t.Errorf("not valid JSON:\n%s", body)
+			}
+		})
+	}
+}
+
+func TestSettingsExportEmptyState(t *testing.T) {
+	const empty = "Everything is at its default."
+	w, db := configTestWeb(t)
+	if !strings.Contains(get(t, w, "/settings/advanced"), empty) {
+		t.Error("nothing saved: the export row does not say everything is at its default")
+	}
+	saveConfig(t, db, "{}\n", store.ConfigSourceUI, 0)
+	if !strings.Contains(get(t, w, "/settings/advanced"), empty) {
+		t.Error("an empty saved config: the export row does not say everything is at its default")
+	}
+	saveConfig(t, db, "scoring:\n  batch_size: 7\n", store.ConfigSourceUI, 1)
+	body := get(t, w, "/settings/advanced")
+	if strings.Contains(body, empty) {
+		t.Error("a changed setting: the empty-state line is still shown")
+	}
+	if !strings.Contains(body, `form="exportForm"`) || strings.Contains(body, `data-fld="defaults"`) {
+		t.Error("the export choices must sit outside the settings draft")
+	}
+}
+
 // logCapture swaps the global logger for one that writes to a buffer.
 func logCapture(t *testing.T) *bytes.Buffer {
 	t.Helper()
@@ -976,7 +1054,7 @@ func TestSettingsNeverLeaksTheKey(t *testing.T) {
 
 func TestDefaultTextServesEveryProviderFromTheSnapshot(t *testing.T) {
 	for _, p := range append([]string{"made-up"}, config.Providers...) {
-		d := providerDefaults(p)
+		d := config.DefaultsFor(p)
 		for i := range fieldSpecs {
 			f := &fieldSpecs[i]
 			if f.Key == keyUser || f.Key == keySystem {
@@ -1087,5 +1165,46 @@ func TestSettingsImportSinceOnlyChangeIsPreviewedAndApplied(t *testing.T) {
 	_, preview = send(t, w, "/settings/import/preview", url.Values{"yaml": {file}, "expected_version": {"1"}})
 	if !strings.Contains(preview, "data-nochange") {
 		t.Errorf("a matching since is no change:\n%s", preview)
+	}
+}
+
+func TestSettingsImportPreviewCountsValuesEqualToTheDefault(t *testing.T) {
+	w, db := configTestWeb(t)
+	tests := []struct {
+		name, file, want string
+		absent           bool
+	}{
+		{
+			"several",
+			"inference:\n  provider: ollama\n  think: true\n  batch_size: 1\n  model: other\n",
+			"3 values equal the default and stay defaults",
+			false,
+		},
+		{
+			"one",
+			"inference:\n  provider: ollama\n  model: other\n",
+			"1 value equals the default and stays a default",
+			false,
+		},
+		{"none", "inference:\n  model: other\n", "the default", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, preview := send(
+				t,
+				w,
+				"/settings/import/preview",
+				url.Values{"yaml": {tc.file}, "expected_version": {"0"}},
+			)
+			if strings.Contains(preview, tc.want) == tc.absent {
+				t.Errorf("preview for %q lacks/has %q:\n%s", tc.file, tc.want, preview)
+			}
+			if strings.Contains(preview, "provider: ollama") {
+				t.Errorf("the diff pins a default:\n%s", preview)
+			}
+		})
+	}
+	if versionOf(t, db) != 0 {
+		t.Fatal("a preview must not save")
 	}
 }

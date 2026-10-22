@@ -330,38 +330,24 @@ func (f *fieldSpec) providers() []string {
 	return out
 }
 
-// providerDefaults is a config with only the defaults of the provider applied.
-// Prepare also validates, and a bare config fails that (no model, no key): the
-// defaults are applied first and are all this wants.
-func providerDefaults(provider string) config.Config {
-	var d config.Config
-	d.Inference.Provider = provider
-	_, _ = d.Prepare()
-	d.Inference.ModelTuning = d.Inference.ModelTuning.Normalize()
-	return d
-}
-
 // defaultsByProvider holds the defaults of every provider, built once: they do
 // not change while the server runs.
 var defaultsByProvider = sync.OnceValue(func() map[string]config.Config {
 	m := make(map[string]config.Config, len(config.Providers))
 	for _, p := range config.Providers {
-		m[p] = providerDefaults(p)
+		m[p] = config.DefaultsFor(p)
 	}
 	return m
 })
 
 // defaultText is the value a field takes when nothing is set, for the provider.
 func defaultText(f *fieldSpec, provider string) string {
-	switch f.Key {
-	case keyUser:
-		return osUser()
-	case keySystem:
+	if f.Key == keySystem {
 		return ""
 	}
 	d, ok := defaultsByProvider()[provider]
 	if !ok {
-		d = providerDefaults(provider)
+		d = config.DefaultsFor(provider)
 	}
 	return f.get(&d)
 }

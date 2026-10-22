@@ -50,6 +50,9 @@ type ImportOutcome struct {
 	// Replaced is the version a save displaced when it came from somewhere other
 	// than this file; nil otherwise.
 	Replaced *store.ConfigVersion
+	// Defaulted names the settings of the file that equal their default and so
+	// were not saved.
+	Defaulted []string
 }
 
 // Prepared is a config file in the form that is stored: canonical, marshaled
@@ -62,6 +65,7 @@ type Prepared struct {
 	Secrets       []config.Secret // literal keys lifted out; never log Value
 	Legacy        config.Legacy
 	Dropped       []string // fields the provider does not read, removed
+	Defaulted     []string // fields equal to their default, left unset so they stay defaults
 	Warnings      []string // deprecated keys the file used, each naming its new home
 }
 
@@ -86,6 +90,7 @@ func Prepare(file config.File, label string, lg zerolog.Logger) (Prepared, error
 		)
 	}
 	secrets := run.ExtractLiterals()
+	defaulted := run.DropDefaults()
 	if _, err := run.Canonical(); err != nil {
 		return Prepared{}, fmt.Errorf(
 			"%s is not a valid config, nothing was saved:\n%w",
@@ -99,7 +104,7 @@ func Prepare(file config.File, label string, lg zerolog.Logger) (Prepared, error
 	}
 	return Prepared{
 		Run: run, Content: content, Hash: run.Hash(), EffectiveHash: run.EffectiveHash(),
-		Secrets: secrets, Legacy: legacy, Dropped: dropped, Warnings: file.Deprecations(),
+		Secrets: secrets, Legacy: legacy, Dropped: dropped, Defaulted: defaulted, Warnings: file.Deprecations(),
 	}, nil
 }
 
@@ -242,7 +247,7 @@ func ApplyImport(
 				return ImportOutcome{}, err
 			}
 		}
-		out := ImportOutcome{Version: cur.Version, FeedSince: sinceChanged}
+		out := ImportOutcome{Version: cur.Version, FeedSince: sinceChanged, Defaulted: p.Defaulted}
 		equal := haveCur && activeEffectiveHash(cur) == p.EffectiveHash
 		if equal && !changed {
 			lg.Debug().Msgf("config unchanged (version %d)", cur.Version)
