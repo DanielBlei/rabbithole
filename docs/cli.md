@@ -11,6 +11,7 @@ rabbithole [--config PATH] [--debug] [--trace] <command>
 | Command | What it does |
 |---|---|
 | [`ingest`](#ingest) | Fetch the feeds, score what is new, record it, and optionally write a markdown digest |
+| [`digest`](#digest) | Print a daily or weekly Markdown digest of already-scored articles |
 | [`serve`](#serve) | Serve the web UI and the JSON API, behind the login |
 | [`auth`](#auth) | Show, reset or switch off the web UI's login |
 | [`items`](#items) | Browse the stored items and record your own read, skip, rating and notes |
@@ -24,6 +25,24 @@ store.
 | `--config` | Path to the configuration file | `./configs/config.yaml` |
 | `--debug` | Log each stage with timings: configuration, per-feed fetches, filtering, scoring batches and per-item scores, selection, write | off |
 | `--trace` | Additionally log raw model prompts and responses; implies `--debug` | off |
+
+## digest
+
+```
+rabbithole digest [--period daily|weekly] [--limit N]
+```
+
+Prints a Markdown reading digest to stdout from articles already scored and stored. The default
+period is the previous complete UTC day (limit 10); `--period weekly` selects the previous
+complete Monday-to-Monday UTC week (limit 20). Both periods include their start and exclude their
+end. `--limit` must be between 1 and 50. Articles without an LLM score are omitted; user ratings
+do not affect relevance order. No feeds are fetched and no model is called.
+
+```
+rabbithole digest
+rabbithole digest --period weekly
+rabbithole digest --period daily --limit 5
+```
 
 ## ingest
 
