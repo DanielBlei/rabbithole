@@ -1,0 +1,12 @@
+# Placeholder credentials from tests and CI; never live values.
+
+[allowlist]
+  description = "Placeholder credentials that only exist in tests and CI"
+
+  regexes = [
+    # Tests asserting the API key reaches no page and no log line.
+    '''sk-leakcheck-7Hq2Z9''',
+    '''sk-live-PLEASE-DO-NOT-PRINT''',
+    # Throwaway service-container credentials in the CI workflow.
+    '''postgres://rabbithole:rabbithole@127\.0\.0\.1:5432''',
+  ]
