@@ -8,6 +8,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -185,8 +186,24 @@ func sessionCmd(t *testing.T) *cobra.Command {
 	return c
 }
 
+// osDataHome is the per-user data home, relative to HOME, on the OS under test.
+func osDataHome() string {
+	if runtime.GOOS == "darwin" {
+		return "Library/Application Support"
+	}
+	return ".local/share"
+}
+
 func userStoreFile(home string) string {
-	return filepath.Join(home, ".local", "share", "rabbithole", "rabbithole.db")
+	return filepath.Join(home, filepath.FromSlash(osDataHome()), "rabbithole", "rabbithole.db")
+}
+
+// userStoreTilde is userStoreFile as the CLI prints it, with HOME shortened.
+func userStoreTilde() string { return "~/" + osDataHome() + "/rabbithole/rabbithole.db" }
+
+// dataHomeRoot is the first directory a store creation would add under home.
+func dataHomeRoot(home string) string {
+	return filepath.Join(home, strings.SplitN(osDataHome(), "/", 2)[0])
 }
 
 func TestAskCreateStore(t *testing.T) {
@@ -354,7 +371,7 @@ func TestOpenSessionCreatesDefaultStore(t *testing.T) {
 			strings.Contains(buf.String(), "hint") {
 			t.Errorf("log = %s", buf.String())
 		}
-		if !strings.Contains(out.String(), "✔ Store created at ~/.local/share/rabbithole/rabbithole.db\n\n") {
+		if !strings.Contains(out.String(), "✔ Store created at "+userStoreTilde()+"\n\n") {
 			t.Errorf("no confirmation in %q", out.String())
 		}
 	})
@@ -367,7 +384,7 @@ func TestOpenSessionCreatesDefaultStore(t *testing.T) {
 		if err != errNothingCreated {
 			t.Fatalf("err = %v, want errNothingCreated", err)
 		}
-		if _, err := os.Stat(filepath.Join(home, ".local")); err == nil {
+		if _, err := os.Stat(dataHomeRoot(home)); err == nil {
 			t.Error("a directory was created")
 		}
 	})
@@ -386,7 +403,7 @@ func TestOpenSessionCreatesDefaultStore(t *testing.T) {
 		if out.Len() != 0 {
 			t.Errorf("prompt written without a terminal: %q", out.String())
 		}
-		want := `"engine":"sqlite","store":"~/.local/share/rabbithole/rabbithole.db","hint":"set RABBITHOLE_DB for Postgres or another path","message":"store created"`
+		want := `"engine":"sqlite","store":"` + userStoreTilde() + `","hint":"set RABBITHOLE_DB for Postgres or another path","message":"store created"`
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("log = %s", buf.String())
 		}
@@ -467,7 +484,7 @@ func TestOpenSessionLegacyStore(t *testing.T) {
 	}
 	logged := buf.String()
 	for _, want := range []string{
-		`using legacy store ./data/rabbithole.db (deprecated, supported until v0.4.0); move it to ~/.local/share/rabbithole/ or pass --db ./data/rabbithole.db to keep it here`,
+		`using legacy store ./data/rabbithole.db (deprecated, supported until v0.4.0); move it to ~/` + osDataHome() + `/rabbithole/ or pass --db ./data/rabbithole.db to keep it here`,
 		`legacy store ./rabbithole/data/rabbithole.db is ignored; using ./data/rabbithole.db`,
 		`"from":"legacy"`,
 	} {
@@ -500,7 +517,7 @@ func TestOpenSessionPerUserStoreBeatsLegacy(t *testing.T) {
 	s.Close()
 	if !strings.Contains(
 		buf.String(),
-		"legacy store ./data/rabbithole.db is ignored; using ~/.local/share/rabbithole/rabbithole.db",
+		"legacy store ./data/rabbithole.db is ignored; using "+userStoreTilde(),
 	) ||
 		strings.Contains(buf.String(), "deprecated") {
 		t.Errorf("log = %s", buf.String())
@@ -517,17 +534,17 @@ func TestReadOnlySessionNeverCreates(t *testing.T) {
 		t.Fatalf("optional = %+v, %v", s, err)
 	}
 	s.Close()
-	if s.missing != "~/.local/share/rabbithole/rabbithole.db" {
+	if s.missing != userStoreTilde() {
 		t.Errorf("missing = %q", s.missing)
 	}
 	_, err = openSession(sessionCmd(t), sessionOpts{mustExist: true})
-	if err == nil || err.Error() != "no store at ~/.local/share/rabbithole/rabbithole.db" {
+	if err == nil || err.Error() != "no store at "+userStoreTilde() {
 		t.Errorf("mustExist err = %v", err)
 	}
 	if out.Len() != 0 {
 		t.Errorf("read-only command asked: %q", out.String())
 	}
-	if _, err := os.Stat(filepath.Join(home, ".local")); err == nil {
+	if _, err := os.Stat(dataHomeRoot(home)); err == nil {
 		t.Error("a read-only command created a directory")
 	}
 }
@@ -552,14 +569,14 @@ func TestDescribeStore(t *testing.T) {
 	}
 	if got, want := describe(
 		"",
-	), "~/.local/share/rabbithole/rabbithole.db  (sqlite, default, not created yet)"; got != want {
+	), userStoreTilde()+"  (sqlite, default, not created yet)"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 	if fileExists(userDB) {
 		t.Fatal("store path created the store")
 	}
 	writeFile(t, userDB, "x")
-	if got, want := describe(""), "~/.local/share/rabbithole/rabbithole.db  (sqlite, default, exists)"; got != want {
+	if got, want := describe(""), userStoreTilde()+"  (sqlite, default, exists)"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 	if err := os.Remove(userDB); err != nil {
@@ -600,10 +617,10 @@ func TestStorePathCommand(t *testing.T) {
 	if err := runStorePath(c, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := out.String(), "~/.local/share/rabbithole/rabbithole.db  (sqlite, default, not created yet)\n"; got != want {
+	if got, want := out.String(), userStoreTilde()+"  (sqlite, default, not created yet)\n"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".local")); err == nil {
+	if _, err := os.Stat(dataHomeRoot(home)); err == nil {
 		t.Error("store path created a directory")
 	}
 }
@@ -648,7 +665,7 @@ func TestItemsReadCommandsDoNotCreate(t *testing.T) {
 	if out.Len() != 0 {
 		t.Errorf("asked: %q", out.String())
 	}
-	if _, err := os.Stat(filepath.Join(home, ".local")); err == nil {
+	if _, err := os.Stat(dataHomeRoot(home)); err == nil {
 		t.Error("a read command created a directory")
 	}
 }

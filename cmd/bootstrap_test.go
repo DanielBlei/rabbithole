@@ -250,7 +250,7 @@ func TestResolveBootReadsOnlyNamedFiles(t *testing.T) {
 func TestOpenSessionBareReadsNoFiles(t *testing.T) {
 	t.Chdir(t.TempDir())
 	home := isolatedHome(t)
-	userDB := filepath.Join(home, ".local", "share", "rabbithole", "rabbithole.db")
+	userDB := userStoreFile(home)
 	feeds := "feeds:\n  - name: A\n    url: http://a.test/feed\n"
 	writeFile(t, "configs/config.yaml", goodConfig+"profile: ./p.md\n")
 	writeFile(t, "configs/feeds.yaml", feeds)
@@ -345,7 +345,7 @@ func TestOpenSessionReappliesConfigFile(t *testing.T) {
 	if v := boot(); v.Version != 1 {
 		t.Fatalf("second boot version = %d, want a noop on 1", v.Version)
 	}
-	dbPath := filepath.Join(home, ".local", "share", "rabbithole", "rabbithole.db")
+	dbPath := userStoreFile(home)
 	db, err := store.OpenFrom(t.Context(), config.StoreConfig{DBPath: dbPath})
 	if err != nil {
 		t.Fatal(err)
