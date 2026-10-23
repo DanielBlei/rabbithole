@@ -114,7 +114,11 @@ func TestImportMovesLiteralKeyToEnvFile(t *testing.T) {
 	if os.Getenv("RABBITHOLE_INFERENCE_API_KEY") != literal {
 		t.Error("the next run in this process does not see the key")
 	}
-	if v.Source != store.ConfigSourceImport+path {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Source != store.ConfigSourceImport+resolved {
 		t.Errorf("source = %q", v.Source)
 	}
 }
