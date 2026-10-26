@@ -6,6 +6,7 @@ package ingest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -33,7 +34,7 @@ const finishTimeout = 5 * time.Second
 // substitute a stub instead of a real fetch→score→record cycle.
 type runFunc func(
 	context.Context,
-	*config.Config,
+	config.Config,
 	profile.Snapshot,
 	*store.Store,
 	time.Time,
@@ -42,7 +43,7 @@ type runFunc func(
 
 type rescoreFunc func(
 	context.Context,
-	*config.Config,
+	config.Config,
 	profile.Snapshot,
 	*store.Store,
 	time.Time,
@@ -63,7 +64,7 @@ const (
 // and captures logs for the web UI.
 type Manager struct {
 	db       *store.Store
-	cfg      *config.Config
+	src      config.Source
 	profiles *profilemgr.Service
 	run      runFunc
 	rescore  rescoreFunc
@@ -97,16 +98,16 @@ type Status struct {
 	Profile   string
 }
 
-// NewManager returns a Manager for db/cfg. logLevel decides whether a run's own
+// NewManager returns a Manager for db that reads its run config from src. logLevel decides whether a run's own
 // lines show in the terminal (see newRunLogger). Runs left mid-flight by a
 // crashed process are marked failed first, so the UI never shows a run that
 // isn't alive.
-func NewManager(db *store.Store, cfg *config.Config, logLevel zerolog.Level) (*Manager, error) {
+func NewManager(db *store.Store, src config.Source, logLevel zerolog.Level) (*Manager, error) {
 	if err := db.InterruptStaleIngestRuns(context.Background()); err != nil {
 		return nil, err
 	}
 	return &Manager{
-		db: db, cfg: cfg, profiles: profilemgr.New(db),
+		db: db, src: src, profiles: profilemgr.New(db),
 		run: Run, rescore: RescoreRecent, logLevel: logLevel,
 	}, nil
 }
@@ -219,15 +220,18 @@ func (m *Manager) execute(
 
 	runLogger := newRunLogger(buf, m.logLevel)
 	ctx = runLogger.WithContext(ctx)
-	var (
-		counts store.IngestCounts
-		err    error
-	)
-	switch run.kind {
-	case RunKindRescore:
+	var counts store.IngestCounts
+	// One snapshot for the whole run: a config change lands on the next run.
+	cfg, _, err := m.src.Active(ctx)
+	if err != nil {
+		err = fmt.Errorf("read config: %w", err)
+	}
+	switch {
+	case err != nil:
+	case run.kind == RunKindRescore:
 		var outcome RescoreOutcome
 		outcome, err = m.rescore(
-			ctx, m.cfg, activeProfile, m.db, time.Now(), run.window,
+			ctx, cfg, activeProfile, m.db, time.Now(), run.window,
 		)
 		counts = store.IngestCounts{
 			Fetched: outcome.Candidates,
@@ -236,8 +240,8 @@ func (m *Manager) execute(
 		}
 	default:
 		var outcome Outcome
-		outcome, err = m.run(ctx, m.cfg, activeProfile, m.db, time.Now(), Options{
-			Think:  *m.cfg.Inference.Think,
+		outcome, err = m.run(ctx, cfg, activeProfile, m.db, time.Now(), Options{
+			Think:  cfg.Inference.ThinkEnabled(),
 			Record: true,
 		})
 		counts = store.IngestCounts{

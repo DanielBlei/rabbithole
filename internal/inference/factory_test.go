@@ -80,37 +80,6 @@ func TestResolve(t *testing.T) {
 			t.Fatalf("Resolve() error = %v, want it to mention backend init", err)
 		}
 	})
-
-	t.Run("a configured summary model is validated on the same host", func(t *testing.T) {
-		host := serveJSON(t, `{"models":[{"model":"llama3:latest"},{"model":"small:1b"}]}`)
-		cfg := config.InferenceConfig{
-			Provider: "ollama",
-			Host:     host,
-			Model:    "llama3:latest",
-			Summary:  config.SummaryConfig{Model: "small:1b"},
-		}
-		s, err := Resolve(t.Context(), cfg, false, "be nice")
-		if err != nil {
-			t.Fatalf("Resolve() error = %v", err)
-		}
-		if s == nil {
-			t.Fatal("Resolve() scorer = nil, want a scorer")
-		}
-	})
-
-	t.Run("an unreachable summary model fails Resolve", func(t *testing.T) {
-		host := serveJSON(t, `{"models":[{"model":"llama3:latest"}]}`)
-		cfg := config.InferenceConfig{
-			Provider: "ollama",
-			Host:     host,
-			Model:    "llama3:latest",
-			Summary:  config.SummaryConfig{Model: "no-tag"},
-		}
-		_, err := Resolve(t.Context(), cfg, false, "be nice")
-		if err == nil || !strings.Contains(err.Error(), "summary model") {
-			t.Fatalf("Resolve() error = %v, want it to mention summary model", err)
-		}
-	})
 }
 
 func TestResolveHonoursStructuredOutput(t *testing.T) {
@@ -141,4 +110,38 @@ func TestResolveHonoursStructuredOutput(t *testing.T) {
 			t.Errorf("structured_output=%v: response_format sent = %v", structured, sent)
 		}
 	}
+}
+
+func TestResolveExpandsAPIKeyReferences(t *testing.T) {
+	var auth []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = append(auth, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"llama3"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Run("references reach the client resolved", func(t *testing.T) {
+		auth = nil
+		t.Setenv("RABBITHOLE_TEST_KEY", "main-secret")
+		cfg := config.InferenceConfig{
+			Provider: "vllm", Host: srv.URL, Model: "llama3", APIKey: "$RABBITHOLE_TEST_KEY",
+		}
+		if _, err := Resolve(t.Context(), cfg, false, ""); err != nil {
+			t.Fatalf("Resolve() error = %v", err)
+		}
+		if len(auth) != 1 || auth[0] != "Bearer main-secret" {
+			t.Errorf("Authorization headers = %v, want the resolved key", auth)
+		}
+	})
+
+	t.Run("an unset reference fails naming the field only", func(t *testing.T) {
+		cfg := config.InferenceConfig{
+			Provider: "vllm", Host: srv.URL, Model: "llama3", APIKey: "$RABBITHOLE_TEST_UNSET",
+		}
+		_, err := Resolve(t.Context(), cfg, false, "")
+		if err == nil || !strings.Contains(err.Error(), "inference.api_key") {
+			t.Fatalf("Resolve() error = %v, want it to name inference.api_key", err)
+		}
+	})
 }

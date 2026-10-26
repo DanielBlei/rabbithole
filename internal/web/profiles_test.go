@@ -20,20 +20,20 @@ import (
 func TestProfileSettingsRenderDefaultImmutable(t *testing.T) {
 	w := newTestWeb(t)
 	rec := httptest.NewRecorder()
-	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/feed", nil))
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/settings/profiles", nil))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /feed = %d", rec.Code)
+		t.Fatalf("GET /settings/profiles = %d", rec.Code)
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		`id="stgProfiles"`,
+		`data-stp-pane="profiles"`,
 		`id="profilesSettings"`,
 		"Active profile",
 		"Default",
-		"built-in · immutable",
+		"Immutable. Duplicate it to make an editable copy.",
 		`hx-post="/profiles/` + profile.DefaultID + `/duplicate"`,
 		`hx-get="/profiles/rescore"`,
-		"Existing scores stay unchanged until you rescore them.",
+		`id="tip-profile-active" role="tooltip"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("profile settings missing %q", want)
@@ -168,7 +168,7 @@ func TestProfileCreateEditSelectAndDuplicate(t *testing.T) {
 		t.Fatalf("create response = %s", body)
 	}
 	// Save sits in the sticky footer, so it stays visible on a long profile.
-	if !strings.Contains(body, `<div class="prof-form__foot">`) || !strings.Contains(body, "save profile") {
+	if !strings.Contains(body, `<div class="prof-form__foot">`) || !strings.Contains(body, "Save profile") {
 		t.Errorf("editor missing the save footer; body=%s", body)
 	}
 	locals, err := w.db.ListProfiles(t.Context())

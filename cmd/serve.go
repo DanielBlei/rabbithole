@@ -12,15 +12,14 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
-	"github.com/DanielBlei/rabbithole/internal/profilemgr"
 	"github.com/DanielBlei/rabbithole/internal/server"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -31,6 +30,7 @@ var (
 	serveTLSKey       string
 	serveInsecureHTTP bool
 	serveDev          bool
+	serveNoEnvWrite   bool
 	serveProxies      []string
 )
 
@@ -51,6 +51,8 @@ func init() {
 		"networks whose X-Forwarded-For and X-Forwarded-Proto are believed; empty trusts none")
 	serveCmd.Flags().BoolVar(&serveDev, "dev", false,
 		"serve the CSS, scripts and fonts no-cache, so an edit shows on the next reload")
+	serveCmd.Flags().BoolVar(&serveNoEnvWrite, "no-env-write", false,
+		"never write a pasted API key to .env: hides the paste action in Settings and refuses it")
 	rootCmd.AddCommand(serveCmd)
 }
 
@@ -244,42 +246,28 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return err
-	}
-	log.Debug().Str("config", configPath).Str("addr", serveAddr).Msg("config loaded")
-
 	// `serve` is the process that owns the store: it reconciles interrupted ingest
 	// runs at startup and holds the sessions, so two of them reaching the same
 	// database would undo each other. Ask for the single-writer guard, which
 	// Postgres enforces and SQLite has nothing to enforce it with.
-	db, err := openStore(ctx, cfg, true)
+	s, err := openSession(cmd, sessionOpts{exclusive: true})
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			log.Warn().Err(err).Msg("db close failed")
-		}
-	}()
+	defer s.Close()
+	db, src := s.db, s.src
 
-	// A legacy profile path is a one-time bootstrap source. Validation still
-	// runs on every boot, but an existing web selection is never overwritten.
-	if err := profilemgr.New(db).BootstrapLegacy(ctx, cfg); err != nil {
+	_, version, err := src.Active(ctx)
+	if err != nil {
 		return err
 	}
-
-	// Feeds live in the store; the feeds file only seeds ones it has never seen.
-	// Running this every boot means adding an entry to the file is enough to
-	// pick it up, while anything you changed on the Sources page — disabled,
-	// retuned, deleted — is left exactly as you left it.
-	seedFeeds(ctx, db, cfg)
+	logActiveConfig(ctx, db, version)
+	logManagedConfig(configPath)
 
 	// Items carry their feed's tags, which the feed page filters on. Syncing at
 	// startup means a tag edit reaches items recorded before it, rather than
 	// waiting for the next ingest run to notice.
-	configured, err := ingest.ResolveFeeds(ctx, db, cfg)
+	configured, err := ingest.ResolveFeeds(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -290,14 +278,17 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// The ingest manager owns web-triggered (and later scheduled) ingest runs:
 	// single-flight, background context, run history. It also flips any history
 	// row a crashed process left as 'running' to an error before serving.
-	mgr, err := ingest.NewManager(db, cfg, log.GetLevel())
+	mgr, err := ingest.NewManager(db, src, log.GetLevel())
 	if err != nil {
 		return err
 	}
 
-	srv := server.New(db, cfg, serveAddr, configPath, mgr, log)
+	srv := server.New(db, src, serveAddr, mgr, log)
 	srv.TrustProxies(proxies)
 	srv.Dev(serveDev)
+	srv.ManagedBy(configPath)
+	srv.EnvFile(s.env, serveNoEnvWrite)
+	srv.StoreInfo(s.storeInfo)
 	httpSrv := newHTTPServer(serveAddr, srv.Routes(), tlsConfig)
 	// Bound here rather than in the goroutine, so a taken port fails the command.
 	ln, err := net.Listen("tcp", serveAddr)
@@ -351,31 +342,57 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 }
 
-// seedFeeds imports feeds the store has never seen from the seed file.
-//
-// Every failure here is a warning, never a boot failure: the store already
-// holds the feed set, and a missing, unreadable or half-broken seed file is a
-// reason to say so and carry on rather than to refuse to serve.
-func seedFeeds(ctx context.Context, db *store.Store, cfg *config.Config) {
-	path, _ := cfg.FeedsFilePath(configPath)
-	doc, found, err := config.ReadFeedsFile(path)
+// logActiveConfig says which config version is in force, or that the defaults are.
+// The version comes from the snapshot serve already took; the row only adds how
+// and when it was saved, and is left out if the config moved on in between.
+func logActiveConfig(ctx context.Context, db *store.Store, version int) {
+	if version == 0 {
+		log.Info().Msg("no config saved in the store, using the defaults")
+		return
+	}
+	v, ok, err := db.ActiveConfig(ctx)
+	if err != nil || !ok || v.Version != version {
+		log.Info().Int("version", version).Msg("config loaded from the store")
+		return
+	}
+	log.Info().Int("version", v.Version).
+		Str("saved", v.CreatedAt.Local().Format("2006-01-02 15:04")).
+		Str("by", describeConfigSource(v.Source)).
+		Msg("config loaded from the store")
+}
+
+// logManagedConfig says that a --config file is applied when it changes.
+// Without one there is nothing to say.
+func logManagedConfig(path string) {
+	if path == "" {
+		return
+	}
+	log.Info().Msgf("config imported from %s; edits in Settings are kept until the file changes", path)
+}
+
+// describeConfigSource turns a stored source into how the version was saved,
+// with a path under the working directory shown relative to it.
+func describeConfigSource(src string) string {
+	switch {
+	case src == store.ConfigSourceUI:
+		return "settings UI"
+	case strings.HasPrefix(src, store.ConfigSourceRollback):
+		return "rollback to version " + strings.TrimPrefix(src, store.ConfigSourceRollback)
+	case strings.HasPrefix(src, store.ConfigSourceImport):
+		return "import of " + displayPath(strings.TrimPrefix(src, store.ConfigSourceImport))
+	}
+	return src
+}
+
+// displayPath shortens an absolute path under the working directory to a
+// relative one; anything else is returned as is.
+func displayPath(p string) string {
+	wd, err := os.Getwd()
 	if err != nil {
-		log.Warn().Err(err).Str("feeds", path).Msg("reading the feed seed file failed")
-		return
+		return p
 	}
-	if !found {
-		log.Info().Str("feeds", path).Msg("no feed seed file; feeds come from the store")
-		return
+	if rel, err := filepath.Rel(wd, p); err == nil && !strings.HasPrefix(rel, "..") {
+		return "./" + rel
 	}
-	result, err := db.SeedFeeds(ctx, *doc)
-	if err != nil {
-		log.Warn().Err(err).Str("feeds", path).Msg("seeding feeds failed")
-		return
-	}
-	for _, warning := range result.Warnings {
-		log.Warn().Str("feeds", path).Msg("skipped while seeding: " + warning)
-	}
-	// Logged whether or not anything was added from a seed file
-	log.Debug().Str("feeds", path).Int("added", result.Added).Int("skipped", result.Skipped).
-		Msg("seeded feeds from the seed file")
+	return p
 }

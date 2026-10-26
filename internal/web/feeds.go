@@ -147,14 +147,14 @@ func itemsPhrase(n int) string {
 }
 
 // defaultsSummary renders the set-wide defaults as one line for the page's
-// legend, naming the global fallback for anything they leave unset — so the
+// legend, naming the built-in value for anything they leave unset, so the
 // cascade is legible without opening the defaults editor.
-func defaultsSummary(d config.FeedDefaults, globalSince time.Duration) string {
+func defaultsSummary(d config.FeedDefaults) string {
 	var parts []string
 	if d.Since != nil {
 		parts = append(parts, "since "+shortDur(d.Since.Std()))
 	} else {
-		parts = append(parts, "since "+shortDur(globalSince)+" (from ingest.since)")
+		parts = append(parts, "since "+shortDur(config.DefaultSince)+" (built-in)")
 	}
 	if d.MaxItems != nil {
 		parts = append(parts, "max_items "+capLabel(*d.MaxItems))

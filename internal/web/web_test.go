@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ func testIngestManager(t *testing.T, db *store.Store) *ingest.Manager {
 	cfg.Inference.Model = "test-model"
 	cfg.Inference.BatchSize = 1
 	cfg.Inference.MaxParallel = 1
-	m, err := ingest.NewManager(db, cfg, zerolog.InfoLevel)
+	m, err := ingest.NewManager(db, config.Static(*cfg), zerolog.InfoLevel)
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -51,7 +52,7 @@ func newTestWeb(t *testing.T) *Web {
 		nil, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	return New(db, &config.Config{}, "", testIngestManager(t, db))
+	return New(db, config.Static{}, testIngestManager(t, db))
 }
 
 func post(t *testing.T, w *Web, path string) *httptest.ResponseRecorder {
@@ -193,7 +194,7 @@ func newEmptyWeb(t *testing.T) *Web {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return New(db, &config.Config{}, "", testIngestManager(t, db))
+	return New(db, config.Static{}, testIngestManager(t, db))
 }
 
 // A never-ingested store lands on the first-run zero-state: the ingest chip and
@@ -323,7 +324,7 @@ func TestWelcomeDialog(t *testing.T) {
 			if !tt.welcome {
 				return
 			}
-			for _, want := range []string{`hx-get="/sources"`, `data-stg-open="profiles"`, `hx-get="/ingest"`} {
+			for _, want := range []string{`hx-get="/sources"`, `href="/settings/profiles"`, `hx-get="/ingest"`} {
 				if !strings.Contains(body, want) {
 					t.Errorf("welcome missing step %q", want)
 				}
@@ -452,7 +453,7 @@ func TestFeedSearch(t *testing.T) {
 	if err := db.Record(context.Background(), items, nil, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	w := New(db, &config.Config{}, "", testIngestManager(t, db))
+	w := New(db, config.Static{}, testIngestManager(t, db))
 
 	body := get(t, w, "/feed?view=1&unread=1&search=kuber")
 	if !strings.Contains(body, "Kubernetes at the edge") {
@@ -479,7 +480,7 @@ func TestFeedPagerRowsControl(t *testing.T) {
 	if err := db.Record(context.Background(), items, nil, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	w := New(db, &config.Config{}, "", testIngestManager(t, db))
+	w := New(db, config.Static{}, testIngestManager(t, db))
 
 	body := get(t, w, "/feed")
 	// Both pagers carry it: they write the same sentence.
@@ -513,7 +514,7 @@ func TestFeedCmdArgs(t *testing.T) {
 	if err := db.Record(context.Background(), items, nil, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	w := New(db, &config.Config{}, "", testIngestManager(t, db))
+	w := New(db, config.Static{}, testIngestManager(t, db))
 
 	body := get(t, w, "/feed?view=1&unread=1&source=Red+Hat&source=HF+blog&published=7d")
 	for _, want := range []string{"--source", "--published"} {
@@ -559,7 +560,7 @@ func TestFeedSourceAndTagFilters(t *testing.T) {
 	if err := db.Record(context.Background(), items, nil, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	w := New(db, &config.Config{}, "", testIngestManager(t, db))
+	w := New(db, config.Static{}, testIngestManager(t, db))
 
 	body := get(t, w, "/feed?view=1&unread=1&source=Red+Hat")
 	if !strings.Contains(body, "Edge computing") || strings.Contains(body, "Small models") {
@@ -613,7 +614,7 @@ func TestFeedScoreFilter(t *testing.T) {
 	if err := db.Record(context.Background(), items, digested, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
-	w := New(db, &config.Config{}, "", testIngestManager(t, db))
+	w := New(db, config.Static{}, testIngestManager(t, db))
 
 	// Both ends included: the 2 and the 5 are in, the 9 is not.
 	body := get(t, w, "/feed?view=1&unread=1&smin=2&smax=5")
@@ -697,5 +698,52 @@ func TestStaticCacheControlFollowsDev(t *testing.T) {
 				t.Error("no ETag, so a revalidation costs the whole file")
 			}
 		})
+	}
+}
+
+// userSource is a config.Source whose user can change between requests.
+type userSource struct {
+	mu   sync.Mutex
+	user string
+}
+
+func (u *userSource) Active(context.Context) (config.Config, int, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return config.Config{User: u.user}, 0, nil
+}
+
+// The prompt user is read from each request's config snapshot, so a changed
+// config shows without rebuilding Web.
+func TestPromptUserResolvedPerRequest(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	src := &userSource{user: "alice"}
+	w := New(db, src, testIngestManager(t, db))
+
+	for _, name := range []string{"alice", "bob"} {
+		src.mu.Lock()
+		src.user = name
+		src.mu.Unlock()
+		rec := httptest.NewRecorder()
+		w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/maze", nil))
+		if !strings.Contains(rec.Body.String(), name+"@rabbithole") {
+			t.Errorf("/maze for user %q: prompt not found in body", name)
+		}
+	}
+}
+
+func TestPagesRenderWhenTheStoredConfigIsUnreadable(t *testing.T) {
+	w, db := configTestWeb(t)
+	if _, err := db.SaveConfig(t.Context(), "bogus_key: 1\n", "h", store.ConfigSourceUI, 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/feed", "/maze", "/sources", "/ingest"} {
+		if body := get(t, w, path); !strings.Contains(body, "@rabbithole") {
+			t.Errorf("GET %s rendered without the prompt:\n%.300s", path, body)
+		}
 	}
 }

@@ -33,9 +33,11 @@ history rather than being stored with a made-up score.
      structured_output: false
    ```
 
+   Change it in Settings, or save it with `rabbithole config export -o config.yaml`, edit, then `rabbithole config import config.yaml`.
+
    The model then writes the JSON from the system prompt's instructions, and the checks above
    still apply. Keep a system prompt that spells out the shape: the built-in one does, and so
-   does `configs/prompts/system.example.md`. `reason_max_chars` becomes a request rather than a
+   does `docs/examples/prompts/system.md`. `reason_max_chars` becomes a request rather than a
    hard limit.
 3. **Upgrade vLLM**, if you run it yourself. Several fixes to structured output after reasoning
    are recent.
@@ -81,15 +83,61 @@ default.
 
 ## `$NAME is not set or empty`
 
-**What you see.** The config refuses to load with, for example,
-`inference.api_key: $RABBITHOLE_KEY is not set or empty`.
+**What you see.** An ingest run fails to start with, for example,
+`inference.api_key: $RABBITHOLE_INFERENCE_API_KEY is not set or empty`. After `config import` or
+`config rollback`, the same case is a warning: `the config uses $RABBITHOLE_INFERENCE_API_KEY,
+which is not set`.
 
-**Why.** The value is an environment reference and the variable is missing in the process that
+**Why.** The stored config holds a reference, and the variable is missing in the process that
 started rabbithole.
 
-**What to do.** Export it, or put it in `.env`. `.env` is only picked up by the `make` targets;
-when running the binary directly, load it first (`set -a; source .env; set +a`) or point a
-systemd unit at it with `EnvironmentFile=`.
+**What to do.** Export it in your shell profile, or put it in `./.env`. The binary reads `.env`
+itself (`RABBITHOLE_*` keys only, and a variable already in the environment wins). A running
+`serve` keeps the environment it started with, so restart it after changing a key.
+
+## `an api_key must be a reference to a RABBITHOLE_*_API_KEY environment variable`
+
+**What you see.** `config import` (or `serve --config`) refuses a file and saves nothing.
+
+**Why.** The store holds only references to variables named `RABBITHOLE_*_API_KEY`. A reference
+to any other variable, such as `$OPENAI_API_KEY`, is refused so a config cannot read arbitrary
+environment variables.
+
+**What to do.** Export the key under the allowed name and refer to that:
+`export RABBITHOLE_INFERENCE_API_KEY=$OPENAI_API_KEY`, then `api_key: $RABBITHOLE_INFERENCE_API_KEY`.
+Or write the literal key in the file once: it is moved to `./.env` and only the reference is kept.
+
+## `ignored for provider ...`
+
+**What you see.** A warning on import, such as
+`ignored for provider ollama: inference.effort`.
+
+**Why.** The field is not read by the provider you chose, so it is dropped rather than stored.
+[Fields by provider](configuration.md#fields-by-provider) lists which provider reads which field.
+
+**What to do.** Nothing, or remove the line, or change the provider.
+
+## `config export` prints `{}`
+
+**What you see.** `rabbithole config export` prints `{}`, or only a comment.
+
+**Why.** Everything is at its default. Export lists only the settings you changed. Look, fonts and
+widgets are kept in the browser, not in the saved settings.
+
+**What to do.** Run `rabbithole config export --defaults` to see every setting with its value.
+
+## The store is not where I expect
+
+**What you see.** An empty feed after an upgrade, or `Create a new SQLite store` on a machine that
+already has data.
+
+**Why.** The default store moved to your per-user data folder. Older releases kept it in
+`./data` or `./rabbithole/data`, which are still used when no per-user store exists, with a
+deprecation warning.
+
+**What to do.** Run `rabbithole store path`: it prints the store in use and why. Point at an
+existing file with `--db` or `RABBITHOLE_DB`, or move it; see
+[Upgrading from v0.2.x](configuration.md#upgrading-from-v02x).
 
 ## A 400 that mentions `max_tokens` or `max_completion_tokens`
 
@@ -102,3 +150,19 @@ which older OpenAI-compatible servers expect.
 
 **What to do.** Switch `inference.provider` to the other one: `openai` for OpenAI and gateways
 in front of it, `vllm` for a vLLM server you run.
+
+## `Host not allowed` (403) behind a reverse proxy
+
+**What you see.** The page or API answers `403 Host not allowed. Use localhost or 127.0.0.1.`
+when reached through a proxy or a domain name, though `serve` runs fine on `localhost`.
+
+**Why.** A server listening on a loopback address (the default `127.0.0.1:8080`) answers only
+requests whose `Host` header is `localhost` or a loopback IP address. This stops a web page on
+another domain from rebinding its DNS to your machine and reading your data. A proxy that
+forwards the public name (`Host: rabbit.example.com`) is refused for the same reason.
+
+**What to do.** Either make the proxy send `Host: localhost` to the upstream (nginx:
+`proxy_set_header Host localhost;`), or listen on a non-loopback address with `--addr`, which
+needs `--tls-cert` and `--tls-key`, or `--insecure-http` when a TLS proxy sits in front (see
+[auth.md](auth.md)). Cross-origin POSTs are refused as well, so the page and its
+requests must use the same public name.

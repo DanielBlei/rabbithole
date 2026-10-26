@@ -45,21 +45,21 @@ type Service struct {
 // New returns a profile service over db.
 func New(db *store.Store) *Service { return &Service{db: db} }
 
-// BootstrapLegacy validates and imports config.profile once. ImportProfileOnce
+// BootstrapLegacy validates and imports the profile file at profilePath once. ImportProfileOnce
 // transactionally activates the deterministic import only when no active
 // reference has ever been persisted, preserving legacy behavior without
 // overwriting a later web selection on every restart.
-func (s *Service) BootstrapLegacy(ctx context.Context, cfg *config.Config) error {
-	if cfg.Profile == "" {
+func (s *Service) BootstrapLegacy(ctx context.Context, profilePath string) error {
+	if profilePath == "" {
 		return nil
 	}
-	content, err := cfg.LoadProfile()
+	content, err := config.LoadProfileFile(profilePath)
 	if err != nil {
 		return err
 	}
-	path, err := filepath.Abs(cfg.Profile)
+	path, err := filepath.Abs(profilePath)
 	if err != nil {
-		return fmt.Errorf("resolve profile path %q: %w", cfg.Profile, err)
+		return fmt.Errorf("resolve profile path %q: %w", profilePath, err)
 	}
 	id := legacyID(filepath.Clean(path))
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))

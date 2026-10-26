@@ -13,7 +13,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
@@ -132,95 +131,33 @@ func init() {
 	rootCmd.AddCommand(itemsCmd)
 }
 
-// openStore opens whichever engine the config names and logs which one. Every
-// command goes through it so the redaction and the warning below cannot be
-// forgotten at one call site: cfg.Store.URL carries the password, so it is the
-// resolved Label that reaches a log line or an error, never the DSN.
-//
-// exclusive claims the single-writer guard, which only `serve` passes: a
-// one-shot command has to work while a server is up.
-func openStore(ctx context.Context, cfg *config.Config, exclusive bool) (*store.Store, error) {
-	label := cfg.Store.DBPath
-	var pg config.Postgres
-	if cfg.Store.IsPostgres() {
-		var err error
-		if pg, err = cfg.Store.ResolvePostgres(); err != nil {
-			return nil, err
-		}
-		label = pg.Label
-		if pg.PasswordInConfigFile {
-			log.Warn().Msgf("store.url carries a password; a $%s reference keeps it out of the"+
-				" config file and out of the web config viewer", config.DBPasswordEnv)
-		}
-	}
-	var err error
-	var db *store.Store
-	if exclusive {
-		db, err = store.OpenExclusive(ctx, cfg.Store)
-	} else {
-		db, err = store.OpenFrom(ctx, cfg.Store)
-	}
-	if err != nil {
-		if cfg.Store.IsPostgres() && !pg.HasPassword && !errors.Is(err, store.ErrStoreInUse) {
-			return nil, fmt.Errorf("%w (no password given: set %s)", err, config.DBPasswordEnv)
-		}
-		return nil, err
-	}
-	logStoreConnected(cfg, label, exclusive, pg)
-	return db, nil
-}
-
-// logStoreConnected says which store this process opened and on what terms: the
-// engine, the target, and on Postgres the sslmode with what that mode actually
-// delivers, as fields rather than as prose. `serve` says it at info, since boot is
-// where an operator checks the settings took effect; one-shot commands say it at
-// debug so `items list` stays quiet.
-//
-// Stated, not warned about. What each sslmode costs is argued once in
-// docs/configuration.md#tls, and repeating it every boot reads as alarm about the
-// documented default — `require`, the only mode Supabase and RDS reach on the first
-// try — which trains people to ignore the lines that do mean something. The two
-// booleans still carry the whole fact: over loopback `verified:false` is nobody
-// else's reach, and `encrypted:false` is visible to anyone reading the line.
-func logStoreConnected(cfg *config.Config, label string, exclusive bool, pg config.Postgres) {
-	level := zerolog.DebugLevel
-	if exclusive {
-		// Only `serve` opens exclusively, and its boot log is the confirmation.
-		level = zerolog.InfoLevel
-	}
-	engine := "sqlite"
-	if cfg.Store.IsPostgres() {
-		engine = "postgres"
-	}
-	event := log.WithLevel(level).Str("engine", engine).Str("store", label)
-	if cfg.Store.IsPostgres() {
-		event = event.
-			Str("sslmode", pg.SSLMode).
-			Bool("encrypted", pg.TLSEncrypted()).
-			Bool("verified", pg.TLSVerified()).
-			Bool("loopback", pg.Loopback)
-	}
-	event.Msg("store connected")
-}
-
-// withStore opens the configured store, runs fn, and closes it. The loaded
-// config is passed through so callers can apply config-driven defaults (e.g.
-// `items list`'s default window) without reloading it.
-func withStore(cmd *cobra.Command, fn func(ctx context.Context, db *store.Store, cfg *config.Config) error) error {
-	cfg, err := config.Load(configPath)
+// withStore opens the store, runs fn, and closes it. The run config comes as a
+// source rather than a value, so a command that does not need it (auth reset,
+// the escape hatch for a forgotten password) still works when the stored config
+// is unreadable.
+func withStore(cmd *cobra.Command, fn func(ctx context.Context, db *store.Store, src config.Source) error) error {
+	s, err := openSession(cmd, sessionOpts{quiet: true})
 	if err != nil {
 		return err
 	}
-	db, err := openStore(cmd.Context(), cfg, false)
+	defer s.Close()
+	return fn(cmd.Context(), s.db, s.src)
+}
+
+// withReadStore is withStore for a command that only reads: a SQLite store that
+// is not there prints empty instead of creating one.
+func withReadStore(cmd *cobra.Command, empty string,
+	fn func(ctx context.Context, db *store.Store) error) error {
+	s, err := openSession(cmd, sessionOpts{quiet: true, optional: true, noImport: true})
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			log.Warn().Err(err).Msg("db close failed")
-		}
-	}()
-	return fn(cmd.Context(), db, cfg)
+	defer s.Close()
+	if s.db == nil {
+		fmt.Printf("%s (no store at %s)\n", empty, s.missing)
+		return nil
+	}
+	return fn(cmd.Context(), s.db)
 }
 
 // applyToEach runs fn for every identifier, continuing past per-item errors
@@ -243,7 +180,7 @@ func applyToEach(identifiers []string, fn func(string) error) error {
 
 func statusRunE(status, verb string) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		return withStore(cmd, func(ctx context.Context, db *store.Store, _ *config.Config) error {
+		return withStore(cmd, func(ctx context.Context, db *store.Store, _ config.Source) error {
 			return applyToEach(args, func(identifier string) error {
 				s := status
 				if err := db.UpdateUserState(ctx, identifier, store.UserPatch{Status: &s}); err != nil {
@@ -258,7 +195,7 @@ func statusRunE(status, verb string) func(*cobra.Command, []string) error {
 
 func bookmarkRunE(value bool, verb string) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		return withStore(cmd, func(ctx context.Context, db *store.Store, _ *config.Config) error {
+		return withStore(cmd, func(ctx context.Context, db *store.Store, _ config.Source) error {
 			return applyToEach(args, func(identifier string) error {
 				v := value
 				if err := db.UpdateUserState(ctx, identifier, store.UserPatch{Bookmarked: &v}); err != nil {
@@ -277,7 +214,7 @@ func runRate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("score must be an integer, got %q", args[1])
 	}
-	return withStore(cmd, func(ctx context.Context, db *store.Store, _ *config.Config) error {
+	return withStore(cmd, func(ctx context.Context, db *store.Store, _ config.Source) error {
 		if err := db.UpdateUserState(ctx, identifier, store.UserPatch{UserScore: &score}); err != nil {
 			return err
 		}
@@ -289,7 +226,7 @@ func runRate(cmd *cobra.Command, args []string) error {
 func runNote(cmd *cobra.Command, args []string) error {
 	identifier := args[0]
 	note := strings.Join(args[1:], " ")
-	return withStore(cmd, func(ctx context.Context, db *store.Store, _ *config.Config) error {
+	return withStore(cmd, func(ctx context.Context, db *store.Store, _ config.Source) error {
 		if err := db.UpdateUserState(ctx, identifier, store.UserPatch{UserNote: &note}); err != nil {
 			return err
 		}
@@ -343,7 +280,7 @@ func resolveListFilter(defaultSince time.Duration) (store.ListFilter, error) {
 }
 
 func runList(cmd *cobra.Command, _ []string) error {
-	return withStore(cmd, func(ctx context.Context, db *store.Store, cfg *config.Config) error {
+	return withReadStore(cmd, "No items.", func(ctx context.Context, db *store.Store) error {
 		filter, err := resolveListFilter(defaultListSince)
 		if err != nil {
 			return err
@@ -378,7 +315,7 @@ func writeItemTable(rows []store.ItemRow) error {
 }
 
 func runSources(cmd *cobra.Command, _ []string) error {
-	return withStore(cmd, func(ctx context.Context, db *store.Store, _ *config.Config) error {
+	return withReadStore(cmd, "No sources.", func(ctx context.Context, db *store.Store) error {
 		counts, err := db.Sources(ctx)
 		if err != nil {
 			return err
@@ -441,8 +378,8 @@ func resolvePruneFilter(now time.Time) (store.PruneFilter, error) {
 
 // reingestNote warns when a prune reaches into the window ingest still fetches,
 // where deleting an item its feed still lists means the next run re-fetches and
-// re-scores it. It reads the global window while feeds may override it, so the
-// note says "may" and is empty only when the prune stays clear of it entirely.
+// re-scores it. window is the feed defaults' lookback while feeds may override it,
+// so the note says "may" and is empty only when the prune stays clear of it entirely.
 func reingestNote(filter store.PruneFilter, now time.Time, window time.Duration) string {
 	if !filter.Before.IsZero() && !filter.Before.After(now.Add(-window)) {
 		return ""
@@ -463,7 +400,7 @@ func humanDuration(d time.Duration) string {
 }
 
 func runPrune(cmd *cobra.Command, _ []string) error {
-	return withStore(cmd, func(ctx context.Context, db *store.Store, cfg *config.Config) error {
+	return withStore(cmd, func(ctx context.Context, db *store.Store, _ config.Source) error {
 		now := time.Now()
 		filter, err := resolvePruneFilter(now)
 		if err != nil {
@@ -497,7 +434,11 @@ func runPrune(cmd *cobra.Command, _ []string) error {
 			return nil
 		}
 		fmt.Printf("Pruned %d item(s).%s\n", result.Deleted, keptClause(result))
-		if note := reingestNote(filter, now, cfg.Ingest.Since.Std()); note != "" {
+		defaults, err := db.FeedDefaults(ctx)
+		if err != nil {
+			return err
+		}
+		if note := reingestNote(filter, now, defaults.EffectiveSince()); note != "" {
 			fmt.Println(note)
 		}
 		return nil

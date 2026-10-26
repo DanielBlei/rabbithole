@@ -10,6 +10,7 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -18,13 +19,10 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/eval"
 	"github.com/DanielBlei/rabbithole/internal/inference"
+	"github.com/DanielBlei/rabbithole/internal/profilemgr"
 	"github.com/DanielBlei/rabbithole/internal/rank"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
-
-// defaultBenchmarkPath sits beside the other configs, matching how the config
-// file itself is defaulted.
-const defaultBenchmarkPath = "./configs/golden.yaml"
 
 // heuristicProvider is the model-free scorer, useful for exercising a benchmark
 // run without a backend.
@@ -74,19 +72,18 @@ var (
 
 func init() {
 	benchmarkCmd := &cobra.Command{
-		Use:   "benchmark [golden-file]",
+		Use:   "benchmark <golden-file>",
 		Short: "Score a labelled golden dataset with the current profile and prompt, and report the gap",
 		Long: "Loads a golden dataset — articles you scored by hand — re-scores every sample with " +
 			"your configured or built-in profile and system prompt, and reports how far the model landed from " +
 			"your scores. Because it re-scores rather than reading stored values, two runs either " +
 			"side of a profile edit are directly comparable.\n\n" +
-			"Defaults to " + defaultBenchmarkPath + ". Copy configs/golden.example.yaml to start " +
-			"one of your own. Nothing is written to the store.",
-		Example: "  rabbithole eval benchmark\n" +
-			"  rabbithole eval benchmark configs/golden.example.yaml\n" +
-			"  rabbithole eval benchmark --model qwen3.6:35b --repeats 5\n" +
-			"  rabbithole eval benchmark --format json --output-path before.json",
-		Args: cobra.MaximumNArgs(1),
+			"Copy docs/examples/golden.yaml to start one of your own. " +
+			"Nothing is written to the store.",
+		Example: "  rabbithole eval benchmark docs/examples/golden.yaml\n" +
+			"  rabbithole eval benchmark my-golden.yaml --model qwen3.6:35b --repeats 5\n" +
+			"  rabbithole eval benchmark my-golden.yaml --format json --output-path before.json",
+		Args: cobra.ExactArgs(1),
 		RunE: runBenchmark,
 	}
 	benchmarkCmd.Flags().
@@ -152,12 +149,11 @@ func resolveOutput(format, path string) (eval.Output, error) {
 	return eval.Output{Format: f, Path: path}, nil
 }
 
-// resolveBenchmarkOptions turns the `eval benchmark` flags and its optional
+// resolveBenchmarkOptions turns the `eval benchmark` flags and its dataset
 // path argument into eval.BenchmarkOptions. Think is left to the caller, which
 // needs the config to know what it is overriding.
 func resolveBenchmarkOptions(args []string, limitSet bool) (eval.BenchmarkOptions, error) {
 	opts := eval.BenchmarkOptions{
-		Path:        defaultBenchmarkPath,
 		Repeats:     benchRepeats,
 		Limit:       benchLimit,
 		Provider:    benchProvider,
@@ -167,9 +163,10 @@ func resolveBenchmarkOptions(args []string, limitSet bool) (eval.BenchmarkOption
 		MaxParallel: benchParallel,
 		ShowWhy:     benchShowWhy,
 	}
-	if len(args) == 1 {
-		opts.Path = args[0]
+	if len(args) != 1 {
+		return eval.BenchmarkOptions{}, errors.New("the golden dataset path is required")
 	}
+	opts.Path = args[0]
 	if opts.Repeats < 1 {
 		return eval.BenchmarkOptions{}, fmt.Errorf("--repeats must be at least 1, got %d", opts.Repeats)
 	}
@@ -240,26 +237,21 @@ func runBenchmark(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(configPath)
+	cfg, profilePath, profile, err := benchmarkConfig(cmd)
 	if err != nil {
 		return err
 	}
-	applyBackendOverride(cfg, opts)
+	applyBackendOverride(&cfg, opts)
 
 	// think comes from config; --no-think overrides it for one-off runs, the
 	// same precedence ingest uses.
-	opts.Think = *cfg.Inference.Think
+	opts.Think = cfg.Inference.ThinkEnabled()
 	if cmd.Flags().Changed("no-think") {
 		opts.Think = false
 	}
-
-	profile, err := cfg.LoadProfile()
-	if err != nil {
-		return err
-	}
 	ds, err := eval.Load(opts.Path)
 	if err != nil {
-		return missingGoldenError(opts.Path, err)
+		return err
 	}
 	datasetSamples := len(ds.Samples)
 	ds = ds.Limit(opts.Limit)
@@ -274,14 +266,11 @@ func runBenchmark(cmd *cobra.Command, args []string) error {
 		Msg("benchmark loaded")
 	log.Debug().
 		Int("profile_chars", len(profile)).
-		Str("profile", cfg.Profile).
+		Str("profile", profilePath).
 		Str("benchmark_hash", ds.Hash).
 		Msg("benchmark inputs")
 
-	systemPrompt, err := cfg.Inference.LoadSystemPrompt()
-	if err != nil {
-		return err
-	}
+	systemPrompt := cfg.Inference.EffectiveSystemPrompt()
 	scorer, err := resolveJudgeScorer(ctx, cfg.Inference, opts.Think, systemPrompt)
 	if err != nil {
 		return err
@@ -325,14 +314,60 @@ func runBenchmark(cmd *cobra.Command, args []string) error {
 	})
 }
 
-// missingGoldenError points at the example dataset when the default path is the
-// one that is missing, since a fresh checkout does not ship configs/golden.yaml.
-func missingGoldenError(path string, err error) error {
-	if path != defaultBenchmarkPath || !errors.Is(err, os.ErrNotExist) {
-		return err
+// benchmarkConfig returns the config a benchmark scores with, the interest
+// profile's file path (empty for the stored or built-in one) and the profile
+// text. A --config file is read as is: never imported, and the store is not
+// opened at all. Without one the stored config and the active profile are used.
+func benchmarkConfig(cmd *cobra.Command) (cfg config.Config, profilePath, profile string, err error) {
+	if configPath == "" {
+		s, err := openSession(cmd, sessionOpts{quiet: true, noImport: true, optional: true})
+		if err != nil {
+			return cfg, "", "", err
+		}
+		defer s.Close()
+		if s.db == nil {
+			log.Info().Msgf("benchmark config: defaults (no store at %s)", s.missing)
+			profile, err = config.LoadProfileFile("")
+			return config.RunDefaults(), "", profile, err
+		}
+		if cfg, _, err = s.src.Active(cmd.Context()); err != nil {
+			return cfg, "", "", err
+		}
+		if v, ok, err := s.db.ActiveConfig(cmd.Context()); err == nil && ok {
+			log.Info().Msgf("benchmark config: version %d (%s)", v.Version, v.Source)
+		} else {
+			log.Info().Msg("benchmark config: defaults")
+		}
+		snap, err := profilemgr.New(s.db).Resolve(cmd.Context())
+		if err != nil {
+			return cfg, "", "", err
+		}
+		return cfg, "", snap.Content, nil
 	}
-	return fmt.Errorf("no golden dataset at %s; copy configs/golden.example.yaml to %s, "+
-		"or pass a path", defaultBenchmarkPath, defaultBenchmarkPath)
+	log.Info().Msgf("benchmark config: %s", configPath)
+	if _, err := loadEnv(); err != nil {
+		return cfg, "", "", err
+	}
+	file, err := config.ReadFile(configPath)
+	if err != nil {
+		return cfg, "", "", err
+	}
+	if err := file.InlineSystemPrompt(filepath.Dir(configPath)); err != nil {
+		return cfg, "", "", fmt.Errorf("%s: %w", configPath, err)
+	}
+	cfg, _, legacy, _ := file.Split()
+	// The file's literal key is the one this run uses: it replaces any value of
+	// the variable in this process only, and is never written to .env.
+	for _, sec := range cfg.ExtractLiterals() {
+		if err := os.Setenv(sec.Name, sec.Value); err != nil {
+			return cfg, "", "", fmt.Errorf("set %s: %w", sec.Name, err)
+		}
+	}
+	if _, err := cfg.Prepare(); err != nil {
+		return cfg, "", "", err
+	}
+	profile, err = config.LoadProfileFile(legacy.ProfilePath)
+	return cfg, legacy.ProfilePath, profile, err
 }
 
 // writeReport renders the report to the requested destination, stdout when no
@@ -367,22 +402,12 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	// Loaded to fail early on a bad config, and because the report names the
-	// profile it was judged against.
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return err
-	}
-
-	db, err := openStore(cmd.Context(), cfg, false)
+	s, err := openSession(cmd, sessionOpts{quiet: true, noImport: true, mustExist: true})
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			log.Warn().Err(err).Msg("db close failed")
-		}
-	}()
+	defer s.Close()
+	db := s.db
 
 	filter := store.ListFilter{
 		RatedOnly: opts.RatedOnly,

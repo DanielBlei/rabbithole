@@ -48,16 +48,14 @@ func TestResolveBenchmarkOptions(t *testing.T) {
 		name     string
 		args     []string
 		limitSet bool
+		noArgs   bool
 		setup    func()
 		wantErr  bool
 		check    func(t *testing.T, o eval.BenchmarkOptions)
 	}{
 		{
-			name: "bare benchmark defaults to the golden file beside the config",
+			name: "defaults apply to the named dataset",
 			check: func(t *testing.T, o eval.BenchmarkOptions) {
-				if o.Path != defaultBenchmarkPath {
-					t.Errorf("Path = %q, want %q", o.Path, defaultBenchmarkPath)
-				}
 				if o.Repeats != eval.DefaultRepeats {
 					t.Errorf("Repeats = %d, want %d", o.Repeats, eval.DefaultRepeats)
 				}
@@ -76,13 +74,18 @@ func TestResolveBenchmarkOptions(t *testing.T) {
 			},
 		},
 		{
-			name: "positional argument overrides the default golden file",
+			name: "the positional argument is the dataset path",
 			args: []string{"testdata/other.yaml"},
 			check: func(t *testing.T, o eval.BenchmarkOptions) {
 				if o.Path != "testdata/other.yaml" {
 					t.Errorf("Path = %q, want testdata/other.yaml", o.Path)
 				}
 			},
+		},
+		{
+			name:    "a missing dataset path is refused",
+			noArgs:  true,
+			wantErr: true,
 		},
 		{
 			name:     "limit narrows the run",
@@ -154,7 +157,11 @@ func TestResolveBenchmarkOptions(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup()
 			}
-			o, err := resolveBenchmarkOptions(tt.args, tt.limitSet)
+			args := tt.args
+			if args == nil && !tt.noArgs {
+				args = []string{"golden.yaml"}
+			}
+			o, err := resolveBenchmarkOptions(args, tt.limitSet)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("resolveBenchmarkOptions() error = nil, want non-nil")
@@ -703,5 +710,28 @@ func TestResolveJudgeScorerGate(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown provider") {
 		t.Errorf("error = %v, want an unknown-provider error", err)
+	}
+}
+
+func TestBenchmarkConfigUsesFileLiteralKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	body := "inference:\n  provider: openai\n  host: https://api.example.com/v1\n  model: m\n  api_key: sk-from-file\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RABBITHOLE_INFERENCE_API_KEY", "sk-from-env")
+	oldCfg, oldEnv := configPath, envFile
+	configPath, envFile = path, filepath.Join(dir, ".env")
+	t.Cleanup(func() { configPath, envFile = oldCfg, oldEnv })
+
+	if _, _, _, err := benchmarkConfig(&cobra.Command{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("RABBITHOLE_INFERENCE_API_KEY"); got != "sk-from-file" {
+		t.Errorf("key used = %q, want the file's literal", got)
+	}
+	if _, err := os.Stat(envFile); err == nil {
+		t.Error("eval wrote an env file")
 	}
 }

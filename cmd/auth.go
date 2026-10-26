@@ -39,7 +39,7 @@ func init() {
 		Short: "Show whether the web UI asks for a login",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withStore(cmd, func(ctx context.Context, db *store.Store, _ *config.Config) error {
+			return withStore(cmd, func(ctx context.Context, db *store.Store, _ config.Source) error {
 				return authStatus(ctx, db, cmd.OutOrStdout())
 			})
 		},
@@ -51,7 +51,7 @@ func init() {
 			"and not echoed; --password-stdin reads it from the first line of stdin instead, for scripts.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withStore(cmd, func(ctx context.Context, db *store.Store, _ *config.Config) error {
+			return withStore(cmd, func(ctx context.Context, db *store.Store, _ config.Source) error {
 				read := func() (string, error) {
 					return readNewPassword(cmd.InOrStdin(), cmd.ErrOrStderr(), resetPasswordStdin)
 				}
@@ -67,7 +67,7 @@ func init() {
 		Short: "Switch the login off, leaving the web UI open to anyone who can reach it",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withStore(cmd, func(ctx context.Context, db *store.Store, _ *config.Config) error {
+			return withStore(cmd, func(ctx context.Context, db *store.Store, _ config.Source) error {
 				return authDisable(ctx, db, cmd.OutOrStdout())
 			})
 		},

@@ -79,7 +79,7 @@ func TestRescoreItemsReplacesSuccessAndPreservesFailure(t *testing.T) {
 	cfg.Inference.MaxParallel = 1
 	snapshot := profile.NewSnapshot("new-profile", "New", "# New", false)
 	outcome, err := rescoreItems(
-		ctx, cfg, snapshot, db, items, &rescoreTestScorer{failID: "fail"},
+		ctx, *cfg, snapshot, db, items, &rescoreTestScorer{failID: "fail"},
 	)
 	if err != nil {
 		t.Fatalf("rescoreItems: %v", err)
@@ -149,7 +149,7 @@ func TestRescoreUsesOneProfileSnapshot(t *testing.T) {
 	cfg.Inference.BatchSize = 1
 	cfg.Inference.MaxParallel = 1
 
-	if _, err := rescoreItems(ctx, cfg, snapshot, db, items, scorer); err != nil {
+	if _, err := rescoreItems(ctx, *cfg, snapshot, db, items, scorer); err != nil {
 		t.Fatal(err)
 	}
 	scorer.mu.Lock()
@@ -191,7 +191,7 @@ func TestRescoreBackendInitFailureLeavesScoresUntouched(t *testing.T) {
 	cfg.Inference.Think = &think
 	cfg.Inference.Provider = "not-a-provider"
 	_, err = RescoreRecent(
-		ctx, cfg, profile.Default(), db, time.Now(), ProfileRescoreWindow,
+		ctx, *cfg, profile.Default(), db, time.Now(), ProfileRescoreWindow,
 	)
 	if err == nil {
 		t.Fatal("RescoreRecent succeeded with invalid provider")
@@ -239,7 +239,7 @@ func TestSelectingProfileAloneDoesNotChangeStoredScore(t *testing.T) {
 
 func TestRescoreRejectsInvalidWindow(t *testing.T) {
 	_, err := RescoreRecent(
-		context.Background(), &config.Config{}, profile.Default(), nil, time.Now(), 0,
+		context.Background(), config.Config{}, profile.Default(), nil, time.Now(), 0,
 	)
 	if err == nil {
 		t.Fatalf("invalid window error = %v", err)

@@ -1,10 +1,9 @@
-// Unsaved changes in the profile editor. Closing settings, leaving the
-// Profiles tab or any other editor action first asks to save, discard or keep
-// editing.
+// Unsaved changes in the profile editor. Leaving the page or any other editor
+// action first asks to save, discard or keep editing. Switching settings tabs
+// does not: the editor stays in its pane, edits and all.
 (function(){
-  var settings = document.getElementById('settingsModal');
   var askLayer = document.getElementById('modalTop');
-  if (!settings || !askLayer) return;
+  if (!document.getElementById('profilesSettings') || !askLayer) return;
   var snapshot = null, snapshotForm = null;
 
   function editorForm(){
@@ -50,9 +49,9 @@
             '<p class="prof-form__err" role="alert" hidden></p>' +
           '</div>' +
           '<div class="modal__foot prof-confirm__actions">' +
-            '<button type="button" data-modal-close>keep editing</button>' +
-            '<button class="prof__danger" type="button" data-unsaved="discard">discard</button>' +
-            '<button class="prof-form__save" type="button" data-unsaved="save">save</button>' +
+            '<button class="clk-btn" type="button" data-modal-close>Keep editing</button>' +
+            '<button class="clk-btn clk-btn--danger" type="button" data-unsaved="discard">Discard</button>' +
+            '<button class="clk-btn clk-btn--go" type="button" data-unsaved="save">Save</button>' +
           '</div>' +
         '</div>' +
       '</div>';
@@ -85,20 +84,24 @@
     });
   }
 
-  // Closing settings: the ×, the backdrop or Escape.
-  document.addEventListener('modal:beforeclose', function(e){
-    if (e.detail.layer !== settings || !dirty()) return;
+  // Following a link away from the page. The settings tab bar is not one of
+  // these: its links only switch panes.
+  document.addEventListener('click', function(e){
+    var link = e.target.closest('a[href]');
+    if (!link || link.closest('[data-stp-tab]') || link.hasAttribute('data-stp-tab')) return;
+    if (e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    if (link.target && link.target !== '_self') return;
+    if (link.origin !== window.location.origin || link.hasAttribute('hx-get') || !dirty()) return;
     e.preventDefault();
-    ask(e.detail.proceed);
+    ask(function(){ snapshot = null; window.location.href = link.href; });
   });
 
-  // Leaving the Profiles tab.
-  settings.addEventListener('click', function(e){
-    var tab = e.target.closest('.stg__rail input[name="stgSect"]');
-    if (!tab || tab.id === 'stgProfiles' || !dirty()) return;
+  // Reload, back out of the page or close the tab: the browser's own prompt.
+  window.addEventListener('beforeunload', function(e){
+    if (!dirty()) return;
     e.preventDefault();
-    ask(function(){ tab.checked = true; tab.focus(); });
-  }, true);
+    e.returnValue = '';
+  });
 
   // Any other action inside the editor. The request is replayed rather than
   // resumed, because a save swaps out the element that issued it.

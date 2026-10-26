@@ -6,7 +6,6 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -30,18 +29,14 @@ func newIngestWeb(t *testing.T) *Web {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	profile := filepath.Join(t.TempDir(), "profile.md")
-	if err := os.WriteFile(profile, []byte("# interests"), 0o644); err != nil {
-		t.Fatalf("write profile: %v", err)
-	}
 	think := false
-	cfg := &config.Config{Profile: profile}
+	cfg := &config.Config{}
 	cfg.Inference.Think = &think
-	m, err := ingest.NewManager(db, cfg, zerolog.InfoLevel)
+	m, err := ingest.NewManager(db, config.Static(*cfg), zerolog.InfoLevel)
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
-	return New(db, cfg, "", m)
+	return New(db, config.Static(*cfg), m)
 }
 
 func get(t *testing.T, w *Web, path string) string {

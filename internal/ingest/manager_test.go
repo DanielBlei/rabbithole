@@ -6,6 +6,7 @@ package ingest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -36,14 +37,14 @@ func newManagerForTest(t *testing.T, outcome Outcome, runErr error) (*Manager, c
 	cfg := &config.Config{}
 	cfg.Inference.Think = &think
 
-	m, err := NewManager(db, cfg, zerolog.InfoLevel)
+	m, err := NewManager(db, config.Static(*cfg), zerolog.InfoLevel)
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
 	release := make(chan struct{})
 	m.run = func(
 		ctx context.Context,
-		_ *config.Config,
+		_ config.Config,
 		_ profile.Snapshot,
 		_ *store.Store,
 		_ time.Time,
@@ -127,7 +128,7 @@ func TestManagerProfileResolutionPerRun(t *testing.T) {
 	gates := make(chan chan struct{}, 4)
 	m.run = func(
 		ctx context.Context,
-		_ *config.Config,
+		_ config.Config,
 		activeProfile profile.Snapshot,
 		_ *store.Store,
 		_ time.Time,
@@ -209,7 +210,7 @@ func TestManagerIngestAndRescoreShareSingleFlight(t *testing.T) {
 	captured := make(chan profile.Snapshot, 1)
 	m.rescore = func(
 		ctx context.Context,
-		_ *config.Config,
+		_ config.Config,
 		activeProfile profile.Snapshot,
 		_ *store.Store,
 		_ time.Time,
@@ -281,7 +282,7 @@ func TestManagerRescoreSnapshotSurvivesProfileChange(t *testing.T) {
 	release := make(chan struct{})
 	m.rescore = func(
 		ctx context.Context,
-		_ *config.Config,
+		_ config.Config,
 		activeProfile profile.Snapshot,
 		_ *store.Store,
 		_ time.Time,
@@ -319,7 +320,7 @@ func TestManagerCancelRescore(t *testing.T) {
 	m, _ := newManagerForTest(t, Outcome{}, nil)
 	m.rescore = func(
 		ctx context.Context,
-		_ *config.Config,
+		_ config.Config,
 		_ profile.Snapshot,
 		_ *store.Store,
 		_ time.Time,
@@ -418,7 +419,7 @@ func TestManagerInterruptsStaleRuns(t *testing.T) {
 	think := true
 	cfg := &config.Config{}
 	cfg.Inference.Think = &think
-	if _, err := NewManager(db, cfg, zerolog.InfoLevel); err != nil {
+	if _, err := NewManager(db, config.Static(*cfg), zerolog.InfoLevel); err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
 
@@ -439,7 +440,7 @@ func TestManagerBufferCapturesDebugRegardlessOfLogLevel(t *testing.T) {
 	orig := m.run
 	m.run = func(
 		ctx context.Context,
-		cfg *config.Config,
+		cfg config.Config,
 		activeProfile profile.Snapshot,
 		db *store.Store,
 		day time.Time,
@@ -526,7 +527,7 @@ func TestManagerLogsRunContextOnly(t *testing.T) {
 	orig := m.run
 	m.run = func(
 		ctx context.Context,
-		cfg *config.Config,
+		cfg config.Config,
 		activeProfile profile.Snapshot,
 		db *store.Store,
 		day time.Time,
@@ -589,7 +590,7 @@ func TestManagerShutdownTimesOut(t *testing.T) {
 	m, _ := newManagerForTest(t, Outcome{}, nil)
 	m.run = func(
 		ctx context.Context,
-		_ *config.Config,
+		_ config.Config,
 		_ profile.Snapshot,
 		_ *store.Store,
 		_ time.Time,
@@ -614,5 +615,74 @@ func TestManagerShutdownTimesOut(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Shutdown did not return at ctx deadline")
+	}
+}
+
+// funcSource adapts a function to config.Source.
+type funcSource func(context.Context) (config.Config, int, error)
+
+func (f funcSource) Active(ctx context.Context) (config.Config, int, error) { return f(ctx) }
+
+// A run whose config cannot be read ends as an error row, never a silent skip,
+// and the run function is not called.
+func TestManagerConfigSourceError(t *testing.T) {
+	m, release := newManagerForTest(t, Outcome{}, nil)
+	called := false
+	m.run = func(context.Context, config.Config, profile.Snapshot, *store.Store, time.Time, Options) (Outcome, error) {
+		called = true
+		return Outcome{}, nil
+	}
+	m.src = funcSource(func(context.Context) (config.Config, int, error) {
+		return config.Config{}, 0, errors.New("store offline")
+	})
+	ctx := context.Background()
+
+	if err := m.Start(ctx, store.IngestTriggerManual); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	close(release)
+	waitIdle(t, m)
+
+	last, err := m.db.LastIngestRun(ctx)
+	if err != nil {
+		t.Fatalf("LastIngestRun: %v", err)
+	}
+	if last.Status != store.IngestStatusError || !strings.Contains(last.Error, "store offline") {
+		t.Errorf("error row wrong: %+v", last)
+	}
+	if called {
+		t.Error("run was called despite a config error")
+	}
+}
+
+// One Active call feeds the whole run: a source that changes after the first
+// read does not reach the run mid-flight.
+func TestManagerSnapshotPerRun(t *testing.T) {
+	m, release := newManagerForTest(t, Outcome{}, nil)
+	var calls int
+	m.src = funcSource(func(context.Context) (config.Config, int, error) {
+		calls++
+		cfg := config.Config{}
+		cfg.Inference.Model = fmt.Sprintf("model-%d", calls)
+		return cfg, calls, nil
+	})
+	var got []string
+	m.run = func(
+		_ context.Context, cfg config.Config, _ profile.Snapshot, _ *store.Store, _ time.Time, _ Options,
+	) (Outcome, error) {
+		got = append(got, cfg.Inference.Model)
+		return Outcome{}, nil
+	}
+	ctx := context.Background()
+
+	for range 2 {
+		if err := m.Start(ctx, store.IngestTriggerManual); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		waitIdle(t, m)
+	}
+	close(release)
+	if calls != 2 || len(got) != 2 || got[0] != "model-1" || got[1] != "model-2" {
+		t.Errorf("calls = %d, models = %v, want one Active call per run", calls, got)
 	}
 }

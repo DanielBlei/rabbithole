@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"os/user"
 	"strconv"
 	"strings"
 	"time"
@@ -43,7 +42,7 @@ var (
 // pageTmpl builds the template set for one page: the shared layout and partials
 // plus the named page file under templates/.
 func pageTmpl(page string) *template.Template {
-	return template.Must(template.New(page).ParseFS(
+	return template.Must(template.New(page).Funcs(template.FuncMap{"tip": tipFor}).ParseFS(
 		templatesFS,
 		"templates/layout.html",
 		"templates/partials/*.html",
@@ -83,9 +82,7 @@ const (
 // Web renders the HTML frontend over the same store the JSON API uses.
 type Web struct {
 	db       *store.Store
-	cfg      *config.Config
-	user     string // shell-prompt name: cfg.User, or the OS user when blank
-	cfgPath  string // config file path, read on demand by the config viewer
+	src      config.Source
 	ing      *ingest.Manager
 	profiles *profilemgr.Service
 
@@ -94,18 +91,39 @@ type Web struct {
 	hashing  chan struct{}  // password-hash slots, hashSlots wide
 	trusted  []netip.Prefix // proxies whose forwarding headers are believed
 	dev      bool           // serve assets no-cache, for editing them live
+
+	managedBy string // the --config file, "" without one
+
+	env       EnvSource  // where api key variables came from, for the settings page
+	storeInfo *StoreInfo // what boot knew about the store, nil when not reported
+
+	envFile    *config.EnvFile // the .env a pasted key is written to
+	noEnvWrite bool            // --no-env-write: pasting a key is refused
+	// scorerCheck builds the scorer for "Test connection"; nil uses the real one.
+	scorerCheck func(context.Context, config.Config) error
 }
 
-// New returns a Web backed by db, using cfg for request defaults. cfgPath is
-// the config file the viewer reads and displays read-only. ing owns the
+// New returns a Web backed by db, reading the run config from src once per request. ing owns the
 // in-process ingest runs the UI triggers and watches.
-func New(db *store.Store, cfg *config.Config, cfgPath string, ing *ingest.Manager) *Web {
+func New(db *store.Store, src config.Source, ing *ingest.Manager) *Web {
 	return &Web{
-		db: db, cfg: cfg, user: promptUser(cfg.User), cfgPath: cfgPath, ing: ing,
+		db: db, src: src, ing: ing,
 		profiles: profilemgr.New(db),
 		sessions: newSessionStore(), limiter: newLoginLimiter(),
 		hashing: make(chan struct{}, hashSlots), trusted: DefaultTrustedProxies,
 	}
+}
+
+// pagePromptUser is the shell-prompt name the pages wear. A stored config that
+// cannot be read is logged and the default name is used: these pages need
+// nothing else from it, so they keep rendering.
+func (s *Web) pagePromptUser(ctx context.Context) string {
+	cfg, _, err := s.src.Active(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("run config unreadable; using the default prompt user")
+		return promptUser("")
+	}
+	return promptUser(cfg.User)
 }
 
 // promptUser picks the shell-prompt name: the configured user, or the OS login
@@ -115,10 +133,7 @@ func promptUser(configured string) string {
 	if configured != "" {
 		return configured
 	}
-	if u, err := user.Current(); err == nil {
-		return u.Username
-	}
-	return ""
+	return config.DefaultUser()
 }
 
 // Routes returns the web handler: the digest ("feed") page — the landing page,
@@ -129,7 +144,18 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.handleFeed)
 	mux.HandleFunc("GET /feed", s.handleFeed)
 	mux.HandleFunc("GET /maze", s.handleMaze)
-	mux.HandleFunc("GET /config", s.handleConfig)
+	mux.HandleFunc("GET /settings", s.handleSettingsIndex)
+	mux.HandleFunc("GET /settings/{tab}", s.handleSettings)
+	mux.HandleFunc("POST /settings/review", s.handleSettingsReview)
+	mux.HandleFunc("POST /settings/save", s.handleSettingsSave)
+	mux.HandleFunc("POST /settings/test", s.handleSettingsTest)
+	mux.HandleFunc("POST /settings/key", s.handleSettingsKey)
+	mux.HandleFunc("POST /settings/rollback", s.handleSettingsRollback)
+	mux.HandleFunc("GET /settings/versions/{n}/diff", s.handleSettingsVersionDiff)
+	mux.HandleFunc("GET /settings/export", s.handleSettingsExport)
+	mux.HandleFunc("GET /settings/import", s.handleSettingsImportDialog)
+	mux.HandleFunc("POST /settings/import/preview", s.handleSettingsImportPreview)
+	mux.HandleFunc("POST /settings/import/apply", s.handleSettingsImportApply)
 	mux.HandleFunc("GET /login", s.handleLoginPage)
 	mux.HandleFunc("POST /login", s.handleLogin)
 	mux.HandleFunc("POST /logout", s.handleLogout)
@@ -154,6 +180,7 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /sources/export", s.handleSourceExport)
 	mux.HandleFunc("GET /sources/{id}", s.handleSourceSelect)
 	mux.HandleFunc("POST /sources", s.handleSourceAdd)
+	mux.HandleFunc("POST /sources/import", s.handleSourceImport)
 	mux.HandleFunc("POST /sources/defaults", s.handleSourceSaveDefaults)
 	mux.HandleFunc("POST /sources/{id}", s.handleSourceSave)
 	mux.HandleFunc("POST /sources/{id}/enabled", s.handleSourceEnabled)
@@ -240,6 +267,10 @@ func (s *Web) staticControl() string {
 // no-cache, so a rebuild shows on the next reload rather than after the normal
 // cache window.
 func (s *Web) SetDev(on bool) { s.dev = on }
+
+// SetManagedBy names the --config file, so the settings page can say that edits
+// made there are kept until the file changes.
+func (s *Web) SetManagedBy(path string) { s.managedBy = path }
 
 // contentTags hashes every embedded asset once, at startup. The whole tree is
 // under a megabyte, and doing it here means no hashing on the request path and
@@ -499,7 +530,7 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		Title:      "The Rabbit Hole",
 		Active:     "feed",
 		Chrome:     chrome,
-		PromptUser: s.user,
+		PromptUser: s.pagePromptUser(r.Context()),
 		Stats: s.stats(
 			r,
 			rows,

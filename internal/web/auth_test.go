@@ -237,9 +237,9 @@ func TestSetupCanLeaveTheInstanceOpen(t *testing.T) {
 
 	wantRedirect(t, b.do(http.MethodPost, "/setup", url.Values{"action": {"open"}}), "/")
 	stranger := newBrowser(t, w)
-	page := stranger.get("/feed")
+	page := stranger.get("/settings/account")
 	wantStatus(t, page, http.StatusOK)
-	if !strings.Contains(page.Body.String(), `href="/setup"`) || strings.Contains(page.Body.String(), "log out") {
+	if !strings.Contains(page.Body.String(), `href="/setup"`) || strings.Contains(page.Body.String(), "Log out") {
 		t.Error("an open instance should offer to set a password, and no logout")
 	}
 	wantRedirect(t, stranger.get("/login"), "/")
@@ -255,9 +255,9 @@ func TestLoginReturnsToNextAndLogoutEndsTheSession(t *testing.T) {
 
 	form := url.Values{"username": {"alice"}, "password": {"correct horse"}, "next": {"/maze"}}
 	wantRedirect(t, b.do(http.MethodPost, "/login", form), "/maze")
-	page := b.get("/feed")
+	page := b.get("/settings/account")
 	wantStatus(t, page, http.StatusOK)
-	if !strings.Contains(page.Body.String(), "log out") {
+	if !strings.Contains(page.Body.String(), "Log out") {
 		t.Error("settings should offer log out when a password is set")
 	}
 	if !strings.Contains(b.get("/login").Header().Get("Location"), "/") {
@@ -291,7 +291,7 @@ func TestRestartForgetsSessions(t *testing.T) {
 	b := newBrowser(t, w)
 	b.login("alice", "correct horse")
 
-	restarted := New(w.db, &config.Config{}, "", testIngestManager(t, w.db))
+	restarted := New(w.db, config.Static{}, testIngestManager(t, w.db))
 	b.h = restarted.Gate(restarted.Routes())
 	wantRedirect(t, b.get("/feed"), "/login?next=%2Ffeed")
 }

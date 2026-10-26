@@ -4,6 +4,8 @@
 package web
 
 import (
+	"bytes"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -31,10 +33,8 @@ func sourcesTestWeb(t *testing.T, doc config.FeedsDoc) (*Web, *store.Store) {
 	if _, err := db.SeedFeeds(t.Context(), doc); err != nil {
 		t.Fatalf("SeedFeeds: %v", err)
 	}
-	cfg := &config.Config{
-		Ingest: config.IngestConfig{Since: config.Duration(globalSince), Feeds: "/tmp/feeds.yaml"},
-	}
-	return New(db, cfg, "", testIngestManager(t, db)), db
+	w := New(db, config.Static{}, testIngestManager(t, db))
+	return w, db
 }
 
 // feedID looks up the stored ID for a feed by name, which is how the dialog
@@ -112,9 +112,9 @@ func TestSourcesRendersResolvedValues(t *testing.T) {
 			why:  "the client filter matches on the url",
 		},
 		{
-			name: "global since as the placeholder",
+			name: "built-in since as the placeholder",
 			in:   detail,
-			want: `placeholder="9d"`,
+			want: `placeholder="7d"`,
 			why:  "Beta sets no window, so the empty box shows what it will use",
 		},
 		{
@@ -933,4 +933,110 @@ func mustFeed(t *testing.T, db *store.Store, name string) config.Feed {
 		t.Fatalf("FeedByID: %v", err)
 	}
 	return f
+}
+
+// postFile sends body as the multipart "file" field of an import.
+func postFile(t *testing.T, w *Web, body string) string {
+	t.Helper()
+	return postFileRec(t, w, body).Body.String()
+}
+
+func postFileRec(t *testing.T, w *Web, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	part, err := mw.CreateFormFile("file", "feeds.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/sources/import", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	w.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /sources/import: status = %d, want 200; body=%s", rec.Code, rec.Body)
+	}
+	return rec
+}
+
+const importFeeds = `feeds:
+  - name: Gamma
+    url: https://gamma.test/feed
+  - name: Delta
+    url: https://delta.test/feed
+  - name: Broken
+    url: ftp://nope.test/feed
+`
+
+func TestSourcesImportReportsCounts(t *testing.T) {
+	w, db := sourcesTestWeb(t, config.FeedsDoc{
+		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
+	})
+	out := postFile(t, w, importFeeds)
+	if !strings.Contains(out, `role="status"`) ||
+		!strings.Contains(out, "added 2 feed(s), skipped 1 already known (including deleted ones)") {
+		t.Errorf("status line missing or wrong; body=%s", out)
+	}
+	if !strings.Contains(out, "feed 2:") {
+		t.Errorf("the skipped entry's warning is missing; body=%s", out)
+	}
+	if !strings.Contains(out, "Gamma") || !strings.Contains(out, `id="srcBody"`) {
+		t.Errorf("the repainted list lacks the new feed; body=%s", out)
+	}
+	if got := len(mustFeeds(t, db)); got != 3 {
+		t.Errorf("feeds = %d, want 3", got)
+	}
+
+	again := postFile(t, w, importFeeds)
+	if !strings.Contains(again, "added 0 feed(s), skipped 3 already known") {
+		t.Errorf("second import; body=%s", again)
+	}
+}
+
+func TestSourcesImportCarriesTheFeedCount(t *testing.T) {
+	w, _ := sourcesTestWeb(t, config.FeedsDoc{
+		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
+	})
+	if got := postFileRec(t, w, importFeeds).Header().Get(feedCountHeader); got != "3" {
+		t.Errorf("%s = %q, want 3", feedCountHeader, got)
+	}
+}
+
+func TestSourcesImportSkipsDeletedFeeds(t *testing.T) {
+	w, db := sourcesTestWeb(t, config.FeedsDoc{})
+	postFile(t, w, importFeeds)
+	req := httptest.NewRequest(http.MethodDelete, "/sources/"+feedID(t, db, "Gamma"), nil)
+	w.Routes().ServeHTTP(httptest.NewRecorder(), req)
+	out := postFile(t, w, importFeeds)
+	if !strings.Contains(out, "added 0 feed(s)") {
+		t.Errorf("a deleted feed came back; body=%s", out)
+	}
+}
+
+func TestSourcesImportRejectionsRenderInline(t *testing.T) {
+	w, db := sourcesTestWeb(t, config.FeedsDoc{})
+	cases := map[string]struct{ body, want string }{
+		"broken yaml":    {"feeds: [unclosed\n", "parse feeds file"},
+		"empty":          {"# nothing here\n", "not a feeds file: no feeds list"},
+		"config shaped":  {"inference:\n  provider: ollama\n", "not a feeds file: no feeds list"},
+		"oversize":       {"feeds: []\n# " + strings.Repeat("x", sourceImportLimit), "too large"},
+		"no feeds field": {"", "not a feeds file"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			out := postFile(t, w, c.body)
+			if !strings.Contains(out, `role="alert"`) || !strings.Contains(out, c.want) {
+				t.Errorf("want an inline alert with %q; body=%s", c.want, out)
+			}
+		})
+	}
+	if got := len(mustFeeds(t, db)); got != 0 {
+		t.Errorf("a rejected file added %d feeds", got)
+	}
 }

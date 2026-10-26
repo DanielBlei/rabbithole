@@ -203,7 +203,7 @@ type Store struct {
 }
 
 // OpenFrom opens whichever engine the config names: a db_path means SQLite, a
-// url means Postgres. config.Load has already rejected setting both or neither.
+// url means Postgres. StoreConfig.Validate has already rejected setting both or neither.
 // It places no claim on the store, so any number of processes may hold one —
 // which is what lets a CLI command run while a server is up.
 func OpenFrom(ctx context.Context, cfg config.StoreConfig) (*Store, error) {

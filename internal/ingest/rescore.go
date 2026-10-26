@@ -33,7 +33,7 @@ type RescoreOutcome struct {
 // retain their previous valid scores.
 func RescoreRecent(
 	ctx context.Context,
-	cfg *config.Config,
+	cfg config.Config,
 	activeProfile profile.Snapshot,
 	db *store.Store,
 	now time.Time,
@@ -58,11 +58,7 @@ func RescoreRecent(
 		return outcome, nil
 	}
 
-	think := false
-	if cfg.Inference.Think != nil {
-		think = *cfg.Inference.Think
-	}
-	scorer, err := resolveConfiguredScorer(ctx, cfg, think)
+	scorer, err := resolveConfiguredScorer(ctx, cfg, cfg.Inference.ThinkEnabled())
 	if err != nil {
 		return outcome, err
 	}
@@ -71,7 +67,7 @@ func RescoreRecent(
 
 func rescoreItems(
 	ctx context.Context,
-	cfg *config.Config,
+	cfg config.Config,
 	activeProfile profile.Snapshot,
 	db *store.Store,
 	items []feeds.Item,

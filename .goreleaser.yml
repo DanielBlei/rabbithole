@@ -19,13 +19,11 @@ archives:
   - formats:
       - tar.gz
     # Listing files replaces the default LICENSE/README globs, so they stay
-    # listed. The examples keep their configs/ path; scripts/install.sh reads
-    # them from there for the starter config.
+    # listed. The examples stay in the repo (docs/examples); nothing reads them
+    # from the archive.
     files:
       - LICENSE
       - README.md
-      - configs/config.example.yaml
-      - configs/feeds.example.yaml
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
 

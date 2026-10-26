@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package config loads the YAML run configuration and the interest profile.
+// Package config holds the run configuration, the store bootstrap block and the interest profile.
 package config
 
 import (
@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -93,17 +92,6 @@ func ParseDuration(s string) (time.Duration, error) {
 	return dur, nil
 }
 
-// Config is the full run configuration loaded from YAML. Feeds are not in here:
-// they live in the store, and ingest.feeds names only the file new ones are
-// seeded from (see feeds.go).
-type Config struct {
-	User      string          `yaml:"user"`    // shell-prompt name on the web UI; blank falls back to the OS user
-	Profile   string          `yaml:"profile"` // path to the interest-profile markdown
-	Inference InferenceConfig `yaml:"inference"`
-	Ingest    IngestConfig    `yaml:"ingest"`
-	Store     StoreConfig     `yaml:"store"`
-}
-
 // InferenceConfig configures the scoring backend (the model and how to reach it).
 type InferenceConfig struct {
 	Provider string `yaml:"provider"` // ollama | openai | vllm | heuristic
@@ -117,7 +105,7 @@ type InferenceConfig struct {
 	// false leaves the shape to the system prompt, for endpoints whose guided decoding garbles it.
 	StructuredOutput *bool `yaml:"structured_output"`
 
-	// SystemPrompt: unset takes inference's built-in default, a path overrides it, false sends none.
+	// SystemPrompt: unset takes inference's built-in default, text replaces it, false sends none.
 	SystemPrompt SystemPromptSetting `yaml:"system_prompt"`
 
 	// How items are batched through the model. BatchSize also sizes the token
@@ -128,38 +116,18 @@ type InferenceConfig struct {
 	// ModelTuning carries the decoding limits.
 	// Omit the block, or any field in it, to take rank's defaults.
 	ModelTuning rank.ModelTuning `yaml:"model_tuning"`
-
-	// Summary is a placeholder for a separate summarization backend;
-	// nothing routes to it yet.
-	Summary SummaryConfig `yaml:"summary"`
 }
 
-// SummaryConfig overrides the model backend used for summarization tasks.
-// Unset fields fall back to the parent InferenceConfig; if any field here
-// is set, Model must be too, since a summary block that only tweaks the
-// endpoint without naming a model has no meaning.
-//
-// ModelTuning and SystemPrompt are not overridable here yet — they always
-// come from the parent InferenceConfig. Summarization will likely want its
-// own SystemPrompt eventually (a different task than profile scoring), but
-// that's for whoever wires up actual usage.
-type SummaryConfig struct {
-	Provider string `yaml:"provider"`
-	Host     string `yaml:"host"`
-	Model    string `yaml:"model"`
-	APIKey   string `yaml:"api_key"`
-	Think    *bool  `yaml:"think"`
-	Effort   string `yaml:"effort"`
-}
-
-// SystemPromptSetting is the inference.system_prompt config value: a path, false (disabled),
-// or unset (the built-in default).
+// SystemPromptSetting is the inference.system_prompt value: the prompt text, false
+// (disabled), or unset (the built-in default). A config file may name a prompt file
+// instead of the text; File.InlineSystemPrompt replaces the path with the file's
+// contents before anything is stored.
 type SystemPromptSetting struct {
-	Path     string
+	Text     string
 	Disabled bool
 }
 
-// UnmarshalYAML accepts a path string or the literal false; true is rejected.
+// UnmarshalYAML accepts text or the literal false; true is rejected.
 func (s *SystemPromptSetting) UnmarshalYAML(value *yaml.Node) error {
 	if value.Tag == "!!bool" {
 		var b bool
@@ -167,19 +135,49 @@ func (s *SystemPromptSetting) UnmarshalYAML(value *yaml.Node) error {
 			return err
 		}
 		if b {
-			return fmt.Errorf("system_prompt: true has no meaning; use a path, false, or omit it")
+			return fmt.Errorf("system_prompt: true has no meaning; use the prompt text, false, or omit it")
 		}
 		s.Disabled = true
 		return nil
 	}
-	return value.Decode(&s.Path)
+	return value.Decode(&s.Text)
 }
 
-// IngestConfig governs the fetch/score run.
-type IngestConfig struct {
-	Since     Duration `yaml:"since"`      // lookback window (e.g. 14d, 168h)
-	DigestDir string   `yaml:"digest_dir"` // optional: where `ingest --markdown` writes the digest; no default
-	Feeds     string   `yaml:"feeds"`      // path to the feed seed file; empty looks for feeds.yaml beside the config
+// LooksLikePath reports whether a system_prompt value reads as a file path rather
+// than prompt text: one line that has no whitespace, or that starts with /, ./,
+// ../ or ~/. Prompt text is normally several words, so it never matches.
+func LooksLikePath(v string) bool {
+	v = strings.TrimSpace(v)
+	if v == "" || strings.ContainsAny(v, "\r\n") {
+		return false
+	}
+	if !strings.ContainsAny(v, " \t") {
+		return true
+	}
+	for _, p := range []string{"/", "./", "../", "~/"} {
+		if strings.HasPrefix(v, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// FileInference is the inference block of a config file: the stored settings plus
+// the keys that are accepted and dropped.
+type FileInference struct {
+	InferenceConfig `yaml:",inline"`
+
+	// Summary was a placeholder for a separate summarization backend. It is
+	// accepted so old files import, and ignored.
+	Summary map[string]any `yaml:"summary"`
+}
+
+// FileIngest is the ingest block of a config file. Feeds is a legacy import
+// directive: the path a one-time feed seed is read from.
+type FileIngest struct {
+	Since     Duration `yaml:"since"`
+	DigestDir string   `yaml:"digest_dir"`
+	Feeds     string   `yaml:"feeds"`
 }
 
 // StoreConfig configures item persistence. Exactly one of the two fields is
@@ -231,7 +229,7 @@ type Postgres struct {
 	// PasswordInConfigFile records that store.url carries a password, in either
 	// of the two forms the drivers take. It stays true when DBPasswordEnv
 	// overrides the value, because what deserves a warning is a secret sitting in
-	// a file that gets copied around and shown in the config viewer — not which
+	// a file that gets copied around and shown in Settings, Advanced — not which
 	// of the two sources won.
 	PasswordInConfigFile bool
 
@@ -273,8 +271,9 @@ func (p Postgres) TLSEncrypted() bool {
 	}
 }
 
-// bracedEnvRef matches ${NAME}, which url.Parse rejects in userinfo.
-var bracedEnvRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+// bracedEnvRef matches ${NAME}, which url.Parse rejects in userinfo. It only
+// rewrites the braces away; parseRef still decides what counts as a name.
+var bracedEnvRef = regexp.MustCompile(`\$\{(` + refNamePattern + `)\}`)
 
 // ResolvePostgres builds the connection from store.url plus DBPasswordEnv. The
 // environment wins over a password in the URL, so an exported variable can
@@ -375,154 +374,81 @@ const (
 	defaultModel       = "qwen3.5:4b"
 	defaultBatchSize   = 1
 	defaultMaxParallel = 1
-	defaultSince       = 7 * 24 * time.Hour
 	defaultEffort      = "medium"
 )
+
+// DefaultSince is the lookback window a feed gets when neither it nor the feed
+// defaults set one.
+const DefaultSince = 7 * 24 * time.Hour
 
 // efforts are the reasoning_effort levels inference.effort accepts. Lower ones
 // belong to think: false, which probes the model's own lowest.
 var efforts = []string{"low", "medium", "high", "xhigh"}
 
-// Load reads and validates the config at path, applying defaults for unset fields.
-func Load(path string) (*Config, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
-	}
-	var cfg Config
-	if err := yaml.Unmarshal(raw, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
-	}
-	if err := cfg.expandAPIKeys(); err != nil {
-		return nil, err
-	}
-	cfg.applyDefaults()
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
-}
-
-func (c *Config) applyDefaults() {
-	if c.Inference.Provider == "" {
-		c.Inference.Provider = defaultProvider
-	}
-	if c.Inference.Host == "" {
-		c.Inference.Host = defaultHost
-	}
-	if c.Inference.Model == "" {
-		c.Inference.Model = defaultModel
-	}
-	if c.Inference.Think == nil {
-		t := true
-		c.Inference.Think = &t
-	}
-	if c.Inference.Effort == "" {
-		c.Inference.Effort = defaultEffort
-	}
-	if c.Inference.StructuredOutput == nil {
-		t := true
-		c.Inference.StructuredOutput = &t
-	}
-	if c.Inference.BatchSize <= 0 {
-		c.Inference.BatchSize = defaultBatchSize
-	}
-	if c.Inference.MaxParallel <= 0 {
-		c.Inference.MaxParallel = defaultMaxParallel
-	}
-	if c.Ingest.Since == 0 {
-		c.Ingest.Since = Duration(defaultSince)
-	}
-}
-
-func (c *Config) validate() error {
-	// "claude" is deliberately absent: it is an eval-only reference scorer,
-	// reachable through `eval benchmark --provider claude` and nowhere else.
-	switch c.Inference.Provider {
-	case "ollama", "openai", "vllm", "heuristic":
-	default:
-		return fmt.Errorf("invalid provider %q, must be ollama, openai, vllm or heuristic", c.Inference.Provider)
-	}
-	for field, effort := range map[string]string{
-		"inference.effort":         c.Inference.Effort,
-		"inference.summary.effort": c.Inference.Summary.Effort,
-	} {
-		if effort != "" && !slices.Contains(efforts, effort) {
-			return fmt.Errorf("%s %q, must be one of %s", field, effort, strings.Join(efforts, ", "))
-		}
-	}
-	if c.Inference.Summary != (SummaryConfig{}) && c.Inference.Summary.Model == "" {
-		return fmt.Errorf("inference.summary.model is required when other inference.summary fields are set")
-	}
+// Validate checks the store block: exactly one target, a sane pool, and pool
+// settings only beside a Postgres url. It is what bootstrap runs on whichever
+// location it resolved.
+func (s StoreConfig) Validate() error {
 	switch {
-	case c.Store.DBPath == "" && c.Store.URL == "":
+	case s.DBPath == "" && s.URL == "":
 		return fmt.Errorf("store needs either db_path (sqlite) or url (postgres)")
-	case c.Store.DBPath != "" && c.Store.URL != "":
+	case s.DBPath != "" && s.URL != "":
 		return fmt.Errorf("store has both db_path and url; keep the one for the engine you want")
 	}
-	if c.Store.MaxConns < 0 {
-		return fmt.Errorf("store.max_conns must not be negative, got %d", c.Store.MaxConns)
+	if s.MaxConns < 0 {
+		return fmt.Errorf("store.max_conns must not be negative, got %d", s.MaxConns)
 	}
-	if c.Store.ConnMaxLifetime < 0 {
-		return fmt.Errorf("store.conn_max_lifetime must not be negative, got %s", c.Store.ConnMaxLifetime)
+	if s.ConnMaxLifetime < 0 {
+		return fmt.Errorf("store.conn_max_lifetime must not be negative, got %s", s.ConnMaxLifetime)
 	}
-	if c.Store.IsPostgres() {
-		if _, err := c.Store.ResolvePostgres(); err != nil {
+	if s.IsPostgres() {
+		if _, err := s.ResolvePostgres(); err != nil {
 			return err
 		}
-	} else if c.Store.MaxConns != 0 || c.Store.ConnMaxLifetime != 0 {
+	} else if s.MaxConns != 0 || s.ConnMaxLifetime != 0 {
 		// Naming them beside a sqlite path would otherwise look like it did
 		// something: there is no pool to shape, only the pragmas in its DSN.
 		return fmt.Errorf("store.max_conns and store.conn_max_lifetime apply to store.url, not db_path")
 	}
-	if c.Ingest.Since < 0 {
-		return fmt.Errorf("since must be positive, got %s", c.Ingest.Since)
-	}
 	return nil
 }
 
-// expandAPIKeys resolves a leading $NAME or ${NAME} in the api_key fields from
-// the environment. Any other '$', or an unset or empty variable, fails the load.
-func (c *Config) expandAPIKeys() error {
-	fields := []struct {
-		name string
-		key  *string
-	}{
-		{"inference.api_key", &c.Inference.APIKey},
-		{"inference.summary.api_key", &c.Inference.Summary.APIKey},
-	}
-	for _, f := range fields {
-		expanded, err := expandEnvRef(f.name, *f.key)
-		if err != nil {
-			return err
+// parseRef reads a whole $NAME or ${NAME} reference. ok is false for anything
+// else, including a '$' elsewhere in the value or a malformed name.
+func parseRef(value string) (name string, ok bool) {
+	switch {
+	case strings.HasPrefix(value, "${"):
+		if !strings.HasSuffix(value, "}") || len(value) < 4 {
+			return "", false
 		}
-		*f.key = expanded
+		name = value[2 : len(value)-1]
+	case strings.HasPrefix(value, "$"):
+		name = value[1:]
+	default:
+		return "", false
 	}
-	return nil
+	if !refNameRE.MatchString(name) {
+		return "", false
+	}
+	return name, true
 }
+
+// refNamePattern is the shape of an environment variable name in a reference.
+const refNamePattern = `[A-Za-z_][A-Za-z0-9_]*`
+
+var refNameRE = regexp.MustCompile(`^` + refNamePattern + `$`)
 
 // expandEnvRef resolves one api_key value. Errors never include the value.
 func expandEnvRef(field, value string) (string, error) {
 	if !strings.Contains(value, "$") {
 		return value, nil
 	}
-	var name string
-	switch {
-	case !strings.HasPrefix(value, "$"):
-		return "", fmt.Errorf("%s: a '$' is only allowed as a leading $NAME or ${NAME} reference", field)
-	case strings.HasPrefix(value, "${"):
-		if !strings.HasSuffix(value, "}") || len(value) < 4 {
-			return "", fmt.Errorf("%s: reference is not a well-formed ${NAME}", field)
-		}
-		name = value[2 : len(value)-1]
-	default:
-		name = value[1:]
+	name, ok := parseRef(value)
+	if !ok {
+		return "", fmt.Errorf("%s: a '$' is only allowed as a whole $NAME or ${NAME} reference", field)
 	}
-	if name == "" || strings.Contains(name, "$") {
-		return "", fmt.Errorf("%s: reference is not a single $NAME or ${NAME}", field)
-	}
-	resolved, ok := os.LookupEnv(name)
-	if !ok || resolved == "" {
+	resolved, set := os.LookupEnv(name)
+	if !set || resolved == "" {
 		return "", fmt.Errorf("%s: $%s is not set or empty", field, name)
 	}
 	return resolved, nil
@@ -543,14 +469,15 @@ func loadTrimmedFile(path string) (string, error) {
 	return stripHTMLComments(string(raw)), nil
 }
 
-// LoadProfile reads the interest-profile markdown referenced by the config.
-func (c *Config) LoadProfile() (string, error) {
-	if c.Profile == "" {
+// LoadProfileFile reads the interest-profile markdown at path; an empty path
+// returns the built-in default.
+func LoadProfileFile(path string) (string, error) {
+	if path == "" {
 		return profiledomain.DefaultContent, nil
 	}
-	profile, err := loadTrimmedFile(c.Profile)
+	profile, err := loadTrimmedFile(path)
 	if err != nil {
-		return "", fmt.Errorf("read profile %q: %w", c.Profile, err)
+		return "", fmt.Errorf("read profile %q: %w", path, err)
 	}
 	// The shipped template is mostly an HTML comment, so a file that looks
 	// filled in can strip to nothing. Without it every score is arbitrary while
@@ -558,67 +485,22 @@ func (c *Config) LoadProfile() (string, error) {
 	if strings.TrimSpace(profile) == "" {
 		return "", fmt.Errorf(
 			"profile %q is empty; it is required in order to make meaningful suggestions",
-			c.Profile,
+			path,
 		)
 	}
 	return profile, nil
 }
 
-// LoadOverride reads Path, if set, stripping HTML comments like LoadProfile. Unset returns
-// ("", nil); the caller decides what that means.
-func (s *SystemPromptSetting) LoadOverride() (string, error) {
-	if s.Path == "" {
-		return "", nil
+// EffectiveSystemPrompt resolves inference.system_prompt: disabled returns "", text returns
+// itself, and unset returns the built-in default. The heuristic provider never looks at a
+// system prompt, so it always gets "".
+func (c InferenceConfig) EffectiveSystemPrompt() string {
+	switch {
+	case c.Provider == "heuristic" || c.SystemPrompt.Disabled:
+		return ""
+	case c.SystemPrompt.Text != "":
+		return c.SystemPrompt.Text
+	default:
+		return rank.DefaultSystemPrompt
 	}
-	prompt, err := loadTrimmedFile(s.Path)
-	if err != nil {
-		return "", fmt.Errorf("read system prompt %q: %w", s.Path, err)
-	}
-	if strings.TrimSpace(prompt) == "" {
-		return "", fmt.Errorf("system prompt %q is empty", s.Path)
-	}
-	return prompt, nil
-}
-
-// LoadSystemPrompt resolves the effective inference.system_prompt: disabled returns "", a path
-// returns that file's contents, and unset returns the built-in default. The heuristic provider
-// never looks at a system prompt, so it always gets "" without touching SystemPrompt at all —
-// a bad or missing override path must not block a heuristic run.
-func (c *InferenceConfig) LoadSystemPrompt() (string, error) {
-	if c.Provider == "heuristic" {
-		return "", nil
-	}
-	if c.SystemPrompt.Disabled {
-		return "", nil
-	}
-	if c.SystemPrompt.Path != "" {
-		return c.SystemPrompt.LoadOverride()
-	}
-	return rank.DefaultSystemPrompt, nil
-}
-
-// ResolveSummary returns the effective InferenceConfig for summarization
-// tasks: c with Provider/Host/Model/APIKey/Think/Effort overridden by any set
-// Summary fields. ModelTuning and SystemPrompt always come from c.
-func (c InferenceConfig) ResolveSummary() InferenceConfig {
-	resolved := c
-	if c.Summary.Provider != "" {
-		resolved.Provider = c.Summary.Provider
-	}
-	if c.Summary.Host != "" {
-		resolved.Host = c.Summary.Host
-	}
-	if c.Summary.Model != "" {
-		resolved.Model = c.Summary.Model
-	}
-	if c.Summary.APIKey != "" {
-		resolved.APIKey = c.Summary.APIKey
-	}
-	if c.Summary.Think != nil {
-		resolved.Think = c.Summary.Think
-	}
-	if c.Summary.Effort != "" {
-		resolved.Effort = c.Summary.Effort
-	}
-	return resolved
 }

@@ -50,7 +50,7 @@ type Outcome struct {
 // Outcome aggregates every feed, with Results sorted best-first across all.
 func Run(
 	ctx context.Context,
-	cfg *config.Config,
+	cfg config.Config,
 	activeProfile profile.Snapshot,
 	db *store.Store,
 	day time.Time,
@@ -60,7 +60,7 @@ func Run(
 	// One read of the feed set for the whole run. The Sources page can edit
 	// feeds while this is in flight, and a run that re-read the store partway
 	// through would fetch one set and tag against another.
-	configured, err := ResolveFeeds(ctx, db, cfg)
+	configured, err := ResolveFeeds(ctx, db)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -216,26 +216,20 @@ func Run(
 
 func resolveConfiguredScorer(
 	ctx context.Context,
-	cfg *config.Config,
+	cfg config.Config,
 	think bool,
 ) (rank.Scorer, error) {
-	systemPrompt, err := cfg.Inference.LoadSystemPrompt()
-	if err != nil {
-		return nil, err
-	}
-	return inference.Resolve(ctx, cfg.Inference, think, systemPrompt)
+	return inference.Resolve(ctx, cfg.Inference, think, cfg.Inference.EffectiveSystemPrompt())
 }
 
 // ResolveFeeds reads the configured feeds out of the store and walks them
-// through the defaults cascade. Feeds live in the store, but the cascade's
-// outermost fallback for `since` is still ingest.since from the main config —
-// so both are needed to answer "what will this feed actually fetch".
-func ResolveFeeds(ctx context.Context, db *store.Store, cfg *config.Config) ([]config.ResolvedFeed, error) {
+// through the defaults cascade, answering "what will this feed actually fetch".
+func ResolveFeeds(ctx context.Context, db *store.Store) ([]config.ResolvedFeed, error) {
 	doc, err := db.FeedsDoc(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return config.ResolveFeeds(doc, cfg.Ingest.Since.Std())
+	return config.ResolveFeeds(doc)
 }
 
 // ConfiguredTags maps every configured feed's name — the value items record as

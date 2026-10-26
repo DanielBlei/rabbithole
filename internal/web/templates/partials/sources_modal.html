@@ -44,12 +44,15 @@
           </details>
         </div>
 
-        {{/* Defaults and export stack over this dialog rather than replacing it —
-             the same move the runner makes for its config viewer. */}}
+        {{/* Defaults and export stack over this dialog rather than replacing it. */}}
         <div class="src__acts">
           <a class="src__act src__act--add" href="#" hx-get="/sources/new" hx-target="#srcBody" hx-swap="outerHTML">+ add feed</a>
           <a class="src__act" href="#" hx-get="/sources/defaults" hx-target="#modalTop" hx-swap="innerHTML">&#9881; defaults</a>
           <a class="src__act" href="#" hx-get="/sources/export" hx-target="#modalTop" hx-swap="innerHTML">&#8681; export</a>
+          {{/* The picker is a pill that clicks a hidden input; a feeds file can also
+               be dropped anywhere on the columns. static/js/sources.js sends both. */}}
+          <button class="src__act" type="button" data-src-import>&#8679; import</button>
+          <input type="file" accept=".yaml,.yml" hidden data-src-file aria-label="Import feeds file">
         </div>
       </div>
 
@@ -84,8 +87,12 @@
      into the number it is measuring. It carries no server state — which page
      you're on lives in that script, so it survives these swaps. */}}
 {{define "sourcesBody"}}
-<div class="src__cols" id="srcBody">
+<div class="src__cols" id="srcBody" data-src-drop>
   <div class="src__col">
+    {{with .Import}}
+      {{if .Err}}<div class="sdet__err src__import" role="alert">{{.Err}}</div>
+      {{else}}<div class="sdet__ok src__import" role="status">{{.Msg}}{{range .Warnings}}<div>{{.}}</div>{{end}}</div>{{end}}
+    {{end}}
     <div class="src__list" data-src-list>
       {{if .Rows}}
         {{range .Rows}}{{template "sourceRow" .}}{{end}}

@@ -125,7 +125,7 @@ func (s *Web) mazeData(ctx context.Context) (mazeData, error) {
 		Title:      "The Rabbit Hole",
 		Active:     "maze",
 		Chrome:     s.chrome(ctx),
-		PromptUser: s.user,
+		PromptUser: s.pagePromptUser(ctx),
 		Open:       openViews,
 		Due:        due,
 		DoneGroups: groupByDay(done, today),

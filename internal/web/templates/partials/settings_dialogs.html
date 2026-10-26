@@ -1,0 +1,159 @@
+{{/* SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+     SPDX-License-Identifier: Apache-2.0 */}}
+
+{{/* Dialogs the settings page opens into #modal. */}}
+
+{{/* A "?" button and its bubble: opens on hover or focus, a tap toggles it. */}}
+{{define "stpHint"}}<button type="button" class="hint" aria-describedby="{{.ID}}" aria-label="More about this setting" data-hint>?</button><span class="hint__tip" id="{{.ID}}" role="tooltip">{{.Text}}</span>{{end}}
+
+{{define "stpDiff"}}
+<pre class="stp-diff" aria-label="Changes to the configuration file">{{range .}}{{if eq .Op "..."}}<span class="stp-diff__gap">...</span>{{else}}<span class="stp-diff__l stp-diff__l--{{if eq .Op "+"}}add{{else if eq .Op "-"}}del{{else}}ctx{{end}}"><i>{{if ne .Op " "}}{{.Op}}{{end}}</i>{{.Text}}</span>{{end}}{{end}}</pre>
+{{end}}
+
+{{define "settingsReview"}}
+<div class="modal">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__frame modal__frame--stp" role="dialog" aria-modal="true" aria-labelledby="stpReviewTitle">
+    <div class="modal__bar">
+      <span class="modal__title" id="stpReviewTitle">{{if .NoChange}}Review{{else}}Review changes{{end}}</span>
+      <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+    </div>
+    <div class="stp-dlg">
+      {{if .NoChange}}
+      <p class="stp-dlg__lead" data-stp-nochange>No changes to save.</p>
+      {{else}}
+      <div class="stp-chg">
+        {{range .Changes}}
+        <div class="stp-chg__r"><span class="stp-chg__n">{{.Name}}</span><span class="stp-chg__v"><del>{{.Old}}</del><i class="stp-chg__a" aria-hidden="true">&rarr;</i><ins>{{.New}}</ins></span></div>
+        {{end}}
+      </div>
+      {{if .HostMoved}}
+      <div class="stp-callout stp-callout--warn">
+        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v3.6M8 5.2v.1"/></svg>
+        <p>The server address moves from <code>{{.HostFrom}}</code> to <code>{{.HostTo}}</code>, and an API key is set. The key will be sent to the new address.</p>
+      </div>
+      <button type="button" class="stp-confirm" role="switch" aria-checked="false" data-stp-confirmhost><span class="stp-confirm__box" aria-hidden="true"></span>Send the API key to the new address</button>
+      {{end}}
+      {{if .Replies}}
+      <div class="stp-callout stp-callout--warn" data-stp-repliesnote>
+        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v3.6M8 5.2v.1"/></svg>
+        <p>These changes touch how the model is told to answer. A wrong change can make scores fail. You can roll back from Saved versions.</p>
+      </div>
+      {{end}}
+      <details class="stp-fold stp-fold--in">
+        <summary>Configuration file changes</summary>
+        {{template "stpDiff" .Diff}}
+      </details>
+      <p class="stp-dlg__note">Saving creates version {{.NextVersion}} from the Settings page. The next ingest run uses it.</p>
+      {{end}}
+      <p class="stp-row__err" role="alert" data-stp-dlgerr hidden></p>
+    </div>
+    <div class="modal__foot stp-dlg__foot">
+      <button type="button" class="clk-btn" data-modal-close>{{if .NoChange}}Close{{else}}Keep editing{{end}}</button>
+      {{if not .NoChange}}<button type="button" class="clk-btn clk-btn--go" data-stp-savenow{{if .HostMoved}} disabled{{end}}>Save version {{.NextVersion}}</button>{{end}}
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "settingsVersionDiff"}}
+<div class="stp-vdiff">
+  {{if .Diff}}
+  <p class="stp-row__h">Rolling back to version {{.Version}} would change the active version ({{.Active}}) like this.</p>
+  {{template "stpDiff" .Diff}}
+  {{else}}
+  <p class="stp-row__h">Version {{.Version}} matches the active configuration.</p>
+  {{end}}
+</div>
+{{end}}
+
+{{define "settingsImport"}}
+<div class="modal">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__frame modal__frame--stp" role="dialog" aria-modal="true" aria-labelledby="stpImportTitle">
+    <div class="modal__bar">
+      <span class="modal__title" id="stpImportTitle">Import a configuration</span>
+      <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+    </div>
+    <div class="stp-dlg" data-stp-importdlg>
+      <p class="stp-dlg__lead">Paste a configuration file or choose one. You see what would change before anything is saved.</p>
+      <textarea class="stp-area" data-stp-importtext rows="10" placeholder="inference:&#10;  provider: ollama" spellcheck="false" aria-label="Configuration file"></textarea>
+      <div class="stp-dlg__row">
+        <button type="button" class="clk-btn" data-stp-importpick>Choose a file</button>
+        <input type="file" accept=".yaml,.yml,text/yaml" hidden data-stp-importpickin aria-label="Configuration file">
+      </div>
+      <div data-stp-importresult aria-live="polite"></div>
+    </div>
+    <div class="modal__foot stp-dlg__foot">
+      <button type="button" class="clk-btn" data-modal-close>Cancel</button>
+      <button type="button" class="clk-btn" data-stp-importpreview>Preview</button>
+      <button type="button" class="clk-btn clk-btn--go" data-stp-importapply disabled>Apply as a new version</button>
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{define "settingsImportPreview"}}
+{{if .Error}}
+<p class="stp-row__err" role="alert" data-stp-importbad>{{.Error}}</p>
+{{else}}
+<div data-stp-importok{{if .NoChange}} data-nochange{{end}}{{if .HostMoved}} data-hostmoved{{end}}>
+  {{if .NoChange}}<p class="stp-dlg__lead">No changes to save. This file matches the active configuration.</p>
+  {{else if .SinceOnly}}
+  <p class="stp-dlg__lead">Applying this file changes the feed defaults only. No new version is saved.</p>
+  {{else}}
+  <p class="stp-dlg__lead">Applying this file saves version {{.NextVersion}}.</p>
+  {{template "stpDiff" .Diff}}
+  {{end}}
+  {{if .SinceTo}}<p class="stp-row__h">Feed defaults since: {{.SinceFrom}} -> {{.SinceTo}}</p>{{end}}
+  {{range .Warnings}}<p class="stp-row__h">Deprecated: {{.}}.</p>{{end}}
+  {{if .Defaulted}}<p class="stp-row__h">{{.Defaulted}} {{if eq .Defaulted 1}}value equals{{else}}values equal{{end}} the default and {{if eq .Defaulted 1}}stays a default{{else}}stay defaults{{end}}.</p>{{end}}
+  {{if .Dropped}}<p class="stp-row__h">Ignored because the provider does not read them: {{range $i, $d := .Dropped}}{{if $i}}, {{end}}{{$d}}{{end}}.</p>{{end}}
+  {{if .Moves}}<p class="stp-row__h">The API key in this file moves to <code>.env</code>. The saved configuration keeps only the name of its variable.</p>{{end}}
+  {{if .Ignored}}<p class="stp-row__h">The store, profile and feeds paths in this file are not applied from here.</p>{{end}}
+  {{if .HostMoved}}
+  <div class="stp-callout stp-callout--warn">
+    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v3.6M8 5.2v.1"/></svg>
+    <p>The server address moves from <code>{{.HostFrom}}</code> to <code>{{.HostTo}}</code>, and an API key is set. The key will be sent to the new address.</p>
+  </div>
+  <button type="button" class="stp-confirm" role="switch" aria-checked="false" data-stp-confirmhost><span class="stp-confirm__box" aria-hidden="true"></span>Send the API key to the new address</button>
+  {{end}}
+</div>
+{{end}}
+{{end}}
+
+{{/* The Reset to defaults chooser. Opened from General: a checkbox list with an
+     "All" master that reads mixed while only some are ticked. */}}
+{{define "settingsResetAll"}}
+<div class="modal">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__frame modal__frame--stp" role="dialog" aria-modal="true" aria-labelledby="stpResetTitle">
+    <div class="modal__bar">
+      <span class="modal__title" id="stpResetTitle">Reset to defaults</span>
+      <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+    </div>
+    <div class="stp-dlg" data-stp-resetdlg data-default-profile="{{.DefaultProfile}}">
+      <p class="stp-dlg__lead">Pick what goes back to its default. Your account and password are never included.</p>
+      <fieldset class="stp-checks">
+        <legend class="stp-sr">What to reset</legend>
+        <label class="stp-check stp-check--all"><input type="checkbox" data-stp-pillall><span class="stp-check__box" aria-hidden="true"></span><span class="stp-check__t">All</span></label>
+        <div class="stp-checks__list">
+          <label class="stp-check"><input type="checkbox" data-stp-pill="general"><span class="stp-check__box" aria-hidden="true"></span><span class="stp-check__t">General<small>Prompt name</small></span></label>
+          <label class="stp-check"><input type="checkbox" data-stp-pill="scoring"><span class="stp-check__box" aria-hidden="true"></span><span class="stp-check__t">Scoring<small>Model, behavior, performance</small></span></label>
+          <label class="stp-check"><input type="checkbox" data-stp-pill="advanced"><span class="stp-check__box" aria-hidden="true"></span><span class="stp-check__t">Advanced<small>Model tuning and replies</small></span></label>
+          <label class="stp-check"><input type="checkbox" data-stp-pill="profile"><span class="stp-check__box" aria-hidden="true"></span><span class="stp-check__t">Profile<small>Back to the built-in profile</small></span></label>
+          <label class="stp-check"><input type="checkbox" data-stp-pill="appearance"><span class="stp-check__box" aria-hidden="true"></span><span class="stp-check__t">Appearance<small>Layout and type</small></span></label>
+          <label class="stp-check"><input type="checkbox" data-stp-pill="widgets"><span class="stp-check__box" aria-hidden="true"></span><span class="stp-check__t">Widgets<small>Clock and weather</small></span></label>
+        </div>
+      </fieldset>
+      <p class="stp-dlg__note stp-resetwarn" data-stp-resetwarn hidden>Advanced also resets the reply settings: structured replies and the instructions.</p>
+      <p class="stp-dlg__sum" data-stp-resetsum role="status" aria-live="polite">Nothing selected.</p>
+      <p class="stp-dlg__note">Profile switches back to the built-in one; no profile is deleted.</p>
+    </div>
+    <div class="modal__foot stp-dlg__foot">
+      <button type="button" class="clk-btn" data-modal-close>Cancel</button>
+      <button type="button" class="clk-btn clk-btn--danger" data-stp-resetgo disabled>Reset selected</button>
+    </div>
+  </div>
+</div>
+{{end}}

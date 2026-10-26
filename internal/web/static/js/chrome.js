@@ -1,24 +1,5 @@
-// Page chrome/main menu: opening the settings dialog, the popmenu filters, and
-// the left-edge side menu.
-
-// Settings opens from two places — the topbar gear and the side menu's
-// `$ settings` — so the trigger is an attribute, not an id. Only the opening
-// lives here: modal.js has the dialog registered as its bottom layer and owns
-// closing it, the scroll lock, the focus trap and returning focus to whatever
-// opened it. A value on the attribute names the section to open on.
-(function(){
-  var dialog = document.getElementById('settingsModal');
-  if (!dialog) return;
-  var SECTIONS = {profiles: 'stgProfiles'};
-  document.addEventListener('click', function(e){
-    var opener = e.target.closest('[data-stg-open]');
-    if (!opener) return;
-    e.preventDefault();
-    var tab = document.getElementById(SECTIONS[opener.dataset.stgOpen]);
-    if (tab) tab.checked = true;
-    dialog.hidden = false;
-  });
-})();
+// Page chrome/main menu: the popmenu filters, the cursor switch and the
+// left-edge side menu.
 
 // The cursor switch at the head of the side menu. The prompt cursors are the
 // chrome's one piece of constant motion, and constant motion in the corner of

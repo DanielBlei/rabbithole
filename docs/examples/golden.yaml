@@ -1,4 +1,4 @@
-# The Rabbit Hole benchmark set. Copy to configs/golden.yaml and edit.
+# The Rabbit Hole benchmark set. Copy it and edit your copy.
 #
 # A small pile of articles you have marked yourself. `rabbithole eval benchmark` asks the
 # model to mark the same ones, then shows you where it disagreed with you. That is how

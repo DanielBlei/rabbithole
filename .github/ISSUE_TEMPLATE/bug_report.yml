@@ -37,8 +37,8 @@ body:
     attributes:
       label: Store
       options:
-        - sqlite (store.db_path)
-        - postgres (store.url)
+        - sqlite (a file path)
+        - postgres (a postgres:// URL)
         - not sure
 
   - type: input

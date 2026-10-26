@@ -97,8 +97,9 @@
     toggles.forEach(function(btn){
       var key = btn.getAttribute('data-clk-toggle');
       btn.classList.toggle('is-on', !!prefs[key]);
-      btn.setAttribute('aria-pressed', prefs[key] ? 'true' : 'false');
-      if (key === 'seconds') btn.textContent = prefs.seconds ? 'On' : 'Off';
+      btn.setAttribute('aria-checked', prefs[key] ? 'true' : 'false');
+      var txt = btn.querySelector('.wx-sw__txt');
+      if (txt) txt.textContent = prefs[key] ? 'On' : 'Off';
     });
     fmtOpts.forEach(function(opt){ opt.checked = opt.value === prefs.dateFmt; });
     hourOpts.forEach(function(opt){ opt.checked = (opt.value === '24') === !!prefs.time24; });

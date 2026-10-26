@@ -43,9 +43,15 @@ func serveRSS(t *testing.T, body string) string {
 	return srv.URL
 }
 
+// testCfg is a run config plus the database file the test's feeds were seeded into.
+type testCfg struct {
+	config.Config
+	dbPath string
+}
+
 // testConfig builds a heuristic-provider config (no backend needed) over the
 // given feeds, with a wide age window and a low threshold so test items pass.
-func testConfig(t *testing.T, feeds ...config.Feed) *config.Config {
+func testConfig(t *testing.T, feeds ...config.Feed) *testCfg {
 	t.Helper()
 	return testConfigWith(t, config.FeedsDoc{Feeds: feeds})
 }
@@ -54,14 +60,19 @@ func testConfig(t *testing.T, feeds ...config.Feed) *config.Config {
 // exercise the defaults block and per-feed overrides. Feeds live in the store,
 // so the document is seeded into the database the config points at; the
 // openStore below reopens that same file.
-func testConfigWith(t *testing.T, doc config.FeedsDoc) *config.Config {
+func testConfigWith(t *testing.T, doc config.FeedsDoc) *testCfg {
 	t.Helper()
-	cfg := &config.Config{
-		Inference: config.InferenceConfig{BatchSize: 2, MaxParallel: 2, Provider: "heuristic", Model: "test-model"},
-		Ingest:    config.IngestConfig{Since: config.Duration(365 * 24 * time.Hour)},
-		Store:     config.StoreConfig{DBPath: filepath.Join(t.TempDir(), "test.db")},
+	if doc.Defaults.Since == nil {
+		wide := config.Duration(365 * 24 * time.Hour)
+		doc.Defaults.Since = &wide
 	}
-	db, err := store.Open(cfg.Store.DBPath)
+	cfg := &testCfg{
+		Config: config.Config{
+			Inference: config.InferenceConfig{BatchSize: 2, MaxParallel: 2, Provider: "heuristic", Model: "test-model"},
+		},
+		dbPath: filepath.Join(t.TempDir(), "test.db"),
+	}
+	db, err := store.Open(cfg.dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -72,9 +83,9 @@ func testConfigWith(t *testing.T, doc config.FeedsDoc) *config.Config {
 	return cfg
 }
 
-func openStore(t *testing.T, cfg *config.Config) *store.Store {
+func openStore(t *testing.T, cfg *testCfg) *store.Store {
 	t.Helper()
-	db, err := store.Open(cfg.Store.DBPath)
+	db, err := store.Open(cfg.dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -158,7 +169,7 @@ func TestRunProcessesFeedsPerSourceAndDedups(t *testing.T) {
 	db := openStore(t, cfg)
 	firstProfile := testProfile("vllm inference latency batching")
 
-	out, err := Run(ctx, cfg, firstProfile, db, time.Now(), Options{Record: true})
+	out, err := Run(ctx, cfg.Config, firstProfile, db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -185,7 +196,7 @@ func TestRunProcessesFeedsPerSourceAndDedups(t *testing.T) {
 	// scored. The pre-scoring dedup drops them all rather than automatically
 	// rescoring them under the new profile.
 	secondProfile := profile.NewSnapshot("other-profile", "Other profile", "unrelated", false)
-	out2, err := Run(ctx, cfg, secondProfile, db, time.Now(), Options{Record: true})
+	out2, err := Run(ctx, cfg.Config, secondProfile, db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -217,14 +228,15 @@ func TestRunFetchedCountsOnlyItemsWithinAgeWindow(t *testing.T) {
   <item><title>Old item</title><link>https://x.test/old</link><guid>https://x.test/old</guid>
     <pubDate>%s</pubDate><description>summary</description></item>
 </channel></rss>`, recent, old)
-	feed := config.Feed{Name: "Mixed", URL: serveRSS(t, body)}
+	feed := config.Feed{
+		Name:  "Mixed",
+		URL:   serveRSS(t, body),
+		Since: durPtr(24 * time.Hour),
+	} // only the recent item survives
 	cfg := testConfig(t, feed)
-	// The feed sets no window of its own, so it inherits ingest.since — which
-	// the run resolves against, not load.
-	cfg.Ingest.Since = config.Duration(24 * time.Hour) // narrow window: only the recent item survives
 	db := openStore(t, cfg)
 
-	out, err := Run(ctx, cfg, testProfile("test"), db, time.Now(), Options{Record: true})
+	out, err := Run(ctx, cfg.Config, testProfile("test"), db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -243,7 +255,7 @@ func TestRunSkipsFailedFeed(t *testing.T) {
 	cfg := testConfig(t, good, bad)
 	db := openStore(t, cfg)
 
-	out, err := Run(ctx, cfg, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
+	out, err := Run(ctx, cfg.Config, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("Run should not fail because one feed failed: %v", err)
 	}
@@ -291,7 +303,7 @@ func TestRunSkipsDisabledFeeds(t *testing.T) {
 	}})
 	db := openStore(t, cfg)
 
-	out, err := Run(ctx, cfg, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
+	out, err := Run(ctx, cfg.Config, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -336,7 +348,7 @@ func TestRunSkipsDeletedFeeds(t *testing.T) {
 		}
 	}
 
-	out, err := Run(ctx, cfg, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
+	out, err := Run(ctx, cfg.Config, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -403,7 +415,14 @@ func TestRunAppliesPerFeedFilters(t *testing.T) {
 			cfg := testConfigWith(t, c.doc)
 			db := openStore(t, cfg)
 
-			out, err := Run(context.Background(), cfg, testProfile("test"), db, time.Now(), Options{Record: true})
+			out, err := Run(
+				context.Background(),
+				cfg.Config,
+				testProfile("test"),
+				db,
+				time.Now(),
+				Options{Record: true},
+			)
 			if err != nil {
 				t.Fatalf("Run: %v", err)
 			}
@@ -427,7 +446,7 @@ func TestRunCapKeepsNewestItems(t *testing.T) {
 	}})
 	db := openStore(t, cfg)
 
-	out, err := Run(context.Background(), cfg, testProfile("test"), db, time.Now(), Options{Record: true})
+	out, err := Run(context.Background(), cfg.Config, testProfile("test"), db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -467,7 +486,7 @@ func TestRunRecordsFeedFetchHistory(t *testing.T) {
 			db := openStore(t, cfg)
 
 			if _, err := Run(
-				ctx, cfg, testProfile("vllm inference"), db, time.Now(), Options{Record: c.record},
+				ctx, cfg.Config, testProfile("vllm inference"), db, time.Now(), Options{Record: c.record},
 			); err != nil {
 				t.Fatalf("Run: %v", err)
 			}
@@ -506,7 +525,7 @@ func TestRunAppendsToFeedHistory(t *testing.T) {
 	db := openStore(t, cfg)
 
 	for range 3 {
-		if _, err := Run(ctx, cfg, testProfile("test"), db, time.Now(), Options{Record: true}); err != nil {
+		if _, err := Run(ctx, cfg.Config, testProfile("test"), db, time.Now(), Options{Record: true}); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
 	}
@@ -538,7 +557,7 @@ func TestRunSkipsUnimplementedFeedTypes(t *testing.T) {
 	}})
 	db := openStore(t, cfg)
 
-	out, err := Run(ctx, cfg, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
+	out, err := Run(ctx, cfg.Config, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

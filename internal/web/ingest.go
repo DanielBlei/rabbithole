@@ -109,22 +109,20 @@ type ingestModalData struct {
 // that ingest responses re-render out-of-band so the chrome never goes stale.
 type chromeData struct {
 	Chip     ingestChipData
-	IngDot   string              // ingest status dot: err | warn | run | "" (healthy — no dot)
-	IngSub   string              // ingest subline shown inside the open side menu
-	IngNever bool                // no run has ever been recorded
-	FirstRun bool                // no run, no items and the welcome not dismissed — gates the welcome dialog
-	Welcome  map[string]bool     // welcome steps already taken, by store.Onboarding* name
-	Running  bool                // a run is live — the ingWatch fragment polls while true
-	OOB      bool                // render the fragments with hx-swap-oob
-	Account  accountData         // Settings → Account; empty Mode when no gate ran
-	Profiles profileSettingsData // Settings → Profiles
+	IngDot   string          // ingest status dot: err | warn | run | "" (healthy — no dot)
+	IngSub   string          // ingest subline shown inside the open side menu
+	IngNever bool            // no run has ever been recorded
+	FirstRun bool            // no run, no items and the welcome not dismissed — gates the welcome dialog
+	Welcome  map[string]bool // welcome steps already taken, by store.Onboarding* name
+	Running  bool            // a run is live — the ingWatch fragment polls while true
+	OOB      bool            // render the fragments with hx-swap-oob
+	Account  accountData     // Settings → Account; empty Mode when no gate ran
 }
 
 // chrome assembles the layout's shared state for a full page render.
 func (s *Web) chrome(ctx context.Context) chromeData {
 	c := s.ingestChrome(ctx)
 	c.Account = accountView(authFrom(ctx), "")
-	c.Profiles = s.profileSettings(ctx, nil)
 	if c.IngNever {
 		c.FirstRun, c.Welcome = s.welcome(ctx)
 	}
@@ -249,7 +247,8 @@ func (s *Web) renderIngestModal(w http.ResponseWriter, r *http.Request, fresh bo
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := feedTmpl.ExecuteTemplate(w, "ingestModal", ingestModalData{Body: body, PromptUser: s.user}); err != nil {
+	data := ingestModalData{Body: body, PromptUser: s.pagePromptUser(r.Context())}
+	if err := feedTmpl.ExecuteTemplate(w, "ingestModal", data); err != nil {
 		// The response is already partially written; log rather than double-write.
 		log.Error().Err(err).Msg("render ingest modal")
 	}

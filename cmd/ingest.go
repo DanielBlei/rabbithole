@@ -20,6 +20,7 @@ var (
 	providerOverride string
 	noThink          bool
 	writeMarkdown    bool
+	digestOut        string
 )
 
 var ingestCmd = &cobra.Command{
@@ -36,51 +37,45 @@ func init() {
 	ingestCmd.Flags().
 		BoolVar(&noThink, "no-think", false, "override config to disable model reasoning/thinking for this run (use for models without thinking support)")
 	ingestCmd.Flags().
-		BoolVar(&writeMarkdown, "markdown", false, "also write the dated markdown digest to the output dir (default: update the store only)")
+		BoolVar(&writeMarkdown, "markdown", false, "also write the dated markdown digest (default: update the store only)")
+	ingestCmd.Flags().
+		StringVar(&digestOut, "out", "", "directory for --markdown (default: ingest.digest_dir if stored, else ./digests)")
 }
 
 func ingestE(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
-	cfg, err := config.Load(configPath)
+	s, err := openSession(cmd, sessionOpts{})
 	if err != nil {
 		return err
 	}
-	if providerOverride != "" {
-		cfg.Inference.Provider = providerOverride
+	defer s.Close()
+	db := s.db
+
+	stored, version, err := db.ActiveCanonicalConfig(ctx)
+	if err != nil {
+		return err
 	}
-	// think comes from config; --no-think overrides it for one-off runs without
-	// editing the config (precedence: flag if passed → config → default true).
-	think := *cfg.Inference.Think
+	run, err := applyIngestOverrides(stored, providerOverride)
+	if err != nil {
+		return err
+	}
+	// think comes from the stored config; --no-think overrides it for one-off runs
+	// without editing it (precedence: flag if passed -> config -> default true).
+	think := run.Inference.ThinkEnabled()
 	if cmd.Flags().Changed("no-think") {
 		think = false // --no-think always disables reasoning
 	}
 	log.Debug().
-		Str("config", configPath).
-		Str("provider", cfg.Inference.Provider).
-		Str("model", cfg.Inference.Model).
-		Str("host", cfg.Inference.Host).
-		Int("batch_size", cfg.Inference.BatchSize).
-		Str("since", cfg.Ingest.Since.String()).
+		Int("version", version).
+		Str("provider", run.Inference.Provider).
+		Str("model", run.Inference.Model).
+		Str("host", run.Inference.Host).
+		Int("batch_size", run.Inference.BatchSize).
 		Bool("think", think).
 		Msg("config loaded")
 
-	db, err := openStore(ctx, cfg, false)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			log.Warn().Err(err).Msg("db close failed")
-		}
-	}()
-	log.Debug().Str("db", cfg.Store.DBPath).Msg("store opened")
-
-	profiles := profilemgr.New(db)
-	if err := profiles.BootstrapLegacy(ctx, cfg); err != nil {
-		return err
-	}
-	activeProfile, err := profiles.Resolve(ctx)
+	activeProfile, err := profilemgr.New(db).Resolve(ctx)
 	if err != nil {
 		return err
 	}
@@ -91,7 +86,7 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 		Msg("interest profile resolved")
 
 	day := time.Now()
-	outcome, err := ingest.Run(ctx, cfg, activeProfile, db, day, ingest.Options{
+	outcome, err := ingest.Run(ctx, run, activeProfile, db, day, ingest.Options{
 		Think:  think,
 		Record: !dryRun,
 	})
@@ -110,10 +105,7 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 	}
 
 	if writeMarkdown {
-		if cfg.Ingest.DigestDir == "" {
-			return fmt.Errorf("--markdown set but ingest.digest_dir is empty; set it in the config file")
-		}
-		path, err := digest.Write(cfg.Ingest.DigestDir, day, outcome.Results)
+		path, err := digest.Write(digestDir(digestOut, run.Ingest.DigestDir), day, outcome.Results)
 		if err != nil {
 			return err
 		}
@@ -124,4 +116,38 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 
 	fmt.Printf("Recorded %d item(s) to the store.\n", len(outcome.Results))
 	return nil
+}
+
+// digestDir picks where --markdown writes: --out, else the stored (deprecated)
+// ingest.digest_dir, else ./digests.
+func digestDir(out, stored string) string {
+	switch {
+	case out != "":
+		return out
+	case stored != "":
+		return stored
+	default:
+		return defaultDigestDir
+	}
+}
+
+const defaultDigestDir = "digests"
+
+// applyIngestOverrides returns the config a run uses: the canonical (set-only)
+// stored config with --provider applied, then prepared so the provider gets its
+// own defaults and is validated. Starting from the un-defaulted form means
+// nothing the old provider's defaults filled in is carried over. The stored
+// config is never touched.
+func applyIngestOverrides(stored config.Config, provider string) (config.Config, error) {
+	run := stored.Clone()
+	if provider != "" {
+		run.Inference.Provider = provider
+	}
+	if _, err := run.Prepare(); err != nil {
+		if provider != "" {
+			return config.Config{}, fmt.Errorf("--provider %s: %w", provider, err)
+		}
+		return config.Config{}, err
+	}
+	return run, nil
 }

@@ -21,12 +21,14 @@ import (
 
 var (
 	configPath string
+	envFile    string
+	dbFlag     string
+	dbMaxConns int
+	dbLifetime string
 	debug      bool
 	trace      bool
 	log        zerolog.Logger
 )
-
-const defaultConfigPath = "./configs/config.yaml"
 
 // version is stamped in at build time.
 var version = "dev"
@@ -55,14 +57,24 @@ var rootCmd = &cobra.Command{
 	SilenceErrors: true,
 	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		invoked = cmd.CommandPath()
 		log = logger.New(debug, trace)
 		zerolog.DefaultContextLogger = &log
+		logLegacyConfigFile()
 		return nil
 	},
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath, "path to config YAML")
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "",
+		"config YAML applied to the store when it changes since it was last applied; edits made elsewhere are kept until then (optional)")
+	rootCmd.PersistentFlags().StringVar(&envFile, "env-file", defaultEnvFile,
+		"env file read for RABBITHOLE_* variables the environment does not set")
+	rootCmd.PersistentFlags().StringVar(&dbFlag, "db", "",
+		"store location: a SQLite path or a postgres:// URL (env: "+dbEnv+"); default: a file in your user data dir")
+	rootCmd.PersistentFlags().IntVar(&dbMaxConns, "db-max-conns", 0, "Postgres only: cap the connection pool")
+	rootCmd.PersistentFlags().StringVar(&dbLifetime, "db-conn-max-lifetime", "",
+		"Postgres only: how long one pooled connection may live, e.g. 30m")
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "enable debug logging")
 	rootCmd.PersistentFlags().
 		BoolVar(&trace, "trace", false, "enable trace logging (raw model prompts/responses, implies --debug)")
@@ -90,7 +102,10 @@ func Execute() error {
 	ctx, cancel := withSignalCancel(context.Background())
 	defer cancel()
 	err := rootCmd.ExecuteContext(ctx)
-	if errors.Is(err, context.Canceled) {
+	if errors.Is(err, errInterrupted) {
+		os.Exit(130) //nolint:gocritic // the conventional SIGINT status; cancel has nothing left to release
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, errNothingCreated) {
 		return nil
 	}
 	return err

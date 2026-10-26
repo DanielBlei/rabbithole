@@ -1,9 +1,10 @@
 # Store
 
-Everything persists through `internal/store`, on one of two engines. `store.db_path` is a
-SQLite file, the local default, and the shipped example config uses `./data/rabbithole.db`.
-`store.url` is a Postgres connection instead, for reaching the same store from more than one
-machine. Exactly one of the two is set; see [configuration](configuration.md#store).
+Everything persists through `internal/store`, on one of two engines. A file path is SQLite, the
+local default, kept in your per-user data folder (`~/.local/share/rabbithole/rabbithole.db` on
+Linux). A `postgres://` URL is Postgres instead, for reaching the same store from more than one
+machine. The location comes from `--db`, `RABBITHOLE_DB`, a `--config` file's `store` block, or the
+default, in that order; see [configuration](configuration.md#store-location).
 
 ## One implementation, two engines
 
@@ -67,7 +68,7 @@ for hours would mean the owner-and-heartbeat schema change above. SQLite has not
 so the rule there is still one you keep.
 
 One-shot commands (`items`, `auth`, `ingest`) open through `OpenFrom` and take no claim, so they
-keep working while a server holds the guard — which is the point: the machine serving the UI is
+keep working while a server holds the guard, which is the point: the machine serving the UI is
 also the machine you run `items prune` on.
 
 Two concurrent requests inside one server are fine and are handled: the feed conflict probe is
@@ -107,7 +108,7 @@ Applied per pooled connection via the DSN:
 
 | Pragma | Reason |
 |---|---|
-| `journal_mode(WAL)` | Readers do not block the writer — the web UI stays responsive during an ingest run |
+| `journal_mode(WAL)` | Readers do not block the writer, the web UI stays responsive during an ingest run |
 | `busy_timeout(5000)` | Wait rather than fail when a write is in progress |
 | `foreign_keys(1)` | Enforce `REFERENCES` and `ON DELETE CASCADE` |
 | `auto_vacuum(incremental)` | Reclaim space; only takes effect on a database created fresh |
@@ -186,13 +187,13 @@ erDiagram
 ```
 
 Solid lines are real foreign keys. Dotted lines are conventions the application maintains,
-with no database constraint behind them — see [Boundaries](#boundaries).
+with no database constraint behind them (see [Boundaries](#boundaries)).
 
 Three groups, largely independent:
 
 | Group | Tables | Written by                          |
 |---|---|-------------------------------------|
-| **Feed config** | `feeds`, `feed_defaults` | The feed sources, seeded at startup |
+| **Feed config** | `feeds`, `feed_defaults` | The feed sources, from the Sources page or an import |
 | **Feed pipeline** | `items`, `feed_fetches` | `internal/ingest`                   |
 | **Run history** | `ingest_history`, `ingest_run_logs` | `internal/ingest`'s run manager     |
 | **Interest profiles** | `profiles`, `profile_state`, `profile_imports` | Settings UI, CLI/server bootstrap |
@@ -212,7 +213,7 @@ The core table: one row per article ever seen, whether or not it was scored.
 | `published_at` | TIMESTAMP | From the feed; NULL when it publishes no date |
 | `created_at` | TIMESTAMP | When this row was first written; stands in for `published_at` when the feed gives none |
 | `updated_at` | TIMESTAMP | Touched by re-scoring and by user edits |
-| `llm_score` | INTEGER | 0–10; NULL means seen but not yet scored |
+| `llm_score` | INTEGER | 0 to 10; NULL means seen but not yet scored |
 | `llm_score_reason` | TEXT | The model's rationale |
 | `llm_score_model` | TEXT | Model that produced the score, captured at scoring time |
 | `llm_profile_id` | TEXT | Stable profile identity used for this score; NULL on historical rows |
@@ -220,7 +221,7 @@ The core table: one row per article ever seen, whether or not it was scored.
 | `llm_profile_hash` | TEXT | SHA-256 of the exact comment-stripped profile text used |
 | `digested_on` | DATE | Run day the item's score was produced |
 | `status` | TEXT | `unread` \| `read` \| `skipped` |
-| `user_score` | INTEGER | 0–10, your own rating; outranks `llm_score` in sorting |
+| `user_score` | INTEGER | 0 to 10, your own rating; outranks `llm_score` in sorting |
 | `user_note` | TEXT | Free text |
 | `bookmarked` | BOOLEAN | |
 | `tags` | TEXT | The source feed's tags, comma-joined; NULL when it has none |
@@ -230,11 +231,11 @@ Indexes: `digested_on`, `created_at`, `bookmarked`.
 **Ownership.** The columns split in two, and the split is enforced by the write paths rather
 than by the schema:
 
-- **Model-owned** — `llm_score`, `llm_score_reason`, `llm_score_model`, the three
+- **Model-owned**: `llm_score`, `llm_score_reason`, `llm_score_model`, the three
   `llm_profile_*` columns and `digested_on`. `Record` writes them during ingest;
   `ReplaceItemScores` replaces score/provenance fields during an explicit rescore without
   changing `digested_on`.
-- **User-owned** — `status`, `user_score`, `user_note`, `bookmarked`. Only `UpdateUserState`
+- **User-owned**: `status`, `user_score`, `user_note`, `bookmarked`. Only `UpdateUserState`
   writes these, and it is the single mutation path shared by the CLI and the HTTP handlers.
 
 `Record`'s upsert touches only the model-owned columns and is guarded by
@@ -275,14 +276,14 @@ built-in Default. Its value may name Default or an existing local profile. Setti
 profile validates that it exists; deleting the active local profile and switching the row to
 Default happen in one transaction.
 
-An explicitly configured legacy Markdown file is validated on every process start and
-inserted under an ID derived from its absolute path. `profile_imports` records the absolute
+A legacy Markdown profile named by `profile:` in an explicitly imported config file is validated
+when that import saves a version, and inserted under an ID derived from its absolute path. `profile_imports` records the absolute
 source path independently of the mutable profile row, making the bootstrap one-time and
 non-overwriting even if the imported profile is later deleted. It becomes active only on that
 first import and only if `profile_state` has never been set.
 
 **Dedup.** `ScoredLinks` treats only a link with a non-NULL `llm_score` as done. A row
-recorded without a score is reported as absent so the next run retries it — a scoring
+recorded without a score is reported as absent so the next run retries it: a scoring
 failure costs one run, not the article.
 
 **Date windows.** `List` and `Count` filter on `COALESCE(published_at, created_at)`, an
@@ -304,7 +305,7 @@ and both build one predicate so they cannot disagree. Nothing references `items`
 reaches the feed and nothing else.
 
 Unlike `ListFilter`, whose zero value means "everything", a zero `PruneFilter` is invalid.
-Emptying the feed takes `All`, which cannot be combined with the other selectors — the point
+Emptying the feed takes `All`, which cannot be combined with the other selectors, the point
 is that it can't be reached by an unset field, not that it can't be reached. Bookmarked,
 rated and noted items are kept
 unless `IncludeSaved`: that state is the only part of a row re-ingest cannot restore. A
@@ -313,13 +314,13 @@ pruned link its feed still lists returns on the next run, rescored from scratch,
 
 ## feeds and feed_defaults
 
-The configured feed set — what to fetch and how. Written by the Sources page; `feeds.yaml`
-only seeds feeds the store has never seen (see
-[configuration](configuration.md#feeds)).
+The configured feed set: what to fetch and how. Written by the Sources page, and by a feeds-file
+import (the Sources page or `rabbithole sources import`), which only adds feeds the store has never
+seen (see [configuration](configuration.md#feeds)).
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | TEXT PK | `config.FeedID` — `sha256(url)[:12]`, set on the first write and never changed |
+| `id` | TEXT PK | `config.FeedID`: `sha256(url)[:12]`, set on the first write and never changed |
 | `name` | TEXT UNIQUE | What `items.source` records; unique so two feeds can't merge |
 | `url` | TEXT UNIQUE | One feed per link. A missing scheme is filled in before the row is written, so the same address always gives the same `id` |
 | `enabled` | BOOLEAN | NULL falls through to `feed_defaults`, then to the built-in `true` |
@@ -332,14 +333,14 @@ Three things the column types decide:
 
 - **The tuning columns are nullable because NULL is the point.** It means "take the
   default", matching the pointer fields on `config.Feed`. A zero would mean something
-  else — `max_items` 0 is *uncapped*, not *nothing*.
+  else: `max_items` 0 is *uncapped*, not *nothing*.
 - **`id` never changes after the first write.** `feed_fetches` uses the same value, so a
   feed keeps its history through both a rename and a change of URL. Building it from the URL
-  rather than a counter also means a feed you add again, or seed into a fresh database,
+  rather than a counter also means a feed you add again, or import into a fresh database,
   picks its old history back up.
-- **Deletion is soft.** History stays with the feed in case it comes back, and seeding treats
-  a deleted feed as one it has already seen — without that, removing a feed that came from
-  `feeds.yaml` would undo itself on the next boot.
+- **Deletion is soft.** History stays with the feed in case it comes back, and an import treats
+  a deleted feed as one it has already seen, so importing a feeds file again does not bring back a
+  feed you removed.
 
 `feed_defaults` is a single row (`CHECK (id = 1)`) holding the same four tuning columns,
 applied to any feed that leaves one unset. Names and URLs stay unique across deleted rows
@@ -352,7 +353,7 @@ Append-only log of every feed fetch attempt, one row per feed per run.
 | Column | Type | Notes |
 |---|---|---|
 | `id` | INTEGER PK | |
-| `feed_id` | TEXT | `config.FeedID` — the first 12 hex chars of `sha256(url)` |
+| `feed_id` | TEXT | `config.FeedID`: the first 12 hex chars of `sha256(url)` |
 | `feed_name` | TEXT | Denormalized label as of that fetch |
 | `url` | TEXT | Denormalized |
 | `status` | TEXT | `ok` \| `error` |
@@ -368,7 +369,7 @@ and recent-attempt strip on the Sources page.
 Keying on `feed_id` rather than the name is why renaming a feed keeps its history. The ID
 is minted from the URL when the feed is first stored and then frozen on the row, so editing
 a feed's URL keeps its history too. Rows for feeds no longer configured are simply never
-read, so re-adding a feed restores its history — which is also why there is no foreign key
+read, so re-adding a feed restores its history, which is also why there is no foreign key
 here: a cascade would throw that away.
 
 `PruneFeedFetches` keeps the newest 200 rows per feed and runs at the end of every fetch
@@ -412,7 +413,7 @@ stateDiagram-v2
 row stale, and `InterruptStaleIngestRuns` reconciles it at the next startup rather than
 letting the UI show a run that has not moved in days.
 
-Only the CLI's `ingest` command bypasses this table — it runs the cycle directly, so
+Only the CLI's `ingest` command bypasses this table: it runs the cycle directly, so
 CLI runs do not appear in the run history. Web-triggered runs go through the manager, which
 is single-flight.
 
@@ -420,17 +421,17 @@ is single-flight.
 
 The Maze board, entirely separate from the feed pipeline and written only by the web UI.
 
-**todos** — `id`, `title` (≤80 chars), `note`, `done`, `due_on` (`YYYY-MM-DD` text, sortable
+**todos**: `id`, `title` (≤80 chars), `note`, `done`, `due_on` (`YYYY-MM-DD` text, sortable
 lexicographically), `completed_at`, `tags` (comma-joined), `created_at`, `updated_at`.
 Indexed on `done` and `due_on`. Deletes are hard.
 
-**ideas** — `id`, `body` (≤280 chars), `color` (from `store.IdeaColors`), `position`,
+**ideas**: `id`, `body` (≤280 chars), `color` (from `store.IdeaColors`), `position`,
 `created_at`, `updated_at`, `deleted_at`. Indexed on `(deleted_at, position)`. Deletes are
 soft: `DeleteIdea` stamps `deleted_at` and every read filters on it. `ReorderIdeas` rewrites
 `position` for drag-and-drop.
 
-Note the inconsistency: todos delete hard, ideas delete soft. That is deliberate — a
-sticky note is cheap to restore and easy to knock off a board by accident — but it is worth
+Note the inconsistency: todos delete hard, ideas delete soft. That is deliberate: a
+sticky note is cheap to restore and easy to knock off a board by accident, but it is worth
 knowing before either table grows features.
 
 ## auth
@@ -466,6 +467,26 @@ database greets its user again whatever the browser remembers.
 The welcome is for new installs only. A database that existed before the table gets it with the
 `dismissed` row already in place, and the first time the web UI finds stored items without a
 recorded run (a CLI ingest), it writes that row too.
+
+## config_versions
+
+The run config as an append-only history. `version` is the primary key, one row per saved change,
+and the highest is the one in force. No row means the defaults, applied when read, so a store that
+was never configured picks up new defaults on upgrade.
+
+| Column | Type | Notes |
+|---|---|---|
+| `version` | INTEGER PK | A save inserts `expected + 1`, so two saves from the same version collide and the loser is told its copy is stale |
+| `schema_version` | INTEGER | Format of `content`, for migrating old rows |
+| `content` | TEXT | Canonical YAML: what was set, not the defaults. Holds `$RABBITHOLE_*_API_KEY` references, never a key |
+| `content_hash` | TEXT | sha256 of the normalised config; equal hashes mean equal settings, whatever the YAML spelling |
+| `source` | TEXT | `ui`, `import:<absolute path>` or `rollback:<version>` |
+| `created_at` | TEXT | When it was saved |
+
+Rows are never updated or deleted. A rollback copies an old row forward as a new latest version.
+The table is added to an existing database on the first start of a release that has it, with no
+schema bump, and nothing else changes. Written by the Settings page, `rabbithole config import`, `config rollback`
+and `--config`; read on every ingest run and web request, cached by version.
 
 ## An ingest run, end to end
 
@@ -583,7 +604,7 @@ Databases with recognized older versions are upgraded in place; unknown versions
 without being modified.
 
 A new table that nothing older depends on is the exception. It goes in `additiveTables`
-instead, whose DDL runs on every open — after a `tableExists` check, not on the strength of
+instead, whose DDL runs on every open, after a `tableExists` check, not on the strength of
 `IF NOT EXISTS` alone. Postgres checks a role's rights on the schema before it notices the table
 is already there, so an unconditional create would need `CREATE` on every start and rule out a
 DML-only runtime role, which is how a hosted database is normally set up. `auth` was the first
@@ -594,17 +615,54 @@ a mismatch would mean a table that is never created and never complained about.
 Which leaves two kinds of database role: one that can create, needed once per release that
 changes the schema, and one that can only read and write, which is enough to run everything after
 that. Both of them also need `USAGE` on the schema the tables live in. That grant is separate
-from the table grants, and a role without it is not told permission denied — it is told the table
-does not exist, since a schema it cannot enter has no visible contents — which reads like a
+from the table grants, and a role without it is not told permission denied; it is told the table
+does not exist, since a schema it cannot enter has no visible contents, which reads like a
 missing migration rather than a missing grant. `public` grants it to everyone already; a schema
 of your own does not.
+
+## Postgres TLS background
+
+**Why not `verify-full` by default.** Supabase signs its database certificate with its own
+"Supabase Intermediate" CA rather than a public one, so `verify-full` cannot complete a
+handshake at all until you point the client at that CA. Measured against a live project, both
+`verify-full` and `verify-ca` fail there out of the box while `require` connects. A default that
+refuses to start on the database the docs recommend is a default people work around by deleting
+the setting entirely, which lands them somewhere worse and unlogged.
+
+**What the weaker default costs.** With no certificate check, an attacker positioned between you
+and the database can terminate your TLS with a certificate of their own making and read what
+passes. This store carries the login's argon2 hash and the `signing_key` that HMACs the "stay
+signed in" cookies, so an intercepted session is not only a row leak: it can be enough to mint
+cookies that keep working. Loopback is exempt from all of this, which is why local Postgres needs
+no certificates at all.
+
+**What the app does about it.** `serve` reports the connection it made at every boot (engine,
+database, `sslmode`, and `encrypted` / `verified` / `loopback` as fields), so what the mode
+actually bought is in the log rather than assumed. It is **stated, not warned about**: the default
+is a documented trade, and a warning about it every start reads as alarm, which trains you to skim
+past the lines that do mean something. The argument is made once, here. Nothing
+is ever downgraded behind your back: an explicit `sslmode` is always respected, and at the default
+(`require`) a server that will not do TLS is refused rather than accepted in plain text. `prefer`
+is the one mode that does fall back, which is why it is not recommended, and `encrypted=false` on
+that boot line is how you notice you are running it.
+
+## Postgres privileges background
+
+`USAGE` on the schema is its own grant, and forgetting it is the one privileges mistake that
+looks like something else: a role that cannot enter a schema is not told permission denied; it is
+told `relation "items" does not exist`, because the names inside are invisible to it. So the
+grant looks complete, the tables are there, and every query claims they are not. The store's own
+lookup inherits it: the freshness check asks `to_regclass` for `items`, gets NULL for a table it
+cannot see, takes the populated database for an empty one and runs its creates, which come back
+`no schema has been selected to create in`. Only `public` is spared, since it grants `USAGE` to
+every role already; put the tables anywhere else and the grant is part of the setup.
 
 ## Known gaps
 
 - **Unbounded growth.** Only `feed_fetches` prunes on its own; `items` has `items prune` but
   nothing calls it for you. `ingest_history`, `ingest_run_logs` and completed `todos` grow
   forever. Nothing is large enough to matter yet, but `ingest_run_logs` is the first to
-  watch — it stores whole run logs.
+  watch, it stores whole run logs.
 - **Deleting does not shrink the file.** `auto_vacuum(incremental)` only takes on a database
   created with it, so on an existing one freed pages go to the freelist and get reused
   rather than returned. Reclaiming disk means running `VACUUM` by hand with the server
@@ -617,7 +675,7 @@ of your own does not.
   reworking every query that filters on `source`. Until then `RenameSource` keeps a rename
   from splitting a feed's items into two sources.
 - **Deleted feed rows accumulate.** Nothing collects them, and each one goes on holding its
-  name and URL against reuse. That is deliberate — it is what stops a re-seed from
-  resurrecting a feed you removed — and it can be undone: the Sources page lists deleted
+  name and URL against reuse. That is deliberate: it is what stops a re-import from
+  resurrecting a feed you removed, and it can be undone: the Sources page lists deleted
   feeds under the state filter's `deleted` option with a restore button, and adding the same
   URL again undeletes the row rather than failing.

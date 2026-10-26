@@ -1,0 +1,56 @@
+# The Rabbit Hole settings, every stored parameter with its default.
+# Reference: docs/configuration.md
+#
+# Settings live in the store. You never need a file: a bare `rabbithole serve`
+# runs on these defaults.
+#
+# This file is a reference to copy lines from, not one to import whole. Copy only
+# the lines you want to change into your own file, then import that:
+#
+#   rabbithole config export -o my.yaml     # start from what is saved now
+#   (edit my.yaml)
+#   rabbithole config import my.yaml
+#
+# A value that equals its default is not saved on import, so it stays a default and
+# later releases can still improve it for you. `config export --defaults` writes
+# every setting with its value.
+#
+# Active lines show the default. Commented lines are optional and have no default,
+# or only apply to one provider. Fields a provider does not read are dropped on
+# import with a warning.
+
+# user: rabbit                    # name in the web UI shell prompt; unset uses your OS login name
+
+inference:
+  provider: ollama                # ollama | vllm | openai | heuristic (keywords, no model)
+
+  # Model-backed providers: ollama, vllm, openai
+  host: http://localhost:11434    # inference server URL
+  model: qwen3.5:4b               # chat model name
+  think: true                     # model reasoning before scoring (vllm: false switches it off)
+  structured_output: true         # send the verdict schema; false only if the endpoint garbles it
+  # api_key: $RABBITHOLE_INFERENCE_API_KEY   # bearer token, if the endpoint needs one: a reference, never the value
+  # system_prompt: ./prompts/system.md               # your own instructions: the text itself, or a file path
+  #                                                  # (read once on import, relative to this file); omit for the built-in
+  # system_prompt: false                               # send no system message
+
+  # openai only
+  # effort: medium                # reasoning effort while thinking: low | medium | high | xhigh
+
+  # Every provider, heuristic included
+  batch_size: 1                   # articles per scoring request (lower helps smaller models focus)
+  max_parallel: 1                 # requests in flight; keep at 1 for Ollama, it queues anyway
+
+  # Decoding limits for model-backed providers
+  model_tuning:
+    # num_ctx: 8192               # ollama only: input window; unset lets Ollama truncate long prompts
+    # max_tokens: 2048            # tokens for the whole reply; unset sizes it from the three below
+    tokens_per_item: 1024         # reply budget per article in a batch
+    tokens_overhead: 512          # reply budget for the JSON scaffolding
+    tokens_thinking: 2048         # extra reply budget when think is on
+    reason_max_chars: 512         # longest "why" the model may write
+
+# Deprecated, removed in v0.4.0. Importing them still works and logs a warning.
+# ingest:
+#   since: 7d                     # now the feed defaults' since: set it on the Sources page
+#   digest_dir: ./digests         # now `rabbithole ingest --markdown --out ./digests`

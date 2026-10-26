@@ -97,7 +97,7 @@ func serveTLSForTest(t *testing.T, certFile, keyFile string) string {
 	think := false
 	cfg := &config.Config{}
 	cfg.Inference.Think = &think
-	mgr, err := ingest.NewManager(db, cfg, zerolog.InfoLevel)
+	mgr, err := ingest.NewManager(db, config.Static(*cfg), zerolog.InfoLevel)
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -111,7 +111,7 @@ func serveTLSForTest(t *testing.T, certFile, keyFile string) string {
 		t.Fatalf("Listen: %v", err)
 	}
 	srv := newHTTPServer(ln.Addr().String(),
-		server.New(db, cfg, ln.Addr().String(), "config.yaml", mgr, zerolog.Nop()).Routes(), tlsConfig)
+		server.New(db, config.Static(*cfg), ln.Addr().String(), mgr, zerolog.Nop()).Routes(), tlsConfig)
 	done := make(chan error, 1)
 	go func() { done <- serveOn(srv, ln) }()
 	t.Cleanup(func() {
