@@ -13,7 +13,6 @@ rabbithole [global flags] <command>
 | [`ingest`](#ingest) | Fetch the feeds, score what is new, record it, and optionally write a markdown digest |
 | [`digest`](#digest) | Print a daily or weekly Markdown digest of already-scored articles |
 | [`serve`](#serve) | Serve the web UI and the JSON API, behind the login |
-| [`ingest`](#ingest) | Fetch the feeds, score what is new, record it, and optionally write a markdown digest |
 | [`config`](#config) | Export, import, list and roll back the saved settings |
 | [`sources`](#sources) | Import and export the feed set |
 | [`store`](#store) | Show where the store lives |
@@ -35,6 +34,14 @@ run uses the defaults.
 | `--db-conn-max-lifetime` | Postgres only: how long one pooled connection may live, e.g. `30m` | `30m` |
 | `--debug` | Log each stage with timings: settings, per-feed fetches, filtering, scoring batches and per-item scores, selection, write | off |
 | `--trace` | Additionally log raw model prompts and responses; implies `--debug` | off |
+
+`--config` is an import, not a requirement. On the `config` subcommands it only locates the store and
+is never imported. The details are in [The --config file](configuration.md#the---config-file).
+
+The store location is `--db`, then `RABBITHOLE_DB`, then the `--config` file's `store` block, then the
+default. On the first start with no store, a terminal gets the question
+`Create a new SQLite store at ...? [Y/n]`; `n` creates nothing and exits 0. Without a terminal the
+store is created and a hint is logged. A Postgres password comes from `RABBITHOLE_DB_PASSWORD`.
 
 ## digest
 

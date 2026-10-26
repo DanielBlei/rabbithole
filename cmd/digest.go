@@ -39,7 +39,7 @@ func runDigest(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	return withStore(cmd, func(ctx context.Context, db *store.Store, _ *config.Config) error {
+	return withStore(cmd, func(ctx context.Context, db *store.Store, _ config.Source) error {
 		rows, err := db.DigestItems(ctx, start, end, limit)
 		if err != nil {
 			return err
