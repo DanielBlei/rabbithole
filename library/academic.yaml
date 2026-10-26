@@ -1,0 +1,69 @@
+# The Rabbit Hole source library: saved academic searches.
+# Format and how to add an entry: library/README.md
+schema_version: 1
+type: academic
+description: Saved paper searches. The URL host picks the provider (arXiv, Crossref, Semantic Scholar).
+groups:
+  - name: llm-systems
+    description: LLM inference, serving and efficiency research.
+    sources:
+      - name: "arXiv: speculative decoding"
+        url: https://arxiv.org/search?q=speculative+decoding
+        description: Newest arXiv papers on speculative decoding.
+        labels: [AI, Inference, Papers]
+
+      - name: "arXiv: KV cache"
+        url: https://arxiv.org/search?q=kv+cache
+        description: Newest arXiv papers on KV cache design and compression.
+        labels: [AI, Inference, Papers]
+
+      - name: "arXiv: mixture of experts"
+        url: https://arxiv.org/search?q=mixture+of+experts
+        description: Newest arXiv papers on mixture-of-experts models.
+        labels: [AI, Papers]
+
+      - name: "arXiv: LLM systems"
+        url: https://arxiv.org/search?q=cat:cs.DC+AND+abs:llm
+        description: Distributed computing papers (cs.DC) that mention LLMs.
+        labels: [AI, Inference, Distributed Systems, Papers]
+
+      - name: "arXiv: quantization"
+        url: https://arxiv.org/search?q=cat:cs.LG+AND+abs:quantization
+        description: Machine learning papers (cs.LG) on quantization.
+        labels: [AI, Inference, Papers]
+
+  - name: agents-rag-evals
+    description: Coding agents, retrieval-augmented generation and LLM evaluation.
+    sources:
+      - name: "arXiv: RAG research"
+        url: https://arxiv.org/search?q=retrieval+augmented+generation
+        description: Newest arXiv papers on retrieval-augmented generation.
+        labels: [AI, Research, Papers]
+
+      - name: "arXiv: coding agents"
+        url: https://arxiv.org/search?q=cat:cs.SE+AND+abs:agent
+        description: Software engineering papers (cs.SE) about agents.
+        labels: [AI, Agents, Software Engineering, Papers]
+
+      - name: "arXiv: LLM benchmarks"
+        url: https://arxiv.org/search?q=cat:cs.CL+AND+ti:benchmark+AND+abs:llm
+        description: Language papers (cs.CL) introducing LLM benchmarks.
+        labels: [AI, Research, Papers]
+
+  - name: journals
+    description: Newest articles from computing journals, by ISSN via Crossref.
+    sources:
+      - name: Communications of the ACM
+        url: https://api.crossref.org/works?issn=0001-0782
+        description: Research, practice and viewpoints from the ACM's flagship magazine.
+        labels: [Research, Papers]
+
+      - name: ACM TOSEM
+        url: https://api.crossref.org/works?issn=1049-331X
+        description: ACM Transactions on Software Engineering and Methodology.
+        labels: [Software Engineering, Papers]
+
+      - name: ACM Computing Surveys
+        url: https://api.crossref.org/works?issn=0360-0300
+        description: Survey and tutorial articles across computer science.
+        labels: [Research, Papers]

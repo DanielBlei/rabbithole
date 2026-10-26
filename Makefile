@@ -192,6 +192,21 @@ vulncheck: ## Scan dependencies for known vulnerabilities
 .PHONY: check
 check: lint test-race build ## The gate CI runs (run before committing; needs golangci-lint)
 
+##@ Library
+
+# library-check is offline; `check` covers it through test-race. library-urls needs
+# the network, so it is not part of `check`. CI runs it when library paths change
+# and weekly (.github/workflows/library.yml).
+
+.PHONY: library-check
+library-check: ## Check library/ format, uniqueness and feeds.yaml parity (offline)
+	@RABBITHOLE_DB= RABBITHOLE_DB_PASSWORD= go test -count=1 ./internal/library/...
+	@RABBITHOLE_DB= RABBITHOLE_DB_PASSWORD= go test -count=1 -run TestLibrary ./internal/ingest/ ./internal/config/
+
+.PHONY: library-urls
+library-urls: ## Fetch every library source through the app's fetchers (network)
+	@RABBITHOLE_DB= RABBITHOLE_DB_PASSWORD= go test -tags=network -count=1 -timeout 20m -run TestLibrarySourcesLive ./internal/ingest/
+
 ##@ Debug
 
 .PHONY: debug
