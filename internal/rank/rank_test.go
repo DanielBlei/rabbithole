@@ -88,7 +88,7 @@ func TestScoreBatchSkipsItemModelNeverScores(t *testing.T) {
 		return []ItemScore{{ID: batch[0].ID, Score: 5, Reason: "Relevant to the reader."}}, nil
 	}}
 
-	got := scoreBatch(context.Background(), scorer, "profile", items)
+	got := scoreBatch(context.Background(), scorer, ProfileContext("profile"), items)
 
 	if len(got) != 1 || got[0].ID != "b" {
 		t.Fatalf("got %+v, want only item b scored", got)
@@ -111,7 +111,7 @@ func TestScoreOneRetriesTransientFailure(t *testing.T) {
 		return []ItemScore{{ID: batch[0].ID, Score: 7, Reason: "Relevant to the reader."}}, nil
 	}}
 
-	got := scoreOne(context.Background(), scorer, "profile", item)
+	got := scoreOne(context.Background(), scorer, ProfileContext("profile"), item)
 
 	if len(got) != 1 || got[0].ID != "a" || got[0].Score != 7 {
 		t.Fatalf("got %+v, want item a recovered with score 7", got)
