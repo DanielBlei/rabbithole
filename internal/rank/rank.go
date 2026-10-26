@@ -13,6 +13,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/DanielBlei/rabbithole/internal/feedback"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/retry"
 )
@@ -40,7 +41,8 @@ type Result struct {
 type Option func(*options)
 
 type options struct {
-	onBatch func(done, total, scored int)
+	onBatch  func(done, total, scored int)
+	feedback feedback.Selection
 }
 
 // OnBatch registers a callback fired as each batch finishes, receiving the
@@ -53,6 +55,13 @@ type options struct {
 // results, so an implementation needs no locking of its own but must not block.
 func OnBatch(fn func(done, total, scored int)) Option {
 	return func(o *options) { o.onBatch = fn }
+}
+
+// WithFeedback adds explicit reader ratings to the scoring context for this
+// run. The selection is bounded and ordered by the feedback package; an inactive
+// selection leaves the prompt exactly as it was before adaptive scoring.
+func WithFeedback(selection feedback.Selection) Option {
+	return func(o *options) { o.feedback = selection }
 }
 
 // ScoreAll scores every item in batches of batchSize, running up to maxParallel
@@ -76,6 +85,7 @@ func ScoreAll(
 	if maxParallel < 1 {
 		maxParallel = 1
 	}
+	scoringContext := ScoringContext{Profile: profile, Feedback: o.feedback}
 	batches := chunk(items, batchSize)
 	logger := zerolog.Ctx(ctx)
 	guard := &verdictGuard{Scorer: s}
@@ -98,7 +108,7 @@ func ScoreAll(
 			logger.Debug().Int("batch", idx+1).Int("of", len(batches)).
 				Int("size", len(batch)).Msg("scoring batch")
 
-			scores := scoreBatch(ctx, s, profile, batch)
+			scores := scoreBatch(ctx, s, scoringContext, batch)
 
 			titles := make(map[string]string, len(batch))
 			for _, it := range batch {
@@ -144,12 +154,12 @@ func truncate(s string, n int) string {
 // items — small models in particular sometimes return a verdict for only part
 // of a batch without erroring. Decomposition isolates the problem item; the
 // actual retrying happens once, at the leaf, in scoreOne.
-func scoreBatch(ctx context.Context, s Scorer, profile string, batch []feeds.Item) []ItemScore {
+func scoreBatch(ctx context.Context, s Scorer, scoringContext ScoringContext, batch []feeds.Item) []ItemScore {
 	if len(batch) == 1 {
-		return scoreOne(ctx, s, profile, batch[0])
+		return scoreOne(ctx, s, scoringContext, batch[0])
 	}
 	logger := zerolog.Ctx(ctx)
-	scores, err := s.Score(ctx, profile, batch)
+	scores, err := score(ctx, s, scoringContext, batch)
 	if err == nil {
 		missing := missingItems(batch, scores)
 		if len(missing) == 0 {
@@ -157,10 +167,10 @@ func scoreBatch(ctx context.Context, s Scorer, profile string, batch []feeds.Ite
 		}
 		logger.Warn().Int("items", len(batch)).Int("missing", len(missing)).
 			Msg("batch response missing scores for some items, retrying individually")
-		return append(scores, retryEach(ctx, s, profile, missing)...)
+		return append(scores, retryEach(ctx, s, scoringContext, missing)...)
 	}
 	logger.Warn().Int("items", len(batch)).Err(err).Msg("batch " + failureVerb(err) + ", retrying individually")
-	return retryEach(ctx, s, profile, batch)
+	return retryEach(ctx, s, scoringContext, batch)
 }
 
 // scoreOne is the single retry point for scoring. It re-asks the model for one
@@ -168,11 +178,11 @@ func scoreBatch(ctx context.Context, s Scorer, profile string, batch []feeds.Ite
 // non-deterministic and a transient failure (a timeout, a momentary connection
 // blip, or a one-shot unparseable response) usually clears on a re-ask.
 // Without this, a single hiccup drops the article from the digest entirely.
-func scoreOne(ctx context.Context, s Scorer, profile string, item feeds.Item) []ItemScore {
+func scoreOne(ctx context.Context, s Scorer, scoringContext ScoringContext, item feeds.Item) []ItemScore {
 	logger := zerolog.Ctx(ctx)
 	var scores []ItemScore
 	err := retry.Do(ctx, retryAttempts, retryBackoff, func() error {
-		got, err := s.Score(ctx, profile, []feeds.Item{item})
+		got, err := score(ctx, s, scoringContext, []feeds.Item{item})
 		if err != nil {
 			return err
 		}
@@ -203,12 +213,21 @@ func failureVerb(err error) string {
 	return "scoring failed"
 }
 
-func retryEach(ctx context.Context, s Scorer, profile string, items []feeds.Item) []ItemScore {
+func retryEach(ctx context.Context, s Scorer, scoringContext ScoringContext, items []feeds.Item) []ItemScore {
 	var out []ItemScore
 	for _, it := range items {
-		out = append(out, scoreBatch(ctx, s, profile, []feeds.Item{it})...)
+		out = append(out, scoreBatch(ctx, s, scoringContext, []feeds.Item{it})...)
 	}
 	return out
+}
+
+// score sends the richest context the backend understands. Prompt-based
+// backends opt in through ContextScorer; others keep receiving the profile.
+func score(ctx context.Context, s Scorer, scoringContext ScoringContext, items []feeds.Item) ([]ItemScore, error) {
+	if contextual, ok := s.(ContextScorer); ok {
+		return contextual.ScoreContext(ctx, scoringContext, items)
+	}
+	return s.Score(ctx, scoringContext.Profile, items)
 }
 
 // missingItems returns the items in batch that scores has no entry for.

@@ -339,11 +339,20 @@ type jsonSchema struct {
 
 // Score sends one JSON-mode completion for the batch and parses the verdicts.
 func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) ([]rank.ItemScore, error) {
+	return c.ScoreContext(ctx, rank.ProfileContext(profile), items)
+}
+
+// ScoreContext sends one JSON-mode completion with the profile and any explicit feedback.
+func (c *Client) ScoreContext(
+	ctx context.Context,
+	scoringContext rank.ScoringContext,
+	items []feeds.Item,
+) ([]rank.ItemScore, error) {
 	logger := zerolog.Ctx(ctx)
 	ctx, cancel := context.WithTimeout(ctx, chatTimeout)
 	defer cancel()
 
-	userPrompt := rank.BuildUserPrompt(profile, items)
+	userPrompt := rank.BuildUserPromptContext(scoringContext, items)
 	budget := c.tuning.Budget(len(items), c.think)
 
 	var messages []chatMessage

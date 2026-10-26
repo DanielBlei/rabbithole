@@ -35,8 +35,20 @@ type Outcome struct {
 	Unseen  []feeds.Item  // fresh, not-yet-seen items considered for scoring
 	Results []rank.Result // every scored item, sorted best-first
 	Scored  int           // items the model scored, across all feeds
-	Skipped int           // items skipped as already scored
+	Skipped int           // items skipped as already scored or as duplicate links in this run
 	Failed  int           // items the model failed to score
+}
+
+// preparedFeed is one feed's post-fetch filtering result. Computing these
+// before scoring lets Run assemble the whole operation's candidate set first,
+// while the scoring loop keeps its original per-feed order and logging.
+type preparedFeed struct {
+	start   time.Time
+	raw     int
+	aged    int
+	fetched int
+	skipped int
+	unseen  []feeds.Item
 }
 
 // Run fetches every feed in cfg, then processes the feeds one at a time: each
@@ -44,10 +56,11 @@ type Outcome struct {
 // profile and, if opts.Record is set, recorded under day in their own
 // transaction (every item with its score, plus a digest date for the selected
 // ones). Dedup keys on link, so a feed re-issuing a different id for the same
-// article doesn't trigger a needless re-score. Processing per feed keeps each
-// feed's work isolated and durable — a feed that fails to score or record is
-// logged and skipped without losing the feeds already committed. The returned
-// Outcome aggregates every feed, with Results sorted best-first across all.
+// article — or several feeds carrying one link in the same run — doesn't trigger
+// a needless re-score. Processing per feed keeps each feed's work isolated and
+// durable — a feed that fails to score or record is logged and skipped without
+// losing the feeds already committed. The returned Outcome aggregates every
+// feed, with Results sorted best-first across all.
 func Run(
 	ctx context.Context,
 	cfg config.Config,
@@ -106,6 +119,64 @@ func Run(
 		logger.Warn().Err(err).Msg("syncing feed tags failed")
 	}
 
+	// Apply each feed's filters before scoring so the feedback snapshot can
+	// exclude every item this run may score. Otherwise an explicitly rated
+	// candidate could appear as an example for its own score, and batches would
+	// see different feedback depending on which feed had been processed first.
+	prepared := make([]preparedFeed, len(active))
+	var candidates []feeds.Item
+	// The prepass records nothing, so two feeds carrying one link would both
+	// schedule it. Remember links already claimed by an earlier feed: the old
+	// per-feed loop got the same effect from the store after the first record.
+	seenLinks := make(map[string]struct{})
+	for i, f := range active {
+		feedItems := results[i].Items
+		if len(feedItems) == 0 {
+			continue
+		}
+		p := preparedFeed{start: time.Now(), raw: len(feedItems)}
+
+		// Each feed filters against its own resolved window, so a firehose can
+		// run a tight lookback while a rarely-updated blog keeps a wide one.
+		fresh := filterByAge(feedItems, f.Since)
+		p.aged = len(fresh)
+
+		// Then the per-feed cap, newest first, so one prolific feed can't eat
+		// the run's whole scoring budget.
+		fresh = capNewest(fresh, f.MaxItems)
+		p.fetched = len(fresh)
+
+		// dedup against the store before scoring: items already scored never
+		// reach the (expensive) scoring phase. A read failure here is a
+		// run-wide DB problem, so it aborts rather than skipping one feed.
+		unseen, err := filterUnscored(ctx, db, fresh)
+		if err != nil {
+			return Outcome{}, err
+		}
+		deduped := unseen[:0:0]
+		for _, item := range unseen {
+			if item.Link != "" {
+				if _, seen := seenLinks[item.Link]; seen {
+					continue
+				}
+				seenLinks[item.Link] = struct{}{}
+			}
+			deduped = append(deduped, item)
+		}
+		p.skipped = len(fresh) - len(deduped)
+		p.unseen = deduped
+		prepared[i] = p
+		candidates = append(candidates, deduped...)
+	}
+
+	scoringContext := rank.ProfileContext(activeProfile.Content)
+	if len(candidates) > 0 {
+		scoringContext, err = loadScoringContext(ctx, db, activeProfile, candidates)
+		if err != nil {
+			return Outcome{}, err
+		}
+	}
+
 	// resolveScorer builds the backend lazily on the first feed with items to
 	// score, so a run with nothing new never validates (and hits) the backend.
 	var (
@@ -132,44 +203,26 @@ func Run(
 	// everything to zero.
 	outcome := Outcome{}
 	for i, f := range active {
-		feedItems := results[i].Items
-		if len(feedItems) == 0 {
+		p := prepared[i]
+		if p.raw == 0 {
 			continue
 		}
-		feedStart := time.Now()
-
-		// Each feed filters against its own resolved window, so a firehose can
-		// run a tight lookback while a rarely-updated blog keeps a wide one.
-		fresh := filterByAge(feedItems, f.Since)
-		logger.Debug().Str("feed", f.Name).Int("before", len(feedItems)).Int("after", len(fresh)).
-			Int("dropped_old", len(feedItems)-len(fresh)).Str("since", f.Since.String()).
+		logger.Debug().Str("feed", f.Name).Int("before", p.raw).Int("after", p.aged).
+			Int("dropped_old", p.raw-p.aged).Str("since", f.Since.String()).
 			Msg("age filter applied")
-
-		// Then the per-feed cap, newest first, so one prolific feed can't eat
-		// the run's whole scoring budget.
-		if capped := capNewest(fresh, f.MaxItems); len(capped) < len(fresh) {
-			logger.Debug().Str("feed", f.Name).Int("dropped_over_cap", len(fresh)-len(capped)).
+		if p.aged > p.fetched {
+			logger.Debug().Str("feed", f.Name).Int("dropped_over_cap", p.aged-p.fetched).
 				Int("max_items", f.MaxItems).Msg("item cap applied")
-			fresh = capped
 		}
-		outcome.Fetched += len(fresh)
-
-		// dedup against the store before scoring: items already scored never
-		// reach the (expensive) scoring phase. A read failure here is a
-		// run-wide DB problem, so it aborts rather than skipping one feed.
-		unseen, err := filterUnscored(ctx, db, fresh)
-		if err != nil {
-			return outcome, err
-		}
-		skipped := len(fresh) - len(unseen)
-		outcome.Skipped += skipped
+		outcome.Fetched += p.fetched
+		outcome.Skipped += p.skipped
 
 		// One line per feed says what there is to do: how many new items to
 		// score and how many were skipped as already scored. new=0 means there
 		// was nothing to process for this feed.
-		logger.Info().Str("feed", f.Name).Int("new", len(unseen)).Int("skipped", skipped).
+		logger.Info().Str("feed", f.Name).Int("new", len(p.unseen)).Int("skipped", p.skipped).
 			Msg("processing feed")
-		if len(unseen) == 0 {
+		if len(p.unseen) == 0 {
 			continue
 		}
 
@@ -179,25 +232,26 @@ func Run(
 		}
 
 		scores := rank.ScoreAll(
-			ctx, s, activeProfile.Content, unseen, cfg.Inference.BatchSize, cfg.Inference.MaxParallel,
+			ctx, s, scoringContext.Profile, p.unseen, cfg.Inference.BatchSize, cfg.Inference.MaxParallel,
+			rank.WithFeedback(scoringContext.Feedback),
 		)
-		failed := len(unseen) - len(scores)
+		failed := len(p.unseen) - len(scores)
 		outcome.Failed += failed
 		logger.Info().Str("feed", f.Name).Int("processed", len(scores)).Int("failed", failed).
 			Msg("items processed")
-		results := rank.Select(unseen, scores)
+		results := rank.Select(p.unseen, scores)
 
 		if opts.Record {
-			if err := record(ctx, db, unseen, scores, cfg.Inference.Model, activeProfile, day); err != nil {
+			if err := record(ctx, db, p.unseen, scores, cfg.Inference.Model, activeProfile, day); err != nil {
 				logger.Warn().Str("feed", f.Name).Err(err).Msg("recording feed failed, skipping")
 				continue
 			}
-			logger.Info().Str("feed", f.Name).Int("recorded", len(unseen)).Int("scored", len(scores)).
+			logger.Info().Str("feed", f.Name).Int("recorded", len(p.unseen)).Int("scored", len(scores)).
 				Int("results", len(results)).Int("failed", failed).
-				Str("elapsed", time.Since(feedStart).Round(100*time.Millisecond).String()).Msg("ingested to db")
+				Str("elapsed", time.Since(p.start).Round(100*time.Millisecond).String()).Msg("ingested to db")
 		}
 
-		outcome.Unseen = append(outcome.Unseen, unseen...)
+		outcome.Unseen = append(outcome.Unseen, p.unseen...)
 		outcome.Results = append(outcome.Results, results...)
 		outcome.Scored += len(scores)
 	}
