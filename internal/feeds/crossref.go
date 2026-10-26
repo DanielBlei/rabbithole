@@ -158,8 +158,7 @@ func (f *AcademicFetcher) fetchCrossref(
 	items := make([]Item, 0, len(doc.Message.Items))
 
 	for _, work := range doc.Message.Items {
-		if want := strings.TrimSpace(query.Publisher); want != "" &&
-			!strings.EqualFold(want, strings.TrimSpace(work.Publisher)) {
+		if !crossrefPublisherMatches(query.Publisher, work.Publisher) {
 			continue
 		}
 
@@ -195,6 +194,34 @@ func (f *AcademicFetcher) fetchCrossref(
 	}
 
 	return items, nil
+}
+
+// crossrefPublisherMatches reports whether a saved publisher filter applies to
+// a work returned by Crossref. Crossref stores long-form publisher names such
+// as "Institute of Electrical and Electronics Engineers (IEEE)" while saved
+// sources often use short names such as "IEEE". Matching is therefore a
+// case-insensitive substring test on whitespace-normalized names. The
+// query.publisher-name parameter remains the primary filter; this check only
+// drops works whose publisher clearly does not match.
+//
+// An empty filter accepts every work, and a work without a publisher name is
+// rejected when a filter is set.
+func crossrefPublisherMatches(filter, publisher string) bool {
+	filter = normalizeCrossrefPublisher(filter)
+	if filter == "" {
+		return true
+	}
+
+	publisher = normalizeCrossrefPublisher(publisher)
+	if publisher == "" {
+		return false
+	}
+
+	return strings.Contains(publisher, filter)
+}
+
+func normalizeCrossrefPublisher(name string) string {
+	return strings.ToLower(strings.Join(strings.Fields(name), " "))
 }
 
 func firstAcademicString(values []string) string {

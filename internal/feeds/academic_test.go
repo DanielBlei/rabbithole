@@ -292,6 +292,200 @@ func TestFetchCrossrefFiltersPublisherAndCanonicalizesDOI(t *testing.T) {
 	}
 }
 
+func TestCrossrefPublisherMatches(t *testing.T) {
+	tests := []struct {
+		name      string
+		filter    string
+		publisher string
+		want      bool
+	}{
+		{
+			name:      "exact case-insensitive",
+			filter:    "acm",
+			publisher: "ACM",
+			want:      true,
+		},
+		{
+			name:      "ieee short name",
+			filter:    "IEEE",
+			publisher: "Institute of Electrical and Electronics Engineers (IEEE)",
+			want:      true,
+		},
+		{
+			name:      "springer variant",
+			filter:    "Springer",
+			publisher: "Springer Nature Switzerland",
+			want:      true,
+		},
+		{
+			name:      "lowercase filter",
+			filter:    "springer",
+			publisher: "Springer US",
+			want:      true,
+		},
+		{
+			name:      "full name",
+			filter:    "Springer Nature Singapore",
+			publisher: "Springer Nature Singapore",
+			want:      true,
+		},
+		{
+			name:      "extra whitespace",
+			filter:    "  Springer   Nature ",
+			publisher: "Springer Nature  Switzerland",
+			want:      true,
+		},
+		{
+			name:      "wrong publisher",
+			filter:    "IEEE",
+			publisher: "Elsevier",
+			want:      false,
+		},
+		{
+			name:      "missing publisher",
+			filter:    "IEEE",
+			publisher: "",
+			want:      false,
+		},
+		{
+			name:      "empty filter",
+			filter:    "",
+			publisher: "Elsevier",
+			want:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := crossrefPublisherMatches(tt.filter, tt.publisher); got != tt.want {
+				t.Errorf(
+					"crossrefPublisherMatches(%q, %q) = %v, want %v",
+					tt.filter,
+					tt.publisher,
+					got,
+					tt.want,
+				)
+			}
+		})
+	}
+}
+
+func TestFetchCrossrefShortPublisherFilters(t *testing.T) {
+	const response = `{
+	  "message": {
+	    "items": [
+	      {
+	        "DOI": "10.1234/ieee",
+	        "title": ["IEEE paper"],
+	        "publisher": "Institute of Electrical and Electronics Engineers (IEEE)",
+	        "published": {"date-parts": [[2026, 9, 4]]}
+	      },
+	      {
+	        "DOI": "10.1234/springer-ch",
+	        "title": ["Springer Switzerland paper"],
+	        "publisher": "Springer Nature Switzerland",
+	        "published": {"date-parts": [[2026, 9, 3]]}
+	      },
+	      {
+	        "DOI": "10.1234/springer-us",
+	        "title": ["Springer US paper"],
+	        "publisher": "Springer US",
+	        "published": {"date-parts": [[2026, 9, 2]]}
+	      },
+	      {
+	        "DOI": "10.1234/elsevier",
+	        "title": ["Elsevier paper"],
+	        "publisher": "Elsevier",
+	        "published": {"date-parts": [[2026, 9, 1]]}
+	      },
+	      {
+	        "DOI": "10.1234/no-publisher",
+	        "title": ["Unattributed paper"],
+	        "published": {"date-parts": [[2026, 8, 31]]}
+	      }
+	    ]
+	  }
+	}`
+
+	tests := []struct {
+		name      string
+		publisher string
+		wantDOIs  []string
+	}{
+		{
+			name:      "ieee short name",
+			publisher: "IEEE",
+			wantDOIs:  []string{"10.1234/ieee"},
+		},
+		{
+			name:      "springer variants",
+			publisher: "Springer",
+			wantDOIs:  []string{"10.1234/springer-ch", "10.1234/springer-us"},
+		},
+		{
+			name:      "padded lowercase filter",
+			publisher: " springer ",
+			wantDOIs:  []string{"10.1234/springer-ch", "10.1234/springer-us"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) {
+					want := strings.TrimSpace(tt.publisher)
+					if got := r.URL.Query().Get("query.publisher-name"); got != want {
+						t.Errorf("query.publisher-name = %q, want %q", got, want)
+					}
+
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = fmt.Fprint(w, response)
+				},
+			))
+			defer srv.Close()
+
+			crossrefRequestMu.Lock()
+			crossrefLastRequest = time.Time{}
+			crossrefRequestMu.Unlock()
+
+			f := NewAcademicFetcher()
+			f.CrossrefBaseURL = srv.URL
+
+			items, err := f.Fetch(
+				context.Background(),
+				Source{Name: "Crossref"},
+				AcademicQuery{
+					Provider:  "crossref",
+					Query:     "large language models",
+					Publisher: tt.publisher,
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var gotDOIs []string
+			seenIDs := make(map[string]struct{}, len(items))
+
+			for _, item := range items {
+				if _, ok := seenIDs[item.ID]; ok {
+					t.Errorf("duplicate item ID %q", item.ID)
+				}
+				seenIDs[item.ID] = struct{}{}
+
+				gotDOIs = append(
+					gotDOIs,
+					strings.TrimPrefix(item.Link, "https://doi.org/"),
+				)
+			}
+
+			if strings.Join(gotDOIs, "|") != strings.Join(tt.wantDOIs, "|") {
+				t.Errorf("DOIs = %#v, want %#v", gotDOIs, tt.wantDOIs)
+			}
+		})
+	}
+}
+
 func TestFetchCrossrefRetries429(t *testing.T) {
 	var requests atomic.Int32
 
