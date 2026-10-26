@@ -394,6 +394,13 @@ Supported search parameters include `q`, `query`, `search_query` and
 `open_access` and `min_citations`. Crossref-style `query.publisher-name` and
 `query.container-title` are also accepted.
 
+On Crossref, `publisher` is sent to the API as `query.publisher-name`. Returned
+works are then kept when the saved value appears, case-insensitively, anywhere
+in Crossref's publisher name after trimming and collapsing whitespace. Short
+names therefore match Crossref's long-form values: `IEEE` matches
+`Institute of Electrical and Electronics Engineers (IEEE)`, and `Springer`
+matches the `Springer Nature ...` variants.
+
 `since` and `max_items` are applied by the common ingest pipeline after provider
 results are normalized.
 
