@@ -10,8 +10,9 @@ rabbithole [global flags] <command>
 
 | Command | What it does |
 |---|---|
-| [`serve`](#serve) | Serve the web UI and the JSON API, behind the login |
 | [`ingest`](#ingest) | Fetch the feeds, score what is new, record it, and optionally write a markdown digest |
+| [`digest`](#digest) | Print a daily or weekly Markdown digest of already-scored articles |
+| [`serve`](#serve) | Serve the web UI and the JSON API, behind the login |
 | [`config`](#config) | Export, import, list and roll back the saved settings |
 | [`sources`](#sources) | Import and export the feed set |
 | [`store`](#store) | Show where the store lives |
@@ -41,6 +42,24 @@ The store location is `--db`, then `RABBITHOLE_DB`, then the `--config` file's `
 default. On the first start with no store, a terminal gets the question
 `Create a new SQLite store at ...? [Y/n]`; `n` creates nothing and exits 0. Without a terminal the
 store is created and a hint is logged. A Postgres password comes from `RABBITHOLE_DB_PASSWORD`.
+
+## digest
+
+```
+rabbithole digest [--period daily|weekly] [--limit N]
+```
+
+Prints a Markdown reading digest to stdout from articles already scored and stored. The default
+period is the previous complete UTC day (limit 10); `--period weekly` selects the previous
+complete Monday-to-Monday UTC week (limit 20). Both periods include their start and exclude their
+end. `--limit` must be between 1 and 50. Articles without an LLM score are omitted; user ratings
+do not affect relevance order. No feeds are fetched and no model is called.
+
+```
+rabbithole digest
+rabbithole digest --period weekly
+rabbithole digest --period daily --limit 5
+```
 
 ## ingest
 
