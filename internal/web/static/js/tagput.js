@@ -35,7 +35,7 @@
   }
   // Chips this file renders, plus the read-only ones the server prints.
   function colorChips() {
-    document.querySelectorAll('.tagput__chip, .tagput__sug, .src__tag').forEach(function (el) {
+    document.querySelectorAll('.tagput__chip, .tagput__sug, .src__tag, .mg .tag[data-tag]').forEach(function (el) {
       var name = (el.dataset.tag || el.textContent).trim();
       if (name) { colorize(el, name); }
     });
@@ -154,6 +154,8 @@
 
   document.addEventListener('DOMContentLoaded', initAll);
   document.body.addEventListener('htmx:afterSwap', initAll);
+  // Rows a live refresh swaps in out of band carry the server's tag colours.
+  document.body.addEventListener('htmx:oobAfterSwap', initAll);
 
   window.tagput = { colorize: colorize, cycleColor: cycleColor, colorChips: colorChips, initAll: initAll };
 })();

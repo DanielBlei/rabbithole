@@ -7,6 +7,9 @@
 <div class="src-page">
   {{template "sourcesNav" .}}
   <div class="src-page__main">
+    {{/* An ingestion run starting or ending anywhere on the page (static/js/ingest.js
+         raises the event) refreshes this page's live parts out of band. */}}
+    <span hidden hx-get="/sources/live?page={{.Section}}" hx-trigger="sources-ingest-change from:body" hx-swap="none"></span>
     {{if eq .Section "manage"}}{{template "sourcesManage" .}}{{else}}{{template "sourcesOverview" .}}{{end}}
   </div>
 </div>

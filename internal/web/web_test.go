@@ -745,9 +745,19 @@ func TestPagesRenderWhenTheStoredConfigIsUnreadable(t *testing.T) {
 	if _, err := db.SaveConfig(t.Context(), "bogus_key: 1\n", "h", store.ConfigSourceUI, 0); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/feed", "/maze", "/sources", "/sources/manage", "/ingest"} {
+	for _, path := range []string{"/feed", "/maze", "/ingest"} {
 		if body := get(t, w, path); !strings.Contains(body, "@rabbithole") {
 			t.Errorf("GET %s rendered without the prompt:\n%.300s", path, body)
+		}
+	}
+	// The Sources pages have no prompt line; their headings show they rendered.
+	// A source is needed for the Overview to show more than its first-run prompt.
+	if _, err := db.AddFeed(t.Context(), config.Feed{Name: "Alpha", URL: "https://alpha.test/feed"}); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{"/sources": "ov-brief", "/sources/manage": "Manage sources"} {
+		if body := get(t, w, path); !strings.Contains(body, want) {
+			t.Errorf("GET %s rendered without %q:\n%.300s", path, want, body)
 		}
 	}
 }
@@ -798,6 +808,7 @@ func TestRoutesRegister(t *testing.T) {
 		{"GET", "/sources", "GET /sources"},
 		{"GET", "/sources/manage", "GET /sources/manage"},
 		{"GET", "/sources/new", "GET /sources/new"},
+		{"GET", "/sources/live", "GET /sources/live"},
 		{"GET", "/sources/defaults", "GET /sources/defaults"},
 		{"GET", "/sources/export", "GET /sources/export"},
 		{"GET", "/sources/feed/1", "GET /sources/feed/{id}"},

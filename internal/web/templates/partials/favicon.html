@@ -1,0 +1,6 @@
+{{/* SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+     SPDX-License-Identifier: Apache-2.0 */}}
+
+{{/* A source's letter tile in place of its favicon. Takes a monogramData, e.g.
+     {{template "favicon" (monogram .Name .URL 20)}}. */}}
+{{define "favicon"}}<span class="fav fav--mono fav--c{{.Color}}" style="--fs:{{.Size}}px" aria-hidden="true"><span class="fav__m">{{.Letter}}</span></span>{{end}}

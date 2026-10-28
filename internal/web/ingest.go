@@ -9,12 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/httplog"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/store"
@@ -101,6 +103,46 @@ type ingestBodyData struct {
 type ingestModalData struct {
 	Body       ingestBodyData
 	PromptUser string
+}
+
+// ingestBarData drives the compact ingest bar on the Sources pages. Status is
+// none | running | ok | error | cancelled. Counts are only set once a run has
+// finished, since the store records them at finish.
+type ingestBarData struct {
+	Status  string
+	Running bool
+	// When is the start while running and the end after, as "5m ago". A run the
+	// store has no end time for reads as its start.
+	When    string
+	Took    string // run duration of a finished run
+	Err     string // error text of a failed run
+	Counts  store.IngestCounts
+	Enabled int  // enabled feeds, the scope of a rerun
+	Rerun   bool // label the run button as a full rerun
+	Compact bool
+	// Note makes a bar response carry the running note out of band. Set by the
+	// bar of a page that has the note; a page without it has no target.
+	Note bool
+	// Poll makes the note poll itself, for a page whose note has no bar to
+	// carry it.
+	Poll bool
+	OOB  bool // render the running note out of band
+}
+
+// Query is the URL query that re-requests this bar with its variant kept. The
+// poll and the Run/Cancel actions all carry it so the swapped bar keeps its look.
+func (d ingestBarData) Query() string {
+	v := url.Values{"view": {"bar"}}
+	if d.Rerun {
+		v.Set("rerun", "1")
+	}
+	if d.Compact {
+		v.Set("compact", "1")
+	}
+	if d.Note {
+		v.Set("note", "1")
+	}
+	return v.Encode()
 }
 
 // chromeData is the shared page-chrome model both pages embed for layout.html:
@@ -262,24 +304,150 @@ func (s *Web) handleIngestRun(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.renderIngestBody(w, r.Context(), histPageFromQuery(r))
+	s.renderIngestAction(w, r)
 }
 
 // handleIngestCancel cancels the in-flight run, if any, and re-renders the
 // body. The run winds down asynchronously; polling picks up the final state.
 func (s *Web) handleIngestCancel(w http.ResponseWriter, r *http.Request) {
 	s.ing.Cancel()
+	s.renderIngestAction(w, r)
+}
+
+// renderIngestAction answers a run or cancel. A request from the Sources bar
+// (view=bar) gets the bar back; the modal gets its body as before.
+func (s *Web) renderIngestAction(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("view") == "bar" {
+		s.renderIngestBar(w, r)
+		return
+	}
 	s.renderIngestBody(w, r.Context(), histPageFromQuery(r))
 }
 
 // handleIngestStatus is the poll target: the modal body re-renders itself
 // every 2s while a run is live (the hx-get is only emitted in the running
-// state, so polling stops by itself when the run ends).
+// state, so polling stops by itself when the run ends). view=bar polls the
+// Sources bar instead.
 func (s *Web) handleIngestStatus(w http.ResponseWriter, r *http.Request) {
 	// Polling at 2s would otherwise bury the run's own console output, which
 	// is exactly what the operator opened the modal to watch.
 	httplog.Quiet(r)
+	switch r.URL.Query().Get("view") {
+	case "bar":
+		s.renderIngestBar(w, r)
+		return
+	case "note":
+		s.renderIngestNote(w, r)
+		return
+	}
 	s.renderIngestBody(w, r.Context(), histPageFromQuery(r))
+}
+
+// renderIngestBar writes the Sources ingest bar, then the running note out of
+// band when the page has one (note=1), then the chrome. The bar's poll and its
+// Run and Cancel buttons all answer here.
+func (s *Web) renderIngestBar(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	q := r.URL.Query()
+	data, err := s.ingestBarView(ctx, q.Get("rerun") == "1", q.Get("compact") == "1")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	data.Note = q.Get("note") == "1"
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := feedTmpl.ExecuteTemplate(w, "ingestBar", data); err != nil {
+		log.Error().Err(err).Msg("render ingest bar")
+		return
+	}
+	if data.Note {
+		data.OOB = true
+		if err := feedTmpl.ExecuteTemplate(w, "ingestNote", data); err != nil {
+			log.Error().Err(err).Msg("render ingest note")
+		}
+	}
+	s.writeIngestChrome(w, ctx)
+}
+
+// renderIngestNote writes the running note alone, for the note that polls
+// itself on a page with no ingest bar. It keeps polling while the run is live.
+func (s *Web) renderIngestNote(w http.ResponseWriter, r *http.Request) {
+	data, err := s.ingestBarView(r.Context(), false, false)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	data.Poll = true
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := feedTmpl.ExecuteTemplate(w, "ingestNote", data); err != nil {
+		log.Error().Err(err).Msg("render ingest note")
+	}
+}
+
+// ingestBarView builds the Sources bar from the manager snapshot and the newest
+// finished run. Enabled comes from the server's resolved feed set, not the
+// page, so a rerun label stays true across polls.
+func (s *Web) ingestBarView(ctx context.Context, rerun, compact bool) (ingestBarData, error) {
+	// A live run needs no feed count: the bar shows no rerun label while it runs.
+	if s.ing.Status().Running {
+		return s.ingestBarWith(ctx, 0, rerun, compact)
+	}
+	enabled, err := s.enabledFeedCount(ctx)
+	if err != nil {
+		return ingestBarData{}, err
+	}
+	return s.ingestBarWith(ctx, enabled, rerun, compact)
+}
+
+// ingestBarWith is ingestBarView for a caller that already has the enabled
+// count.
+func (s *Web) ingestBarWith(ctx context.Context, enabled int, rerun, compact bool) (ingestBarData, error) {
+	data := ingestBarData{Status: "none", Enabled: enabled, Rerun: rerun, Compact: compact}
+	now := time.Now()
+	if st := s.ing.Status(); st.Running {
+		data.Status, data.Running, data.When = "running", true, agoPhrase(st.StartedAt, now)
+		return data, nil
+	}
+	last, err := s.db.LastIngestRun(ctx)
+	if err != nil {
+		return ingestBarData{}, err
+	}
+	if last == nil {
+		return data, nil
+	}
+	// Anything not ok or error reads as cancelled, the same default the chrome uses.
+	v := toIngestRunView(*last, now)
+	switch v.Status {
+	case store.IngestStatusOK, store.IngestStatusError:
+		data.Status = v.Status
+	default:
+		data.Status = store.IngestStatusCancelled
+	}
+	data.When, data.Took, data.Counts = finishedAgo(*last, now), v.Took, v.Counts
+	if data.Status == store.IngestStatusError {
+		data.Err = v.Error
+	}
+	return data, nil
+}
+
+// enabledFeedCount counts the enabled feeds in the resolved set, the same count
+// the Sources page shows.
+func (s *Web) enabledFeedCount(ctx context.Context) (int, error) {
+	doc, err := s.db.FeedsDoc(ctx)
+	if err != nil {
+		return 0, err
+	}
+	resolved, err := config.ResolveFeeds(doc)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, f := range resolved {
+		if f.Enabled {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // handleIngestRunLog expands (or collapses) one history row's captured log,
@@ -463,6 +631,15 @@ func ingestChip(running bool, kind ingest.RunKind, last *ingestRunView) ingestCh
 	default:
 		return ingestChipData{}
 	}
+}
+
+// finishedAgo words when a run ended, or when it started if the store has no
+// end time for it.
+func finishedAgo(r store.IngestRun, now time.Time) string {
+	if r.FinishedAt == nil {
+		return agoPhrase(r.StartedAt, now)
+	}
+	return agoPhrase(*r.FinishedAt, now)
 }
 
 // toIngestRunView shapes one history row for display.

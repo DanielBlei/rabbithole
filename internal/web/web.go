@@ -43,12 +43,14 @@ var (
 // pageTmpl builds the template set for one page: the shared layout and partials
 // plus the named page file under templates/.
 func pageTmpl(page string) *template.Template {
-	return template.Must(template.New(page).Funcs(template.FuncMap{"tip": tipFor}).ParseFS(
-		templatesFS,
-		"templates/layout.html",
-		"templates/partials/*.html",
-		"templates/"+page,
-	))
+	return template.Must(
+		template.New(page).Funcs(template.FuncMap{"tip": tipFor, "monogram": monogram, "clip": clipText}).ParseFS(
+			templatesFS,
+			"templates/layout.html",
+			"templates/partials/*.html",
+			"templates/"+page,
+		),
+	)
 }
 
 // listLimit bounds how many rows the digest page pulls per render. The current
@@ -178,6 +180,7 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /sources", s.handleSources)
 	mux.HandleFunc("GET /sources/manage", s.handleSourcesManage)
 	mux.HandleFunc("GET /sources/new", s.handleSourceNew)
+	mux.HandleFunc("GET /sources/live", s.handleSourcesLive)
 	mux.HandleFunc("GET /sources/defaults", s.handleSourceDefaults)
 	mux.HandleFunc("GET /sources/export", s.handleSourceExport)
 	mux.HandleFunc("GET /sources/feed/{id}", s.handleSourceSelect)

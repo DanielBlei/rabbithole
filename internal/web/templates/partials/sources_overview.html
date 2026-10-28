@@ -1,15 +1,103 @@
 {{/* SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
      SPDX-License-Identifier: Apache-2.0 */}}
 
-{{/* The Overview section of Sources: a placeholder until it has content. */}}
+{{/* The Overview section of Sources: the health of every live source, what needs
+     attention, and the ingestion bar. With no sources it is the first-run prompt. */}}
 {{define "sourcesOverview"}}
-<section class="pane src-ov">
-  <div class="pane__bar">
-    <span class="pane__ps"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~/sources</span><span class="sh">$&nbsp;</span><span class="pane__cmd">sources --feeds {{.Counts.Total}}</span><span class="blink">_</span></span>
-  </div>
-  <div class="src-ov__body">
-    <p>{{.Counts.Total}} {{if eq .Counts.Total 1}}source{{else}}sources{{end}}.</p>
-    <p><a href="/sources/manage">Manage sources</a></p>
+<div id="srcOverview"{{if .Counts.OOB}} hx-swap-oob="true"{{end}}>
+{{- if .Overview.FirstRun}}
+<section class="ov-empty-state">
+  <h1>No sources yet</h1>
+  <p>Add a feed you already read, or import a sources file.</p>
+  <div class="ov-empty-state__a">
+    <a class="clk-btn clk-btn--go" href="/sources/manage?add=1">Add a source</a>
+    <a class="clk-btn" href="/sources/manage">Import</a>
   </div>
 </section>
+{{- else}}
+<div class="ov ov--page">
+  <header class="ov-top">
+    <h1>Overview</h1>
+    <p class="ov-brief">{{.Overview.Brief}}</p>
+  </header>
+
+  <section class="stp-group" aria-labelledby="ovSync">
+    <header class="stp-group__h">
+      <div><h3 id="ovSync"><span class="stp-group__t">Sync and health</span></h3></div>
+      <p>Ingestion fetches every enabled feed, then scores new items against your profile.</p>
+    </header>
+    <div class="ov-body">
+      {{template "ingestBar" .Overview.Ingest}}
+      <div class="ov-health">
+        <div class="ov-hbar" role="img" aria-label="{{.Overview.HealthAria}}">
+          {{- range .Overview.Health}}{{if gt .Count 0}}<span class="ov-hbar__s ov-hbar__s--{{.Key}}" style="flex-grow:{{.Count}}" title="{{.Count}} {{.Label}}"></span>{{end}}{{end}}
+        </div>
+        <ul class="ov-legend">
+          {{- range .Overview.Health}}
+          <li>
+            {{- if .Link}}
+            <a class="ov-legend__a" href="{{.Link}}"><i class="ov-sw ov-sw--{{.Key}}" aria-hidden="true"></i><b>{{.Count}}</b> {{.Word}}</a>
+            {{- else}}
+            <span class="ov-legend__a"><i class="ov-sw ov-sw--{{.Key}}" aria-hidden="true"></i><b>{{.Count}}</b> {{.Word}}</span>
+            {{- end}}
+          </li>
+          {{- end}}
+        </ul>
+        <div class="ov-rate">
+          <span class="ov-rate__n">{{.Overview.RateText}}</span>
+          <span class="ov-rate__t"><b>Fetch success</b>{{if .Overview.RateTotal}}<span class="sh-hint">{{.Overview.RateOK}} of {{.Overview.RateTotal}} recent fetches (last 12 per enabled source)</span>{{else}}<span class="sh-hint">No fetches yet</span>{{end}}</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="stp-group" aria-labelledby="ovAttn">
+    <header class="stp-group__h">
+      <div><h3 id="ovAttn"><span class="stp-group__t">Needs attention</span></h3></div>
+    </header>
+    <div class="ov-body">
+      {{- if .Overview.AllClear}}
+      <p class="ov-clear"><span class="ov-att__dot ov-att__dot--ok" aria-hidden="true"></span>Nothing failing.{{if .Overview.LastRun}} Last run {{.Overview.LastRun}}.{{end}}</p>
+      {{- else}}
+      <ul class="ov-atts">
+        {{- if .Overview.Failing}}
+        <li class="ov-att ov-att--bad">
+          <span class="ov-att__dot" aria-hidden="true"></span>
+          <div class="ov-att__b">
+            <div class="ov-att__t">{{len .Overview.Failing}} {{if eq (len .Overview.Failing) 1}}source{{else}}sources{{end}} failing</div>
+            <div class="ov-att__d">{{range $i, $f := .Overview.Failing}}{{if $i}}, {{end}}{{$f.Name}}{{end}}</div>
+          </div>
+          <a class="clk-btn clk-btn--link" href="/sources/manage?state=failing">Fix in Manage</a>
+        </li>
+        {{- end}}
+        {{- if .Overview.Flaky}}
+        <li class="ov-att ov-att--warn">
+          <span class="ov-att__dot" aria-hidden="true"></span>
+          <div class="ov-att__b">
+            <div class="ov-att__t">{{len .Overview.Flaky}} {{if eq (len .Overview.Flaky) 1}}source{{else}}sources{{end}} flaky</div>
+            <div class="ov-att__d">{{range $i, $f := .Overview.Flaky}}{{if $i}}, {{end}}{{$f.Name}}{{end}}: the latest fetch failed, earlier ones were fine</div>
+          </div>
+          <a class="clk-btn clk-btn--link" href="/sources/manage?state=flaky">Review</a>
+        </li>
+        {{- end}}
+        {{- if .Overview.Never}}
+        <li class="ov-att ov-att--info">
+          <span class="ov-att__dot" aria-hidden="true"></span>
+          <div class="ov-att__b">
+            <div class="ov-att__t">{{len .Overview.Never}} {{if eq (len .Overview.Never) 1}}source is{{else}}sources are{{end}} waiting for the first run</div>
+            <div class="ov-att__d">{{range $i, $f := .Overview.Never}}{{if $i}}, {{end}}{{$f.Name}}{{end}}: ingestion fetches it next time it runs</div>
+          </div>
+        </li>
+        {{- end}}
+      </ul>
+      {{- end}}
+    </div>
+  </section>
+</div>
+{{- end}}
+</div>
 {{end}}
+
+{{/* The answer to a refresh after an ingestion run starts or ends: the Overview
+     and the nav badge, both out of band. */}}
+{{define "sourceLiveOverview"}}{{template "sourcesOverview" .}}{{template "sourceNavBadge" .Counts}}{{end}}

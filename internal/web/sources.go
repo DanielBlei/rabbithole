@@ -18,13 +18,14 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/httplog"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
-// The three states of an inheritable boolean in the detail form. A feed that
-// sets nothing inherits, which is a different thing from setting it to off —
-// so the control is a three-way choice, not a checkbox.
+// The three states of an inheritable boolean in the editor. A feed that sets
+// nothing inherits, which is a different thing from setting it to off, so the
+// control is a three-way choice, not a checkbox.
 const (
 	inheritChoice = ""
 	onChoice      = "on"
@@ -36,8 +37,8 @@ const (
 // out until they work.
 var sourceTypes = []config.FeedType{config.FeedTypeRSS, config.FeedTypeAcademic}
 
-// sourcesData is the Sources page model: the whole feed set as rows on the
-// left, one feed's editable settings on the right.
+// sourcesData is the Sources page model: the whole feed set as rows, one of
+// which may have its editor open under it.
 type sourcesData struct {
 	Title      string
 	Active     string
@@ -45,24 +46,40 @@ type sourcesData struct {
 	PromptUser string
 	// Section is which Sources page is showing: "overview" or "manage".
 	Section string
+	// Overview is the Overview page's model, filled only when Section is overview.
+	Overview overviewData
 
-	Counts   sourceCounts
-	Defaults string // one-line summary of the cascade
-	Error    string // fetch history unavailable — a note, not a failure
+	Counts sourceCounts
+	// Attention is the Manage status block: failing sources, flaky notes and the
+	// rerun bar.
+	Attention sourcesAttention
+	Defaults  string // one-line summary of the cascade
+	Error     string // fetch history unavailable: a note, not a failure
 
-	Rows   []feedRowData
-	Detail *feedDetail
+	Rows []feedRowData
+	// Adding is the add form, shown at the top of the list as an inline editor.
+	Adding *feedDetail
+	// LiveNote is the running note sent with a live refresh.
+	LiveNote ingestBarData
+	// Unit is set on a one-source response: the row to render, with its editor
+	// when open.
+	Unit *feedRowData
 	// AllTags is every tag in use across the set, comma-joined — what the tag
 	// input suggests from.
 	AllTags string
 
-	// DefaultSince and DefaultCap are what a blank tuning field falls back to.
-	// They are computed once per render rather than per feed because the answer
-	// is the same for every feed: the blank replaces the feed's own value, so
-	// what's left is the defaults → ingest.since → built-in chain. That also
-	// gives the add form, which has no resolved feed yet, correct placeholders.
+	// DefaultSince and DefaultCap are what a blank tuning field falls back to,
+	// and SinceFrom and CapFrom say where that fallback comes from. They are
+	// computed once per render rather than per feed because the answer is the
+	// same for every feed: the blank replaces the feed's own value, so what's
+	// left is the defaults → ingest.since → built-in chain. That also gives the
+	// add form, which has no resolved feed yet, correct placeholders.
 	DefaultSince string
 	DefaultCap   string
+	SinceFrom    string
+	CapFrom      string
+	// DefaultOn is whether a source that sets no flag of its own is fetched.
+	DefaultOn bool
 
 	// Import is the outcome of a feeds-file import, shown above the list.
 	Import *importStatus
@@ -76,62 +93,57 @@ type importStatus struct {
 	Err      string
 }
 
-// sourceCounts is the Sources page's tally, rendered as the arguments of the faux
-// shell command in its title bar — the same place the Maze puts its own counts.
-// It re-renders out of band on every mutation, so it stays true without the
-// header being part of the swap that would wipe the search box.
+// sourceCounts is the Sources page's tally. It feeds the Manage summary line,
+// the filter pill counts and the nav badge, and re-renders out of band on every
+// mutation so they stay true while the toolbar stays out of the swap that
+// would wipe the search box.
 type sourceCounts struct {
 	OOB     bool
 	Total   int
 	Enabled int
 	Failing int
+	Flaky   int
 	Deleted int
 }
 
-// Cmd renders the tally as the command line: `sources --feeds 6 --enabled 5`.
-// Feeds and enabled are always shown; the other two only when they have
-// something to report, so a healthy set isn't padded with zeroes.
-func (c sourceCounts) Cmd() string {
-	cmd := fmt.Sprintf("sources --feeds %d --enabled %d", c.Total, c.Enabled)
-	if c.Failing > 0 {
-		cmd += fmt.Sprintf(" --failing %d", c.Failing)
-	}
-	if c.Deleted > 0 {
-		cmd += fmt.Sprintf(" --deleted %d", c.Deleted)
-	}
-	return cmd
-}
-
-// feedDetail is the right-hand pane: one feed's settings as typed. A tuning
-// field left blank takes the default, and the field's placeholder shows what
-// that default is — so the form posts back an empty string and the page never
-// has to explain the word "inherited".
+// feedDetail is one source's editor: its settings as typed. A tuning field
+// left blank takes the default, and the field's placeholder shows what that
+// default is, so the form posts back an empty string and the page never has to
+// explain the word "inherited".
 type feedDetail struct {
-	// Adding switches the pane to the new-feed form: same fields, no health,
-	// and a create rather than a save.
+	// Adding makes it the new-feed form: same fields, and a create rather than
+	// a save.
 	Adding bool
 
-	ID      string
-	Name    string
-	URL     string
-	Deleted bool
+	ID   string
+	Name string
+	URL  string
 	// Type is the feed's kind, resolved: an unset type shows as rss.
 	Type string
 
-	// Own values, blank when the feed takes the default.
+	// EnabledChoice is the Fetching pill: on, off, or blank to follow the
+	// defaults.
 	EnabledChoice string
 	Since         string
 	MaxItems      string
 	Tags          []string
-	TagsValue     string // comma-joined, the hidden field the tag input drives
+	// TagsValue is Tags comma-joined, the hidden field the tag input drives.
+	TagsValue string
 
-	// Defaults a blank field falls back to, rendered as the placeholder. Not
+	// OwnSince and OwnMax are the values stored on the source itself, blank
+	// when it takes the default. The hints tell them apart from typed ones.
+	OwnSince string
+	OwnMax   string
+	// DefaultSince and DefaultCap are what a blank field falls back to, with
+	// the origin words (SinceFrom, CapFrom) the hints print beside them. Not
 	// per-feed: see sourcesData.
 	DefaultSince string
 	DefaultCap   string
+	SinceFrom    string
+	CapFrom      string
+	// DefaultOn is what the Default pill follows, for its hint.
+	DefaultOn bool
 
-	// Eff carries the feed's health for the strip below the form.
-	Eff feedRowData
 	// InheritedTags come from the defaults and are unioned onto the feed's own.
 	// Only a seed file can set them now, so they show as fixed chips that
 	// explain a tag the feed doesn't list itself.
@@ -139,10 +151,6 @@ type feedDetail struct {
 
 	Err    string // validation failure, rendered against the form
 	Notice string // something that worked but is worth saying, e.g. items re-filed
-	// Flash is the confirmation laid over the pane after a change. It clears
-	// itself; Notice stays put, which is what a caveat like a half-done rename
-	// needs. A plain "saved" only has to be seen once.
-	Flash *flashData
 }
 
 // TypeChoices is what the type picker offers. A feed seeded with a kind the
@@ -159,16 +167,6 @@ func (d *feedDetail) TypeChoices() []string {
 		out = append(out, d.Type)
 	}
 	return out
-}
-
-// flashData is one self-clearing confirmation: the outcome in a word, over the
-// command that produced it. Written in the shell register the drawer and the
-// pane bars already speak, so a change reads as something that ran.
-type flashData struct {
-	Verb string // the outcome: added | saved | deleted
-	Cmd  string // the command it stands in for, e.g. "feed rm"
-	Name string // the feed it happened to
-	Bad  bool   // a removal — red, and a cross rather than a tick
 }
 
 // defaultsData backs the defaults editor modal. No tags field: a tag applied to
@@ -214,6 +212,9 @@ func (s *Web) renderSourcesPage(w http.ResponseWriter, r *http.Request, selected
 	data.Active = "sources"
 	data.Chrome = s.chrome(ctx)
 	data.Section = section
+	if section == "overview" {
+		data.Overview = overviewFrom(data)
+	}
 	var buf bytes.Buffer
 	if err := sourcesTmpl.ExecuteTemplate(&buf, "layout", data); err != nil {
 		log.Error().Err(err).Msg("render sources")
@@ -224,18 +225,48 @@ func (s *Web) renderSourcesPage(w http.ResponseWriter, r *http.Request, selected
 	_, _ = w.Write(buf.Bytes())
 }
 
-// handleSourceSelect opens one feed in the detail pane.
-func (s *Web) handleSourceSelect(w http.ResponseWriter, r *http.Request) {
-	s.renderSourcesBody(w, r, r.PathValue("id"), nil)
+// handleSourcesLive answers the refresh a page makes when an ingestion run
+// starts or ends. It is out-of-band updates only, so nothing is swapped from
+// under an editor in progress: page=manage re-sends the status block, counts,
+// running note and every row except those named in open; page=overview re-sends
+// the Overview.
+func (s *Web) handleSourcesLive(w http.ResponseWriter, r *http.Request) {
+	httplog.Quiet(r)
+	data, err := s.sourcesData(r.Context(), "")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	data.Counts.OOB, data.Attention.OOB = true, true
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	name := "sourceLiveManage"
+	if r.URL.Query().Get("page") == "overview" {
+		data.Overview = overviewFrom(data)
+		name = "sourceLiveOverview"
+	} else {
+		open := make(map[string]bool)
+		for _, id := range strings.Split(r.URL.Query().Get("open"), ",") {
+			open[id] = true
+		}
+		for i := range data.Rows {
+			data.Rows[i].OOB = !open[data.Rows[i].ID]
+		}
+		data.LiveNote = data.Attention.NoteBar()
+		data.LiveNote.OOB = true
+	}
+	if err := feedTmpl.ExecuteTemplate(w, name, data); err != nil {
+		log.Error().Err(err).Msg("render sources live")
+	}
 }
 
-// handleSourceNew opens the add-a-feed form in the detail pane.
+// handleSourceSelect opens one source's editor under its row.
+func (s *Web) handleSourceSelect(w http.ResponseWriter, r *http.Request) {
+	s.writeUnit(w, r, r.PathValue("id"), unitOpts{open: true})
+}
+
+// handleSourceNew opens the add form at the top of the list.
 func (s *Web) handleSourceNew(w http.ResponseWriter, r *http.Request) {
-	s.renderSourcesBody(w, r, "", &feedDetail{
-		Adding:        true,
-		EnabledChoice: inheritChoice,
-		Type:          string(config.FeedTypeRSS),
-	})
+	s.renderSourcesBody(w, r, "", &feedDetail{Adding: true, Type: string(config.FeedTypeRSS)})
 }
 
 // handleSourceAdd creates a feed. A failure re-renders the form with the
@@ -243,8 +274,8 @@ func (s *Web) handleSourceNew(w http.ResponseWriter, r *http.Request) {
 //
 // A success leaves the add form open and empty rather than opening the feed it
 // just made: feeds arrive in batches, and landing in the editor for one you have
-// nothing more to say about means clicking "add feed" again for every single
-// one. The new feed is in the list beside it either way, and the notice names
+// nothing more to say about means clicking "add" again for every single one.
+// The new feed is in the list under the form either way, and the notice names
 // what was added.
 func (s *Web) handleSourceAdd(w http.ResponseWriter, r *http.Request) {
 	feed, err := feedFromForm(r, "")
@@ -262,18 +293,18 @@ func (s *Web) handleSourceAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	s.afterFeedChange(r.Context())
 	s.renderSourcesBody(w, r, "", &feedDetail{
-		Adding:        true,
-		EnabledChoice: inheritChoice,
-		Type:          string(config.FeedTypeRSS),
-		Flash:         &flashData{Verb: "added", Cmd: "feed add", Name: feed.Name},
+		Adding: true,
+		Type:   string(config.FeedTypeRSS),
+		Notice: "Added " + feed.Name + ". It is fetched on the next ingestion run.",
 	})
 }
 
-// handleSourceSave writes the detail form back.
+// handleSourceSave writes the editor back and answers with that source's unit,
+// editor still open.
 //
 // A rename also re-files the feed's existing items: items.source records the
 // feed's name, so without that they would keep pointing at a label no feed
-// claims any more. It is reported rather than enforced — the feed is saved
+// claims any more. It is reported rather than enforced: the feed is saved
 // either way.
 func (s *Web) handleSourceSave(w http.ResponseWriter, r *http.Request) {
 	ctx, id := r.Context(), r.PathValue("id")
@@ -284,41 +315,55 @@ func (s *Web) handleSourceSave(w http.ResponseWriter, r *http.Request) {
 	}
 	feed, err := feedFromForm(r, previous.Type)
 	if err != nil {
-		s.renderSourcesBody(w, r, id, editFormWithError(r, id, err))
+		s.writeUnit(w, r, id, unitOpts{override: editFormWithError(r, id, err)})
 		return
 	}
 	if err := s.db.UpdateFeed(ctx, id, feed); err != nil {
 		if isFeedInputError(err) {
-			s.renderSourcesBody(w, r, id, editFormWithError(r, id, err))
+			s.writeUnit(w, r, id, unitOpts{override: editFormWithError(r, id, err)})
 			return
 		}
 		httpFeedError(w, err)
 		return
 	}
 
-	var notice string
+	notice := "Saved"
 	if moved, err := s.db.RenameSource(ctx, previous.Name, feed.Name); err != nil {
 		log.Warn().Err(err).Str("feed", feed.Name).Msg("re-filing items after a feed rename failed")
-		notice = "renamed, but existing items are still filed under " + previous.Name
+		notice += ": renamed, but existing items are still filed under " + previous.Name
 	} else if moved > 0 {
-		notice = fmt.Sprintf("renamed · re-filed %s", itemsPhrase(int(moved)))
+		notice += fmt.Sprintf(": renamed · re-filed %s", itemsPhrase(int(moved)))
 	}
 	s.afterFeedChange(ctx)
-	s.renderSourcesBody(w, r, id, &feedDetail{
-		Notice: notice,
-		Flash:  &flashData{Verb: "saved", Cmd: "feed save", Name: feed.Name},
-	})
+	s.writeUnit(w, r, id, unitOpts{override: &feedDetail{Notice: notice}, oob: true})
 }
 
-// handleSourceEnabled parks or unparks a feed from its row in the list.
+// enabledOn is whether a source is fetched: its own flag, else the defaults',
+// else on.
+func enabledOn(own *bool, defaults config.FeedDefaults) bool {
+	switch {
+	case own != nil:
+		return *own
+	case defaults.Enabled != nil:
+		return *defaults.Enabled
+	default:
+		return true
+	}
+}
+
+// handleSourceEnabled parks or unparks a feed from its row in the list, always
+// as an explicit value. The response is the row's unit; the editor stays open
+// when the request says it was (open=1), and the page asks before a dirty one
+// is replaced.
 func (s *Web) handleSourceEnabled(w http.ResponseWriter, r *http.Request) {
 	on := r.FormValue("enabled") == onChoice
-	if err := s.db.SetFeedEnabled(r.Context(), r.PathValue("id"), &on); err != nil {
+	id := r.PathValue("id")
+	if err := s.db.SetFeedEnabled(r.Context(), id, &on); err != nil {
 		httpFeedError(w, err)
 		return
 	}
 	s.afterFeedChange(r.Context())
-	s.renderSourcesBody(w, r, r.PathValue("id"), nil)
+	s.writeUnit(w, r, id, unitOpts{open: r.FormValue("open") == "1", oob: true})
 }
 
 // handleSourceConfirmDelete asks before removing a feed. A dialog rather than a
@@ -334,33 +379,16 @@ func (s *Web) handleSourceConfirmDelete(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleSourceDelete parks a feed out of sight. The row survives, so its fetch
-// history stays attached and re-seeding won't bring it back.
+// history stays attached and re-seeding won't bring it back. The response is the
+// unit in its removed state, plus the closing of the confirm dialog.
 func (s *Web) handleSourceDelete(w http.ResponseWriter, r *http.Request) {
 	ctx, id := r.Context(), r.PathValue("id")
-	// Read it first: the confirmation names what went, and after the delete the
-	// resolved set no longer carries it.
-	feed, err := s.db.FeedByID(ctx, id)
-	if err != nil {
-		httpFeedError(w, err)
-		return
-	}
 	if err := s.db.SoftDeleteFeed(ctx, id); err != nil {
 		httpFeedError(w, err)
 		return
 	}
 	s.afterFeedChange(ctx)
-
-	// Closes the confirm dialog, then repaints the columns underneath it.
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if _, err := w.Write(
-		[]byte(`<span id="sourcesDeleteDone" hx-swap-oob="innerHTML:#modalTop"></span>`),
-	); err != nil {
-		log.Error().Err(err).Msg("write delete response")
-		return
-	}
-	s.writeSourcesBody(w, r, "", &feedDetail{
-		Flash: &flashData{Verb: "deleted", Cmd: "feed rm", Name: feed.Name, Bad: true},
-	})
+	s.writeUnit(w, r, id, unitOpts{oob: true, modalDone: true})
 }
 
 func (s *Web) handleSourceRestore(w http.ResponseWriter, r *http.Request) {
@@ -370,7 +398,7 @@ func (s *Web) handleSourceRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.afterFeedChange(r.Context())
-	s.renderSourcesBody(w, r, id, nil)
+	s.writeUnit(w, r, id, unitOpts{oob: true})
 }
 
 func (s *Web) handleSourceDefaults(w http.ResponseWriter, r *http.Request) {
@@ -486,7 +514,7 @@ func (s *Web) handleSourceExport(w http.ResponseWriter, r *http.Request) {
 }
 
 // sourcesData assembles the Sources page model: the resolved feed set joined with each feed's
-// fetch history, plus whichever feed the detail pane is showing.
+// fetch history, plus the editor of the selected feed, if any.
 func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, error) {
 	doc, err := s.db.FeedsDoc(ctx)
 	if err != nil {
@@ -502,11 +530,15 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 	}
 
 	defaultSince, defaultCap := blankFallbacks(doc.Defaults)
+	sinceFrom, capFrom := fallbackOrigins(doc.Defaults)
 	data := sourcesData{
 		PromptUser:   s.pagePromptUser(ctx),
 		Defaults:     defaultsSummary(doc.Defaults),
 		DefaultSince: defaultSince,
 		DefaultCap:   defaultCap,
+		SinceFrom:    sinceFrom,
+		CapFrom:      capFrom,
+		DefaultOn:    enabledOn(nil, doc.Defaults),
 		Counts:       sourceCounts{Total: len(resolved), Deleted: len(deleted)},
 	}
 
@@ -522,12 +554,14 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 	data.Rows = make([]feedRowData, 0, len(resolved)+len(deleted))
 	for _, f := range resolved {
 		row := toFeedRow(f, health[f.ID], now)
-		row.Selected = f.ID == selected
 		if f.Enabled {
 			data.Counts.Enabled++
 		}
-		if row.State == feedStateError {
+		switch row.State {
+		case feedStateError:
 			data.Counts.Failing++
+		case feedStateFlaky:
+			data.Counts.Flaky++
 		}
 		data.Rows = append(data.Rows, row)
 	}
@@ -539,27 +573,102 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 			return sourcesData{}, err
 		}
 		for _, f := range gone {
-			row := toFeedRow(f, health[f.ID], now)
-			row.Selected = f.ID == selected
-			row.Deleted, row.State, row.Detail = true, feedStateOff, "deleted"
-			data.Rows = append(data.Rows, row)
+			data.Rows = append(data.Rows, removedRow(f, health[f.ID], now))
 		}
 	}
 
+	bar, err := s.ingestBarWith(ctx, data.Counts.Enabled, true, true)
+	if err != nil {
+		log.Error().Err(err).Msg("read ingest bar")
+		bar = ingestBarData{Status: "none", Enabled: data.Counts.Enabled, Rerun: true, Compact: true}
+	}
+	// This bar carries the running note out of band, which only this page has.
+	bar.Note = true
+	data.Attention = newAttention(data.Rows, data.Counts.Total, bar)
+
 	data.AllTags = strings.Join(tagUniverse(resolved), ",")
-	data.Detail = s.detailFor(ctx, selected, doc.Defaults, data.Rows)
-	stampDefaults(&data)
+	// A removed source has no editor: restoring it is the only way back.
+	for i := range data.Rows {
+		if row := &data.Rows[i]; selected != "" && row.ID == selected && !row.Deleted {
+			row.Editor = s.detailFor(ctx, selected, doc.Defaults)
+			row.Selected = row.Editor != nil
+		}
+	}
+	data.stampAll()
 	return data, nil
 }
 
-// stampDefaults copies the page's blank-field fallbacks onto the detail pane,
-// wherever that pane came from — the store, a fresh add form, or a rejected
-// submission being re-rendered. The template reads them as placeholders, and it
-// only has the pane as its dot, not the page.
-func stampDefaults(data *sourcesData) {
-	if data.Detail != nil {
-		data.Detail.DefaultSince = data.DefaultSince
-		data.Detail.DefaultCap = data.DefaultCap
+// stamp copies the page's blank-field fallbacks onto an editor, wherever it
+// came from (the store, a fresh add form, or a rejected submission being
+// re-rendered), and words its hints. The template only has the editor as its
+// dot, not the page.
+func (d *sourcesData) stamp(e *feedDetail) {
+	if e == nil {
+		return
+	}
+	e.DefaultSince, e.DefaultCap = d.DefaultSince, d.DefaultCap
+	e.SinceFrom, e.CapFrom = d.SinceFrom, d.CapFrom
+	e.DefaultOn = d.DefaultOn
+}
+
+// stampAll stamps the add form and the open editor.
+func (d *sourcesData) stampAll() {
+	d.stamp(d.Adding)
+	for i := range d.Rows {
+		d.stamp(d.Rows[i].Editor)
+	}
+	if d.Unit != nil {
+		d.stamp(d.Unit.Editor)
+	}
+}
+
+// fallbackOrigins says where a blank field's fallback comes from: the defaults
+// when they set it, the built-in otherwise.
+func fallbackOrigins(d config.FeedDefaults) (since, cap string) {
+	since, cap = originBuiltin, originBuiltin
+	if d.Since != nil {
+		since = originDefaults
+	}
+	if d.MaxItems != nil && *d.MaxItems > 0 {
+		cap = originDefaults
+	}
+	return since, cap
+}
+
+// Origin words for the tuning hints.
+const (
+	originDefaults = "from defaults"
+	originBuiltin  = "built-in"
+	originOwn      = "set on this source"
+	originTyped    = "set here"
+)
+
+// Insecure reports whether the address is plain http, which the editor flags.
+func (d *feedDetail) Insecure() bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(d.URL)), "http://")
+}
+
+// SinceHint words the line under the Since field for what it holds now.
+func (d *feedDetail) SinceHint() string {
+	return tuningHint(d.Since, d.OwnSince, d.DefaultSince, d.SinceFrom)
+}
+
+// CapHint words the line under the Max items field for what it holds now.
+func (d *feedDetail) CapHint() string {
+	return tuningHint(d.MaxItems, d.OwnMax, d.DefaultCap, d.CapFrom)
+}
+
+// tuningHint says what a tuning field will do. Blank takes the fallback and
+// names where it comes from; the value already stored on the source reads as
+// its own; anything else is a pending change that names what it would replace.
+func tuningHint(typed, own, fallback, from string) string {
+	switch typed {
+	case "":
+		return fallback + " " + from
+	case own:
+		return typed + " " + originOwn
+	default:
+		return typed + " " + originTyped + " (otherwise " + fallback + " " + from + ")"
 	}
 }
 
@@ -600,18 +709,17 @@ func tagUniverse(feeds []config.ResolvedFeed) []string {
 	return out
 }
 
-// detailFor builds the pane for the selected feed, or nil when nothing is
-// selected and the pane shows its placeholder. The lookup goes to the store
-// rather than the resolved list so a deleted feed can still be opened — that is
-// the only route back from an accidental delete.
-func (s *Web) detailFor(ctx context.Context, id string, defaults config.FeedDefaults, rows []feedRowData) *feedDetail {
+// detailFor builds the editor for a source. The lookup goes to the store rather
+// than the resolved list so the editor shows the values the source sets itself,
+// not the ones it inherits.
+func (s *Web) detailFor(ctx context.Context, id string, defaults config.FeedDefaults) *feedDetail {
 	if id == "" {
 		return nil
 	}
 	own, err := s.db.FeedByID(ctx, id)
 	if err != nil {
 		if !errors.Is(err, store.ErrFeedNotFound) {
-			log.Error().Err(err).Str("feed", id).Msg("read feed for the detail pane")
+			log.Error().Err(err).Str("feed", id).Msg("read feed for the editor")
 		}
 		return nil
 	}
@@ -628,34 +736,95 @@ func (s *Web) detailFor(ctx context.Context, id string, defaults config.FeedDefa
 	}
 	if own.Since != nil {
 		detail.Since = own.Since.Short()
+		detail.OwnSince = detail.Since
 	}
 	if own.MaxItems != nil {
 		detail.MaxItems = strconv.Itoa(*own.MaxItems)
-	}
-	for _, row := range rows {
-		if row.ID == id {
-			detail.Eff, detail.Deleted = row, row.Deleted
-			break
-		}
+		detail.OwnMax = detail.MaxItems
 	}
 	return detail
 }
 
-// renderSourcesBody re-renders the columns and, out of band, the header counts.
-// Every mutation lands here: the list is small enough that repainting it beats
-// tracking which rows a change touched, and keeping the search box outside the
-// swap means a filtered view survives an edit.
-func (s *Web) renderSourcesBody(w http.ResponseWriter, r *http.Request, selected string, detail *feedDetail) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	s.writeSourcesBody(w, r, selected, detail)
+// unitOpts says how writeUnit answers a one-source request.
+type unitOpts struct {
+	// open renders the source's editor from the store.
+	open bool
+	// override is an editor to show instead: a form with an error, or a notice
+	// laid over the stored one.
+	override *feedDetail
+	// oob adds the out-of-band updates a mutation owes the page: summary,
+	// filter counts, nav badge and attention block.
+	oob bool
+	// modalDone also closes the confirm dialog the request came from.
+	modalDone bool
 }
 
-func (s *Web) writeSourcesBody(w http.ResponseWriter, r *http.Request, selected string, detail *feedDetail) {
-	s.writeSourcesBodyWith(w, r, selected, detail, nil)
+// writeUnit answers with one source's list unit: its row, and its editor when
+// open. Every mutation of a single source lands here, so the swap touches that
+// unit and nothing else.
+func (s *Web) writeUnit(w http.ResponseWriter, r *http.Request, id string, o unitOpts) {
+	selected := ""
+	if o.open || o.override != nil {
+		selected = id
+	}
+	data, err := s.sourcesData(r.Context(), selected)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var row *feedRowData
+	for i := range data.Rows {
+		if data.Rows[i].ID == id {
+			row = &data.Rows[i]
+			break
+		}
+	}
+	if row == nil {
+		http.Error(w, store.ErrFeedNotFound.Error(), http.StatusNotFound)
+		return
+	}
+	// An explicit editor (a form with an error, or a notice) wins over the one
+	// loaded from the store, so what the user typed isn't thrown away.
+	if o.override != nil && !row.Deleted {
+		row.Editor = mergeDetail(row.Editor, o.override)
+		row.Selected = true
+	}
+	data.Unit = row
+	data.stampAll()
+	if o.oob {
+		data.Counts.OOB, data.Attention.OOB = true, true
+		// The settings page reads the feed count here instead of loading itself again.
+		w.Header().Set(feedCountHeader, strconv.Itoa(data.Counts.Total))
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if o.modalDone {
+		if _, err := w.Write(
+			[]byte(`<span id="sourcesDeleteDone" hx-swap-oob="innerHTML:#modalTop"></span>`),
+		); err != nil {
+			log.Error().Err(err).Msg("write delete response")
+			return
+		}
+	}
+	if err := feedTmpl.ExecuteTemplate(w, "sourceUnit", data); err != nil {
+		log.Error().Err(err).Msg("render source unit")
+	}
+}
+
+// renderSourcesBody re-renders the whole list and, out of band, the page's
+// counts. Adding, importing and saving defaults land here: they can change any
+// number of rows, and keeping the search box outside the swap means a filtered
+// view survives.
+func (s *Web) renderSourcesBody(w http.ResponseWriter, r *http.Request, selected string, adding *feedDetail) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	s.writeSourcesBody(w, r, selected, adding)
+}
+
+func (s *Web) writeSourcesBody(w http.ResponseWriter, r *http.Request, selected string, adding *feedDetail) {
+	s.writeSourcesBodyWith(w, r, selected, adding, nil)
 }
 
 func (s *Web) writeSourcesBodyWith(
-	w http.ResponseWriter, r *http.Request, selected string, detail *feedDetail, status *importStatus,
+	w http.ResponseWriter, r *http.Request, selected string, adding *feedDetail, status *importStatus,
 ) {
 	data, err := s.sourcesData(r.Context(), selected)
 	if err != nil {
@@ -663,13 +832,9 @@ func (s *Web) writeSourcesBodyWith(
 		return
 	}
 	data.Import = status
-	// An explicit detail (a form with an error, or a notice) wins over the one
-	// loaded from the store, so what the user typed isn't thrown away.
-	if detail != nil {
-		data.Detail = mergeDetail(data.Detail, detail)
-		stampDefaults(&data)
-	}
-	data.Counts.OOB = true
+	data.Adding = adding
+	data.stampAll()
+	data.Counts.OOB, data.Attention.OOB = true, true
 	// The settings page reads the feed count here instead of loading itself again.
 	w.Header().Set(feedCountHeader, strconv.Itoa(data.Counts.Total))
 	if err := feedTmpl.ExecuteTemplate(w, "sourcesBody", data); err != nil {
@@ -822,21 +987,19 @@ func editFormWithError(r *http.Request, id string, err error) *feedDetail {
 	return form
 }
 
-// mergeDetail lays the handler's overrides over the pane loaded from the store.
+// mergeDetail lays the handler's override over the editor loaded from the store.
 // A notice on its own leaves the stored values alone; a form carrying an error
 // replaces them, because those are the values the user is still editing.
 func mergeDetail(stored, override *feedDetail) *feedDetail {
-	if override.Err == "" && !override.Adding {
+	if override.Err == "" {
 		if stored == nil {
-			// Nothing to lay it over — a delete's confirmation is the whole
-			// pane, above the placeholder that has taken the form's place.
 			return override
 		}
-		stored.Notice, stored.Flash = override.Notice, override.Flash
+		stored.Notice = override.Notice
 		return stored
 	}
 	if stored != nil {
-		override.Eff, override.InheritedTags, override.Deleted = stored.Eff, stored.InheritedTags, stored.Deleted
+		override.InheritedTags, override.OwnSince, override.OwnMax = stored.InheritedTags, stored.OwnSince, stored.OwnMax
 	}
 	return override
 }

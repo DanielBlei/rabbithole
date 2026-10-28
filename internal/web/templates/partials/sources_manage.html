@@ -1,116 +1,180 @@
-{{/* The Manage section of Sources: the feed list and its editor. The header (search,
-     filters, actions, tally) sits outside #srcBody, so a mutation repaints the
-     columns without wiping the search box. */}}
+{{/* The Manage section of Sources: heading, status, toolbar and the source list
+     with its editor. The heading, status and toolbar sit outside #srcBody, so a
+     mutation repaints the list without wiping the search box; the summary line,
+     the attention block and the filter pills ride along as out-of-band updates. */}}
 {{define "sourcesManage"}}
-<section class="pane src-pane" data-all-tags="{{.AllTags}}">
-  <div class="pane__bar">
-    <span class="pane__ps"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~/sources</span><span class="sh">$&nbsp;</span>{{template "sourceCounts" .Counts}}<span class="blink">_</span></span>
-  </div>
-
-  <div class="src__tools">
-    <div class="src__search">
-      <label class="src__searchlbl" for="srcQuery">search</label>
-      <input class="src__input" type="search" id="srcQuery" placeholder="name, url or tag&hellip;"
-             autocomplete="off" spellcheck="false" data-src-query>
-      <span class="src__matches" data-src-matches></span>
+<section class="mg" data-all-tags="{{.AllTags}}">
+  <header class="mg-head">
+    <div class="mg-head__t">
+      <h1 class="mg-title">Manage sources</h1>
+      {{template "sourceSummary" .Counts}}
     </div>
-
-    {{/* One window at a time, so it's a radio set in a popmenu wearing its value
-         on the closed button — the same key + value shape as the feed page's
-         published filter, and the same fixed footprint, so picking a state
-         doesn't shove the search box along the bar. Deleted feeds are rendered
-         with the rest and held back here rather than fetched, which is what lets
-         a delete show up without a round trip. */}}
-    <div class="filter filter--srcstate">
-      <span class="filter__key">state</span>
-      <details class="popmenu popmenu--srcstate">
-        <summary class="popmenu__btn"><span class="popmenu__val" data-src-state-label>All</span><span class="popmenu__meta"><span class="popmenu__dot popmenu__dot--amber" data-src-state-dot hidden></span></span></summary>
-        <div class="popmenu__panel">
-          <label class="pill"><input type="radio" name="state" value="all" checked data-src-state><span>All</span></label>
-          <div class="popmenu__sep" role="separator"></div>
-          <label class="pill pill--opt"><input type="radio" name="state" value="on" data-src-state><span>enabled</span></label>
-          <label class="pill pill--opt"><input type="radio" name="state" value="off" data-src-state><span>disabled</span></label>
-          <label class="pill pill--opt"><input type="radio" name="state" value="gone" data-src-state><span>deleted</span></label>
-        </div>
-      </details>
-    </div>
-
-    {{/* Defaults and export open over this page in #modalTop. */}}
-    <div class="src__acts">
-      <a class="src__act src__act--add" href="#" hx-get="/sources/new" hx-target="#srcBody" hx-swap="outerHTML">+ add feed</a>
-      <a class="src__act" href="#" hx-get="/sources/defaults" hx-target="#modalTop" hx-swap="innerHTML">&#9881; defaults</a>
-      <a class="src__act" href="#" hx-get="/sources/export" hx-target="#modalTop" hx-swap="innerHTML">&#8681; export</a>
-      {{/* The picker is a pill that clicks a hidden input; a feeds file can also
-           be dropped anywhere on the columns. static/js/sources.js sends both. */}}
-      <button class="src__act" type="button" data-src-import>&#8679; import</button>
+    {{/* Defaults and export open over this page in #modalTop. The picker is a
+         button that clicks a hidden input; a feeds file can also be dropped
+         anywhere on the list. static/js/sources.js sends both. */}}
+    <div class="mg-head__a">
+      <button class="clk-btn clk-btn--go" type="button" data-src-add
+              hx-get="/sources/new" hx-target="#srcBody" hx-swap="outerHTML">Add a source</button>
+      <button class="clk-btn" type="button" data-src-repaint hx-get="/sources/defaults" hx-target="#modalTop" hx-swap="innerHTML">Defaults</button>
+      <button class="clk-btn" type="button" hx-get="/sources/export" hx-target="#modalTop" hx-swap="innerHTML">Export</button>
+      <button class="clk-btn" type="button" data-src-import>Import</button>
       <input type="file" accept=".yaml,.yml" hidden data-src-file aria-label="Import feeds file">
     </div>
-  </div>
+  </header>
 
   {{if .Error}}<div class="src__note">{{.Error}}</div>{{end}}
+
+  {{template "ingestNote" .Attention.NoteBar}}
+  {{template "sourcesAttention" .Attention}}
+
+  <div class="mg-toolbar" data-src-toolbar=""{{if not (or .Counts.Total .Counts.Deleted)}} hidden{{end}}>
+    <div class="mg-toolbar__r1">
+      <div class="mg-search">
+        <span class="mg-search__i" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+        <input class="stp-in mg-search__in" type="search" id="srcQuery" placeholder="Search name, address or tag"
+               aria-label="Search sources" autocomplete="off" spellcheck="false" data-src-query>
+        <button class="mg-search__x" type="button" aria-label="Clear search" hidden data-src-clear><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+      <span class="mg-matches" data-src-matches aria-live="polite" hidden></span>
+    </div>
+    <div class="mg-filterwrap">{{template "sourceFilters" .Counts}}</div>
+  </div>
 
   {{template "sourcesBody" .}}
 </section>
 <div class="src-page__foot">defaults: {{.Defaults}}</div>
 {{end}}
 
-{{/* The tally, rendered as the faux shell command's arguments — the same place
-     the Maze puts its counts. Re-rendered out of band by every mutation so it
-     stays true while the bar itself stays out of the swap. */}}
-{{/* Trimmed on both sides: this sits inline in the prompt, where a stray
-     newline would collapse into a space before the command and the cursor. */}}
-{{define "sourceCounts"}}{{- if .OOB -}}
-<span class="pane__cmd" id="srcCmd" hx-swap-oob="true">{{.Cmd}}</span>
-{{- else -}}
-<span class="pane__cmd" id="srcCmd">{{.Cmd}}</span>
-{{- end}}{{end}}
+{{/* The line under the heading, re-rendered out of band by every mutation. */}}
+{{define "sourceSummary"}}<p class="mg-sub" id="srcSummary"{{if .OOB}} hx-swap-oob="true"{{end}}>{{.Summary}}</p>{{end}}
 
-{{/* The two columns. Every mutation swaps this whole block: the list is small,
-     and repainting it beats tracking which rows a change touched.
+{{/* The filter pills. The counts are server-rendered and re-sent out of band
+     after a mutation, so the Failing pill and the nav badge read the same
+     number. static/js/sources.js restores the checked pill after that swap. */}}
+{{define "sourceFilters"}}
+<div class="stp-seg mg-filter" id="srcFilter" role="radiogroup" aria-label="Filter sources"{{if .OOB}} hx-swap-oob="true"{{end}}>
+  {{range .Filters}}<label class="stp-seg__o{{if .Zero}} is-zero{{end}}"><input type="radio" name="srcfilter" value="{{.Key}}" data-src-state=""{{if eq .Key "all"}} checked{{end}}><span>{{.Label}} <i class="mg-n">{{.Count}}</i></span></label>{{end}}
+</div>
+{{end}}
 
-     The pager is a sibling of the scroll box, not a child: static/js/sources.js
-     sizes a page from the list's own height, and a pager inside it would eat
-     into the number it is measuring. It carries no server state — which page
-     you're on lives in that script, so it survives these swaps. */}}
+{{/* Failing sources with what to do about each, flaky ones as notes, and the
+     rerun bar. Re-rendered out of band by every mutation, so it is always the
+     current set. With nothing failing it is one reassuring line. */}}
+{{define "sourcesAttention"}}
+<div class="mg-status" id="srcAttn"{{if .OOB}} hx-swap-oob="true"{{end}}>
+  {{- if .Total}}
+    {{- if not .Failing}}
+    <p class="mg-ok"><span class="mg-ok__dot" aria-hidden="true"></span><span>Nothing failing.{{with .RunPhrase}} {{.}}{{end}}</span></p>
+    {{range .Flaky}}{{template "sourceFlaky" .}}{{end}}
+    {{- else}}
+    <section class="mg-attn" aria-label="Needs attention">
+      <h2 class="mg-attn__h">
+        <button class="mg-attn__toggle" type="button" aria-expanded="true" aria-controls="mg-attn-body" data-src-attn>
+          <span class="mg-attn__dot" aria-hidden="true"></span>
+          <span class="mg-attn__title">Needs attention</span>
+          <span class="mg-chip mg-chip--bad">{{len .Failing}} failing</span>
+          <span class="mg-attn__names">{{.Names}}</span>
+          <svg class="mg-attn__caret" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+      </h2>
+      <div class="mg-attn__body" id="mg-attn-body">
+        <div class="mg-attn__cards">
+          {{range .Failing}}
+          <article class="mg-card">
+            <div class="mg-card__top">
+              {{template "favicon" (monogram .Name .URL 20)}}
+              <b class="mg-card__nm">{{.Name}}</b>
+              <span class="mg-chip mg-chip--bad">&times;{{.FailStreak}}</span>
+            </div>
+            <p class="mg-card__since sh-hint">{{.SincePhrase}}</p>
+            <code class="mg-card__err"{{with .Detail}} title="{{.}}"{{end}}>{{if .Detail}}{{clip .Detail}}{{else}}fetch failed{{end}}</code>
+            <p class="mg-card__why">{{.Explain}}</p>
+            <div class="mg-card__act">
+              {{/* Edit URL scrolls to the source and opens its editor on the
+                   address; Disable and Remove go through the row's own routes. */}}
+              <button class="clk-btn" type="button" aria-label="Edit the URL of {{.Name}}"
+                      data-src-reveal="{{.ID}}" data-src-focus="url">Edit URL</button>
+              <button class="clk-btn" type="button" aria-label="Disable {{.Name}}"
+                      hx-post="/sources/feed/{{.ID}}/enabled" hx-target="#src-{{.ID}}" hx-swap="outerHTML"
+                      hx-vals='{"enabled":"off"}'>Disable</button>
+              <button class="clk-btn clk-btn--danger" type="button" aria-label="Remove {{.Name}}"
+                      hx-get="/sources/feed/{{.ID}}/confirm-delete" hx-target="#modalTop" hx-swap="innerHTML">Remove</button>
+            </div>
+          </article>
+          {{end}}
+        </div>
+        {{range .Flaky}}{{template "sourceFlaky" .}}{{end}}
+        {{template "ingestBar" .Bar}}
+      </div>
+    </section>
+    {{- end}}
+  {{- end -}}
+</div>
+{{end}}
+
+{{define "sourceFlaky"}}
+<p class="mg-flaky">
+  <span class="mg-flaky__dot" aria-hidden="true"></span>
+  <span><b>{{.Name}}</b> missed its last fetch. {{.Need}} in a row and it counts as failing.</span>
+  <button class="clk-btn clk-btn--link" type="button" aria-label="Show {{.Name}}"
+          data-src-reveal="{{.ID}}">Show</button>
+</p>
+{{end}}
+
+{{/* The list. Each source is one unit (row plus its open editor) that a
+     mutation of that source swaps alone; this whole block is swapped only by
+     what can change any number of rows: adding, importing, saving defaults.
+     Search and filters are applied by the script after each swap, from state it
+     keeps outside this block. */}}
 {{define "sourcesBody"}}
-<div class="src__cols" id="srcBody" data-src-drop>
-  <div class="src__col">
+<div class="src__body" id="srcBody" data-src-drop>
+  <div class="src__col mg-listwrap">
     {{with .Import}}
       {{if .Err}}<div class="sdet__err src__import" role="alert">{{.Err}}</div>
       {{else}}<div class="sdet__ok src__import" role="status">{{.Msg}}{{range .Warnings}}<div>{{.}}</div>{{end}}</div>{{end}}
     {{end}}
-    <div class="src__list" data-src-list>
-      {{if .Rows}}
-        {{range .Rows}}{{template "sourceRow" .}}{{end}}
-        <div class="src__none" data-src-none hidden>nothing matches that search</div>
-      {{else}}
-        <div class="src__empty">
-          <p>No feeds yet.</p>
-          <p class="src__emptysub">Add one above, or put it in the seed file and restart.</p>
-        </div>
-      {{end}}
+    {{with .Adding}}<div class="mg-item mg-item--add" id="src-new">{{template "sourceEditor" .}}</div>{{end}}
+    {{if .Rows}}
+    <div class="mg-table" data-src-list>
+      <div class="mg-hrow">
+        <span class="mg-c mg-c--src">Source</span>
+        <span class="mg-c mg-c--health">Fetching</span>
+        <div class="mg-meta"><span class="mg-c mg-c--tags">Tags</span></div>
+        <span class="mg-c mg-c--tog">On</span>
+        <span class="mg-c mg-c--act"><span class="stp-sr">Actions</span></span>
+      </div>
+      {{range .Rows}}{{template "sourceItem" .}}{{end}}
     </div>
-    {{/* Arrows hide when one page holds everything; the per-page chips stay, so
-         the setting is always reachable. Which size is picked lives in
-         localStorage, not here — the server has no say in it. */}}
-    <div class="src__pager">
-      <span class="src__pgnav" data-src-pagenav hidden>
-        <button class="src__pg" type="button" data-src-page="-1" aria-label="Previous page">&lsaquo;</button>
-        <span class="src__pg-n" data-src-pagelbl aria-live="polite"></span>
-        <button class="src__pg" type="button" data-src-page="1" aria-label="Next page">&rsaquo;</button>
-      </span>
-      <span class="src__per">
-        <span class="src__perlbl">per page</span>
-        <button class="src__perbtn" type="button" data-src-per="10">10</button>
-        <button class="src__perbtn" type="button" data-src-per="15">15</button>
-        <button class="src__perbtn" type="button" data-src-per="20">20</button>
-      </span>
+    <div class="mg-empty" data-src-empty="search" hidden>
+      <p class="mg-empty__t">No source matches your search.</p>
+      <div class="mg-empty__a"><button class="clk-btn" type="button" data-src-clear>Clear search</button></div>
+    </div>
+    <div class="mg-empty" data-src-empty="filter" hidden>
+      <p class="mg-empty__t" data-src-empty-text></p>
+      <div class="mg-empty__a"><button class="clk-btn" type="button" data-src-showall>Show all sources</button></div>
+    </div>
+    {{end}}
+    {{/* Always sent, hidden unless there is nothing at all: removing the last
+         live source shows it from the script. */}}
+    <div class="mg-empty" data-src-empty="first"{{if or .Counts.Total .Rows .Adding}} hidden{{end}}>
+      <h2>No sources yet</h2>
+      <p>Sources are the feeds The Rabbit Hole reads. Paste a site address to add your first one, or import a sources file.</p>
+      <div class="mg-empty__a">
+        <button class="clk-btn clk-btn--go" type="button" hx-get="/sources/new" hx-target="#srcBody" hx-swap="outerHTML" data-src-add>Add a source</button>
+        <button class="clk-btn" type="button" data-src-import>Import</button>
+      </div>
     </div>
   </div>
-  {{template "sourceDetail" .Detail}}
 </div>
-{{/* Only in a mutation response, where it is an out-of-band update to the bar.
-     Rendered unconditionally it would put a second element with this id — and a
-     stray visible tally — into the page. */}}
-{{if .Counts.OOB}}{{template "sourceCounts" .Counts}}{{end}}
+{{template "sourceOOB" .}}
 {{end}}
+
+{{/* Only in a mutation response, where each is an out-of-band update to the
+     element already on the page. Rendered unconditionally they would put a
+     second element with the same id into the page. */}}
+{{/* The answer to a refresh after an ingestion run starts or ends: the status
+     block and counts, the running note, and every row that has no open editor,
+     all out of band so an editor in progress is never swapped. */}}
+{{define "sourceLiveManage"}}{{template "sourceOOB" .}}{{template "ingestNote" .LiveNote}}{{range .Rows}}{{if .OOB}}{{template "sourceItem" .}}{{end}}{{end}}{{end}}
+
+{{define "sourceOOB"}}{{if .Counts.OOB}}{{template "sourceSummary" .Counts}}{{template "sourcesAttention" .Attention}}{{template "sourceFilters" .Counts}}{{template "sourceNavBadge" .Counts}}{{end}}{{end}}

@@ -15,8 +15,11 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// FetchTimeout bounds how long one source may take to fetch.
+const FetchTimeout = 30 * time.Second
+
 const (
-	fetchTimeout = 30 * time.Second
+	fetchTimeout = FetchTimeout
 	maxParallel  = 8
 	// summaryLimit caps the summary text sent to the scoring model.
 	// Most RSS feeds only provide a short excerpt (300-600 chars) in

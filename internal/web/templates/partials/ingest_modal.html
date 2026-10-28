@@ -176,3 +176,50 @@
   {{- if eq .State "running"}}<i></i>{{if eq .Activity "rescore"}}rescoring…{{else}}ingest running…{{end}}{{else if eq .State "failed"}}<i></i>{{.Activity}} failed · {{.Ago}}{{else if eq .State "warn"}}<i></i>{{.Activity}} cancelled · {{.Ago}}{{else if eq .State "never"}}<i></i>ingest never ran{{end -}}
 </span>
 {{end}}
+
+{{/* Compact ingest status for the Sources pages. Polls itself every 2s while a
+     run is live, as the modal body does. Run and Cancel answer with a fresh bar
+     (view=bar in the query), and Query carries the variant through each one. */}}
+{{define "ingestBar"}}
+<section class="ingb{{if .Compact}} ingb--compact{{end}}" aria-label="Ingestion" data-status="{{.Status}}"
+  {{if .Running}}hx-get="/ingest/status?{{.Query}}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML"{{end}}>
+  <div class="ingb__main">
+    <div class="ingb__stat" aria-live="polite">
+      {{- if eq .Status "none"}}
+      <span class="ingb__dot"></span><b>No ingestion run yet</b>
+      {{- else if .Running}}
+      <span class="ingb__dot ingb__dot--running"></span><b>Running ingestion</b><span class="ingb__when">started {{.When}}</span>
+      {{- else}}
+      <span class="ingb__dot ingb__dot--{{.Status}}"></span>
+      <b>{{if eq .Status "ok"}}Last run ok{{else if eq .Status "error"}}Last run failed{{else}}Last run cancelled{{end}}</b>
+      <span class="ingb__when">{{.When}}</span>
+      {{- if and (eq .Status "ok") .Took}}<span class="ingb__when">took {{.Took}}</span>{{end}}
+      {{- if .Err}}<span class="ingb__err" title="{{.Err}}">{{clip .Err}}</span>{{end}}
+      {{- end}}
+    </div>
+    {{/* Kept in the layout while idle or running, only invisible, so the bar does
+         not change height when a run finishes. */}}
+    <div class="ingb__cnt{{if or (eq .Status "none") .Running}} is-idle{{end}}">
+      <span class="ingb__c"><b>{{.Counts.Fetched}}</b> fetched</span>
+      <span class="ingb__c"><b>{{.Counts.NewItems}}</b> new</span>
+      <span class="ingb__c"><b>{{.Counts.Scored}}</b> scored</span>
+      <span class="ingb__c"><b>{{.Counts.Skipped}}</b> skipped</span>
+      <span class="ingb__c{{if gt .Counts.Failed 0}} is-bad{{end}}"><b>{{.Counts.Failed}}</b> failed</span>
+    </div>
+  </div>
+  <div class="ingb__act">
+    {{- if .Running}}
+    <button class="clk-btn" type="button" hx-post="/ingest/cancel?{{.Query}}" hx-target="closest .ingb" hx-swap="outerHTML">Cancel</button>
+    {{- end}}
+    <button class="clk-btn clk-btn--go" type="button"{{if or .Running (eq .Enabled 0)}} disabled{{end}}
+            hx-post="/ingest/run?{{.Query}}" hx-target="closest .ingb" hx-swap="outerHTML">{{if .Running}}Running...{{else if .Rerun}}Re-run ingestion for all {{.Enabled}} enabled feed{{if ne .Enabled 1}}s{{end}}{{else}}Run ingestion{{end}}</button>
+  </div>
+</section>
+{{end}}
+
+{{/* The running note for views that edit during a run. It is hidden while idle.
+     A bar response on the same page carries it out of band (OOB) so it follows
+     the run; with no bar on the page it polls itself instead (Poll). */}}
+{{define "ingestNote"}}
+<p class="sdet__warn ingb__note" id="ingestNote" role="status"{{if .OOB}} hx-swap-oob="true"{{end}}{{if and .Running .Poll}} hx-get="/ingest/status?view=note" hx-trigger="every 2s" hx-swap="outerHTML"{{end}}{{if not .Running}} hidden{{end}}>Ingestion is running. Changes apply from the next run.</p>
+{{end}}

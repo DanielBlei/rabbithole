@@ -12,7 +12,8 @@ document.body.addEventListener('htmx:afterSwap', function(){
 // the new items landed. The hidden #ingWatch span carries the live running
 // flag and is OOB-replaced by every ingest response (status polls while the
 // runner modal is open, its own 3s poll while it's closed), so watching that
-// flag flip 1 -> 0 is the "run just finished" edge on any page.
+// flag flip 1 -> 0 is the "run just finished" edge on any page. Either edge
+// is also raised as a sources-ingest-change event.
 (function(){
   var watch = document.getElementById('ingWatch');
   if (!watch) return;
@@ -29,6 +30,12 @@ document.body.addEventListener('htmx:afterSwap', function(){
     var el = document.getElementById('ingWatch');
     if (!el) return;
     var running = el.dataset.running === '1';
+    // A run starting or ending anywhere (this page's bar, the topbar, the
+    // modal) is told to the Sources pages, whose live parts then refresh
+    // themselves (see templates/sources.html).
+    if (wasRunning !== running){
+      document.body.dispatchEvent(new CustomEvent('sources-ingest-change'));
+    }
     // Don't yank the page out from under an open runner modal — the user is
     // reading the log. Hold the refresh until they close it.
     if (wasRunning && !running){

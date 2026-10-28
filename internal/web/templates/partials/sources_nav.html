@@ -9,7 +9,12 @@
   <div class="sh-nav__list">
     <span class="sh-nav__h">My sources</span>
     <a class="sh-ni{{if eq .Section "overview"}} is-on{{end}}" href="/sources"{{if eq .Section "overview"}} aria-current="page"{{end}}>Overview</a>
-    <a class="sh-ni{{if eq .Section "manage"}} is-on{{end}}" href="/sources/manage"{{if eq .Section "manage"}} aria-current="page"{{end}}>Manage{{if .Counts.Failing}}<span class="sh-ni__n sh-ni__n--bad" title="{{.Counts.Failing}} failing">{{.Counts.Failing}}<span class="stp-sr"> failing</span></span>{{end}}</a>
+    <a class="sh-ni{{if eq .Section "manage"}} is-on{{end}}" href="/sources/manage"{{if eq .Section "manage"}} aria-current="page"{{end}}>Manage{{template "sourceNavBadge" .Counts}}</a>
   </div>
 </nav>
 {{end}}
+
+{{/* The failing count on the Manage link. Re-rendered out of band by every
+     mutation, so it stays equal to the Failing pill. The wrapper takes no box
+     of its own. */}}
+{{define "sourceNavBadge"}}<span id="srcNavBadge"{{if .OOB}} hx-swap-oob="true"{{end}}>{{if .Failing}}<span class="sh-ni__n sh-ni__n--bad" title="{{.Failing}} failing">{{.Failing}}<span class="stp-sr"> failing</span></span>{{end}}</span>{{end}}

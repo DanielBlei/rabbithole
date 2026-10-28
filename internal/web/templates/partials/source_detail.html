@@ -1,61 +1,50 @@
-{{/* The detail pane: one feed's settings. Name, url and tags are the everyday
-     fields; since and max_items sit under an "advanced" rule because they are
-     the ones you set once and forget. A tuning field left blank takes the
-     default, which its placeholder shows. */}}
-{{define "sourceDetail"}}
-<div class="src__detail" id="srcDetail">
-{{with .}}{{with .Flash}}{{template "sourceFlash" .}}{{end}}{{end}}
-{{if not (and . (or .Adding .ID))}}
-  {{/* No feed in hand — either nothing is picked, or the one that was just
-       went. A delete's confirmation lands over this. */}}
-  <div class="sdet__none">
-    <p>Pick a feed to see and edit its settings.</p>
-    <p class="sdet__nonesub">Toggles on the left take effect straight away.</p>
-  </div>
-{{else}}
-  <form class="sdet"
-        {{if .Adding}}hx-post="/sources"{{else}}hx-post="/sources/feed/{{.ID}}"{{end}}
-        hx-target="#srcBody" hx-swap="outerHTML">
-    <div class="sdet__hd">
-      <span class="sdet__title">{{if .Adding}}Add Feed{{else}}{{.Name}}{{end}}</span>
-      {{if .Deleted}}<span class="sdet__gone">deleted</span>{{end}}
-    </div>
-
-    {{if .Err}}<div class="sdet__err" role="alert">{{.Err}}</div>{{end}}
-    {{if .Notice}}<div class="sdet__ok" role="status">{{.Notice}}</div>{{end}}
-
-    <label class="sdet__f">
-      <span class="sdet__lbl">name</span>
-      <input class="sdet__in" type="text" name="name" value="{{.Name}}" required
-             autocomplete="off" spellcheck="false">
-    </label>
-
-    {{/* Above the url because it decides what the url means: a feed, or a
-         saved search on an academic provider. Only kinds ingest can fetch. */}}
-    <div class="sdet__f">
-      <span class="sdet__lbl">type</span>
-      <div class="sdet__tri" role="group" aria-label="Type">
-        {{range .TypeChoices}}<label class="sdet__opt"><input type="radio" name="type" value="{{.}}" {{if eq . $.Type}}checked{{end}}><span>{{.}}</span></label>{{end}}
+{{/* One source's editor, inline under its row (or on an empty unit at the top
+     of the list when adding). Name, address and tags are the everyday fields;
+     since and max items are the ones you set once and forget. A tuning field
+     left blank takes the default: the placeholder is that default and the hint
+     says where it comes from. static/js/sources.js owns the dirty state, the
+     discard guard and the live hints. */}}
+{{define "sourceEditor"}}
+{{- $id := .ID}}{{if .Adding}}{{$id = "new"}}{{end -}}
+<form class="mg-ed" id="ed-{{$id}}" role="region" aria-label="{{if .Adding}}Add a source{{else}}Edit {{.Name}}{{end}}"
+      {{if .Adding}}hx-post="/sources" hx-target="#srcBody"{{else}}hx-post="/sources/feed/{{.ID}}" hx-target="#src-{{.ID}}"{{end}}
+      hx-swap="outerHTML" autocomplete="off" novalidate data-src-ed="{{$id}}">
+  <div class="mg-ed__form">
+    <div class="fld">
+      <label class="fld__lbl" for="ed-name-{{$id}}">Name</label>
+      <div class="fld__body">
+        <input class="stp-in" id="ed-name-{{$id}}" type="text" name="name" value="{{.Name}}"
+               autocomplete="off" spellcheck="false">
       </div>
     </div>
 
     {{/* Deliberately not type="url": the browser would reject a scheme-less
          address before it could be sent, and the server fills https in for you.
-         Plain http is accepted but flagged under the field — a feed that only
+         Plain http is accepted but flagged under the field: a feed that only
          serves http is worth having, and worth knowing about. */}}
-    <label class="sdet__f">
-      <span class="sdet__lbl">url</span>
-      <span class="sdet__fld">
-        <input class="sdet__in" type="text" name="url" value="{{.URL}}" required
-               inputmode="url" autocomplete="off" spellcheck="false"
-               placeholder="example.com/feed.xml" data-src-url>
-        <span class="sdet__warn" data-src-insecure hidden>insecure &mdash; consider https over plain http</span>
-      </span>
-    </label>
+    <div class="fld">
+      <label class="fld__lbl" for="ed-url-{{$id}}">Address</label>
+      <div class="fld__body">
+        <input class="stp-in stp-in--mono" id="ed-url-{{$id}}" type="text" name="url" value="{{.URL}}"
+               inputmode="url" autocomplete="off" spellcheck="false" placeholder="example.com/feed.xml" data-src-url="">
+        <p class="sdet__warn" role="status" data-src-insecure=""{{if not .Insecure}} hidden{{end}}>This address is not encrypted (http). Use https:// if the site supports it.</p>
+      </div>
+    </div>
 
-    <div class="sdet__f">
-      <span class="sdet__lbl">tags</span>
-      <div class="sdet__tags">
+    {{/* Above the tags because it decides what the address means: a feed, or a
+         saved search on an academic provider. Only kinds ingest can fetch. */}}
+    <div class="fld" role="group" aria-labelledby="ed-type-{{$id}}">
+      <span class="fld__lbl" id="ed-type-{{$id}}">Type</span>
+      <div class="fld__body">
+        <div class="stp-seg">
+          {{range .TypeChoices}}<label class="stp-seg__o"><input type="radio" name="type" value="{{.}}"{{if eq . $.Type}} checked{{end}}><span>{{.}}</span></label>{{end}}
+        </div>
+      </div>
+    </div>
+
+    <div class="fld" role="group" aria-labelledby="ed-tags-{{$id}}">
+      <span class="fld__lbl" id="ed-tags-{{$id}}">Tags</span>
+      <div class="fld__body">
         <div class="tagput" data-tagput>
           <span class="tagput__chips"></span>
           <input class="tagput__input" type="text" placeholder="+ tag&hellip;" aria-label="Add tag" autocomplete="off">
@@ -72,93 +61,64 @@
       </div>
     </div>
 
-    <div class="sdet__adv">advanced</div>
-
-    <div class="sdet__f">
-      <span class="sdet__lbl">state</span>
-      <div class="sdet__tri" role="group" aria-label="Enabled">
-        <label class="sdet__opt"><input type="radio" name="enabled" value="" {{if eq .EnabledChoice ""}}checked{{end}}><span>default</span></label>
-        <label class="sdet__opt"><input type="radio" name="enabled" value="on" {{if eq .EnabledChoice "on"}}checked{{end}}><span>on</span></label>
-        <label class="sdet__opt"><input type="radio" name="enabled" value="off" {{if eq .EnabledChoice "off"}}checked{{end}}><span>off</span></label>
+    <div class="fld" role="group" aria-labelledby="ed-fetch-{{$id}}">
+      <span class="fld__lbl" id="ed-fetch-{{$id}}">Fetching</span>
+      <div class="fld__body">
+        <div class="stp-seg">
+          <label class="stp-seg__o"><input type="radio" name="enabled" value="on"{{if eq .EnabledChoice "on"}} checked{{end}}><span>On</span></label>
+          <label class="stp-seg__o"><input type="radio" name="enabled" value="off"{{if eq .EnabledChoice "off"}} checked{{end}}><span>Off</span></label>
+          <label class="stp-seg__o"><input type="radio" name="enabled" value=""{{if eq .EnabledChoice ""}} checked{{end}}><span>Default</span></label>
+        </div>
+        {{/* Default stores no flag, so the source follows the defaults as they
+             change; On and Off are explicit. The script swaps the hint as the
+             pill changes. */}}
+        <p class="sh-hint" data-src-fetch-hint="default"{{if ne .EnabledChoice ""}} hidden{{end}}>Default: follows your defaults (currently {{if .DefaultOn}}on{{else}}off{{end}}).</p>
+        <p class="sh-hint" data-src-fetch-hint="set"{{if eq .EnabledChoice ""}} hidden{{end}}>Off keeps the source in your list but skips it on every run.</p>
       </div>
     </div>
 
-    {{/* Leave a field blank and the feed takes the default; the placeholder is
-         that default, so the empty box says what it will do without a word of
-         explanation beside it. The visible label above still names the field,
-         so the placeholder never does a label's job. */}}
-    <label class="sdet__f">
-      <span class="sdet__lbl">since</span>
-      <input class="sdet__in sdet__in--sm" type="text" name="since" value="{{.Since}}"
-             placeholder="{{.DefaultSince}}" autocomplete="off" spellcheck="false">
-    </label>
-
-    <label class="sdet__f">
-      <span class="sdet__lbl">max items</span>
-      <input class="sdet__in sdet__in--sm" type="text" name="max_items" value="{{.MaxItems}}"
-             placeholder="{{.DefaultCap}}" inputmode="numeric" autocomplete="off">
-    </label>
-
-    {{if and (not .Adding) .Eff.Strip}}
-    {{/* Oldest-to-newest run of past attempts: the shape of a feed's recent
-         behaviour, which a single current-status dot can't show. */}}
-    <div class="sdet__health">
-      <span class="sdet__strip">
-        {{range .Eff.Strip}}<i class="sdet__tick{{if not .OK}} sdet__tick--bad{{end}}" title="{{.Title}}"></i>{{end}}
-      </span>
-      <span class="sdet__htxt">
-        {{if eq .Eff.State "error"}}<span class="sdet__hbad">{{.Eff.Detail}}</span>{{else}}{{.Eff.Detail}}{{end}}
-        {{if .Eff.Since1st}}<span class="sdet__when">failing since {{.Eff.Since1st}}</span>
-        {{else if .Eff.LastFetch}}<span class="sdet__when">{{.Eff.LastFetch}}</span>{{end}}
-      </span>
+    <div class="fld">
+      <label class="fld__lbl" for="ed-since-{{$id}}">Since</label>
+      <div class="fld__body">
+        <input class="stp-in stp-in--mono stp-in--sm" id="ed-since-{{$id}}" type="text" name="since" value="{{.Since}}"
+               placeholder="{{.DefaultSince}}" autocomplete="off" spellcheck="false">
+        <p class="sh-hint" data-src-hint="since" data-fallback="{{.DefaultSince}}" data-from="{{.SinceFrom}}" data-own="{{.OwnSince}}"><span data-src-hint-t>{{.SinceHint}}</span>. Use 14d or 12h.</p>
+      </div>
     </div>
-    {{end}}
 
-    <div class="sdet__foot">
-      {{if .Adding}}
-        <span></span>
-        <span class="sdet__btns">
-          <a class="sdet__btn" href="#" hx-get="/sources/manage" hx-target="#srcBody" hx-swap="outerHTML" hx-select="#srcBody">cancel</a>
-          <button class="sdet__btn sdet__btn--go" type="submit">add feed</button>
-        </span>
-      {{else}}
-        {{/* Asks in a dialog stacked over Sources. The confirmation used to
-             appear inline, right under the pointer that had just clicked
-             delete — the one place it must not be. */}}
-        <button class="sdet__btn sdet__btn--del" type="button"
-                hx-get="/sources/feed/{{.ID}}/confirm-delete" hx-target="#modalTop" hx-swap="innerHTML">delete</button>
-        <span class="sdet__btns">
-          <a class="sdet__btn" href="#" hx-get="/sources/feed/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML">reset</a>
-          <button class="sdet__btn sdet__btn--go" type="submit">save</button>
-        </span>
-      {{end}}
-    </div>
-  </form>
-{{end}}
-</div>
-{{end}}
-
-{{/* A glimpse, not a bar: it covers the pane long enough to be read, then
-     clears itself and leaves you where you were. Laid over the form rather than
-     above it so it costs the pane no height — as an inline row it pushed the
-     form into a scrollbar. Written as the command you just ran and what it
-     printed, the register the drawer and the pane bars already speak. */}}
-{{define "sourceFlash"}}
-<div class="sdet__flash{{if .Bad}} sdet__flash--bad{{end}}" role="status">
-  {{/* Outcome first and centred — that is the one word you need; the command
-       under it is the detail you read only if you want it. */}}
-  <div class="sdet__flashcard">
-    <div class="sdet__flashok">{{if .Bad}}&#10007;{{else}}&#10003;{{end}} {{.Verb}}</div>
-    {{/* The name is the only part allowed to shrink, so a long one ellipsises
-         against the pane's width instead of stretching the card off it. */}}
-    <div class="sdet__flashline">
-      <span class="sdet__flashsig">$</span>
-      <span class="pane__cmd sdet__flashverb">{{.Cmd}}</span>
-      <span class="pane__cmd sdet__flashname">{{.Name}}</span>
-      <span class="blink">_</span>
+    <div class="fld">
+      <label class="fld__lbl" for="ed-max-{{$id}}">Max items</label>
+      <div class="fld__body">
+        <input class="stp-in stp-in--mono stp-in--sm" id="ed-max-{{$id}}" type="text" name="max_items" value="{{.MaxItems}}"
+               placeholder="{{.DefaultCap}}" inputmode="numeric" autocomplete="off">
+        <p class="sh-hint" data-src-hint="max" data-fallback="{{.DefaultCap}}" data-from="{{.CapFrom}}" data-own="{{.OwnMax}}"><span data-src-hint-t>{{.CapHint}}</span>. 0 means no cap.</p>
+      </div>
     </div>
   </div>
-</div>
+
+  {{if .Err}}<p class="sdet__err mg-ed__msg" role="alert">{{.Err}}</p>{{end}}
+  {{if .Notice}}<p class="sdet__ok mg-ed__msg" role="status" data-src-notice="">{{.Notice}}</p>{{end}}
+
+  <div class="mg-ed__foot">
+    {{if .Adding}}<span></span>{{else}}
+    {{/* Asks in a dialog stacked over Sources, not inline under the pointer
+         that has just clicked. */}}
+    <button class="clk-btn clk-btn--danger" type="button" hx-get="/sources/feed/{{.ID}}/confirm-delete"
+            hx-target="#modalTop" hx-swap="innerHTML">Remove</button>
+    {{end}}
+    <span class="mg-ed__r">
+      <span class="mg-ed__dirty" data-src-dirty="" aria-live="polite"></span>
+      {{if .Adding}}
+      <button class="clk-btn" type="button" data-src-close="">Cancel</button>
+      <button class="clk-btn clk-btn--go" type="submit">Add source</button>
+      {{else}}
+      <button class="clk-btn" type="button" disabled data-src-reset=""
+              hx-get="/sources/feed/{{.ID}}" hx-target="#src-{{.ID}}" hx-swap="outerHTML">Reset</button>
+      <button class="clk-btn clk-btn--go" type="submit" disabled data-src-save="">Save</button>
+      {{end}}
+    </span>
+  </div>
+</form>
 {{end}}
 
 {{/* Confirming a delete. Stacked in #modalTop over Sources, so Escape drops
@@ -174,11 +134,11 @@
     </div>
     <div class="ask">
       <p class="ask__lead">Delete <span class="ask__name">{{.Name}}</span>?</p>
-      <p class="ask__sub">Its history is kept and can be restored via the <em>deleted</em> filter.</p>
+      <p class="ask__sub">Its history is kept and can be restored via the <em>Removed</em> filter.</p>
       <div class="ask__foot">
         <button class="sdet__btn" type="button" data-modal-close>cancel</button>
         <button class="sdet__btn sdet__btn--del" type="button"
-                hx-delete="/sources/feed/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML">delete</button>
+                hx-delete="/sources/feed/{{.ID}}" hx-target="#src-{{.ID}}" hx-swap="outerHTML">delete</button>
       </div>
     </div>
   </div>
