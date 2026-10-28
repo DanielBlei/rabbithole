@@ -848,11 +848,6 @@
         .catch(function(){ say('Could not import the feeds file.', true); });
     });
   }
-  // Every Sources dialog response carries the feed count.
-  document.addEventListener('htmx:afterRequest', function(e){
-    var xhr = e.detail && e.detail.xhr;
-    if (xhr) showCount(xhr.getResponseHeader('X-Feed-Count'));
-  });
 
   // ---- "?" help bubbles ---------------------------------------------------
   // CSS opens a bubble on hover or focus; this places it beside its button

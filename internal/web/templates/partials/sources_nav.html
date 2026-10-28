@@ -1,0 +1,15 @@
+{{/* SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+     SPDX-License-Identifier: Apache-2.0 */}}
+
+{{/* The section switch on the Sources page: groups of plain links, so it works
+     without htmx. The failing badge on Manage shows the count that needs
+     attention. */}}
+{{define "sourcesNav"}}
+<nav class="sh-nav" aria-label="Sources sections">
+  <div class="sh-nav__list">
+    <span class="sh-nav__h">My sources</span>
+    <a class="sh-ni{{if eq .Section "overview"}} is-on{{end}}" href="/sources"{{if eq .Section "overview"}} aria-current="page"{{end}}>Overview</a>
+    <a class="sh-ni{{if eq .Section "manage"}} is-on{{end}}" href="/sources/manage"{{if eq .Section "manage"}} aria-current="page"{{end}}>Manage{{if .Counts.Failing}}<span class="sh-ni__n sh-ni__n--bad" title="{{.Counts.Failing}} failing">{{.Counts.Failing}}<span class="stp-sr"> failing</span></span>{{end}}</a>
+  </div>
+</nav>
+{{end}}

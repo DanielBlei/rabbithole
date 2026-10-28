@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -324,7 +325,7 @@ func TestWelcomeDialog(t *testing.T) {
 			if !tt.welcome {
 				return
 			}
-			for _, want := range []string{`hx-get="/sources"`, `href="/settings/profiles"`, `hx-get="/ingest"`} {
+			for _, want := range []string{`data-welcome-step="sources"`, `href="/settings/profiles"`, `hx-get="/ingest"`} {
 				if !strings.Contains(body, want) {
 					t.Errorf("welcome missing step %q", want)
 				}
@@ -333,7 +334,10 @@ func TestWelcomeDialog(t *testing.T) {
 			want := 0
 			if tt.ticked != "" {
 				want = 1
-				if !strings.Contains(body, `welcome__step is-done" type="button" data-welcome-step="`+tt.ticked+`"`) {
+				tick := regexp.MustCompile(
+					`<[^>]*\bwelcome__step is-done\b[^>]*\bdata-welcome-step="` + regexp.QuoteMeta(tt.ticked) + `"`,
+				)
+				if !tick.MatchString(body) {
 					t.Errorf("step %q not rendered ticked", tt.ticked)
 				}
 			}
@@ -741,9 +745,96 @@ func TestPagesRenderWhenTheStoredConfigIsUnreadable(t *testing.T) {
 	if _, err := db.SaveConfig(t.Context(), "bogus_key: 1\n", "h", store.ConfigSourceUI, 0); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/feed", "/maze", "/sources", "/ingest"} {
+	for _, path := range []string{"/feed", "/maze", "/sources", "/sources/manage", "/ingest"} {
 		if body := get(t, w, path); !strings.Contains(body, "@rabbithole") {
 			t.Errorf("GET %s rendered without the prompt:\n%.300s", path, body)
+		}
+	}
+}
+
+// TestRoutesRegister checks that each route Routes() registers matches a
+// request. The table must list every route; a pattern conflict panics when
+// Routes() builds the mux.
+func TestRoutesRegister(t *testing.T) {
+	h := newTestWeb(t).Routes()
+	mux, ok := h.(*http.ServeMux)
+	if !ok {
+		t.Fatalf("Routes() returned %T, want *http.ServeMux", h)
+	}
+	routes := []struct{ method, path, want string }{
+		{"GET", "/", "GET /{$}"},
+		{"GET", "/feed", "GET /feed"},
+		{"GET", "/maze", "GET /maze"},
+		{"GET", "/settings", "GET /settings"},
+		{"GET", "/settings/x", "GET /settings/{tab}"},
+		{"POST", "/settings/review", "POST /settings/review"},
+		{"POST", "/settings/save", "POST /settings/save"},
+		{"POST", "/settings/test", "POST /settings/test"},
+		{"POST", "/settings/key", "POST /settings/key"},
+		{"POST", "/settings/rollback", "POST /settings/rollback"},
+		{"GET", "/settings/versions/1/diff", "GET /settings/versions/{n}/diff"},
+		{"GET", "/settings/export", "GET /settings/export"},
+		{"GET", "/settings/import", "GET /settings/import"},
+		{"POST", "/settings/import/preview", "POST /settings/import/preview"},
+		{"POST", "/settings/import/apply", "POST /settings/import/apply"},
+		{"GET", "/login", "GET /login"},
+		{"POST", "/login", "POST /login"},
+		{"POST", "/logout", "POST /logout"},
+		{"GET", "/setup", "GET /setup"},
+		{"POST", "/setup", "POST /setup"},
+		{"POST", "/account/remember", "POST /account/remember"},
+		{"POST", "/account/everywhere", "POST /account/everywhere"},
+		{"GET", "/profiles", "GET /profiles"},
+		{"GET", "/profiles/new", "GET /profiles/new"},
+		{"GET", "/profiles/1/edit", "GET /profiles/{id}/edit"},
+		{"GET", "/profiles/1/confirm-delete", "GET /profiles/{id}/confirm-delete"},
+		{"POST", "/profiles", "POST /profiles"},
+		{"POST", "/profiles/1", "POST /profiles/{id}"},
+		{"POST", "/profiles/1/duplicate", "POST /profiles/{id}/duplicate"},
+		{"POST", "/profiles/1/active", "POST /profiles/{id}/active"},
+		{"GET", "/profiles/rescore", "GET /profiles/rescore"},
+		{"POST", "/profiles/rescore", "POST /profiles/rescore"},
+		{"DELETE", "/profiles/1", "DELETE /profiles/{id}"},
+		{"GET", "/sources", "GET /sources"},
+		{"GET", "/sources/manage", "GET /sources/manage"},
+		{"GET", "/sources/new", "GET /sources/new"},
+		{"GET", "/sources/defaults", "GET /sources/defaults"},
+		{"GET", "/sources/export", "GET /sources/export"},
+		{"GET", "/sources/feed/1", "GET /sources/feed/{id}"},
+		{"POST", "/sources", "POST /sources"},
+		{"POST", "/sources/import", "POST /sources/import"},
+		{"POST", "/sources/defaults", "POST /sources/defaults"},
+		{"POST", "/sources/feed/1", "POST /sources/feed/{id}"},
+		{"POST", "/sources/feed/1/enabled", "POST /sources/feed/{id}/enabled"},
+		{"POST", "/sources/feed/1/restore", "POST /sources/feed/{id}/restore"},
+		{"GET", "/sources/feed/1/confirm-delete", "GET /sources/feed/{id}/confirm-delete"},
+		{"DELETE", "/sources/feed/1", "DELETE /sources/feed/{id}"},
+		{"GET", "/ingest", "GET /ingest"},
+		{"GET", "/ingest/status", "GET /ingest/status"},
+		{"GET", "/ingest/chrome", "GET /ingest/chrome"},
+		{"GET", "/ingest/runs/1/log", "GET /ingest/runs/{id}/log"},
+		{"POST", "/ingest/run", "POST /ingest/run"},
+		{"POST", "/ingest/cancel", "POST /ingest/cancel"},
+		{"POST", "/welcome/x", "POST /welcome/{step}"},
+		{"POST", "/items/1/note", "POST /items/{id}/note"},
+		{"POST", "/items/1/seen", "POST /items/{id}/seen"},
+		{"POST", "/items/1/hide", "POST /items/{id}/hide"},
+		{"POST", "/items/1/bookmark", "POST /items/{id}/bookmark"},
+		{"POST", "/items/1/rate", "POST /items/{id}/rate"},
+		{"POST", "/todos", "POST /todos"},
+		{"POST", "/todos/1/toggle", "POST /todos/{id}/toggle"},
+		{"POST", "/todos/1/tags", "POST /todos/{id}/tags"},
+		{"DELETE", "/todos/1", "DELETE /todos/{id}"},
+		{"POST", "/ideas", "POST /ideas"},
+		{"POST", "/ideas/reorder", "POST /ideas/reorder"},
+		{"POST", "/ideas/1", "POST /ideas/{id}"},
+		{"DELETE", "/ideas/1", "DELETE /ideas/{id}"},
+		{"GET", "/static/x.css", "GET /static/"},
+	}
+	for _, r := range routes {
+		req := httptest.NewRequest(r.method, r.path, nil)
+		if _, pattern := mux.Handler(req); pattern != r.want {
+			t.Errorf("%s %s matched %q, want %q", r.method, r.path, pattern, r.want)
 		}
 	}
 }

@@ -19,7 +19,7 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
-// sourcesTestWeb builds a Web over a store seeded with doc, so the dialog is
+// sourcesTestWeb builds a Web over a store seeded with doc, so the page is
 // tested against feeds that went through the real write path and the real
 // defaults cascade rather than a hand-built view model.
 func sourcesTestWeb(t *testing.T, doc config.FeedsDoc) (*Web, *store.Store) {
@@ -37,7 +37,7 @@ func sourcesTestWeb(t *testing.T, doc config.FeedsDoc) (*Web, *store.Store) {
 	return w, db
 }
 
-// feedID looks up the stored ID for a feed by name, which is how the dialog
+// feedID looks up the stored ID for a feed by name, which is how the editor
 // addresses it.
 func feedID(t *testing.T, db *store.Store, name string) string {
 	t.Helper()
@@ -81,7 +81,7 @@ func seedItem(t *testing.T, db *store.Store, source string) {
 	}
 }
 
-// The dialog's job is showing resolved values and where they came from.
+// The editor's job is showing resolved values and where they came from.
 func TestSourcesRendersResolvedValues(t *testing.T) {
 	w, db := sourcesTestWeb(t, config.FeedsDoc{
 		Defaults: config.FeedDefaults{MaxItems: intPtr(5), Tags: []string{"all"}},
@@ -91,8 +91,8 @@ func TestSourcesRendersResolvedValues(t *testing.T) {
 			{Name: "Parked", URL: "https://parked.test/feed", Enabled: boolPtr(false)},
 		},
 	})
-	list := get(t, w, "/sources")
-	detail := get(t, w, "/sources/"+feedID(t, db, "Beta"))
+	list := get(t, w, "/sources/manage")
+	detail := get(t, w, "/sources/feed/"+feedID(t, db, "Beta"))
 
 	cases := []struct {
 		name string
@@ -135,17 +135,17 @@ func TestSourcesRendersResolvedValues(t *testing.T) {
 }
 
 // The tally is rendered twice — inline in the bar and again out of band by
-// every mutation — so the dialog must carry exactly one of it. Two would mean a
+// every mutation — so the page must carry exactly one of it. Two would mean a
 // duplicate id and a stray visible copy below the columns.
 func TestSourcesCountsRenderOnce(t *testing.T) {
 	w, db := sourcesTestWeb(t, config.FeedsDoc{
 		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
 	})
-	if n := strings.Count(get(t, w, "/sources"), `id="srcCmd"`); n != 1 {
-		t.Errorf("the counts element appears %d times in the dialog, want 1", n)
+	if n := strings.Count(get(t, w, "/sources/manage"), `id="srcCmd"`); n != 1 {
+		t.Errorf("the counts element appears %d times on the page, want 1", n)
 	}
 	// A mutation response carries it as an out-of-band update to that element.
-	body := postForm(t, w, "/sources/"+feedID(t, db, "Alpha")+"/enabled", url.Values{"enabled": {"off"}})
+	body := postForm(t, w, "/sources/feed/"+feedID(t, db, "Alpha")+"/enabled", url.Values{"enabled": {"off"}})
 	if !strings.Contains(body, `hx-swap-oob="true"`) {
 		t.Errorf("a mutation did not carry the out-of-band tally; body=%s", body)
 	}
@@ -159,7 +159,7 @@ func TestSourcesDetailLeavesDefaultedFieldsBlank(t *testing.T) {
 		Defaults: config.FeedDefaults{Since: durPtr(72 * time.Hour)},
 		Feeds:    []config.Feed{{Name: "Beta", URL: "https://beta.test/feed"}},
 	})
-	out := get(t, w, "/sources/"+feedID(t, db, "Beta"))
+	out := get(t, w, "/sources/feed/"+feedID(t, db, "Beta"))
 
 	if !strings.Contains(out, `name="since" value=""`) {
 		t.Errorf("the default was pre-filled into the field; body=%s", out)
@@ -200,8 +200,8 @@ func TestSourcesShowsHealth(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RecordFeedFetches: %v", err)
 	}
-	list := get(t, w, "/sources")
-	detail := get(t, w, "/sources/"+feedID(t, db, "Broken"))
+	list := get(t, w, "/sources/manage")
+	detail := get(t, w, "/sources/feed/"+feedID(t, db, "Broken"))
 
 	cases := []struct {
 		name string
@@ -233,7 +233,7 @@ func TestSourcesDisabledOverridesStaleHealth(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RecordFeedFetches: %v", err)
 	}
-	out := get(t, w, "/sources")
+	out := get(t, w, "/sources/manage")
 
 	if !strings.Contains(out, "srow__dot--off") {
 		t.Errorf("expected the parked dot; body=%s", out)
@@ -242,7 +242,7 @@ func TestSourcesDisabledOverridesStaleHealth(t *testing.T) {
 		t.Errorf("a disabled feed must not count as failing; body=%s", out)
 	}
 	// Its history is still there to look back at.
-	if !strings.Contains(get(t, w, "/sources/"+feedID(t, db, "Parked")), "sdet__tick") {
+	if !strings.Contains(get(t, w, "/sources/feed/"+feedID(t, db, "Parked")), "sdet__tick") {
 		t.Error("parked feed lost its history strip")
 	}
 }
@@ -253,13 +253,13 @@ func TestSourcesToggleEnabled(t *testing.T) {
 	})
 	id := feedID(t, db, "Alpha")
 
-	postForm(t, w, "/sources/"+id+"/enabled", url.Values{"enabled": {"off"}})
+	postForm(t, w, "/sources/feed/"+id+"/enabled", url.Values{"enabled": {"off"}})
 	feeds := mustFeeds(t, db)
 	if feeds[0].Enabled == nil || *feeds[0].Enabled {
 		t.Fatalf("feed was not disabled: %+v", feeds[0].Enabled)
 	}
 
-	out := postForm(t, w, "/sources/"+id+"/enabled", url.Values{"enabled": {"on"}})
+	out := postForm(t, w, "/sources/feed/"+id+"/enabled", url.Values{"enabled": {"on"}})
 	feeds = mustFeeds(t, db)
 	if feeds[0].Enabled == nil || !*feeds[0].Enabled {
 		t.Fatalf("feed was not re-enabled: %+v", feeds[0].Enabled)
@@ -332,7 +332,7 @@ func TestSourcesAddThenDeleteThenRestore(t *testing.T) {
 	id := feedID(t, db, "Added")
 
 	rec := httptest.NewRecorder()
-	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/sources/"+id, nil))
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/sources/feed/"+id, nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("DELETE: status = %d; body=%s", rec.Code, rec.Body)
 	}
@@ -343,11 +343,11 @@ func TestSourcesAddThenDeleteThenRestore(t *testing.T) {
 	if len(mustDeleted(t, db)) != 1 {
 		t.Fatal("delete was not soft")
 	}
-	if !strings.Contains(get(t, w, "/sources"), "restore") {
+	if !strings.Contains(get(t, w, "/sources/manage"), "restore") {
 		t.Error("a deleted feed offers no way back")
 	}
 
-	postForm(t, w, "/sources/"+id+"/restore", nil)
+	postForm(t, w, "/sources/feed/"+id+"/restore", nil)
 	if len(mustFeeds(t, db)) != 2 {
 		t.Fatalf("feed was not restored: %+v", mustFeeds(t, db))
 	}
@@ -400,7 +400,7 @@ func TestSourcesSaveFlashesSaved(t *testing.T) {
 	w, db := sourcesTestWeb(t, config.FeedsDoc{
 		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
 	})
-	body := postForm(t, w, "/sources/"+feedID(t, db, "Alpha"), url.Values{
+	body := postForm(t, w, "/sources/feed/"+feedID(t, db, "Alpha"), url.Values{
 		"name": {"Alpha"}, "url": {"https://alpha.test/feed"},
 	})
 
@@ -423,11 +423,11 @@ func TestSourcesDeleteAsksBeforeItActs(t *testing.T) {
 	})
 	id := feedID(t, db, "Alpha")
 
-	ask := get(t, w, "/sources/"+id+"/confirm-delete")
+	ask := get(t, w, "/sources/feed/"+id+"/confirm-delete")
 	if !strings.Contains(ask, `class="modal"`) || !strings.Contains(ask, "Alpha") {
 		t.Errorf("no dialog naming the feed; body=%s", ask)
 	}
-	if !strings.Contains(ask, `hx-delete="/sources/`+id+`"`) {
+	if !strings.Contains(ask, `hx-delete="/sources/feed/`+id+`"`) {
 		t.Errorf("the dialog does not carry the delete; body=%s", ask)
 	}
 	// Asking must not act.
@@ -436,7 +436,7 @@ func TestSourcesDeleteAsksBeforeItActs(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/sources/"+id, nil))
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/sources/feed/"+id, nil))
 	body := rec.Body.String()
 
 	if !strings.Contains(body, `hx-swap-oob="innerHTML:#modalTop"`) {
@@ -460,7 +460,7 @@ func TestSourcesRenameRefilesItems(t *testing.T) {
 	})
 	seedItem(t, db, "Old Name")
 
-	out := postForm(t, w, "/sources/"+feedID(t, db, "Old Name"), url.Values{
+	out := postForm(t, w, "/sources/feed/"+feedID(t, db, "Old Name"), url.Values{
 		"name": {"New Name"}, "url": {"https://alpha.test/feed"},
 	})
 	if !strings.Contains(out, "re-filed 1 item") {
@@ -490,13 +490,13 @@ func TestSourcesURLEditKeepsHistory(t *testing.T) {
 		t.Fatalf("RecordFeedFetches: %v", err)
 	}
 
-	postForm(t, w, "/sources/"+id, url.Values{
+	postForm(t, w, "/sources/feed/"+id, url.Values{
 		"name": {"Alpha"}, "url": {"https://alpha.test/feed.xml"},
 	})
 	if got := feedID(t, db, "Alpha"); got != id {
 		t.Errorf("the feed's ID changed with its URL: %q -> %q", id, got)
 	}
-	if !strings.Contains(get(t, w, "/sources/"+id), "4 items") {
+	if !strings.Contains(get(t, w, "/sources/feed/"+id), "4 items") {
 		t.Error("the feed lost its history when its URL changed")
 	}
 }
@@ -515,7 +515,7 @@ func TestSourcesDefaultsEditMovesInheritedFeeds(t *testing.T) {
 		t.Errorf("defaults.Since = %+v, want 3d", defaults.Since)
 	}
 	// The feed sets neither knob, so both now come from the defaults.
-	out := get(t, w, "/sources/"+feedID(t, db, "Alpha"))
+	out := get(t, w, "/sources/feed/"+feedID(t, db, "Alpha"))
 	if !strings.Contains(out, `placeholder="3d"`) || !strings.Contains(out, `placeholder="12"`) {
 		t.Errorf("the feed did not pick up the new defaults; body=%s", out)
 	}
@@ -556,15 +556,15 @@ func TestSourcesCommandOmitsEmptyFlags(t *testing.T) {
 	w, db := sourcesTestWeb(t, config.FeedsDoc{
 		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
 	})
-	out := get(t, w, "/sources")
+	out := get(t, w, "/sources/manage")
 	if strings.Contains(out, "--failing") || strings.Contains(out, "--deleted") {
 		t.Errorf("a healthy page printed an empty flag; body=%s", out)
 	}
 
 	rec := httptest.NewRecorder()
-	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/sources/"+feedID(t, db, "Alpha"), nil))
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/sources/feed/"+feedID(t, db, "Alpha"), nil))
 
-	if !strings.Contains(get(t, w, "/sources"), "--deleted 1") {
+	if !strings.Contains(get(t, w, "/sources/manage"), "--deleted 1") {
 		t.Error("--deleted missing after a delete")
 	}
 }
@@ -578,7 +578,7 @@ func TestSourcesDeleteShowsUpInTheSameResponse(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/sources/"+feedID(t, db, "Alpha"), nil))
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/sources/feed/"+feedID(t, db, "Alpha"), nil))
 	body := rec.Body.String()
 
 	if !strings.Contains(body, `data-state="gone"`) {
@@ -599,7 +599,7 @@ func TestSourcesStateFilterIsSelfContained(t *testing.T) {
 	w, _ := sourcesTestWeb(t, config.FeedsDoc{
 		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
 	})
-	out := get(t, w, "/sources")
+	out := get(t, w, "/sources/manage")
 
 	for _, want := range []string{`value="all"`, `value="on"`, `value="off"`, `value="gone"`} {
 		if !strings.Contains(out, want) {
@@ -692,7 +692,7 @@ func TestSourcesFlagsInsecureURL(t *testing.T) {
 	w, db := sourcesTestWeb(t, config.FeedsDoc{
 		Feeds: []config.Feed{{Name: "Plain", URL: "http://plain.test/feed"}},
 	})
-	if !strings.Contains(get(t, w, "/sources/"+feedID(t, db, "Plain")), "data-src-insecure") {
+	if !strings.Contains(get(t, w, "/sources/feed/"+feedID(t, db, "Plain")), "data-src-insecure") {
 		t.Error("no place for the insecure-connection warning")
 	}
 }
@@ -721,21 +721,21 @@ func TestSourcesExportRoundTrips(t *testing.T) {
 	}
 }
 
-// Sources answers with a dialog fragment, not a page. Anything else and it
-// would land a second <html> inside the modal layer.
-func TestSourcesRendersAsAFragment(t *testing.T) {
+// Manage is a whole page: it carries the document and the layout. The editor
+// lives on it; defaults and export open as dialogs over it, so their targets
+// are #modalTop.
+func TestSourcesManageIsAPage(t *testing.T) {
 	w, _ := sourcesTestWeb(t, config.FeedsDoc{
 		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
 	})
-	out := get(t, w, "/sources")
+	out := get(t, w, "/sources/manage")
 
-	if strings.Contains(out, "<!doctype") || strings.Contains(out, "<html") {
-		t.Errorf("the dialog carried a whole page with it; body=%s", out)
+	if !strings.Contains(strings.ToLower(out), "<!doctype") || !strings.Contains(out, "<html") {
+		t.Errorf("manage is not a whole page; body=%.300s", out)
 	}
-	if !strings.Contains(out, `class="modal__frame modal__frame--sources"`) {
-		t.Errorf("no dialog frame; body=%s", out)
+	if strings.Contains(out, "modal__frame--sources") {
+		t.Errorf("a modal frame is rendered around the editor; body=%s", out)
 	}
-	// Its own two dialogs stack above it, or opening one would close Sources.
 	for _, want := range []string{
 		`hx-get="/sources/defaults" hx-target="#modalTop"`,
 		`hx-get="/sources/export" hx-target="#modalTop"`,
@@ -746,6 +746,114 @@ func TestSourcesRendersAsAFragment(t *testing.T) {
 	}
 }
 
+// The section nav is on both pages. Overview has no tally, so the command line
+// id stays unique to Manage; the failing badge is shown only when there is
+// something to report.
+func TestSourcesPagesShowTheNav(t *testing.T) {
+	w, _ := sourcesTestWeb(t, config.FeedsDoc{
+		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
+	})
+	overview := get(t, w, "/sources")
+	manage := get(t, w, "/sources/manage")
+
+	if !strings.Contains(overview, `<nav class="sh-nav"`) {
+		t.Errorf("overview has no section nav; body=%s", overview)
+	}
+	if !strings.Contains(overview, `href="/sources" aria-current="page"`) {
+		t.Errorf("overview link is not marked current; body=%s", overview)
+	}
+	if n := strings.Count(overview, `id="srcCmd"`); n != 0 {
+		t.Errorf("overview renders the tally %d times, want 0", n)
+	}
+	if !strings.Contains(manage, `href="/sources/manage" aria-current="page"`) {
+		t.Errorf("manage link is not marked current; body=%s", manage)
+	}
+	if n := strings.Count(manage, `id="srcCmd"`); n != 1 {
+		t.Errorf("manage renders the tally %d times, want 1", n)
+	}
+
+	t.Run("no badge when nothing fails", func(t *testing.T) {
+		if strings.Contains(manage, "sh-ni__n--bad") {
+			t.Errorf("badge shown with no failing feeds; body=%s", manage)
+		}
+	})
+
+	t.Run("badge counts failing feeds", func(t *testing.T) {
+		broken := config.Feed{Name: "Broken", URL: "https://broken.test/feed"}
+		w, db := sourcesTestWeb(t, config.FeedsDoc{Feeds: []config.Feed{broken}})
+		if err := db.RecordFeedFetches(t.Context(), []store.FeedFetch{
+			{FeedID: config.FeedID(broken.URL), Name: broken.Name, Error: "dial tcp: no such host", At: time.Now()},
+		}); err != nil {
+			t.Fatalf("RecordFeedFetches: %v", err)
+		}
+		out := get(t, w, "/sources/manage")
+		badge := `<span class="sh-ni__n sh-ni__n--bad" title="1 failing">1<span class="stp-sr"> failing</span></span>`
+		if !strings.Contains(out, badge) {
+			t.Errorf("no failing badge on the nav; body=%s", out)
+		}
+	})
+}
+
+// Sources is a page, so the topbar and the navrail mark it current there and
+// nowhere else.
+func TestSourcesTopbarAndRailMarkTheActivePage(t *testing.T) {
+	w, _ := sourcesTestWeb(t, config.FeedsDoc{
+		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
+	})
+	for _, path := range []string{"/sources", "/sources/manage"} {
+		out := get(t, w, path)
+		if !strings.Contains(out, `class="active" href="/sources"`) {
+			t.Errorf("GET %s: topbar Sources link is not active", path)
+		}
+		if !strings.Contains(out, `navrail__item--on" href="/sources"`) {
+			t.Errorf("GET %s: navrail Sources item is not active", path)
+		}
+	}
+
+	feed := get(t, w, "/feed")
+	if strings.Contains(feed, `class="active" href="/sources"`) {
+		t.Error("GET /feed marks the Sources topbar link active")
+	}
+	if strings.Contains(feed, `navrail__item--on" href="/sources"`) {
+		t.Error("GET /feed marks the Sources navrail item active")
+	}
+}
+
+// Every entry point to Sources is a link to the page. None of them opens the
+// Sources dialog through htmx.
+func TestNoEntryPointOpensSourcesAsADialog(t *testing.T) {
+	empty := newEmptyWeb(t)
+	full := newTestWeb(t)
+	for _, c := range []struct {
+		w    *Web
+		path string
+	}{
+		{empty, "/feed"},
+		{empty, "/maze"},
+		{empty, "/ingest"},
+		{full, "/feed"},
+		{full, "/settings/general"},
+	} {
+		if body := get(t, c.w, c.path); strings.Contains(body, `hx-get="/sources"`) {
+			t.Errorf("GET %s opens Sources as a dialog", c.path)
+		}
+	}
+}
+
+// The feed query parameter opens that feed in the editor, so a link can land on
+// one feed directly.
+func TestSourcesManagePreselectsAFeed(t *testing.T) {
+	w, db := sourcesTestWeb(t, config.FeedsDoc{Feeds: []config.Feed{
+		{Name: "Alpha", URL: "https://alpha.test/feed"},
+		{Name: "Beta", URL: "https://beta.test/feed"},
+	}})
+	out := get(t, w, "/sources/manage?feed="+feedID(t, db, "Beta"))
+
+	if !strings.Contains(out, `name="name" value="Beta"`) {
+		t.Errorf("the detail pane does not show the chosen feed; body=%s", out)
+	}
+}
+
 // The pager is inert markup the client script drives, so the only server-side
 // contract is that it ships with the list and starts hidden — a pager visible
 // before the script has counted anything would flash on every open.
@@ -753,7 +861,7 @@ func TestSourcesShipsThePagerMarkup(t *testing.T) {
 	w, _ := sourcesTestWeb(t, config.FeedsDoc{
 		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
 	})
-	out := get(t, w, "/sources")
+	out := get(t, w, "/sources/manage")
 
 	cases := []struct {
 		name string
@@ -768,7 +876,7 @@ func TestSourcesShipsThePagerMarkup(t *testing.T) {
 		{name: "step forward", want: `data-src-page="1"`, why: "the next-page arrow"},
 		{name: "range label", want: "data-src-pagelbl", why: "where the script writes 1-10 of 24"},
 		{
-			name: "footer clears the names", want: "modal__foot--sources",
+			name: "footer clears the names", want: "src-page__foot",
 			why: "left-aligned it read as another feed row",
 		},
 	}
@@ -809,7 +917,7 @@ func TestSourcesSaveDefaultsClosesItsDialog(t *testing.T) {
 
 func TestSourcesEmptyStore(t *testing.T) {
 	w, _ := sourcesTestWeb(t, config.FeedsDoc{})
-	out := get(t, w, "/sources")
+	out := get(t, w, "/sources/manage")
 
 	if !strings.Contains(out, "No feeds yet") {
 		t.Errorf("an empty store should render a zero-state; body=%s", out)
@@ -823,7 +931,7 @@ func TestSourcesMissingFeedIs404(t *testing.T) {
 	w, _ := sourcesTestWeb(t, config.FeedsDoc{
 		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/sources/nope", strings.NewReader("name=x&url=https://x.test/f"))
+	req := httptest.NewRequest(http.MethodPost, "/sources/feed/nope", strings.NewReader("name=x&url=https://x.test/f"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	w.Routes().ServeHTTP(rec, req)
@@ -853,7 +961,7 @@ func TestSourcesAddPicksType(t *testing.T) {
 	if !strings.Contains(body, `srow__kind">academic<`) {
 		t.Errorf("the academic row carries no badge; body=%s", body)
 	}
-	if strings.Contains(get(t, w, "/sources"), `srow__kind">rss<`) {
+	if strings.Contains(get(t, w, "/sources/manage"), `srow__kind">rss<`) {
 		t.Error("an rss row was badged, but rss is the default")
 	}
 	if out := get(t, w, "/sources/export"); strings.Contains(out, "type: rss") {
@@ -905,10 +1013,10 @@ func TestSourcesSaveKeepsType(t *testing.T) {
 		{"Later", "https://later.test/feed", "blog", config.FeedTypeBlog},
 	} {
 		id := feedID(t, db, c.name)
-		if pane := get(t, w, "/sources/"+id); !strings.Contains(pane, `value="`+c.posted+`" checked`) {
+		if pane := get(t, w, "/sources/feed/"+id); !strings.Contains(pane, `value="`+c.posted+`" checked`) {
 			t.Errorf("%s: the pane does not show its type checked; body=%s", c.name, pane)
 		}
-		postForm(t, w, "/sources/"+id, url.Values{
+		postForm(t, w, "/sources/feed/"+id, url.Values{
 			"name": {c.name}, "url": {c.url}, "type": {c.posted}, "tags": {"kept"}, "since": {"3d"},
 		})
 		if got := mustFeed(t, db, c.name).Type; got != c.want {
@@ -918,7 +1026,7 @@ func TestSourcesSaveKeepsType(t *testing.T) {
 
 	// Switching is allowed both ways.
 	id := feedID(t, db, "arXiv")
-	postForm(t, w, "/sources/"+id, url.Values{
+	postForm(t, w, "/sources/feed/"+id, url.Values{
 		"name": {"arXiv"}, "url": {"https://export.arxiv.org/api/query?search_query=all:rag"}, "type": {"rss"},
 	})
 	if got := mustFeed(t, db, "arXiv").Type; got != "" {
@@ -1011,7 +1119,7 @@ func TestSourcesImportCarriesTheFeedCount(t *testing.T) {
 func TestSourcesImportSkipsDeletedFeeds(t *testing.T) {
 	w, db := sourcesTestWeb(t, config.FeedsDoc{})
 	postFile(t, w, importFeeds)
-	req := httptest.NewRequest(http.MethodDelete, "/sources/"+feedID(t, db, "Gamma"), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/sources/feed/"+feedID(t, db, "Gamma"), nil)
 	w.Routes().ServeHTTP(httptest.NewRecorder(), req)
 	out := postFile(t, w, importFeeds)
 	if !strings.Contains(out, "added 0 feed(s)") {
@@ -1038,5 +1146,24 @@ func TestSourcesImportRejectionsRenderInline(t *testing.T) {
 	}
 	if got := len(mustFeeds(t, db)); got != 0 {
 		t.Errorf("a rejected file added %d feeds", got)
+	}
+}
+
+// settings.js reads these classes from the import response: src__import for
+// the status line (both outcomes) and sdet__err for the error line.
+func TestSourcesImportResponseKeepsSettingsHooks(t *testing.T) {
+	w, _ := sourcesTestWeb(t, config.FeedsDoc{})
+	ok := postFile(t, w, importFeeds)
+	if !strings.Contains(ok, "src__import") {
+		t.Errorf("valid import lacks src__import; body=%s", ok)
+	}
+	if strings.Contains(ok, "sdet__err") {
+		t.Errorf("valid import carries an error block; body=%s", ok)
+	}
+	bad := postFile(t, w, "feeds: [")
+	for _, class := range []string{"src__import", "sdet__err"} {
+		if !strings.Contains(bad, class) {
+			t.Errorf("invalid import lacks %s; body=%s", class, bad)
+		}
 	}
 }

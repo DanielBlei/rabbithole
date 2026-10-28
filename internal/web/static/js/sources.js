@@ -1,15 +1,15 @@
-// The Sources dialog: instant client-side filtering and paging of the feed
+// The Sources manage page: instant client-side filtering and paging of the feed
 // list, the copy button on the export modal, and importing a feeds file by
 // picker or drop.
 //
-// Both are client-side because the whole set is already in the dialog and a
+// Both are client-side because the whole set is already on the page and a
 // personal feed list is tens of rows, not thousands — the same call the Feed
 // page's filters make. The search box lives outside #srcBody, so an edit that
 // repaints the columns leaves the query intact; this file just re-applies it
-// after every swap — including the one that opens the dialog.
+// after every swap, including the one that first shows the list.
 //
-// Loaded on every page, since the dialog opens from anywhere. Every lookup is
-// guarded, so it costs nothing on a page where none of this markup exists.
+// Loaded on every page by the layout. Every lookup is guarded, so it costs
+// nothing on a page where none of this markup exists.
 (function () {
   var state = 'all'; // all | on | off | gone — kept here so it survives htmx swaps
 
@@ -62,9 +62,9 @@
   // the chosen size live here rather than in the markup, because the pager sits
   // inside #srcBody and is replaced by every mutation.
   //
-  // A set size rather than one fitted to the window: the dialog's height follows
-  // from it (--src-per drives .src__cols in the stylesheet), so it opens the
-  // same every time instead of tracking whatever screen you happen to be on.
+  // A set size rather than one fitted to the window: the columns' height follows
+  // from it (--src-per drives .src__cols in the stylesheet), so the page holds
+  // the same shape instead of tracking whatever screen you happen to be on.
   var SIZES = [10, 15, 20];
   var page = 1;
   var perPage = 10;
@@ -74,8 +74,8 @@
     if (SIZES.indexOf(saved) !== -1) perPage = saved;
   } catch (e) { /* private mode — the default stands */ }
 
-  // On <html>, not on anything inside the dialog: a mutation replaces #srcBody
-  // and would take the variable with it.
+  // On <html>, not on anything inside the page body: a mutation replaces
+  // #srcBody and would take the variable with it.
   function stampSize() {
     document.documentElement.style.setProperty('--src-per', perPage);
   }
@@ -182,10 +182,10 @@
     refilter();
   });
 
-  // Esc clears the search rather than leaving you to select-all-delete. It has
-  // to stop the dialog's own Esc handler too: both are bound on document, where
-  // stopPropagation does nothing to a sibling listener. This file is loaded
-  // ahead of modal.js so this one runs first.
+  // Esc clears the search rather than leaving you to select-all-delete, and
+  // stops any other Esc handler acting on the same key. Both modal.js and this
+  // are bound on document, where stopPropagation does nothing to a sibling
+  // listener, so this file is loaded ahead of modal.js to run first.
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
     var input = e.target.closest && e.target.closest('[data-src-query]');
@@ -231,7 +231,7 @@
     fetch('/sources/import', { method: 'POST', body: form, credentials: 'same-origin' })
       .then(function (res) {
         // An expired session redirects to the login page; let the gate take over
-        // rather than swap that page into the dialog.
+        // rather than swap that page into the editor.
         if (res.redirected || new URL(res.url).pathname !== '/sources/import') {
           window.location.reload();
           return null;
@@ -303,6 +303,15 @@
 
   function refresh() { apply(); flagInsecure(); }
 
-  document.addEventListener('DOMContentLoaded', refresh);
+  // On narrow screens the section nav is a scrolling row. Bring the current
+  // item into it; a column nav has no overflow to correct.
+  function showActiveNav() {
+    var el = document.querySelector('.sh-ni.is-on');
+    var list = el && el.closest('.sh-nav__list');
+    if (!list || getComputedStyle(list).flexDirection !== 'row') return;
+    el.scrollIntoView({block: 'nearest', inline: 'nearest'});
+  }
+
+  document.addEventListener('DOMContentLoaded', function () { refresh(); showActiveNav(); });
   document.body.addEventListener('htmx:afterSwap', refresh);
 })();

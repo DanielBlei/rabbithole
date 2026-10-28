@@ -8,10 +8,9 @@
     </div>
     {{template "ingestBody" .Body}}
     <div class="modal__foot modal__foot--acts">
-      {{/* Sources stacks over the runner instead of replacing it; Esc drops back
-           here, with the run still streaming underneath. */}}
+      {{/* Sources opens its own page. */}}
       <a class="modal__act" href="/settings/scoring">⚙ scoring settings</a>
-      <a class="modal__act" href="#" hx-get="/sources" hx-target="#modalTop" hx-swap="innerHTML">▤ edit sources</a>
+      <a class="modal__act" href="/sources">▤ edit sources</a>
     </div>
   </div>
 </div>

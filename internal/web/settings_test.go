@@ -147,7 +147,7 @@ func TestSettingsGeneralShowsEffectiveValues(t *testing.T) {
 	if !shownAsSet || strings.Contains(body, "From your computer login") {
 		t.Errorf("a set prompt name should show as itself; body=%s", body)
 	}
-	for _, want := range []string{`hx-get="/sources"`, `data-stp-import`, `data-stp-feedcount`} {
+	for _, want := range []string{`<a class="clk-btn" href="/sources"`, `data-stp-import`, `data-stp-feedcount`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("General lacks %q", want)
 		}

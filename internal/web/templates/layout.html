@@ -39,6 +39,7 @@
       <nav class="topbar__nav">
         <a class="{{if eq .Active "feed"}}active{{end}}" href="/feed">Feed</a>
         <a class="{{if eq .Active "maze"}}active{{end}}" href="/maze">Maze</a>
+        <a class="{{if eq .Active "sources"}}active{{end}}" href="/sources">Sources</a>
       </nav>
     </div>
     <div class="topbar__right">
@@ -125,12 +126,11 @@
          all three a drawer's length away from the pages. */}}
     <div class="navrail__foot">
       <div class="navrail__sec"><span>config</span></div>
-      <button class="navrail__item navrail__item--cmd" type="button"
-              hx-get="/sources" hx-target="#modal" hx-swap="innerHTML" aria-label="Sources">
+      <a class="navrail__item navrail__item--cmd{{if eq .Active "sources"}} navrail__item--on{{end}}" href="/sources" aria-label="Sources"{{if eq .Active "sources"}} aria-current="page"{{end}}>
         <span class="navrail__sig" aria-hidden="true">$</span>
         <span class="navrail__cmd">sources</span>
         <span class="navrail__note">feeds &amp; defaults</span>
-      </button>
+      </a>
       {{template "navIngest" .Chrome}}
       {{/* The gear goes to the same page; this is the route for anyone already
            in the menu. */}}
@@ -165,10 +165,9 @@
         <p class="ask__lead">Nothing has been ingested yet.</p>
         <p class="ask__sub">A few places worth a look before your first feed. <span class="welcome__opt">All optional.</span></p>
         <ul class="welcome__steps">
-          <li><button class="welcome__step{{if index .Chrome.Welcome "sources"}} is-done{{end}}" type="button" data-welcome-step="sources"
-                      hx-get="/sources" hx-target="#modal" hx-swap="innerHTML">
+          <li><a class="welcome__step{{if index .Chrome.Welcome "sources"}} is-done{{end}}" href="/sources" data-welcome-step="sources">
             <span class="welcome__txt">Check your sources<small>the feeds that get read</small></span>
-            <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></button></li>
+            <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></a></li>
           <li><a class="welcome__step{{if index .Chrome.Welcome "profile"}} is-done{{end}}" href="/settings/profiles" data-welcome-step="profile">
             <span class="welcome__txt">Check your profile<small>what gets ranked up and down</small></span>
             <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></a></li>
@@ -191,7 +190,7 @@
   <script src="/static/js/net.js" defer></script>
   <script src="/static/js/chrome.js" defer></script>
   {{/* Ahead of modal.js on purpose: both bind Escape on document, and the
-       sources search box has to swallow the key before the dialog acts on it. */}}
+       sources search box has to swallow the key before modal.js acts on it. */}}
   <script src="/static/js/tagput.js" defer></script>
   <script src="/static/js/sources.js" defer></script>
   <script src="/static/js/modal.js" defer></script>

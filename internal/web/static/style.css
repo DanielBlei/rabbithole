@@ -536,7 +536,7 @@ header.topbar{
 }
 /* The prompt is one flex item, so the bar's gap spaces the arguments after it
    and not the prompt's own pieces. */
-.pane__ps{white-space:pre;}
+.pane__ps{white-space:pre;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;}
 /* Faux shell prompt, classic zsh colouring: green user@host, blue path, dim
    punctuation (inherited from the bar), bright command. Shared by the feed
    pane, both maze widgets, and the ingest modal's title bar. */
@@ -582,7 +582,7 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
   font-size:1.2rem;
 }
 .filter{display:flex;align-items:center;gap:6px;color:var(--text-dim);}
-/* The feed bar dropped its key words for segments; the sources modal still
+/* The feed bar dropped its key words for segments; the Sources page still
    spells its one control key + value. */
 .filter__key{letter-spacing:0.035em;text-transform:uppercase;font-size:1.15rem;}
 .filter--published{position:relative;}
@@ -1356,12 +1356,15 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
 }
 
 /* A phone cannot hold the wordmark, the page switch, the ingest chip, the clock
-   and the gear at once: the wordmark and the date give way so the bar never
-   scrolls the page sideways. */
+   and the gear at once: the wordmark and the date give way, the switch tightens
+   and the chip keeps only its dot (the text stays for screen readers), so the
+   bar never scrolls the page sideways or lets the chip run under the switch. */
 @media (max-width: 520px){
   .topbar__in{gap:8px;}
   .topbar__left{gap:6px;min-width:0;}
   .topbar__left .wordmark,.topbar__left .breaker,.clock__date{display:none;}
+  .topbar__nav a{padding:4px 10px;}
+  .topbar__amb .ing-chip{font-size:0;gap:0;}
   .topbar__right{gap:8px;min-width:0;}
   .topbar__amb{gap:8px;padding:5px 10px;min-width:0;}
 }
@@ -1783,17 +1786,8 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 .welcome__foot{display:flex;justify-content:flex-end;}
 .ask__foot{display:flex;justify-content:flex-end;gap:9px;margin-top:4px;}
 
-/* Sources is wider than the runner: it carries two columns, not a log. Its
-   height comes from the chosen page size (see .src__cols), so it is the same
-   every time you open it and never grows as you add feeds — but it is the
-   setting that decides, not the screen. 88vh is only a backstop for 20-per-page
-   on a short window. */
-.modal__frame--sources{width:min(1100px,96vw);max-height:88vh;}
-.modal__foot--sources{text-align:right;}
-/* A footer of actions rather than a caption: the runner reaches the config and
-   the feed list from here, and the settings dialog reaches the same two plus
-   the source. Pills, so they don't hide in the footer text. Both dialogs share
-   the row and the button — one shape for "what else you can open from here". */
+/* A footer of actions rather than a caption: the runner reaches settings and
+   the Sources page from here. Pills, so they don't hide in the footer text. */
 .modal__foot--acts{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px 10px;}
 .modal__act{
   display:inline-flex;align-items:center;flex:none;
@@ -1990,11 +1984,10 @@ button.src__act{border:0;font-family:inherit;cursor:pointer;}
 .src__note{margin:10px 16px 0;padding:9px 13px;border-radius:8px;background:var(--fill);
   font-size:1.25rem;color:var(--text-dim);}
 
-/* The columns reserve exactly one page of rows. That one number sets the
-   dialog's height, so it is stable whatever the last page holds and whether or
-   not the editor is open — and it shrinks when 88vh says it must, at which
-   point both columns scroll. --src-per is stamped on <html> by
-   static/js/sources.js from the saved per-page choice. */
+/* The columns reserve exactly one page of rows. That one number sets their
+   height, so it is stable whatever the last page holds and whether or not the
+   editor is open. --src-per is stamped on <html> by static/js/sources.js from
+   the saved per-page choice. */
 :root{ --src-row-h:37px; --src-per:10; }
 /* The floor is the editor's doing, not the list's: a page of 10 rows is shorter
    than the form beside it, and without it the form scrolled inside its own
@@ -2252,13 +2245,44 @@ button.src__act{border:0;font-family:inherit;cursor:pointer;}
 .src__copy:hover{background:var(--fill-hover);color:var(--accent);}
 .modal__acts{display:flex;align-items:center;gap:9px;}
 
-/* Narrow: the pane drops below the list instead of squeezing beside it. Both
-   columns then scroll on their own, so the taller of the two can't push the
-   other out of the frame. */
+
+/* Sources as a page: the section nav sits beside the content, and becomes a
+   scrolling row of pills above it on narrow screens. A group is a heading over
+   its items; groups are told apart by a separator. */
+.src-page{display:grid;grid-template-columns:184px minmax(0,1fr);gap:22px;align-items:start;}
+.src-page__main{min-width:0;}
+.sh-nav{position:sticky;top:calc(var(--topbar-h) + 16px);}
+.sh-nav__list{display:flex;flex-direction:column;gap:1px;}
+.sh-nav__h{padding:0 10px 6px;font-size:1.05rem;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim);}
+.sh-nav__sep{height:1px;margin:12px 10px 14px;background:var(--hairline-strong);}
+.sh-ni{position:relative;display:flex;align-items:center;justify-content:space-between;gap:10px;
+  min-height:32px;padding:5px 10px;border-radius:var(--r-xs);color:var(--text-dim);
+  text-decoration:none;font-size:1.3rem;white-space:nowrap;transition:background .13s ease,color .13s ease;}
+.sh-ni:hover{background:var(--fill);color:var(--text);}
+.sh-ni.is-on{color:var(--accent);background:var(--tint);}
+.sh-ni.is-on::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:2px;
+  border-radius:2px;background:var(--accent);}
+.sh-ni__n--bad{display:inline-grid;place-items:center;flex:none;min-width:18px;height:18px;padding:0 6px;
+  border-radius:var(--r-full);background:rgba(255,83,112,.16);color:var(--warn);
+  font-size:1.1rem;font-weight:500;font-variant-numeric:tabular-nums;}
+.src-ov__body{padding:16px 18px;color:var(--text-dim);}
+.src-ov__body a{color:var(--accent);}
+.src-page__foot{margin-top:8px;text-align:right;color:var(--text-dim);font-size:1.1rem;}
+
+/* The columns stack and size to their content; each has its own rule. */
 @media (max-width:900px){
-  .src__cols{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr);}
+  .src__cols{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto;height:auto;}
   .src__col{border-right:0;border-bottom:1px solid var(--hairline);}
-  .src__acts{margin-left:0;}
+  .src__acts{margin-left:0;flex-wrap:wrap;}
+  .src-page{grid-template-columns:minmax(0,1fr);gap:12px;}
+  .sh-nav{position:static;}
+  .sh-nav__list{flex-direction:row;align-items:center;gap:6px;overflow-x:auto;scrollbar-width:none;}
+  .sh-nav__list::-webkit-scrollbar{display:none;}
+  .sh-nav__h,.sh-nav__sep{display:none;}
+  .sh-ni{flex:none;min-height:44px;padding:0 14px;border-radius:var(--r-full);background:var(--fill);}
+  .sh-ni.is-on{background:var(--tint);box-shadow:inset 0 0 0 1px rgba(128,203,196,.30);}
+  .sh-ni.is-on::before{display:none;}
+  .sh-ni__n--bad{margin-left:8px;}
 }
 
 /* ── Maze: the day-to-day tools home. First widget is the todo board. ────────
@@ -3386,9 +3410,12 @@ button.src__act{border:0;font-family:inherit;cursor:pointer;}
    the same inset and sits at the same height. */
 /* The edge is an inset shadow rather than a border because the column's width
    is fixed: a real border would be taken out of the 232px and leave every row
-   in this layout a pixel narrower than the same row in Default. */
+   in this layout a pixel narrower than the same row in Default. The ground
+   starts under the bar's strip, so where the column lies over the page (narrow
+   windows, dock off) the page does not read through it. */
 :root[data-theme="minimal"] .navrail{
-  background:none;box-shadow:inset -1px 0 0 var(--hairline);
+  background:linear-gradient(180deg, transparent var(--topbar-h), var(--bg) var(--topbar-h));
+  box-shadow:inset -1px 0 0 var(--hairline);
   -webkit-backdrop-filter:none;backdrop-filter:none;
 }
 /* The identity band held the prompt; with the prompt gone it is the strip that
@@ -3576,13 +3603,11 @@ button.src__act{border:0;font-family:inherit;cursor:pointer;}
   font-size:1.2rem;font-weight:400;color:var(--text-dim);
 }
 :root[data-theme="minimal"] .modal__frame--ingest .modal__title::before{content:"Ingest";}
-:root[data-theme="minimal"] .modal__frame--sources .modal__title::before{content:"Sources";}
 :root[data-theme="minimal"] .modal__frame--welcome .modal__title::before{content:"Welcome";}
 /* Their paths were the title; now the ::before is, and "~" or "~/sources" said
    twice is just noise. */
 :root[data-theme="minimal"] .modal__frame--ingest .modal__title .pane__path,
 :root[data-theme="minimal"] .modal__frame--ingest .modal__title .pane__cmd,
-:root[data-theme="minimal"] .modal__frame--sources .modal__title .modal__path,
 :root[data-theme="minimal"] .modal__frame--welcome .modal__title .pane__path,
 :root[data-theme="minimal"] .modal__frame--welcome .modal__title .pane__cmd{display:none;}
 
@@ -3615,6 +3640,14 @@ button.src__act{border:0;font-family:inherit;cursor:pointer;}
 :root[data-theme="minimal"] :is(.maze-tabs,.stp-tabs)::before{
   top:auto;bottom:0;height:2px;border-radius:1px;
   background:var(--accent);box-shadow:none;
+}
+/* The section nav is flat text. The active item keeps its accent rule (left
+   edge in the column, the tabs' 2px underline in the row), drawn without
+   changing the box. */
+:root[data-theme="minimal"] .sh-ni.is-on{background:none;}
+@media (max-width:900px){
+  :root[data-theme="minimal"] .sh-ni{background:none;border-radius:0;}
+  :root[data-theme="minimal"] .sh-ni.is-on{box-shadow:none;background:linear-gradient(var(--accent),var(--accent)) bottom / 100% 2px no-repeat;}
 }
 :root[data-theme="minimal"] .todo-tabs{padding:0 0 12px;border-bottom:1px solid var(--hairline);}
 :root[data-theme="minimal"] .todo-panel{padding:16px 0 6px;}

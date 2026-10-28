@@ -14,7 +14,7 @@
   </div>
 {{else}}
   <form class="sdet"
-        {{if .Adding}}hx-post="/sources"{{else}}hx-post="/sources/{{.ID}}"{{end}}
+        {{if .Adding}}hx-post="/sources"{{else}}hx-post="/sources/feed/{{.ID}}"{{end}}
         hx-target="#srcBody" hx-swap="outerHTML">
     <div class="sdet__hd">
       <span class="sdet__title">{{if .Adding}}Add Feed{{else}}{{.Name}}{{end}}</span>
@@ -118,7 +118,7 @@
       {{if .Adding}}
         <span></span>
         <span class="sdet__btns">
-          <a class="sdet__btn" href="#" hx-get="/sources" hx-target="#srcBody" hx-swap="outerHTML" hx-select="#srcBody">cancel</a>
+          <a class="sdet__btn" href="#" hx-get="/sources/manage" hx-target="#srcBody" hx-swap="outerHTML" hx-select="#srcBody">cancel</a>
           <button class="sdet__btn sdet__btn--go" type="submit">add feed</button>
         </span>
       {{else}}
@@ -126,9 +126,9 @@
              appear inline, right under the pointer that had just clicked
              delete — the one place it must not be. */}}
         <button class="sdet__btn sdet__btn--del" type="button"
-                hx-get="/sources/{{.ID}}/confirm-delete" hx-target="#modalTop" hx-swap="innerHTML">delete</button>
+                hx-get="/sources/feed/{{.ID}}/confirm-delete" hx-target="#modalTop" hx-swap="innerHTML">delete</button>
         <span class="sdet__btns">
-          <a class="sdet__btn" href="#" hx-get="/sources/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML">reset</a>
+          <a class="sdet__btn" href="#" hx-get="/sources/feed/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML">reset</a>
           <button class="sdet__btn sdet__btn--go" type="submit">save</button>
         </span>
       {{end}}
@@ -178,7 +178,7 @@
       <div class="ask__foot">
         <button class="sdet__btn" type="button" data-modal-close>cancel</button>
         <button class="sdet__btn sdet__btn--del" type="button"
-                hx-delete="/sources/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML">delete</button>
+                hx-delete="/sources/feed/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML">delete</button>
       </div>
     </div>
   </div>

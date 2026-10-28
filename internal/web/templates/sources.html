@@ -1,0 +1,13 @@
+{{/* SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+     SPDX-License-Identifier: Apache-2.0 */}}
+
+{{/* The Sources page: a section nav over either the Overview placeholder or the
+     Manage editor. */}}
+{{define "content"}}
+<div class="src-page">
+  {{template "sourcesNav" .}}
+  <div class="src-page__main">
+    {{if eq .Section "manage"}}{{template "sourcesManage" .}}{{else}}{{template "sourcesOverview" .}}{{end}}
+  </div>
+</div>
+{{end}}

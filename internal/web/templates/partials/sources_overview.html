@@ -1,0 +1,15 @@
+{{/* SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+     SPDX-License-Identifier: Apache-2.0 */}}
+
+{{/* The Overview section of Sources: a placeholder until it has content. */}}
+{{define "sourcesOverview"}}
+<section class="pane src-ov">
+  <div class="pane__bar">
+    <span class="pane__ps"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~/sources</span><span class="sh">$&nbsp;</span><span class="pane__cmd">sources --feeds {{.Counts.Total}}</span><span class="blink">_</span></span>
+  </div>
+  <div class="src-ov__body">
+    <p>{{.Counts.Total}} {{if eq .Counts.Total 1}}source{{else}}sources{{end}}.</p>
+    <p><a href="/sources/manage">Manage sources</a></p>
+  </div>
+</section>
+{{end}}

@@ -35,8 +35,9 @@ import (
 // is harmless (a page just ignores the ones it doesn't use). Parsed once at
 // startup; a parse failure is a build-time mistake, so fail fast.
 var (
-	feedTmpl = pageTmpl("feed.html")
-	mazeTmpl = pageTmpl("maze.html")
+	feedTmpl    = pageTmpl("feed.html")
+	mazeTmpl    = pageTmpl("maze.html")
+	sourcesTmpl = pageTmpl("sources.html")
 )
 
 // pageTmpl builds the template set for one page: the shared layout and partials
@@ -175,18 +176,19 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /profiles/rescore", s.handleProfileRescore)
 	mux.HandleFunc("DELETE /profiles/{id}", s.handleProfileDelete)
 	mux.HandleFunc("GET /sources", s.handleSources)
+	mux.HandleFunc("GET /sources/manage", s.handleSourcesManage)
 	mux.HandleFunc("GET /sources/new", s.handleSourceNew)
 	mux.HandleFunc("GET /sources/defaults", s.handleSourceDefaults)
 	mux.HandleFunc("GET /sources/export", s.handleSourceExport)
-	mux.HandleFunc("GET /sources/{id}", s.handleSourceSelect)
+	mux.HandleFunc("GET /sources/feed/{id}", s.handleSourceSelect)
 	mux.HandleFunc("POST /sources", s.handleSourceAdd)
 	mux.HandleFunc("POST /sources/import", s.handleSourceImport)
 	mux.HandleFunc("POST /sources/defaults", s.handleSourceSaveDefaults)
-	mux.HandleFunc("POST /sources/{id}", s.handleSourceSave)
-	mux.HandleFunc("POST /sources/{id}/enabled", s.handleSourceEnabled)
-	mux.HandleFunc("POST /sources/{id}/restore", s.handleSourceRestore)
-	mux.HandleFunc("GET /sources/{id}/confirm-delete", s.handleSourceConfirmDelete)
-	mux.HandleFunc("DELETE /sources/{id}", s.handleSourceDelete)
+	mux.HandleFunc("POST /sources/feed/{id}", s.handleSourceSave)
+	mux.HandleFunc("POST /sources/feed/{id}/enabled", s.handleSourceEnabled)
+	mux.HandleFunc("POST /sources/feed/{id}/restore", s.handleSourceRestore)
+	mux.HandleFunc("GET /sources/feed/{id}/confirm-delete", s.handleSourceConfirmDelete)
+	mux.HandleFunc("DELETE /sources/feed/{id}", s.handleSourceDelete)
 	mux.HandleFunc("GET /ingest", s.handleIngest)
 	mux.HandleFunc("GET /ingest/status", s.handleIngestStatus)
 	mux.HandleFunc("GET /ingest/chrome", s.handleIngestChrome)

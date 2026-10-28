@@ -4,6 +4,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -35,10 +36,15 @@ const (
 // out until they work.
 var sourceTypes = []config.FeedType{config.FeedTypeRSS, config.FeedTypeAcademic}
 
-// sourcesData is the Sources dialog model: the whole feed set as rows on the
+// sourcesData is the Sources page model: the whole feed set as rows on the
 // left, one feed's editable settings on the right.
 type sourcesData struct {
+	Title      string
+	Active     string
+	Chrome     chromeData
 	PromptUser string
+	// Section is which Sources page is showing: "overview" or "manage".
+	Section string
 
 	Counts   sourceCounts
 	Defaults string // one-line summary of the cascade
@@ -70,7 +76,7 @@ type importStatus struct {
 	Err      string
 }
 
-// sourceCounts is the dialog's tally, rendered as the arguments of the faux
+// sourceCounts is the Sources page's tally, rendered as the arguments of the faux
 // shell command in its title bar — the same place the Maze puts its own counts.
 // It re-renders out of band on every mutation, so it stays true without the
 // header being part of the swap that would wipe the search box.
@@ -184,16 +190,38 @@ type exportData struct {
 	Err       string
 }
 
-// handleSources opens the whole thing as a dialog. It answers with a bare
-// fragment, not a page: every route below already spoke in fragments, and this
-// was the last one that didn't.
+// handleSources renders the Sources overview page.
 func (s *Web) handleSources(w http.ResponseWriter, r *http.Request) {
-	data, err := s.sourcesData(r.Context(), r.URL.Query().Get("feed"))
+	s.renderSourcesPage(w, r, "", "overview")
+}
+
+// handleSourcesManage renders the feed list and editor, preselecting the feed
+// named by the feed query parameter.
+func (s *Web) handleSourcesManage(w http.ResponseWriter, r *http.Request) {
+	s.renderSourcesPage(w, r, r.URL.Query().Get("feed"), "manage")
+}
+
+// renderSourcesPage writes one Sources page. The chrome is filled here rather
+// than in sourcesData, which also serves the htmx mutations and has no use for it.
+func (s *Web) renderSourcesPage(w http.ResponseWriter, r *http.Request, selected, section string) {
+	ctx := r.Context()
+	data, err := s.sourcesData(ctx, selected)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.renderFragment(w, "sourcesModal", data)
+	data.Title = "Sources"
+	data.Active = "sources"
+	data.Chrome = s.chrome(ctx)
+	data.Section = section
+	var buf bytes.Buffer
+	if err := sourcesTmpl.ExecuteTemplate(&buf, "layout", data); err != nil {
+		log.Error().Err(err).Msg("render sources")
+		http.Error(w, "could not render sources", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(buf.Bytes())
 }
 
 // handleSourceSelect opens one feed in the detail pane.
@@ -391,7 +419,7 @@ func (s *Web) handleSourceSaveDefaults(w http.ResponseWriter, r *http.Request) {
 // sourceImportLimit caps an uploaded feeds file.
 const sourceImportLimit = 1 << 20
 
-// feedCountHeader carries the feed count on a sources dialog response.
+// feedCountHeader carries the feed count on a Sources mutation response.
 const feedCountHeader = "X-Feed-Count"
 
 // handleSourceImport adds the feeds of an uploaded seed file that the store has
@@ -457,7 +485,7 @@ func (s *Web) handleSourceExport(w http.ResponseWriter, r *http.Request) {
 	s.renderFragment(w, "sourceExport", data)
 }
 
-// sourcesData assembles the dialog: the resolved feed set joined with each feed's
+// sourcesData assembles the Sources page model: the resolved feed set joined with each feed's
 // fetch history, plus whichever feed the detail pane is showing.
 func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, error) {
 	doc, err := s.db.FeedsDoc(ctx)
@@ -482,7 +510,7 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 		Counts:       sourceCounts{Total: len(resolved), Deleted: len(deleted)},
 	}
 
-	// History is a join, not a requirement: losing it still leaves a dialog you
+	// History is a join, not a requirement: losing it still leaves a page you
 	// can edit, so it degrades to a note rather than an error.
 	health, err := s.db.FeedHealthByID(ctx, feedStripLen)
 	if err != nil {
@@ -524,10 +552,10 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 	return data, nil
 }
 
-// stampDefaults copies the dialog's blank-field fallbacks onto the detail pane,
+// stampDefaults copies the page's blank-field fallbacks onto the detail pane,
 // wherever that pane came from — the store, a fresh add form, or a rejected
 // submission being re-rendered. The template reads them as placeholders, and it
-// only has the pane as its dot, not the dialog.
+// only has the pane as its dot, not the page.
 func stampDefaults(data *sourcesData) {
 	if data.Detail != nil {
 		data.Detail.DefaultSince = data.DefaultSince
