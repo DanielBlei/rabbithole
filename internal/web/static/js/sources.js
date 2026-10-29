@@ -1,7 +1,8 @@
 // The Sources manage page: instant client-side search and filtering of the
 // source list, the inline editors (dirty state, discard guard, live hints,
 // reveal), the attention block's collapse, the copy button on the export
-// modal, and importing a feeds file by picker or drop.
+// modal, and the import preview (picker, drop or sample) with its select-all
+// and apply label.
 //
 // Client-side because the whole set is already on the page and a personal
 // source list is tens of rows, not thousands, the same call the Feed page's
@@ -515,18 +516,23 @@
   }
 
   // ---- import ----------------------------------------------------------
-  // The server answers with the repainted #srcBody (and the out-of-band tally),
-  // so the response is swapped in the way an htmx request would have.
-  function sendFeeds(file) {
-    var body = document.getElementById('srcBody');
-    if (!file || !body) return;
-    var form = new FormData();
-    form.append('file', file);
-    fetch('/sources/import', { method: 'POST', body: form, credentials: 'same-origin' })
+  // The Import button opens the dialog (hx-get into #modalTop). A file, picked
+  // there, dropped on the page or fetched as the sample, is posted for a
+  // preview that replaces the dialog's content. The plan's apply form is an
+  // ordinary htmx form; this file keeps its select-all box and button label in
+  // step with the ticks.
+  var SAMPLE = '/static/sources-sample.yaml';
+
+  // The server answers with the dialog, swapped in the way an htmx request
+  // would have.
+  function preview(form) {
+    var top = document.getElementById('modalTop');
+    if (!top) return;
+    fetch('/sources/import/preview', { method: 'POST', body: form, credentials: 'same-origin' })
       .then(function (res) {
         // An expired session redirects to the login page; let the gate take over
-        // rather than swap that page into the editor.
-        if (res.redirected || new URL(res.url).pathname !== '/sources/import') {
+        // rather than swap that page into the dialog.
+        if (res.redirected || new URL(res.url).pathname !== '/sources/import/preview') {
           window.location.reload();
           return null;
         }
@@ -534,68 +540,129 @@
         return res.text();
       })
       .then(function (html) {
-        var target = document.getElementById('srcBody');
-        if (html !== null && target) htmx.swap(target, html, { swapStyle: 'outerHTML' });
+        if (html === null) return;
+        htmx.swap(top, html, { swapStyle: 'innerHTML' });
+        if (window.tagput) window.tagput.colorChips();
+        syncPlan();
       })
-      .catch(function () { importError('could not import the feeds file'); });
+      .catch(function () { importError('could not read the feeds file'); });
   }
 
-  // Same markup as the server's error banner, put at the top of the list column.
+  function previewFile(file) {
+    if (!file) return;
+    var form = new FormData();
+    form.append('file', file);
+    preview(form);
+  }
+
+  function previewSample() {
+    fetch(SAMPLE, { credentials: 'same-origin' })
+      .then(function (res) {
+        if (!res.ok) throw new Error('status ' + res.status);
+        return res.text();
+      })
+      .then(function (text) {
+        var form = new FormData();
+        form.append('yaml', text);
+        form.append('name', 'sources-sample.yaml');
+        preview(form);
+      })
+      .catch(function () { importError('could not load the sample file'); });
+  }
+
+  // Said inside the open dialog, else above the list.
   function importError(msg) {
-    var col = document.querySelector('#srcBody .src__col');
-    if (!col) return;
-    var old = col.querySelector('.src__import');
-    if (old) old.remove();
-    var el = document.createElement('div');
-    el.className = 'sdet__err src__import';
-    el.setAttribute('role', 'alert');
-    el.textContent = msg;
-    col.insertBefore(el, col.firstChild);
     var zone = document.getElementById('srcBody');
     if (zone) zone.classList.remove('is-drop');
+    var host = document.querySelector('#modalTop .mg-imp');
+    var col = document.querySelector('#srcBody .src__col');
+    var parent = host || col;
+    if (!parent) return;
+    var old = parent.querySelector(':scope > .sdet__err');
+    if (old) old.remove();
+    var el = document.createElement('div');
+    el.className = 'sdet__err' + (host ? '' : ' src__import');
+    el.setAttribute('role', 'alert');
+    el.textContent = msg;
+    parent.insertBefore(el, parent.firstChild);
+  }
+
+  // The select-all box is on when every new row is ticked, mixed when some are,
+  // and off with nothing to tick. The apply button says what it will do.
+  function syncPlan() {
+    document.querySelectorAll('[data-plan]').forEach(function (plan) {
+      var all = plan.querySelector('[data-plan-all]');
+      var apply = plan.querySelector('[data-plan-apply]');
+      if (!all || !apply) return;
+      var add = 0, addOn = 0, restore = 0;
+      plan.querySelectorAll('[data-plan-pick]').forEach(function (box) {
+        var status = box.closest('.plan__row').dataset.status;
+        if (status === 'new') { add++; if (box.checked) addOn++; }
+        else if (box.checked) restore++;
+      });
+      all.disabled = add === 0;
+      all.checked = add > 0 && addOn === add;
+      all.indeterminate = addOn > 0 && addOn < add;
+      apply.textContent = addOn && restore ? 'Add ' + addOn + ', restore ' + restore
+        : (restore ? 'Restore ' + restore : 'Add ' + addOn);
+      apply.disabled = !addOn && !restore;
+    });
   }
 
   document.addEventListener('click', function (e) {
-    var btn = e.target.closest('[data-src-import]');
-    if (!btn) return;
-    var input = document.querySelector('[data-src-file]');
-    if (input) input.click();
+    if (e.target.closest('[data-imp-pick]')) {
+      var input = document.querySelector('#modalTop [data-src-file]');
+      if (input) input.click();
+    } else if (e.target.closest('[data-imp-sample]')) {
+      previewSample();
+    }
   });
 
   document.addEventListener('change', function (e) {
-    if (!e.target.matches('[data-src-file]')) return;
-    sendFeeds(e.target.files[0]);
-    e.target.value = '';
+    var t = e.target;
+    if (t.matches('[data-src-file]')) {
+      previewFile(t.files[0]);
+      t.value = '';
+    } else if (t.matches('[data-plan-all]')) {
+      t.closest('[data-plan]').querySelectorAll('.plan__row[data-status="new"] [data-plan-pick]').forEach(function (box) {
+        box.checked = t.checked;
+      });
+      syncPlan();
+    } else if (t.matches('[data-plan-pick]')) {
+      syncPlan();
+    }
   });
 
-  function dropTarget(e) {
-    return e.target.closest && e.target.closest('[data-src-drop]');
+  // A feeds file dropped anywhere on the Sources page, over the dialog too,
+  // opens its preview. The list lights up as the drop target.
+  function dropZone(e) {
+    return hasFiles(e) ? document.getElementById('srcBody') : null;
   }
   function hasFiles(e) {
     return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') !== -1;
   }
 
   document.addEventListener('dragover', function (e) {
-    var zone = dropTarget(e);
-    if (!zone || !hasFiles(e)) return;
+    var zone = dropZone(e);
+    if (!zone) return;
     e.preventDefault();
     zone.classList.add('is-drop');
   });
 
   document.addEventListener('dragleave', function (e) {
-    var zone = dropTarget(e);
-    if (zone && !zone.contains(e.relatedTarget)) zone.classList.remove('is-drop');
+    var zone = dropZone(e);
+    if (zone && !e.relatedTarget) zone.classList.remove('is-drop');
   });
 
   document.addEventListener('drop', function (e) {
-    var zone = dropTarget(e);
-    if (!zone || !hasFiles(e)) return;
+    var zone = dropZone(e);
+    if (!zone) return;
     e.preventDefault();
     zone.classList.remove('is-drop');
-    // A drop replaces the whole list, so it asks first when an editor has
+    // The preview takes over the screen, so it asks first when an editor has
     // unsaved changes.
     var file = e.dataTransfer.files[0];
-    guardThen(function () { sendFeeds(file); }, null);
+    guardThen(function () { previewFile(file); }, null);
   });
 
   // On narrow screens the section nav is a scrolling row. Bring the current
@@ -628,7 +695,7 @@
       else if (params.get('add') === '1' && add) add.click();
     }, 0);
   });
-  document.body.addEventListener('htmx:afterSwap', refresh);
+  document.body.addEventListener('htmx:afterSwap', function () { refresh(); syncPlan(); });
   // A live refresh swaps rows in out of band; the filters and search apply to
   // them the same way.
   document.body.addEventListener('htmx:oobAfterSwap', refresh);

@@ -125,8 +125,11 @@ const (
 
 	// Name and URL are unique across live *and* deleted rows, so collision
 	// checks ignore deleted_at and the caller decides what to do with the hit.
+	// URLs are compared by config.FeedURLKey, so the whole table is scanned.
 	sqlFeedIDByName = `SELECT id, deleted_at IS NULL FROM feeds WHERE name = ?`
-	sqlFeedIDByURL  = `SELECT id, deleted_at IS NULL FROM feeds WHERE url = ?`
+	sqlFeedURLs     = `SELECT id, url, deleted_at IS NULL FROM feeds ORDER BY id`
+
+	sqlFeedsForImport = `SELECT id, name, url, deleted_at IS NULL FROM feeds ORDER BY id`
 
 	sqlFeedDefaults    = `SELECT enabled, since, max_items, tags FROM feed_defaults WHERE id = 1`
 	sqlSetFeedDefaults = `INSERT INTO feed_defaults (id, enabled, since, max_items, tags, updated_at)
@@ -230,6 +233,30 @@ func (s *Store) FeedsDoc(ctx context.Context) (config.FeedsDoc, error) {
 	return config.FeedsDoc{Defaults: defaults, Feeds: feeds}, nil
 }
 
+// inTx runs fn in one transaction: commit if it returns nil, roll back
+// otherwise. fn must not call a public Store method, since each opens its own
+// connection or transaction; the *Tx helpers take the tx instead.
+func (s *Store) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	return s.runTx(ctx, nil, fn)
+}
+
+// inReadTx is inTx for work that only reads.
+func (s *Store) inReadTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	return s.runTx(ctx, &sql.TxOptions{ReadOnly: true}, fn)
+}
+
+func (s *Store) runTx(ctx context.Context, opts *sql.TxOptions, fn func(tx *sql.Tx) error) error {
+	tx, err := s.db.BeginTx(ctx, opts)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // AddFeed stores a new feed and returns its ID.
 //
 // A URL or name matching a soft-deleted feed restores that row rather than
@@ -241,44 +268,64 @@ func (s *Store) AddFeed(ctx context.Context, f config.Feed) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	var id string
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		id, err = s.addFeedTx(ctx, tx, f)
+		return err
+	})
 	if err != nil {
-		return "", fmt.Errorf("begin tx: %w", err)
+		return "", err
 	}
-	defer func() { _ = tx.Rollback() }()
+	return id, nil
+}
 
+// addFeedTx adds an already validated feed, or restores the deleted row that
+// holds its name or URL, and returns the row's ID.
+func (s *Store) addFeedTx(ctx context.Context, tx *sql.Tx, f config.Feed) (string, error) {
 	existing, err := s.findFeedConflict(ctx, tx, f.Name, f.URL, "")
 	if err != nil {
 		return "", err
 	}
+	if existing != "" {
+		return existing, s.restoreFeedTx(ctx, tx, existing, f)
+	}
 
+	return s.insertFeedTx(ctx, tx, f)
+}
+
+// insertFeedTx inserts a new row with no conflict probe: the caller has already
+// shown that no stored row holds the name or URL, and the unique indexes catch
+// a race.
+func (s *Store) insertFeedTx(ctx context.Context, tx *sql.Tx, f config.Feed) (string, error) {
 	now := sqlTime(time.Now())
-	id := existing
-	if id == "" {
-		id = config.FeedID(f.URL)
-		// The ID is the URL's digest, so a feed added, hard-purged and added
-		// again would collide on the primary key. Nothing hard-deletes today,
-		// but leaving it as a constraint error would be an unhelpful surprise.
-		if _, err := s.txExec(ctx, tx, sqlInsertFeed, id, f.Name, f.URL, nullFeedType(f.Type),
-			nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
-			now, now); err != nil {
-			if taken := s.feedUniqueErr(err, f); taken != nil {
-				return "", taken
-			}
-			return "", fmt.Errorf("insert feed %q: %w", f.Name, err)
-		}
-	} else if _, err := s.txExec(ctx, tx, sqlRestoreFeed, f.Name, f.URL, nullFeedType(f.Type),
+	id := config.FeedID(f.URL)
+	// The ID is the URL's digest, so a feed added, hard-purged and added
+	// again would collide on the primary key. Nothing hard-deletes today,
+	// but leaving it as a constraint error would be an unhelpful surprise.
+	if _, err := s.txExec(ctx, tx, sqlInsertFeed, id, f.Name, f.URL, nullFeedType(f.Type),
 		nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
-		now, id); err != nil {
+		now, now); err != nil {
 		if taken := s.feedUniqueErr(err, f); taken != nil {
 			return "", taken
 		}
-		return "", fmt.Errorf("restore feed %q: %w", f.Name, err)
-	}
-	if err := tx.Commit(); err != nil {
-		return "", err
+		return "", fmt.Errorf("insert feed %q: %w", f.Name, err)
 	}
 	return id, nil
+}
+
+// restoreFeedTx brings a deleted row back with the values of f, replacing the
+// ones it was parked with. RestoreFeed is the plain undelete that keeps them.
+func (s *Store) restoreFeedTx(ctx context.Context, tx *sql.Tx, id string, f config.Feed) error {
+	if _, err := s.txExec(ctx, tx, sqlRestoreFeed, f.Name, f.URL, nullFeedType(f.Type),
+		nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
+		sqlTime(time.Now()), id); err != nil {
+		if taken := s.feedUniqueErr(err, f); taken != nil {
+			return taken
+		}
+		return fmt.Errorf("restore feed %q: %w", f.Name, err)
+	}
+	return nil
 }
 
 // UpdateFeed writes new values for an existing feed. The ID is untouched, so
@@ -288,32 +335,25 @@ func (s *Store) UpdateFeed(ctx context.Context, id string, f config.Feed) error 
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// Any conflict here is with a different feed — a live one is a collision, a
-	// deleted one still holds the unique name or URL and has to be reported too
-	// rather than being silently resurrected under someone else's edit.
-	if _, err := s.findFeedConflict(ctx, tx, f.Name, f.URL, id); err != nil {
-		return err
-	}
-
-	res, err := s.txExec(ctx, tx, sqlUpdateFeed, f.Name, f.URL, nullFeedType(f.Type),
-		nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
-		sqlTime(time.Now()), id)
-	if err != nil {
-		if taken := s.feedUniqueErr(err, f); taken != nil {
-			return taken
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		// Any conflict here is with a different feed: a live one is a collision, a
+		// deleted one still holds the unique name or URL and has to be reported too
+		// rather than being silently resurrected under someone else's edit.
+		if _, err := s.findFeedConflict(ctx, tx, f.Name, f.URL, id); err != nil {
+			return err
 		}
-		return fmt.Errorf("update feed %q: %w", id, err)
-	}
-	if err := expectOneRow(res, id); err != nil {
-		return err
-	}
-	return tx.Commit()
+
+		res, err := s.txExec(ctx, tx, sqlUpdateFeed, f.Name, f.URL, nullFeedType(f.Type),
+			nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
+			sqlTime(time.Now()), id)
+		if err != nil {
+			if taken := s.feedUniqueErr(err, f); taken != nil {
+				return taken
+			}
+			return fmt.Errorf("update feed %q: %w", id, err)
+		}
+		return expectOneRow(res, id)
+	})
 }
 
 // SetFeedEnabled parks or unparks a feed. A nil value clears the column, so the
@@ -485,7 +525,7 @@ func (s *Store) knownFeedKeys(ctx context.Context) (map[string]bool, error) {
 }
 
 func feedNameKey(name string) string { return "name:" + name }
-func feedURLKey(url string) string   { return "url:" + url }
+func feedURLKey(url string) string   { return "url:" + config.FeedURLKey(url) }
 
 func scanFeed(row rowScanner) (config.Feed, error) {
 	var (
@@ -526,40 +566,94 @@ func scanFeed(row rowScanner) (config.Feed, error) {
 // findFeedConflict reports the ID of a feed already holding name or url. A live
 // match is an error; a deleted one is returned as the row to restore. exclude
 // is the feed being edited, which can of course keep its own name and URL.
+//
+// URLs match by config.FeedURLKey, so a trailing slash or host case does not
+// make a second feed. When editing, the URL is only checked if its key differs
+// from the key the feed already stores, which keeps stored twins editable.
 func (s *Store) findFeedConflict(ctx context.Context, tx *sql.Tx, name, url, exclude string) (string, error) {
-	for _, probe := range []struct {
-		query string
-		arg   string
-		taken error
-	}{
-		{sqlFeedIDByURL, url, ErrFeedURLTaken},
-		{sqlFeedIDByName, name, ErrFeedNameTaken},
-	} {
+	urlID, err := s.findURLConflict(ctx, tx, url, exclude)
+	if err != nil {
+		return "", err
+	}
+	if urlID != "" {
+		return urlID, nil
+	}
+
+	var (
+		id   string
+		live bool
+	)
+	err = s.txQueryRow(ctx, tx, sqlFeedIDByName, name).Scan(&id, &live)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("check feed conflict: %w", err)
+	}
+	if id == exclude {
+		return "", nil
+	}
+	if live {
+		return "", fmt.Errorf("%w: %s", ErrFeedNameTaken, name)
+	}
+	// Deleted. When adding, this is the row to bring back; when editing
+	// another feed, it still owns the unique value and has to be reported.
+	if exclude != "" {
+		return "", fmt.Errorf("%w: %s (deleted: restore it instead)", ErrFeedNameTaken, name)
+	}
+	return id, nil
+}
+
+// findURLConflict is the URL half of findFeedConflict: a live key match is an
+// error, a deleted one is the row to restore, none is "".
+func (s *Store) findURLConflict(ctx context.Context, tx *sql.Tx, url, exclude string) (string, error) {
+	rows, err := s.txQuery(ctx, tx, sqlFeedURLs)
+	if err != nil {
+		return "", fmt.Errorf("check feed conflict: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	key := config.FeedURLKey(url)
+	var (
+		liveID, deletedID string
+		ownKey            string
+		ownFound          bool
+	)
+	for rows.Next() {
 		var (
-			id   string
-			live bool
+			id, stored string
+			live       bool
 		)
-		err := s.txQueryRow(ctx, tx, probe.query, probe.arg).Scan(&id, &live)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
-		if err != nil {
+		if err := rows.Scan(&id, &stored, &live); err != nil {
 			return "", fmt.Errorf("check feed conflict: %w", err)
 		}
+		storedKey := config.FeedURLKey(stored)
 		if id == exclude {
+			ownKey, ownFound = storedKey, true
 			continue
 		}
-		if live {
-			return "", fmt.Errorf("%w: %s", probe.taken, probe.arg)
+		if storedKey != key {
+			continue
 		}
-		// Deleted. When adding, this is the row to bring back; when editing
-		// another feed, it still owns the unique value and has to be reported.
-		if exclude != "" {
-			return "", fmt.Errorf("%w: %s (deleted — restore it instead)", probe.taken, probe.arg)
+		if live && liveID == "" {
+			liveID = id
+		} else if !live && deletedID == "" {
+			deletedID = id
 		}
-		return id, nil
 	}
-	return "", nil
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("check feed conflict: %w", err)
+	}
+	if exclude != "" && ownFound && ownKey == key {
+		return "", nil
+	}
+	switch {
+	case liveID != "":
+		return "", fmt.Errorf("%w: %s", ErrFeedURLTaken, url)
+	case deletedID != "" && exclude != "":
+		return "", fmt.Errorf("%w: %s (deleted: restore it instead)", ErrFeedURLTaken, url)
+	}
+	return deletedID, nil
 }
 
 // validateFeedInput checks a feed before it reaches the database, so a bad

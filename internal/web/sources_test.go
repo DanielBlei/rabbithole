@@ -1216,8 +1216,8 @@ func TestSourcesImportRejectionsRenderInline(t *testing.T) {
 	w, db := sourcesTestWeb(t, config.FeedsDoc{})
 	cases := map[string]struct{ body, want string }{
 		"broken yaml":    {"feeds: [unclosed\n", "parse feeds file"},
-		"empty":          {"# nothing here\n", "not a feeds file: no feeds list"},
-		"config shaped":  {"inference:\n  provider: ollama\n", "not a feeds file: no feeds list"},
+		"empty":          {"# nothing here\n", "not a feeds file: no feeds or sources list"},
+		"config shaped":  {"inference:\n  provider: ollama\n", "not a feeds file: no feeds or sources list"},
 		"oversize":       {"feeds: []\n# " + strings.Repeat("x", sourceImportLimit), "too large"},
 		"no feeds field": {"", "not a feeds file"},
 	}

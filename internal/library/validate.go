@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/text/cases"
 
+	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/tags"
 )
 
@@ -111,7 +112,7 @@ func checkLibrary(refs []sourceRef) (diags Diagnostics, dropped map[int]bool) {
 
 	for i, ref := range refs {
 		nameKey := cases.Fold().String(strings.TrimSpace(ref.src.Name))
-		urlKey := strings.ToLower(ref.src.URL)
+		urlKey := config.FeedURLKey(ref.src.URL)
 		if first, ok := names[nameKey]; ok {
 			diag(ref, fmt.Sprintf("duplicate name (also in %s)", first))
 			dropped[i] = true

@@ -9,16 +9,15 @@
       <h1 class="mg-title">Manage sources</h1>
       {{template "sourceSummary" .Counts}}
     </div>
-    {{/* Defaults and export open over this page in #modalTop. The picker is a
-         button that clicks a hidden input; a feeds file can also be dropped
-         anywhere on the list. static/js/sources.js sends both. */}}
+    {{/* Defaults, export and import open over this page in #modalTop. Import
+         previews a feeds file there before anything is added; a file can also be
+         dropped on the page. static/js/sources.js sends both. */}}
     <div class="mg-head__a">
       <button class="clk-btn clk-btn--go" type="button" data-src-add
               hx-get="/sources/new" hx-target="#srcBody" hx-swap="outerHTML">Add a source</button>
       <button class="clk-btn" type="button" data-src-repaint hx-get="/sources/defaults" hx-target="#modalTop" hx-swap="innerHTML">Defaults</button>
       <button class="clk-btn" type="button" hx-get="/sources/export" hx-target="#modalTop" hx-swap="innerHTML">Export</button>
-      <button class="clk-btn" type="button" data-src-import>Import</button>
-      <input type="file" accept=".yaml,.yml" hidden data-src-file aria-label="Import feeds file">
+      <button class="clk-btn" type="button" data-src-import hx-get="/sources/import" hx-target="#modalTop" hx-swap="innerHTML">Import</button>
     </div>
   </header>
 
@@ -161,7 +160,7 @@
       <p>Sources are the feeds The Rabbit Hole reads. Paste a site address to add your first one, or import a sources file.</p>
       <div class="mg-empty__a">
         <button class="clk-btn clk-btn--go" type="button" hx-get="/sources/new" hx-target="#srcBody" hx-swap="outerHTML" data-src-add>Add a source</button>
-        <button class="clk-btn" type="button" data-src-import>Import</button>
+        <button class="clk-btn" type="button" data-src-import hx-get="/sources/import" hx-target="#modalTop" hx-swap="innerHTML">Import</button>
       </div>
     </div>
   </div>

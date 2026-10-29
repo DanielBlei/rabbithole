@@ -6,6 +6,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -289,6 +290,38 @@ func TestFeedID(t *testing.T) {
 	stored := Feed{ID: "frozen00id00", Name: "Stored", URL: "https://moved.test/feed"}
 	if got := resolveFeed(stored, FeedDefaults{}).ID; got != stored.ID {
 		t.Errorf("stored ID = %q, want the frozen %q", got, stored.ID)
+	}
+}
+
+func TestFeedURLKey(t *testing.T) {
+	cases := []struct {
+		name string
+		a, b string
+		same bool
+	}{
+		{"host case ignored", "https://Example.COM/feed", "https://example.com/feed", true},
+		{"trailing slash ignored", "https://a.test/feed/", "https://a.test/feed", true},
+		{"root slash ignored", "https://a.test/", "https://a.test", true},
+		{"fragment ignored", "https://a.test/feed#top", "https://a.test/feed", true},
+		{"scheme case ignored", "HTTPS://a.test/x", "https://a.test/x", true},
+		{"surrounding whitespace ignored", " https://a.test/x ", "https://a.test/x", true},
+		{"path case kept", "https://a.test/Feed", "https://a.test/feed", false},
+		{"query kept", "https://a.test/f?q=A", "https://a.test/f?q=a", false},
+		{"port kept", "https://a.test:8443/f", "https://a.test/f", false},
+		{"scheme kept", "http://a.test/f", "https://a.test/f", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := FeedURLKey(c.a) == FeedURLKey(c.b); got != c.same {
+				t.Errorf("FeedURLKey(%q)==FeedURLKey(%q) = %v, want %v (keys %q, %q)",
+					c.a, c.b, got, c.same, FeedURLKey(c.a), FeedURLKey(c.b))
+			}
+		})
+	}
+
+	// The key is for matching only: identity still hashes the raw URL.
+	if FeedID("https://a.test/feed/") == FeedID("https://a.test/feed") {
+		t.Error("FeedID matched across a trailing slash; it must keep hashing the raw URL")
 	}
 }
 
@@ -604,6 +637,23 @@ func TestParseFeeds(t *testing.T) {
 		t.Errorf("an explicit empty list = %+v, %v; want accepted", doc, err)
 	}
 
+	feedsForm := "defaults:\n  since: 3d\nfeeds:\n  - name: A\n    url: https://a.test/feed\n  - name: B\n    url: https://b.test/feed\n"
+	sourcesForm := "defaults:\n  since: 3d\nsources:\n  - name: A\n    url: https://a.test/feed\n  - name: B\n    url: https://b.test/feed\n"
+	want, err := ParseFeeds([]byte(feedsForm))
+	if err != nil {
+		t.Fatalf("ParseFeeds(feeds form) = %v", err)
+	}
+	if got, err := ParseFeeds([]byte(sourcesForm)); err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("sources: form = %+v, %v; want the same doc as feeds: %+v", got, err, want)
+	}
+	if doc, err := ParseFeeds([]byte("sources: []\n")); err != nil || len(doc.Feeds) != 0 {
+		t.Errorf("an empty sources: list = %+v, %v; want accepted", doc, err)
+	}
+	if _, err := ParseFeeds([]byte(feedsForm + "sources: []\n")); err == nil ||
+		!strings.Contains(err.Error(), "not a feeds file: has both feeds: and sources:, keep one") {
+		t.Errorf("both keys: err = %v, want the keep-one message", err)
+	}
+
 	for name, raw := range map[string]string{
 		"empty":         "",
 		"comment only":  "# just a comment\n",
@@ -611,7 +661,7 @@ func TestParseFeeds(t *testing.T) {
 		"not a mapping": "- a\n- b\n",
 	} {
 		_, err := ParseFeeds([]byte(raw))
-		if err == nil || !strings.Contains(err.Error(), "not a feeds file: no feeds list") {
+		if err == nil || !strings.Contains(err.Error(), "not a feeds file: no feeds or sources list") {
 			t.Errorf("%s: err = %v, want the not-a-feeds-file message", name, err)
 		}
 	}

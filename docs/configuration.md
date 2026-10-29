@@ -339,6 +339,9 @@ between can see which feed you asked for.
 A `defaults:` block followed by the feed list. Any RSS or Atom URL works as `type: rss`;
 academic searches are described under [Academic sources](#academic-sources).
 
+The list key can be `feeds:` or `sources:`. Import a file from the Sources page and it shows
+what would change (new, already subscribed, removed, clashing) before anything is added.
+
 ```yaml
 defaults:
   since: 7d

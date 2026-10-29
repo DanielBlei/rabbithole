@@ -161,10 +161,10 @@ func TestCheckLibrary(t *testing.T) {
 		}
 	})
 
-	t.Run("duplicate url differing in case", func(t *testing.T) {
+	t.Run("duplicate url differing in host case and trailing slash", func(t *testing.T) {
 		refs := []sourceRef{
-			ref("rss.yaml", 5, "First", "https://Example.com/Feed", "Go"),
-			ref("rss.yaml", 9, "Second", "https://example.com/feed", "Go"),
+			ref("rss.yaml", 5, "First", "https://Example.com/feed", "Go"),
+			ref("rss.yaml", 9, "Second", "https://example.com/feed/", "Go"),
 		}
 		diags, dropped := checkLibrary(refs)
 		if len(diags) != 1 || diags[0].Message != "duplicate url (also in rss.yaml)" {
@@ -172,6 +172,17 @@ func TestCheckLibrary(t *testing.T) {
 		}
 		if !dropped[1] || len(dropped) != 1 {
 			t.Fatalf("dropped = %v, want {1: true}", dropped)
+		}
+	})
+
+	t.Run("url differing only in path case is not a duplicate", func(t *testing.T) {
+		refs := []sourceRef{
+			ref("rss.yaml", 5, "First", "https://example.com/Feed", "Go"),
+			ref("rss.yaml", 9, "Second", "https://example.com/feed", "Go"),
+		}
+		diags, dropped := checkLibrary(refs)
+		if len(diags) != 0 || len(dropped) != 0 {
+			t.Fatalf("diags = %+v, dropped = %v, want neither", diags, dropped)
 		}
 	})
 

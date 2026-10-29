@@ -1,0 +1,73 @@
+{{/* What importing a file would do, one row per entry, before anything is
+     written. Standalone: the apply form posts to .ApplyTo and swaps into
+     .ApplyTarget, and Cancel fetches .CancelGet into .CancelTarget, so the
+     dialog below and a page can both draw it. The file rides along in a hidden
+     field so the apply reads the same text the preview did. static/js/sources.js
+     keeps the select-all box and the apply label in step with the ticks. */}}
+{{define "sourcePlan"}}
+<section class="plan" data-plan>
+  <div class="plan__head"><h3 class="plan__title">{{.Title}}</h3></div>
+  {{if .Err}}
+  <div class="sdet__err" role="alert">{{.Err}}</div>
+  <div class="plan__bar">
+    <button class="clk-btn" type="button" hx-get="{{.CancelGet}}" hx-target="{{.CancelTarget}}" hx-swap="innerHTML">Cancel</button>
+  </div>
+  {{else}}
+  <div class="plan__legend" aria-label="Status counts">
+    {{range .Counts}}<span class="stp-chip stchip--{{.Status}}{{if not .N}} stchip--zero{{end}}" data-plan-count="{{.Status}}">{{.Label}}<b>{{.N}}</b></span>{{end}}
+  </div>
+  <form class="plan__form" hx-post="{{.ApplyTo}}" hx-encoding="multipart/form-data" hx-target="{{.ApplyTarget}}" hx-swap="outerHTML">
+    <input type="hidden" name="yaml" value="{{.YAML}}">
+    <input type="hidden" name="name" value="{{.Name}}">
+    <div class="plan__list">
+      {{range .Rows}}
+      <div class="plan__row" data-status="{{.Status}}">
+        <div class="plan__sel">
+          {{if .Selectable}}<label class="stp-check"><input type="checkbox" name="pick" value="{{.Key}}" aria-label="Select {{.Feed.Name}}" data-plan-pick{{if .Checked}} checked{{end}}><span class="stp-check__box"></span></label>
+          {{else}}<span aria-hidden="true"></span>{{end}}
+        </div>
+        <div class="plan__main">
+          <span class="plan__nm">{{if .Feed.Name}}{{.Feed.Name}}{{else}}(no name){{end}}</span>
+          <span class="plan__url" title="{{.Feed.URL}}">{{if .Feed.URL}}{{.Feed.URL}}{{else}}(no url){{end}}</span>
+          {{with .Tags}}<span class="plan__tags">{{range .}}<span class="tag tag--clip tag--c{{.Color}}" data-tag="{{.Name}}" title="{{.Name}}">{{.Name}}</span>{{end}}</span>{{end}}
+          {{with .Reason}}<span class="plan__why">{{.}}</span>{{end}}
+        </div>
+        <span class="stp-chip stchip--{{.Status}}">{{.Label}}</span>
+      </div>
+      {{end}}
+    </div>
+    {{if .ApplyErr}}<div class="sdet__err" role="alert">{{.ApplyErr}}</div>{{end}}
+    <div class="plan__bar">
+      <label class="stp-check"><input type="checkbox" aria-label="Select all new" data-plan-all{{if .ApplyOff}} disabled{{end}}><span class="stp-check__box"></span><span class="stp-check__t">Select all new</span></label>
+      <button class="clk-btn" type="button" hx-get="{{.CancelGet}}" hx-target="{{.CancelTarget}}" hx-swap="innerHTML">Cancel</button>
+      <button class="clk-btn clk-btn--go" type="submit" data-plan-apply{{if .ApplyOff}} disabled{{end}}>{{.ApplyLabel}}</button>
+    </div>
+  </form>
+  {{end}}
+</section>
+{{end}}
+
+{{/* The import sheet. The chooser until a file is picked; the plan replaces it
+     in place, and Cancel brings the chooser back. */}}
+{{define "sourceImport"}}
+<div class="modal" id="sourceImportModal">
+  <div class="modal__backdrop" data-modal-close></div>
+  <div class="modal__frame" role="dialog" aria-modal="true" aria-label="Import sources">
+    <div class="modal__bar">
+      <span class="modal__title">Import sources</span>
+      <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
+    </div>
+    <div class="stp-dlg mg-imp">
+      {{with .Plan}}{{template "sourcePlan" .}}
+      {{else}}
+      <p class="mg-imp__p">Choose a sources.yaml file, or drop one anywhere on this page. You see what changes before anything is added.</p>
+      <div class="mg-imp__a">
+        <button class="clk-btn" type="button" data-imp-pick>Choose a file</button>
+        <input type="file" accept=".yaml,.yml,.txt" hidden data-src-file aria-label="Import feeds file">
+        <button class="clk-btn" type="button" data-imp-sample>Try the sample file</button>
+      </div>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}

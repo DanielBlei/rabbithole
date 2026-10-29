@@ -534,6 +534,10 @@ func (s *Store) txQueryRow(ctx context.Context, tx *sql.Tx, q string, args ...an
 	return tx.QueryRowContext(ctx, s.d.rebind(q), args...)
 }
 
+func (s *Store) txQuery(ctx context.Context, tx *sql.Tx, q string, args ...any) (*sql.Rows, error) {
+	return tx.QueryContext(ctx, s.d.rebind(q), args...)
+}
+
 func (s *Store) txExec(ctx context.Context, tx *sql.Tx, q string, args ...any) (sql.Result, error) {
 	return tx.ExecContext(ctx, s.d.rebind(q), args...)
 }

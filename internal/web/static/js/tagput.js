@@ -35,7 +35,7 @@
   }
   // Chips this file renders, plus the read-only ones the server prints.
   function colorChips() {
-    document.querySelectorAll('.tagput__chip, .tagput__sug, .src__tag, .mg .tag[data-tag]').forEach(function (el) {
+    document.querySelectorAll('.tagput__chip, .tagput__sug, .src__tag, .mg .tag[data-tag], .plan .tag[data-tag]').forEach(function (el) {
       var name = (el.dataset.tag || el.textContent).trim();
       if (name) { colorize(el, name); }
     });
