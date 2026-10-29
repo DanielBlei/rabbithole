@@ -59,7 +59,15 @@ type verdictGuard struct {
 }
 
 func (g *verdictGuard) Score(ctx context.Context, profile string, items []feeds.Item) ([]ItemScore, error) {
-	scores, err := g.Scorer.Score(ctx, profile, items)
+	return g.ScoreContext(ctx, ProfileContext(profile), items)
+}
+
+func (g *verdictGuard) ScoreContext(
+	ctx context.Context,
+	scoringContext ScoringContext,
+	items []feeds.Item,
+) ([]ItemScore, error) {
+	scores, err := score(ctx, g.Scorer, scoringContext, items)
 	if err != nil {
 		return nil, err
 	}

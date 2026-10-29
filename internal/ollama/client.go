@@ -154,11 +154,20 @@ func (c *Client) listModelNames(ctx context.Context) ([]string, error) {
 
 // Score sends one JSON-mode chat request for the batch and parses the verdicts.
 func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) ([]rank.ItemScore, error) {
+	return c.ScoreContext(ctx, rank.ProfileContext(profile), items)
+}
+
+// ScoreContext sends one JSON-mode chat request with the profile and any explicit feedback.
+func (c *Client) ScoreContext(
+	ctx context.Context,
+	scoringContext rank.ScoringContext,
+	items []feeds.Item,
+) ([]rank.ItemScore, error) {
 	logger := zerolog.Ctx(ctx)
 	ctx, cancel := context.WithTimeout(ctx, chatTimeout)
 	defer cancel()
 
-	userPrompt := rank.BuildUserPrompt(profile, items)
+	userPrompt := rank.BuildUserPromptContext(scoringContext, items)
 	stream := false
 	budget := c.tuning.Budget(len(items), c.think)
 	opts := map[string]any{"num_predict": budget}

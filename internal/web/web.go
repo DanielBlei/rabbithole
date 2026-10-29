@@ -405,8 +405,9 @@ type rowData struct {
 	ScoreModel       string
 	ScoreProfile     string
 	ScoreProfileHash string
-	// The user's own rating, recorded but not yet scoring anything: it lights a
-	// thumb and nothing else. Either one re-posted clears it.
+	// The user's own rating. It lights a thumb; when adaptive feedback is
+	// active, explicit ratings may also inform future scores. Either one
+	// re-posted clears it.
 	RatedUp   bool
 	RatedDown bool
 	HasNote   bool

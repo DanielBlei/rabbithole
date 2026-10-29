@@ -214,6 +214,37 @@ func TestRunProcessesFeedsPerSourceAndDedups(t *testing.T) {
 	}
 }
 
+// A link carried by two feeds in one run is scored once, by the first feed,
+// even though the prepass collects candidates before anything is recorded.
+func TestRunDedupsSharedLinkAcrossFeeds(t *testing.T) {
+	ctx := context.Background()
+	shared := "https://x.test/shared"
+	otherGUID := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Feed</title>
+  <item><title>Shared article</title><link>%s</link><guid>https://x.test/other-guid</guid>
+  <description>summary</description></item>
+</channel></rss>`, shared)
+	feedA := config.Feed{Name: "Alpha", URL: serveRSS(t, feedRSS("Shared article", shared))}
+	feedB := config.Feed{Name: "Beta", URL: serveRSS(t, otherGUID)}
+	cfg := testConfig(t, feedA, feedB)
+	db := openStore(t, cfg)
+
+	out, err := Run(ctx, cfg.Config, testProfile("shared"), db, time.Now(), Options{Record: true})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Fetched != 2 {
+		t.Errorf("Fetched = %d, want both feeds' copies", out.Fetched)
+	}
+	if len(out.Unseen) != 1 || out.Scored != 1 || len(out.Results) != 1 {
+		t.Errorf("shared link scored more than once: Unseen=%d Scored=%d Results=%d",
+			len(out.Unseen), out.Scored, len(out.Results))
+	}
+	if got := sourceCounts(t, db); got["Alpha"] != 1 || got["Beta"] != 0 {
+		t.Errorf("source counts = %v, want only Alpha:1", got)
+	}
+}
+
 // Fetched counts only items within the configured recency window, not every
 // item the feed parser returned — a feed can carry an old backlog that was
 // never in scope for this (or any) run.

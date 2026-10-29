@@ -156,6 +156,113 @@ func TestSelectPreservesOptionalContent(t *testing.T) {
 	}
 }
 
+func TestSelectionActive(t *testing.T) {
+	example := func(score int) Example { return Example{ItemID: "id", UserScore: score} }
+	tests := []struct {
+		name     string
+		positive int
+		negative int
+		want     bool
+	}{
+		{name: "no feedback", positive: 0, negative: 0, want: false},
+		{name: "one rating is not enough", positive: 1, negative: 0, want: false},
+		{name: "two ratings are not enough", positive: 1, negative: 1, want: false},
+		{name: "three one-sided positive ratings", positive: 3, negative: 0, want: true},
+		{name: "three one-sided negative ratings", positive: 0, negative: 3, want: true},
+		{name: "mixed ratings", positive: 2, negative: 1, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var selected Selection
+			for range tt.positive {
+				selected.Positive = append(selected.Positive, example(10))
+			}
+			for range tt.negative {
+				selected.Negative = append(selected.Negative, example(0))
+			}
+			if got := selected.Active(); got != tt.want {
+				t.Errorf("Active() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelectExcluding(t *testing.T) {
+	date := func(day int) *time.Time {
+		value := time.Date(2026, time.October, day, 12, 0, 0, 0, time.UTC)
+		return &value
+	}
+	positive := func(id string, day int) Example {
+		return Example{ItemID: id, UserScore: 10, PublishedAt: date(day)}
+	}
+	negative := func(id string, day int) Example {
+		return Example{ItemID: id, UserScore: 0, PublishedAt: date(day)}
+	}
+	examples := []Example{
+		positive("p1", 1), positive("p2", 2), positive("p3", 3),
+		positive("p4", 4), positive("p5", 5), positive("p6", 6),
+		negative("n1", 1), negative("n2", 2), negative("n3", 3),
+	}
+
+	t.Run("nil exclusion matches Select", func(t *testing.T) {
+		if got, want := SelectExcluding(examples, nil), Select(examples); !reflect.DeepEqual(got, want) {
+			t.Errorf("SelectExcluding(nil) = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("excludes before capping and backfills", func(t *testing.T) {
+		excluded := map[string]struct{}{"p6": {}, "p5": {}, "p4": {}}
+		got := SelectExcluding(examples, excluded)
+		if gotIDs := ids(got.Positive); !reflect.DeepEqual(gotIDs, []string{"p3", "p2", "p1"}) {
+			t.Errorf("positive IDs = %v, want p3, p2, p1 after exclusion", gotIDs)
+		}
+	})
+
+	t.Run("excludes a matching link under a changed item ID", func(t *testing.T) {
+		examples := []Example{
+			{ItemID: "fresh-id", Link: "https://x.test/reissued", UserScore: 10, PublishedAt: date(2)},
+			{ItemID: "kept", Link: "https://x.test/kept", UserScore: 10, PublishedAt: date(1)},
+		}
+		excluded := map[string]struct{}{"https://x.test/reissued": {}}
+		got := SelectExcluding(examples, excluded)
+		if gotIDs := ids(got.Positive); !reflect.DeepEqual(gotIDs, []string{"kept"}) {
+			t.Errorf("positive IDs = %v, want only the non-matching link", gotIDs)
+		}
+	})
+
+	t.Run("mixed feedback keeps active after exclusion", func(t *testing.T) {
+		excluded := map[string]struct{}{"p1": {}, "n1": {}}
+		got := SelectExcluding(examples, excluded)
+		if !got.Active() {
+			t.Fatalf("selection is inactive: %+v", got)
+		}
+		for _, example := range append(got.Positive, got.Negative...) {
+			if _, skip := excluded[example.ItemID]; skip {
+				t.Errorf("excluded item %s remained in feedback", example.ItemID)
+			}
+		}
+	})
+
+	t.Run("one-sided feedback below threshold after exclusion", func(t *testing.T) {
+		oneSided := []Example{positive("p1", 1), positive("p2", 2), positive("p3", 3)}
+		excluded := map[string]struct{}{"p1": {}, "p2": {}}
+		got := SelectExcluding(oneSided, excluded)
+		if got.Active() || len(got.Positive) != 1 || len(got.Negative) != 0 {
+			t.Errorf("selection = %+v, want only p3 (inactive)", got)
+		}
+	})
+
+	t.Run("excluding every example deactivates feedback", func(t *testing.T) {
+		excluded := map[string]struct{}{}
+		for _, example := range examples {
+			excluded[example.ItemID] = struct{}{}
+		}
+		if got := SelectExcluding(examples, excluded); got.Active() {
+			t.Errorf("selection = %+v, want inactive after excluding every example", got)
+		}
+	})
+}
+
 func ids(examples []Example) []string {
 	var result []string
 	for _, example := range examples {

@@ -75,13 +75,18 @@ func rescoreItems(
 ) (RescoreOutcome, error) {
 	logger := zerolog.Ctx(ctx)
 	outcome := RescoreOutcome{Candidates: len(items)}
+	scoringContext, err := loadScoringContext(ctx, db, activeProfile, items)
+	if err != nil {
+		return outcome, err
+	}
 	scores := rank.ScoreAll(
 		ctx,
 		scorer,
-		activeProfile.Content,
+		scoringContext.Profile,
 		items,
 		cfg.Inference.BatchSize,
 		cfg.Inference.MaxParallel,
+		rank.WithFeedback(scoringContext.Feedback),
 		rank.OnBatch(func(done, total, scored int) {
 			logger.Info().
 				Int("batches_done", done).
