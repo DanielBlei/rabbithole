@@ -1,12 +1,14 @@
 {{/* One source's list unit: its row, and its editor under it while open. A
      mutation of one source swaps just this unit. The row has monogram and name,
-     fetch history, first tag, the fetch switch and an Edit button; the switch is
-     here rather than in the editor so parking sources down a long list never
-     costs a round trip through it. The data- attributes on the unit are what the
-     page's client-side search and filters match on. */}}
+     fetch history, first tag, stored items per week, signal, the fetch switch
+     and an Edit button; the switch is here rather than in the editor so parking
+     sources down a long list never costs a round trip through it. The data-
+     attributes on the unit are what the page's client-side search, filters and
+     sort read. */}}
 {{define "sourceItem"}}
 <div class="mg-item" id="src-{{.ID}}" data-src-row data-name="{{.Name}}" data-url="{{.URL}}"
-     data-tags="{{.TagsAttr}}" data-type="{{.Type}}" data-state="{{.State}}"{{if .Deleted}} data-removed="1"{{end}}{{if .OOB}} hx-swap-oob="true"{{end}}>
+     data-tags="{{.TagsAttr}}" data-type="{{.Type}}" data-state="{{.State}}"
+     data-perweek="{{.PerWeekAttr}}" data-signal="{{.SignalAttr}}" data-last="{{.LastAttr}}"{{if .Deleted}} data-removed="1"{{end}}{{if .OOB}} hx-swap-oob="true"{{end}}>
   <div class="mg-row{{if eq .State "error"}} is-failing{{else if eq .State "flaky"}} is-flaky{{end}}{{if .Deleted}} is-removed{{else if not .Enabled}} is-off{{end}}{{if .Selected}} is-open{{end}}">
     <div class="mg-c mg-c--src">
       {{template "favicon" (monogram .Name .URL 20)}}
@@ -34,6 +36,19 @@
           {{if .MoreTags}}<span class="tag tag--more" title="{{.MoreTagsTitle}}">+{{.MoreTags}}</span>{{end}}
         </span>
         {{else}}<span class="sh-hint">none</span>{{end}}
+      </div>
+
+      <div class="mg-c mg-c--vol">
+        <span class="mg-k">Stored / week</span>
+        {{if eq .State "never"}}<span class="sh-hint">none yet</span>
+        {{else}}<span class="mg-vol"><b>{{.Stats.PerWeekText}}</b>{{with .Stats.LastPhrase}}<span class="mg-sub2" title="last item {{.}}">last item {{.}}</span>{{else}}<span class="mg-sub2">no items</span>{{end}}</span>{{end}}
+      </div>
+
+      <div class="mg-c mg-c--sig">
+        <span class="mg-k">Signal</span>
+        {{if eq .State "never"}}<span class="sh-hint">No data yet</span>
+        {{else if not .Stats.Sig.Enough}}<span class="sh-hint" title="{{.SigTitle}}">Not enough data</span>
+        {{else}}<span class="mg-sig" title="{{.SigTitle}}"><b>{{.Stats.Sig.Pct}}%</b>{{template "tierBar" .Stats.Sig.Bar}}</span>{{end}}
       </div>
     </div>
 

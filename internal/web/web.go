@@ -45,12 +45,14 @@ var (
 // plus the named page file under templates/.
 func pageTmpl(page string) *template.Template {
 	return template.Must(
-		template.New(page).Funcs(template.FuncMap{"tip": tipFor, "monogram": monogram, "clip": clipText}).ParseFS(
-			templatesFS,
-			"templates/layout.html",
-			"templates/partials/*.html",
-			"templates/"+page,
-		),
+		template.New(page).
+			Funcs(template.FuncMap{"tip": tipFor, "monogram": monogram, "clip": clipText, "tier": tierWords}).
+			ParseFS(
+				templatesFS,
+				"templates/layout.html",
+				"templates/partials/*.html",
+				"templates/"+page,
+			),
 	)
 }
 
@@ -90,6 +92,10 @@ type Web struct {
 	ing      *ingest.Manager
 	profiles *profilemgr.Service
 	library  *library.Loader
+
+	// now is the clock the Sources page reads; nil is time.Now.
+	now      func() time.Time
+	srcStats statsCache // per-source volume and signal, shared by every Sources response
 
 	sessions *sessionStore // logged-in browsers, in memory: a restart logs everyone out
 	limiter  *loginLimiter

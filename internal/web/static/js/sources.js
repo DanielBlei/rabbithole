@@ -1,19 +1,19 @@
-// The Sources manage page: instant client-side search and filtering of the
-// source list, the inline editors (dirty state, discard guard, live hints,
+// The Sources manage page: instant client-side search, filtering and sorting of
+// the source list, the inline editors (dirty state, discard guard, live hints,
 // reveal), the attention block's collapse, the copy button on the export
 // modal, and the import preview (picker, drop or sample) with its select-all
 // and apply label.
 //
 // Client-side because the whole set is already on the page and a personal
 // source list is tens of rows, not thousands, the same call the Feed page's
-// filters make. The search box and filter pills live outside #srcBody, so an
-// edit that repaints the list leaves the query intact; this file re-applies it
-// after every swap, including the one that first shows the list. The pill
-// counts, summary line and attention block are re-sent by the server after a
-// mutation; their state (which pill is checked, whether the block is open) is
-// kept here so it survives those swaps. An editor lives in its source's unit
-// (#src-{id}), which the server swaps alone; closing one is done here by
-// removing it, so no request is made.
+// filters make. The search box, filter pills and the tag and sort menus live
+// outside #srcBody, so an edit that repaints the list leaves the query intact;
+// this file re-applies it after every swap, including the one that first shows
+// the list. The pill counts, tag menu, summary line and attention block are
+// re-sent by the server after a mutation; their state (which pill or tag is
+// picked, whether the block is open) is kept here so it survives those swaps.
+// An editor lives in its source's unit (#src-{id}), which the server swaps
+// alone; closing one is done here by removing it, so no request is made.
 //
 // Loaded on every page by the layout. Every lookup is guarded, so it costs
 // nothing on a page where none of this markup exists.
@@ -26,7 +26,10 @@
     flaky: 'Nothing is flaky.',
     removed: 'Nothing removed. Removed sources wait here so you can restore them.'
   };
+  var SORTS = ['name', 'items', 'signal', 'last'];
   var filter = 'all';
+  var tag = ''; // '' is all tags; else the menu option's own spelling
+  var sort = 'name';
   var attnOpen = null; // decided the first time the block is on screen
   var scrollOnOpen = false; // the next editor to arrive is one the user asked for
   var focusField = null; // 'url' when Edit URL asked for the address
@@ -37,6 +40,12 @@
   function query() {
     var el = input();
     return el ? el.value.trim().toLowerCase() : '';
+  }
+
+  // A row has a tag when it is one of its comma-joined tags, in any case.
+  function hasTag(row, t) {
+    if (!t) return true;
+    return (row.dataset.tags || '').toLowerCase().split(',').indexOf(t.toLowerCase()) !== -1;
   }
 
   // A row matches on its name, address, tags or kind: the things you'd
@@ -73,7 +82,39 @@
     });
   }
 
+  function byName(a, b) {
+    return a.dataset.name.localeCompare(b.dataset.name, undefined, {sensitivity: 'base'});
+  }
+
+  // Descending by a numeric attribute, rows without a value after the rest.
+  function byNumber(attr) {
+    return function (a, b) {
+      var x = a.dataset[attr], y = b.dataset[attr];
+      if ((x === '') !== (y === '')) return x === '' ? 1 : -1;
+      return (Number(y) || 0) - (Number(x) || 0) || byName(a, b);
+    };
+  }
+
+  // Puts the rows in the picked order. The header row stays first and nothing
+  // moves while an editor is open, focused or not, so a save that drops focus
+  // does not carry the open unit and its notice out of view. closeEditor calls
+  // apply once the editor is gone, which sorts again. Rows already in order are
+  // left alone, so focus and animations survive.
+  function sortRows() {
+    var list = document.querySelector('[data-src-list]');
+    if (!list) return;
+    if (list.querySelector(':scope > .mg-item .mg-ed')) return;
+    var rows = Array.prototype.slice.call(list.querySelectorAll(':scope > .mg-item'));
+    var cmp = sort === 'items' ? byNumber('perweek')
+      : sort === 'signal' ? byNumber('signal')
+      : sort === 'last' ? byNumber('last') : byName;
+    var sorted = rows.slice().sort(cmp);
+    if (sorted.every(function (row, i) { return row === rows[i]; })) return;
+    sorted.forEach(function (row) { list.appendChild(row); });
+  }
+
   function apply() {
+    sortRows();
     var q = query();
     var rows = document.querySelectorAll('[data-src-row]');
     var shown = 0, live = 0, removedN = 0;
@@ -82,7 +123,7 @@
       // A source being edited with unsaved changes stays in view, whatever the
       // search says; the pills ask before hiding it (see the change handler).
       var form = row.querySelector(':scope > .mg-ed');
-      var hit = (form && isDirty(form)) || (inFilter(row, filter) && matches(row, q));
+      var hit = (form && isDirty(form)) || (inFilter(row, filter) && hasTag(row, tag) && matches(row, q));
       row.hidden = !hit;
       if (hit) shown++;
     });
@@ -101,7 +142,7 @@
     // With no rows at all the server has drawn the first-run state itself.
     if (!rows.length) return;
     if (shown) showEmpty(null);
-    else if (q) showEmpty('search');
+    else if (q || tag) showEmpty('search');
     else if (filter === 'all' && !live) showEmpty('first');
     else showEmpty('filter', EMPTY[filter]);
   }
@@ -110,12 +151,48 @@
     document.querySelectorAll('[data-src-state]').forEach(function (r) { r.checked = r.value === filter; });
   }
 
-  // The pill is the state; the address carries it so a link or a reload lands
-  // on the same view.
+  // The menu option whose value is t, in any case, or '' when there is none.
+  function tagOption(t) {
+    var menu = document.getElementById('srcTagMenu');
+    if (!t || !menu) return '';
+    var opts = menu.querySelectorAll('[role="option"]');
+    for (var i = 0; i < opts.length; i++) {
+      var v = opts[i].dataset.value;
+      if (v && v.toLowerCase() === t.toLowerCase()) return v;
+    }
+    return '';
+  }
+
+  // Checks the radio of a menu, which the listbox shows. The change it fires
+  // finds nothing new to do once the state is already set.
+  function pick(name, value) {
+    var radios = document.querySelectorAll('input[type="radio"][name="' + name + '"]');
+    for (var i = 0; i < radios.length; i++) {
+      if (radios[i].value === value && !radios[i].checked) {
+        radios[i].checked = true;
+        radios[i].dispatchEvent(new Event('change', {bubbles: true}));
+      }
+    }
+  }
+
+  // The menus follow the state after a swap: the server sends the tag menu
+  // with nothing picked, and a tag no live source has any more is dropped.
+  function syncMenus() {
+    var was = tag;
+    tag = tagOption(tag);
+    pick('srctag', tag);
+    pick('srcsort', sort);
+    if (tag !== was) syncURL();
+  }
+
+  // The pill, tag and sort are the state; the address carries them so a link or
+  // a reload lands on the same view.
   function syncURL() {
     try {
       var u = new URL(window.location.href);
       if (filter === 'all') u.searchParams.delete('state'); else u.searchParams.set('state', filter);
+      if (!tag) u.searchParams.delete('tag'); else u.searchParams.set('tag', tag);
+      if (sort === 'name') u.searchParams.delete('sort'); else u.searchParams.set('sort', sort);
       history.replaceState(null, '', u.pathname + u.search + u.hash);
     } catch (e) { /* not fatal */ }
   }
@@ -123,6 +200,31 @@
   function setFilter(f) {
     filter = FILTERS.indexOf(f) === -1 ? 'all' : f;
     syncPills();
+    apply();
+    syncURL();
+  }
+
+  function setTag(t) {
+    t = tagOption(t);
+    if (t === tag) return;
+    tag = t;
+    apply();
+    syncURL();
+  }
+
+  function setSort(s) {
+    s = SORTS.indexOf(s) === -1 ? 'name' : s;
+    if (s === sort) return;
+    sort = s;
+    apply();
+    syncURL();
+  }
+
+  function clearAll() {
+    var el = input();
+    if (el) { el.value = ''; el.focus(); }
+    tag = '';
+    pick('srctag', '');
     apply();
     syncURL();
   }
@@ -216,6 +318,8 @@
       btn.removeAttribute('data-src-close');
       btn.setAttribute('data-src-open', '');
     }
+    // sortRows skipped while the editor was open; re-apply the sort and filter now.
+    apply();
   }
 
   // ?feed= names the source the page opened on; once its editor is closed the
@@ -332,6 +436,7 @@
     var want = removed ? 'removed' : (inFilter(unit, filter) ? filter : 'all');
     var field = input();
     if (field && !matches(unit, query())) field.value = '';
+    if (!hasTag(unit, tag)) { tag = ''; pick('srctag', ''); syncURL(); }
     if (want !== filter) setFilter(want); else apply();
     // A removed source has no editor: it is only brought to the middle.
     if (removed) {
@@ -388,6 +493,7 @@
       apply();
       return;
     }
+    if (t.closest('[data-src-clearall]')) { clearAll(); return; }
     if (t.closest('[data-src-showall]')) { setFilter('all'); return; }
 
     // Anything that would replace or close a dirty editor asks first: opening
@@ -448,6 +554,11 @@
 
   document.addEventListener('input', function (e) {
     if (e.target.matches('[data-src-query]')) apply();
+  });
+
+  document.addEventListener('change', function (e) {
+    if (e.target.matches('input[name="srctag"]')) { setTag(e.target.value); return; }
+    if (e.target.matches('input[name="srcsort"]')) { setSort(e.target.value); return; }
   });
 
   // A pill that would hide the source being edited asks first. Keep editing
@@ -674,13 +785,16 @@
     el.scrollIntoView({block: 'nearest', inline: 'nearest'});
   }
 
-  function refresh() { syncPills(); apply(); syncAttn(); initEditors(); }
+  function refresh() { syncPills(); syncMenus(); apply(); syncAttn(); initEditors(); }
 
   document.addEventListener('DOMContentLoaded', function () {
     var params = new URLSearchParams(window.location.search);
     var want = params.get('state');
     if (want && FILTERS.indexOf(want) !== -1) filter = want;
+    tag = params.get('tag') || '';
+    if (SORTS.indexOf(params.get('sort')) !== -1) sort = params.get('sort');
     refresh();
+    syncURL();
     showActiveNav();
 
     // A source named by address (?feed=, which the server renders open, or

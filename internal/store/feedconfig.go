@@ -139,6 +139,12 @@ const (
 			max_items = excluded.max_items, tags = excluded.tags, updated_at = excluded.updated_at`
 	sqlHasFeedDefaults = `SELECT EXISTS(SELECT 1 FROM feed_defaults WHERE id = 1)`
 
+	sqlLiveFeedName = `SELECT name FROM feeds WHERE id = ? AND deleted_at IS NULL`
+
+	// sqlLockFeed takes the row's write lock without changing it, so the name
+	// read after it cannot go stale before the update.
+	sqlLockFeed = `UPDATE feeds SET updated_at = updated_at WHERE id = ? AND deleted_at IS NULL`
+
 	sqlRenameSource = `UPDATE items SET source = ? WHERE source = ?`
 )
 
@@ -328,32 +334,76 @@ func (s *Store) restoreFeedTx(ctx context.Context, tx *sql.Tx, id string, f conf
 	return nil
 }
 
-// UpdateFeed writes new values for an existing feed. The ID is untouched, so
-// editing the URL keeps the feed's identity and its history.
-func (s *Store) UpdateFeed(ctx context.Context, id string, f config.Feed) error {
+// UpdateFeed writes new values for an existing feed and reports how many items
+// were re-filed. The ID is untouched, so editing the URL keeps the feed's
+// identity and its history. items.source stores the feed's name, so a rename
+// moves the feed's items in the same transaction.
+func (s *Store) UpdateFeed(ctx context.Context, id string, f config.Feed) (int64, error) {
 	f, err := validateFeedInput(f)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return s.inTx(ctx, func(tx *sql.Tx) error {
-		// Any conflict here is with a different feed: a live one is a collision, a
-		// deleted one still holds the unique name or URL and has to be reported too
-		// rather than being silently resurrected under someone else's edit.
-		if _, err := s.findFeedConflict(ctx, tx, f.Name, f.URL, id); err != nil {
+	var moved int64
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		res, err := s.txExec(ctx, tx, sqlLockFeed, id)
+		if err != nil {
+			return fmt.Errorf("lock feed %q: %w", id, err)
+		}
+		if err := expectOneRow(res, id); err != nil {
 			return err
 		}
-
-		res, err := s.txExec(ctx, tx, sqlUpdateFeed, f.Name, f.URL, nullFeedType(f.Type),
-			nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
-			sqlTime(time.Now()), id)
-		if err != nil {
-			if taken := s.feedUniqueErr(err, f); taken != nil {
-				return taken
-			}
-			return fmt.Errorf("update feed %q: %w", id, err)
+		var oldName string
+		if err := s.txQueryRow(ctx, tx, sqlLiveFeedName, id).Scan(&oldName); err != nil {
+			return fmt.Errorf("read feed %q: %w", id, err)
 		}
-		return expectOneRow(res, id)
+		if err := s.updateFeedTx(ctx, tx, id, f); err != nil {
+			return err
+		}
+		moved, err = s.renameSourceTx(ctx, tx, oldName, f.Name)
+		return err
 	})
+	if err != nil {
+		return 0, err
+	}
+	return moved, nil
+}
+
+// updateFeedTx writes f over the live feed id.
+func (s *Store) updateFeedTx(ctx context.Context, tx *sql.Tx, id string, f config.Feed) error {
+	// Any conflict here is with a different feed: a live one is a collision, a
+	// deleted one still holds the unique name or URL and has to be reported too
+	// rather than being silently resurrected under someone else's edit.
+	if _, err := s.findFeedConflict(ctx, tx, f.Name, f.URL, id); err != nil {
+		return err
+	}
+
+	res, err := s.txExec(ctx, tx, sqlUpdateFeed, f.Name, f.URL, nullFeedType(f.Type),
+		nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
+		sqlTime(time.Now()), id)
+	if err != nil {
+		if taken := s.feedUniqueErr(err, f); taken != nil {
+			return taken
+		}
+		return fmt.Errorf("update feed %q: %w", id, err)
+	}
+	return expectOneRow(res, id)
+}
+
+// renameSourceTx re-files items recorded under oldName and reports how many
+// moved. It does nothing when the name is unchanged.
+func (s *Store) renameSourceTx(ctx context.Context, tx *sql.Tx, oldName, newName string) (int64, error) {
+	if oldName == newName || oldName == "" {
+		return 0, nil
+	}
+	res, err := s.txExec(ctx, tx, sqlRenameSource, newName, oldName)
+	if err != nil {
+		return 0, fmt.Errorf("rename source %q: %w", oldName, err)
+	}
+	moved, err := res.RowsAffected()
+	if err != nil {
+		return 0, nil // the update landed; the count is a nicety
+	}
+	return moved, nil
 }
 
 // SetFeedEnabled parks or unparks a feed. A nil value clears the column, so the
@@ -482,25 +532,6 @@ func (s *Store) SeedFeeds(ctx context.Context, doc config.FeedsDoc) (SeedResult,
 		return result, err
 	}
 	return result, nil
-}
-
-// RenameSource re-files recorded items under a feed's new name and reports how
-// many moved. items.source stores the feed's name rather than its ID, so
-// without this a rename would strand every item the feed has already
-// contributed under a label nothing points at any more.
-func (s *Store) RenameSource(ctx context.Context, oldName, newName string) (int64, error) {
-	if oldName == newName || oldName == "" {
-		return 0, nil
-	}
-	res, err := s.exec(ctx, sqlRenameSource, newName, oldName)
-	if err != nil {
-		return 0, fmt.Errorf("rename source %q: %w", oldName, err)
-	}
-	moved, err := res.RowsAffected()
-	if err != nil {
-		return 0, nil // the update landed; the count is a nicety
-	}
-	return moved, nil
 }
 
 // knownFeedKeys is every name and URL the store holds, deleted rows included,

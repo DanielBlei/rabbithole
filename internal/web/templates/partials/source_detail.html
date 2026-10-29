@@ -9,6 +9,7 @@
 <form class="mg-ed" id="ed-{{$id}}" role="region" aria-label="{{if .Adding}}Add a source{{else}}Edit {{.Name}}{{end}}"
       {{if .Adding}}hx-post="/sources" hx-target="#srcBody"{{else}}hx-post="/sources/feed/{{.ID}}" hx-target="#src-{{.ID}}"{{end}}
       hx-swap="outerHTML" autocomplete="off" novalidate data-src-ed="{{$id}}">
+  <div class="mg-ed__cols">
   <div class="mg-ed__form">
     <div class="fld">
       <label class="fld__lbl" for="ed-name-{{$id}}">Name</label>
@@ -94,6 +95,38 @@
         <p class="sh-hint" data-src-hint="max" data-fallback="{{.DefaultCap}}" data-from="{{.CapFrom}}" data-own="{{.OwnMax}}"><span data-src-hint-t>{{.CapHint}}</span>. 0 means no cap.</p>
       </div>
     </div>
+  </div>
+  {{with .Side}}
+  {{/* Read-only. It sits inside the form, so a control added here must be
+       type="button" and must not be a form field, or the dirty guard and the
+       submit would pick it up. */}}
+  <aside class="mg-ed__side" aria-label="Source activity">
+    <h3 class="mg-ed__h">Last 30 days</h3>
+    <dl class="mg-facts">
+      <dt>Status</dt><dd>{{.Status}}</dd>
+      <dt>Stored items</dt><dd>{{template "spark" .Stats}}<span class="mg-facts__txt">{{.ItemsText}}</span></dd>
+      <dt>Signal</dt><dd>{{if .Never}}{{.SignalText}}{{else}}{{template "tierBar" .Stats.Sig.Bar}}<span class="mg-facts__txt">{{.SignalText}}</span>{{end}}</dd>
+      <dt>Reader activity</dt><dd>{{.ActivityText}}</dd>
+      <dt>Fetch time</dt><dd>{{.FetchText}}</dd>
+      <dt>In effect</dt><dd>{{.Effective}}</dd>
+    </dl>
+    <h3 class="mg-ed__h">Fetch history{{with .HistoryHint}} <span class="sh-hint">{{.}}</span>{{end}}</h3>
+    {{if .History}}
+    <ol class="mg-hist">
+      {{range .History}}
+      <li class="mg-hist__r{{if not .OK}} is-err{{end}}">
+        <span class="mg-hist__t" title="{{.At}}">{{.Ago}}</span>
+        {{if .OK}}<span class="stp-chip stp-chip--ok">ok</span>{{else}}<span class="mg-chip mg-chip--bad">error</span>{{end}}
+        <span class="mg-hist__d"{{with .Title}} title="{{.}}"{{end}}>{{.Detail}}</span>
+        <span class="mg-hist__ms">{{.Elapsed}}</span>
+      </li>
+      {{end}}
+    </ol>
+    {{else}}
+    <p class="sh-hint">No fetches yet. The first run fills this in.</p>
+    {{end}}
+  </aside>
+  {{end}}
   </div>
 
   {{if .Err}}<p class="sdet__err mg-ed__msg" role="alert">{{.Err}}</p>{{end}}

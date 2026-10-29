@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rs/zerolog/log"
 
@@ -156,6 +155,10 @@ type feedDetail struct {
 
 	Err    string // validation failure, rendered against the form
 	Notice string // something that worked but is worth saying, e.g. items re-filed
+
+	// Side is the panel beside the form: the source's last 30 days and fetch
+	// history. Nil while adding.
+	Side *sideData
 }
 
 // TypeChoices is what the type picker offers. A feed seeded with a kind the
@@ -218,7 +221,7 @@ func (s *Web) renderSourcesPage(w http.ResponseWriter, r *http.Request, selected
 // here rather than in sourcesData, which also serves the htmx mutations and has
 // no use for it. The nav reads the library without waiting for it.
 func (s *Web) sourcesPageData(ctx context.Context, selected, section string) (sourcesData, error) {
-	data, err := s.sourcesData(ctx, selected)
+	data, err := s.sourcesData(ctx, selected, section != "library")
 	if err != nil {
 		return sourcesData{}, err
 	}
@@ -251,7 +254,7 @@ func (s *Web) writeSourcesPage(w http.ResponseWriter, data sourcesData) {
 // the Overview.
 func (s *Web) handleSourcesLive(w http.ResponseWriter, r *http.Request) {
 	httplog.Quiet(r)
-	data, err := s.sourcesData(r.Context(), "")
+	data, err := s.sourcesData(r.Context(), "", true)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -318,13 +321,14 @@ func (s *Web) handleSourceAdd(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+var errRenameDuringRun = errors.New("finish or cancel the ingest run before renaming")
+
 // handleSourceSave writes the editor back and answers with that source's unit,
 // editor still open.
 //
-// A rename also re-files the feed's existing items: items.source records the
-// feed's name, so without that they would keep pointing at a label no feed
-// claims any more. It is reported rather than enforced: the feed is saved
-// either way.
+// A rename also re-files the feed's existing items in the same transaction. It
+// is refused while an ingest run is live, since the run files new items under
+// the name it resolved at start.
 func (s *Web) handleSourceSave(w http.ResponseWriter, r *http.Request) {
 	ctx, id := r.Context(), r.PathValue("id")
 	previous, err := s.db.FeedByID(ctx, id)
@@ -337,7 +341,13 @@ func (s *Web) handleSourceSave(w http.ResponseWriter, r *http.Request) {
 		s.writeUnit(w, r, id, unitOpts{override: editFormWithError(r, id, err)})
 		return
 	}
-	if err := s.db.UpdateFeed(ctx, id, feed); err != nil {
+	renamed := previous.Name != feed.Name
+	if renamed && s.ing.Status().Running {
+		s.writeUnit(w, r, id, unitOpts{override: editFormWithError(r, id, errRenameDuringRun)})
+		return
+	}
+	moved, err := s.db.UpdateFeed(ctx, id, feed)
+	if err != nil {
 		if isFeedInputError(err) {
 			s.writeUnit(w, r, id, unitOpts{override: editFormWithError(r, id, err)})
 			return
@@ -347,10 +357,10 @@ func (s *Web) handleSourceSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	notice := "Saved"
-	if moved, err := s.db.RenameSource(ctx, previous.Name, feed.Name); err != nil {
-		log.Warn().Err(err).Str("feed", feed.Name).Msg("re-filing items after a feed rename failed")
-		notice += ": renamed, but existing items are still filed under " + previous.Name
-	} else if moved > 0 {
+	if renamed {
+		s.srcStats.invalidate()
+	}
+	if moved > 0 {
 		notice += fmt.Sprintf(": renamed · re-filed %s", itemsPhrase(int(moved)))
 	}
 	s.afterFeedChange(ctx)
@@ -533,8 +543,9 @@ func (s *Web) handleSourceExport(w http.ResponseWriter, r *http.Request) {
 }
 
 // sourcesData assembles the Sources page model: the resolved feed set joined with each feed's
-// fetch history, plus the editor of the selected feed, if any.
-func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, error) {
+// fetch history, plus the editor of the selected feed, if any. withStats adds
+// each feed's volume and signal; the Library page has no use for them.
+func (s *Web) sourcesData(ctx context.Context, selected string, withStats bool) (sourcesData, error) {
 	doc, err := s.db.FeedsDoc(ctx)
 	if err != nil {
 		return sourcesData{}, err
@@ -569,7 +580,7 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 		data.Error = "fetch history unavailable: " + err.Error()
 	}
 
-	now := time.Now()
+	now := s.clock()
 	data.Rows = make([]feedRowData, 0, len(resolved)+len(deleted))
 	for _, f := range resolved {
 		row := toFeedRow(f, health[f.ID], now)
@@ -596,11 +607,18 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 		}
 	}
 
-	bar, err := s.ingestBarWith(ctx, data.Counts.Enabled, true, true)
+	// One read of the newest run serves the stats cache key and the ingest bar;
+	// a failed read leaves both as if there were no run.
+	last, err := s.db.LastIngestRun(ctx)
 	if err != nil {
 		log.Error().Err(err).Msg("read ingest bar")
-		bar = ingestBarData{Status: "none", Enabled: data.Counts.Enabled, Rerun: true, Compact: true}
+		last = nil
 	}
+	if withStats {
+		s.addStats(ctx, &data, health, last, now)
+	}
+
+	bar := s.ingestBarWith(data.Counts.Enabled, last, true, true)
 	// This bar carries the running note out of band, which only this page has.
 	bar.Note = true
 	data.Attention = newAttention(data.Rows, data.Counts.Total, bar)
@@ -611,6 +629,9 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 		if row := &data.Rows[i]; selected != "" && row.ID == selected && !row.Deleted {
 			row.Editor = s.detailFor(ctx, selected, doc.Defaults)
 			row.Selected = row.Editor != nil
+			if row.Editor != nil && withStats {
+				row.Editor.Side = row.side(health[row.ID], now)
+			}
 		}
 	}
 	data.stampAll()
@@ -807,7 +828,7 @@ func (s *Web) writeUnit(w http.ResponseWriter, r *http.Request, id string, o uni
 	if o.open || o.override != nil {
 		selected = id
 	}
-	data, err := s.sourcesData(r.Context(), selected)
+	data, err := s.sourcesData(r.Context(), selected, true)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -866,7 +887,7 @@ func (s *Web) writeSourcesBody(w http.ResponseWriter, r *http.Request, selected 
 func (s *Web) writeSourcesBodyWith(
 	w http.ResponseWriter, r *http.Request, selected string, adding *feedDetail, status *importStatus,
 ) {
-	data, err := s.sourcesData(r.Context(), selected)
+	data, err := s.sourcesData(r.Context(), selected, true)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1040,6 +1061,7 @@ func mergeDetail(stored, override *feedDetail) *feedDetail {
 	}
 	if stored != nil {
 		override.InheritedTags, override.OwnSince, override.OwnMax = stored.InheritedTags, stored.OwnSince, stored.OwnMax
+		override.Side = stored.Side
 	}
 	return override
 }

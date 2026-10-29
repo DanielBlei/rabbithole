@@ -617,3 +617,270 @@ func TestAttentionRunPhrase(t *testing.T) {
 		})
 	}
 }
+
+// sidePanelOf returns the editor's side panel markup.
+func sidePanelOf(t *testing.T, body string) string {
+	t.Helper()
+	_, rest, ok := strings.Cut(body, `<aside class="mg-ed__side"`)
+	if !ok {
+		t.Fatalf("no side panel; body=%s", body)
+	}
+	panel, _, _ := strings.Cut(rest, "</aside>")
+	return panel
+}
+
+// factOf returns the text of one fact's value, tags stripped.
+func factOf(t *testing.T, panel, label string) string {
+	t.Helper()
+	_, rest, ok := strings.Cut(panel, "<dt>"+label+"</dt><dd>")
+	if !ok {
+		t.Fatalf("no fact %q; panel=%s", label, panel)
+	}
+	val, _, _ := strings.Cut(rest, "</dd>")
+	var b strings.Builder
+	inTag := false
+	for _, r := range val {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	return html.UnescapeString(b.String())
+}
+
+// The panel states the last 30 days from the stored items, the user's reads
+// and the fetch attempts, and the settings the source runs with.
+func TestSourcesEditorSidePanelFacts(t *testing.T) {
+	alpha := config.Feed{
+		Name:     "Alpha",
+		URL:      "https://alpha.test/feed",
+		Since:    durPtr(7 * 24 * time.Hour),
+		MaxItems: intPtr(20),
+	}
+	w, db := sourcesTestWeb(t, config.FeedsDoc{
+		Defaults: config.FeedDefaults{MaxItems: intPtr(50)},
+		Feeds:    []config.Feed{alpha, {Name: "Beta", URL: "https://beta.test/feed"}},
+	})
+	seedItems(t, db, "Alpha", 12, 2, 1, 3)
+	read, up := store.StatusRead, 10
+	if err := db.UpdateUserState(t.Context(), "Alpha-0", store.UserPatch{Status: &read, UserScore: &up}); err != nil {
+		t.Fatalf("UpdateUserState: %v", err)
+	}
+	now := time.Now()
+	if err := db.RecordFeedFetches(t.Context(), []store.FeedFetch{
+		{
+			FeedID:  config.FeedID(alpha.URL),
+			Name:    "Alpha",
+			Items:   3,
+			Elapsed: 400 * time.Millisecond,
+			At:      now.Add(-3 * time.Hour),
+		},
+		{
+			FeedID:  config.FeedID(alpha.URL),
+			Name:    "Alpha",
+			Items:   3,
+			Elapsed: 1500 * time.Millisecond,
+			At:      now.Add(-2 * time.Hour),
+		},
+		{
+			FeedID:  config.FeedID(alpha.URL),
+			Name:    "Alpha",
+			Items:   3,
+			Elapsed: 800 * time.Millisecond,
+			At:      now.Add(-time.Hour),
+		},
+	}); err != nil {
+		t.Fatalf("RecordFeedFetches: %v", err)
+	}
+
+	panel := sidePanelOf(t, get(t, w, "/sources/feed/"+feedID(t, db, "Alpha")))
+	for _, want := range []string{"Last 30 days", "Fetch history", `<span class="sh-hint">last 3 attempts</span>`} {
+		if !strings.Contains(panel, want) {
+			t.Errorf("panel is missing %q; panel=%s", want, panel)
+		}
+	}
+	for label, want := range map[string]string{
+		"Status":          "Fetching fine. Last fetch 1h ago.",
+		"Stored items":    "2.3 per week, last item just now",
+		"Signal":          "80%: 12 of 15 scored are 7+, 3 unscored",
+		"Reader activity": "1 read, 0 hidden, 0 bookmarked, 1 thumbs up, 0 down",
+		"Fetch time":      "900 ms average, 800 ms last",
+		"In effect":       "7d back (set on this source), up to 20 items (set on this source)",
+	} {
+		if got := factOf(t, panel, label); got != want {
+			t.Errorf("%s = %q, want %q", label, got, want)
+		}
+	}
+	if !strings.Contains(panel, `class="spark"`) || !strings.Contains(panel, `class="tier"`) {
+		t.Errorf("the panel has no spark or tier bar; panel=%s", panel)
+	}
+
+	// Beta sets nothing itself: the origins come from the defaults and the built-in.
+	beta := sidePanelOf(t, get(t, w, "/sources/feed/"+feedID(t, db, "Beta")))
+	if got, want := factOf(t, beta, "In effect"), "7d back (built-in), up to 50 items (from defaults)"; got != want {
+		t.Errorf("In effect = %q, want %q", got, want)
+	}
+}
+
+// An uncapped source says so rather than printing a dash.
+func TestSourcesEditorSidePanelUncapped(t *testing.T) {
+	w, db := sourcesTestWeb(t, config.FeedsDoc{Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}}})
+	panel := sidePanelOf(t, get(t, w, "/sources/feed/"+feedID(t, db, "Alpha")))
+	if got, want := factOf(t, panel, "In effect"), "7d back (built-in), no item cap (built-in)"; got != want {
+		t.Errorf("In effect = %q, want %q", got, want)
+	}
+}
+
+// A source that was never fetched has nothing to report yet, and says so.
+func TestSourcesEditorSidePanelNeverFetched(t *testing.T) {
+	w, db := sourcesTestWeb(t, config.FeedsDoc{Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}}})
+	panel := sidePanelOf(t, get(t, w, "/sources/feed/"+feedID(t, db, "Alpha")))
+	for label, want := range map[string]string{
+		"Status":          "Waiting for first run",
+		"Stored items":    "0 per week",
+		"Signal":          "No items yet.",
+		"Reader activity": "None yet.",
+		"Fetch time":      "Not fetched yet.",
+	} {
+		if got := factOf(t, panel, label); got != want {
+			t.Errorf("%s = %q, want %q", label, got, want)
+		}
+	}
+	if !strings.Contains(panel, "No fetches yet. The first run fills this in.") || strings.Contains(panel, "mg-hist") {
+		t.Errorf("the empty history is not the empty state; panel=%s", panel)
+	}
+	if strings.Contains(panel, "last 0 attempts") {
+		t.Errorf("an empty history carries a count; panel=%s", panel)
+	}
+}
+
+// A disabled source says ingestion skips it, and still shows what it has.
+func TestSourcesEditorSidePanelDisabled(t *testing.T) {
+	off := false
+	alpha := config.Feed{Name: "Alpha", URL: "https://alpha.test/feed", Enabled: &off}
+	w, db := sourcesTestWeb(t, config.FeedsDoc{Feeds: []config.Feed{alpha}})
+	recordTimed(t, db, alpha, 400*time.Millisecond)
+	seedItems(t, db, "Alpha", 1, 0, 0, 0)
+
+	panel := sidePanelOf(t, get(t, w, "/sources/feed/"+feedID(t, db, "Alpha")))
+	if got, want := factOf(t, panel, "Status"), "Disabled. Ingestion skips it. Last fetch 1h ago."; got != want {
+		t.Errorf("Status = %q, want %q", got, want)
+	}
+	if got, want := factOf(
+		t,
+		panel,
+		"Signal",
+	), "Not enough data yet. Only 1 scored so far (needs 10), 0 unscored"; got != want {
+		t.Errorf("Signal = %q, want %q", got, want)
+	}
+}
+
+// A failing source gives the plain-language reason, and its history keeps the
+// raw error, clipped, with the full text on hover.
+func TestSourcesEditorSidePanelFailingAndHistory(t *testing.T) {
+	alpha := config.Feed{Name: "Alpha", URL: "https://alpha.test/feed"}
+	w, db := sourcesTestWeb(t, config.FeedsDoc{Feeds: []config.Feed{alpha}})
+	long := "http error: 503 " + strings.Repeat("unavailable ", 40)
+	now := time.Now()
+	id := config.FeedID(alpha.URL)
+	if err := db.RecordFeedFetches(t.Context(), []store.FeedFetch{
+		{FeedID: id, Name: "Alpha", Items: 1, Elapsed: 2 * time.Second, At: now.Add(-4 * time.Hour)},
+		{FeedID: id, Name: "Alpha", Error: long, At: now.Add(-3 * time.Hour)},
+		{FeedID: id, Name: "Alpha", Error: long, At: now.Add(-2 * time.Hour)},
+		{FeedID: id, Name: "Alpha", Error: long, Elapsed: 30 * time.Second, At: now.Add(-time.Hour)},
+	}); err != nil {
+		t.Fatalf("RecordFeedFetches: %v", err)
+	}
+
+	panel := sidePanelOf(t, get(t, w, "/sources/feed/"+feedID(t, db, "Alpha")))
+	status := factOf(t, panel, "Status")
+	if want := explainFeedError(long) + " Last fetch 1h ago."; status != want {
+		t.Errorf("Status = %q, want %q", status, want)
+	}
+	if got, want := factOf(t, panel, "Fetch time"), "2.0 s average, 30 s last"; got != want {
+		t.Errorf("Fetch time = %q, want %q", got, want)
+	}
+
+	if !strings.Contains(panel, `last 4 attempts`) || strings.Count(panel, `class="mg-hist__r`) != 4 {
+		t.Errorf("history is not four rows; panel=%s", panel)
+	}
+	if strings.Count(panel, `<span class="mg-chip mg-chip--bad">error</span>`) != 3 ||
+		strings.Count(panel, `<span class="stp-chip stp-chip--ok">ok</span>`) != 1 {
+		t.Errorf("history chips are wrong; panel=%s", panel)
+	}
+	if !strings.Contains(panel, `class="mg-hist__r is-err"`) ||
+		!strings.Contains(panel, `<span class="mg-hist__ms">30 s</span>`) ||
+		!strings.Contains(panel, `<span class="mg-hist__ms">2.0 s</span>`) ||
+		!strings.Contains(panel, `<span class="mg-hist__d">1 item</span>`) {
+		t.Errorf("history rows are missing their detail or elapsed; panel=%s", panel)
+	}
+	// The error is clipped in the row and whole in its title; the attempt's
+	// ago carries the full timestamp.
+	if !strings.Contains(panel, `title="`+html.EscapeString(strings.TrimSpace(long))) {
+		t.Errorf("the error has no full-text title; panel=%s", panel)
+	}
+	if !strings.Contains(panel, clipText(long)+`</span>`) ||
+		strings.Contains(panel, html.EscapeString(long)+`</span>`) {
+		t.Errorf("the error is not clipped in the row; panel=%s", panel)
+	}
+	stamp := now.Add(-time.Hour).Local().Format("2 Jan 2006, 15:04")
+	if !strings.Contains(panel, `<span class="mg-hist__t" title="`+stamp) {
+		t.Errorf("the ago has no timestamp title %q; panel=%s", stamp, panel)
+	}
+}
+
+// The panel sits beside the form and holds no controls, so the editor's dirty
+// guard never reads it. Adding a source has no panel.
+func TestSourcesEditorSidePanelIsReadOnlyAndAbsentWhenAdding(t *testing.T) {
+	w, db := sourcesTestWeb(t, config.FeedsDoc{Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}}})
+	recordFetches(t, db, config.Feed{Name: "Alpha", URL: "https://alpha.test/feed"}, 2, 0)
+
+	out := get(t, w, "/sources/feed/"+feedID(t, db, "Alpha"))
+	if !strings.Contains(out, `<div class="mg-ed__cols">`) {
+		t.Errorf("the editor has no columns; body=%s", out)
+	}
+	panel := sidePanelOf(t, out)
+	for _, bad := range []string{"<input", "<button", "<select", "<textarea"} {
+		if strings.Contains(panel, bad) {
+			t.Errorf("the panel holds a control %q; panel=%s", bad, panel)
+		}
+	}
+
+	add := get(t, w, "/sources/new")
+	if strings.Contains(add, "mg-ed__side") || strings.Contains(add, "Fetch history") {
+		t.Errorf("the add form has a panel; body=%s", add)
+	}
+	if !strings.Contains(add, `<div class="mg-ed__cols">`) {
+		t.Errorf("the add form lost its form column; body=%s", add)
+	}
+}
+
+// A rejected save re-renders the editor with what was typed, and keeps the
+// panel for the stored source.
+func TestSourcesEditorSidePanelSurvivesFailedSave(t *testing.T) {
+	alpha := config.Feed{Name: "Alpha", URL: "https://alpha.test/feed"}
+	w, db := sourcesTestWeb(t, config.FeedsDoc{Feeds: []config.Feed{alpha}})
+	recordFetches(t, db, alpha, 2, 0)
+	id := feedID(t, db, "Alpha")
+
+	out := postForm(
+		t,
+		w,
+		"/sources/feed/"+id,
+		url.Values{"name": {"Alpha"}, "url": {"https://alpha.test/feed"}, "since": {"2w"}},
+	)
+	if !strings.Contains(out, `class="sdet__err mg-ed__msg"`) {
+		t.Fatalf("the save was not rejected; body=%s", out)
+	}
+	panel := sidePanelOf(t, out)
+	if got := factOf(t, panel, "Status"); !strings.HasPrefix(got, "Fetching fine. Last fetch ") {
+		t.Errorf("Status = %q", got)
+	}
+	if strings.Count(panel, `class="mg-hist__r`) != 2 {
+		t.Errorf("the history was lost; panel=%s", panel)
+	}
+}

@@ -192,6 +192,9 @@
   {{/* Ahead of modal.js on purpose: both bind Escape on document, and the
        sources search box has to swallow the key before modal.js acts on it. */}}
   <script src="/static/js/tagput.js" defer></script>
+  {{/* Ahead of sources.js and settings.js, which use the rhListbox global it
+       defines. Escape is handled on the menu element itself. */}}
+  <script src="/static/js/listbox.js" defer></script>
   <script src="/static/js/sources.js" defer></script>
   <script src="/static/js/library.js" defer></script>
   <script src="/static/js/modal.js" defer></script>

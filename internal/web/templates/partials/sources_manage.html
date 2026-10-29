@@ -35,6 +35,7 @@
         <button class="mg-search__x" type="button" aria-label="Clear search" hidden data-src-clear><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
       </div>
       <span class="mg-matches" data-src-matches aria-live="polite" hidden></span>
+      <div class="mg-toolbar__lb">{{template "sourceTagMenu" .}}{{template "listbox" .SortMenu}}</div>
     </div>
     <div class="mg-filterwrap">{{template "sourceFilters" .Counts}}</div>
   </div>
@@ -55,6 +56,10 @@
   {{range .Filters}}<label class="stp-seg__o{{if .Zero}} is-zero{{end}}"><input type="radio" name="srcfilter" value="{{.Key}}" data-src-state=""{{if eq .Key "all"}} checked{{end}}><span>{{.Label}} <i class="mg-n">{{.Count}}</i></span></label>{{end}}
 </div>
 {{end}}
+
+{{/* The tag menu: live sources' tags with their counts. Re-sent out of band
+     after a mutation; static/js/sources.js restores the pick after that swap. */}}
+{{define "sourceTagMenu"}}{{template "listbox" .TagMenu}}{{end}}
 
 {{/* Failing sources with what to do about each, flaky ones as notes, and the
      rerun bar. Re-rendered out of band by every mutation, so it is always the
@@ -138,15 +143,19 @@
       <div class="mg-hrow">
         <span class="mg-c mg-c--src">Source</span>
         <span class="mg-c mg-c--health">Fetching</span>
-        <div class="mg-meta"><span class="mg-c mg-c--tags">Tags</span></div>
+        <div class="mg-meta">
+          <span class="mg-c mg-c--tags">Tags</span>
+          <span class="mg-c mg-c--vol" title="Items stored per week, 8-week average">Stored / week</span>
+          <span class="mg-c mg-c--sig" title="Share of scored items rated {{tier "atleast"}}, last 30 days">Signal</span>
+        </div>
         <span class="mg-c mg-c--tog">On</span>
         <span class="mg-c mg-c--act"><span class="stp-sr">Actions</span></span>
       </div>
       {{range .Rows}}{{template "sourceItem" .}}{{end}}
     </div>
     <div class="mg-empty" data-src-empty="search" hidden>
-      <p class="mg-empty__t">No source matches your search.</p>
-      <div class="mg-empty__a"><button class="clk-btn" type="button" data-src-clear>Clear search</button></div>
+      <p class="mg-empty__t">No source matches your search or tag.</p>
+      <div class="mg-empty__a"><button class="clk-btn" type="button" data-src-clearall>Clear search and tag</button></div>
     </div>
     <div class="mg-empty" data-src-empty="filter" hidden>
       <p class="mg-empty__t" data-src-empty-text></p>
@@ -177,4 +186,4 @@
      all out of band so an editor in progress is never swapped. */}}
 {{define "sourceLiveManage"}}{{template "sourceOOB" .}}{{template "ingestNote" .LiveNote}}{{range .Rows}}{{if .OOB}}{{template "sourceItem" .}}{{end}}{{end}}{{end}}
 
-{{define "sourceOOB"}}{{if .Counts.OOB}}{{template "sourceSummary" .Counts}}{{template "sourcesAttention" .Attention}}{{template "sourceFilters" .Counts}}{{template "sourceNavBadge" .Counts}}{{end}}{{end}}
+{{define "sourceOOB"}}{{if .Counts.OOB}}{{template "sourceSummary" .Counts}}{{template "sourcesAttention" .Attention}}{{template "sourceFilters" .Counts}}{{template "sourceTagMenu" .}}{{template "sourceNavBadge" .Counts}}{{end}}{{end}}

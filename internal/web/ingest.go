@@ -390,30 +390,30 @@ func (s *Web) renderIngestNote(w http.ResponseWriter, r *http.Request) {
 func (s *Web) ingestBarView(ctx context.Context, rerun, compact bool) (ingestBarData, error) {
 	// A live run needs no feed count: the bar shows no rerun label while it runs.
 	if s.ing.Status().Running {
-		return s.ingestBarWith(ctx, 0, rerun, compact)
+		return s.ingestBarWith(0, nil, rerun, compact), nil
 	}
 	enabled, err := s.enabledFeedCount(ctx)
 	if err != nil {
 		return ingestBarData{}, err
 	}
-	return s.ingestBarWith(ctx, enabled, rerun, compact)
-}
-
-// ingestBarWith is ingestBarView for a caller that already has the enabled
-// count.
-func (s *Web) ingestBarWith(ctx context.Context, enabled int, rerun, compact bool) (ingestBarData, error) {
-	data := ingestBarData{Status: "none", Enabled: enabled, Rerun: rerun, Compact: compact}
-	now := time.Now()
-	if st := s.ing.Status(); st.Running {
-		data.Status, data.Running, data.When = "running", true, agoPhrase(st.StartedAt, now)
-		return data, nil
-	}
 	last, err := s.db.LastIngestRun(ctx)
 	if err != nil {
 		return ingestBarData{}, err
 	}
+	return s.ingestBarWith(enabled, last, rerun, compact), nil
+}
+
+// ingestBarWith is ingestBarView for a caller that already has the enabled
+// count and the newest finished run (nil when there is none).
+func (s *Web) ingestBarWith(enabled int, last *store.IngestRun, rerun, compact bool) ingestBarData {
+	data := ingestBarData{Status: "none", Enabled: enabled, Rerun: rerun, Compact: compact}
+	now := time.Now()
+	if st := s.ing.Status(); st.Running {
+		data.Status, data.Running, data.When = "running", true, agoPhrase(st.StartedAt, now)
+		return data
+	}
 	if last == nil {
-		return data, nil
+		return data
 	}
 	// Anything not ok or error reads as cancelled, the same default the chrome uses.
 	v := toIngestRunView(*last, now)
@@ -427,7 +427,7 @@ func (s *Web) ingestBarWith(ctx context.Context, enabled int, rerun, compact boo
 	if data.Status == store.IngestStatusError {
 		data.Err = v.Error
 	}
-	return data, nil
+	return data
 }
 
 // enabledFeedCount counts the enabled feeds in the resolved set, the same count

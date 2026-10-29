@@ -110,7 +110,9 @@ type FeedAttempt struct {
 	Status string
 	Items  int
 	Error  string
-	At     time.Time
+	// Elapsed is how long the fetch took; zero when unknown.
+	Elapsed time.Duration
+	At      time.Time
 }
 
 // OK reports whether this attempt succeeded.
@@ -164,11 +166,11 @@ const (
 	// strips. Ordered so callers get each feed's attempts newest-first.
 	sqlRecentFeedAttempts = `
 		WITH ranked AS (
-			SELECT feed_id, status, items, error, fetched_at,
+			SELECT feed_id, status, items, error, elapsed_ms, fetched_at,
 			       ROW_NUMBER() OVER (PARTITION BY feed_id ORDER BY id DESC) AS rn
 			FROM feed_fetches
 		)
-		SELECT feed_id, status, items, error, fetched_at FROM ranked
+		SELECT feed_id, status, items, error, elapsed_ms, fetched_at FROM ranked
 		WHERE rn <= ? ORDER BY feed_id, rn`
 
 	// Retention: keep the newest `keep` rows per feed, drop the rest. Rows for
@@ -309,12 +311,14 @@ func (s *Store) recentFeedAttempts(ctx context.Context, limit int) (map[string][
 	out := make(map[string][]FeedAttempt)
 	for rows.Next() {
 		var (
-			id string
-			a  FeedAttempt
+			id      string
+			a       FeedAttempt
+			elapsed int64
 		)
-		if err := rows.Scan(&id, &a.Status, &a.Items, &a.Error, &a.At); err != nil {
+		if err := rows.Scan(&id, &a.Status, &a.Items, &a.Error, &elapsed, &a.At); err != nil {
 			return nil, fmt.Errorf("scan feed attempt: %w", err)
 		}
+		a.Elapsed = time.Duration(elapsed) * time.Millisecond
 		a.At = utcTime(a.At)
 		out[id] = append(out[id], a)
 	}

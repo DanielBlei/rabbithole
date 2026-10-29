@@ -263,7 +263,7 @@ func TestImportPlansIDSquatterAsConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddFeed: %v", err)
 	}
-	if err := db.UpdateFeed(ctx, id, config.Feed{Name: "Edited", URL: "https://new.test/feed"}); err != nil {
+	if _, err := db.UpdateFeed(ctx, id, config.Feed{Name: "Edited", URL: "https://new.test/feed"}); err != nil {
 		t.Fatalf("UpdateFeed: %v", err)
 	}
 

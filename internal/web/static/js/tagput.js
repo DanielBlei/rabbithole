@@ -3,9 +3,10 @@
 // comma-joined field, and both want a tag to be the same colour wherever it
 // appears.
 //
-// This file owns the only global the frontend defines: window.tagput. Everything
-// else is delegated document listeners, but the Maze needs to recolour chips
-// after its own swaps, so the two need a seam.
+// This file owns window.tagput, one of the two globals the frontend defines (the
+// other is window.rhListbox). Everything else is delegated document listeners,
+// but the Maze needs to recolour chips after its own swaps, so the two need a
+// seam.
 (function () {
   // ---- tag colours ----------------------------------------------------
   // Each tag name maps to one of TAG_COLORS palette classes (.tag--cN in the

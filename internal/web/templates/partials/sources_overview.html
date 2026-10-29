@@ -2,8 +2,9 @@
      SPDX-License-Identifier: Apache-2.0 */}}
 
 {{/* The Overview section of Sources: the health of every live source, what needs
-     attention, the ingestion bar, and, once the library has loaded, its suggestions
-     and coverage. With no sources it is the first-run prompt. */}}
+     attention, the ingestion bar, volume and signal per source, the slowest feeds
+     and, once the library has loaded, its suggestions and coverage. With no
+     sources it is the first-run prompt. */}}
 {{define "sourcesOverview"}}
 <div id="srcOverview"{{if .Counts.OOB}} hx-swap-oob="true"{{end}}>
 {{- if .Overview.FirstRun}}
@@ -82,6 +83,16 @@
           <a class="clk-btn clk-btn--link" href="/sources/manage?state=flaky">Review</a>
         </li>
         {{- end}}
+        {{- range .Overview.Quiet}}
+        <li class="ov-att ov-att--quiet">
+          <span class="ov-att__dot" aria-hidden="true"></span>
+          <div class="ov-att__b">
+            <div class="ov-att__t">Gone quiet: {{.Name}}</div>
+            <div class="ov-att__d">No new items in {{.Days}} days</div>
+          </div>
+          <a class="clk-btn clk-btn--link" href="/sources/manage#src-{{.ID}}">Open</a>
+        </li>
+        {{- end}}
         {{- if .Overview.Never}}
         <li class="ov-att ov-att--info">
           <span class="ov-att__dot" aria-hidden="true"></span>
@@ -92,6 +103,89 @@
         </li>
         {{- end}}
       </ul>
+      {{- end}}
+    </div>
+  </section>
+
+  <section class="stp-group" aria-labelledby="ovVol">
+    <header class="stp-group__h">
+      <div><h3 id="ovVol"><span class="stp-group__t">Volume</span></h3></div>
+      <p>Stored items per week, last 8 weeks. Retention and the since window cut older history.</p>
+    </header>
+    <div class="ov-body">
+      {{- if .Overview.Volume}}
+      <div>
+        <div class="ov-colh" aria-hidden="true"><span class="ov-cw-spark">Last 8 weeks</span><span class="ov-cw-num">Stored items</span></div>
+        <ul class="ov-list">
+          {{- range .Overview.Volume}}
+          <li class="ov-vrow">
+            {{template "favicon" (monogram .Name .URL 20)}}
+            <div class="ov-who">{{template "ovName" .}}{{if .Hint}}<span class="sh-hint">{{.Hint}}</span>{{end}}</div>
+            {{template "spark" .}}
+            <span class="ov-num"><b>{{.PerWeekText}}</b><span class="sh-hint"> /wk</span></span>
+          </li>
+          {{- end}}
+        </ul>
+        {{- if .Overview.VolumeSkipped}}
+        <p class="sh-hint ov-more">{{.Overview.SkippedNote}}</p>
+        {{- end}}
+      </div>
+      {{- else}}
+      <p class="ov-none">Nothing fetched yet. Run ingestion to see volume.</p>
+      {{- end}}
+    </div>
+  </section>
+
+  <section class="stp-group" aria-labelledby="ovSig">
+    <header class="stp-group__h">
+      <div><h3 id="ovSig"><span class="stp-group__t">Signal</span></h3></div>
+      <p>How many scored items are {{tier "atleast"}}, per source.</p>
+    </header>
+    <div class="ov-body">
+      {{- if .Overview.Signal.Scored}}
+      <div>
+        {{- if or .Overview.Signal.Best .Overview.Signal.Noisy}}
+        <div class="ov-calls">
+          {{- with .Overview.Signal.Best}}
+          <div class="ov-call ov-call--good">
+            <span class="ov-call__k">Best signal</span>
+            <div class="ov-call__who">{{template "favicon" (monogram .Name .URL 20)}}{{template "ovName" .}}</div>
+            <p class="sh-hint">{{.Hint}}</p>
+          </div>
+          {{- end}}
+          {{- if .Overview.Signal.Noisy}}
+          <div class="ov-call ov-call--bad">
+            <span class="ov-call__k">Noisy, low signal</span>
+            {{- range .Overview.Signal.Noisy}}
+            <div class="ov-call__item">
+              <div class="ov-call__who">{{template "favicon" (monogram .Name .URL 20)}}{{template "ovName" .}}</div>
+              <p class="sh-hint">{{.Hint}}</p>
+            </div>
+            {{- end}}
+          </div>
+          {{- end}}
+        </div>
+        {{- end}}
+        <ul class="ov-legend ov-legend--tier" aria-label="Bar colours">
+          <li><span class="ov-legend__a"><i class="ov-sw ov-sw--t-high" aria-hidden="true"></i>{{tier "high"}}</span></li>
+          <li><span class="ov-legend__a"><i class="ov-sw ov-sw--t-mid" aria-hidden="true"></i>{{tier "mid"}}</span></li>
+          <li><span class="ov-legend__a"><i class="ov-sw ov-sw--t-low" aria-hidden="true"></i>{{tier "low"}}</span></li>
+          <li><span class="ov-legend__a"><i class="ov-sw ov-sw--t-none" aria-hidden="true"></i>unscored</span></li>
+        </ul>
+        <ul class="ov-list">
+          {{- range .Overview.Signal.Rows}}
+          <li class="ov-srow{{if .Thin}} is-thin{{end}}">
+            {{template "favicon" (monogram .Name .URL 20)}}
+            <div class="ov-who">{{template "ovName" .}}<span class="sh-hint ov-eng">{{.Eng}}</span></div>
+            <span class="ov-srow__bar">{{template "tierBar" .Bar}}</span>
+            <span class="ov-share"><b>{{.Lead}}</b><span class="sh-hint">{{.Hint}}</span></span>
+          </li>
+          {{- end}}
+        </ul>
+        <p class="sh-hint ov-more">Last 30 days. Signal is the score from your profile, not read or thumbs counts.</p>
+      </div>
+      {{- else}}
+      <p class="ov-none">Nothing scored yet. Signal appears after the first run.</p>
       {{- end}}
     </div>
   </section>
@@ -115,6 +209,28 @@
   </section>
   {{template "ovCoverage" .Coverage}}
   {{- end}}
+
+  <section class="stp-group" aria-labelledby="ovSlow">
+    <header class="stp-group__h">
+      <div><h3 id="ovSlow"><span class="stp-group__t">Slowest feeds</span></h3></div>
+      <p>Average fetch time. Slow feeds stretch every run.</p>
+    </header>
+    <div class="ov-body">
+      {{- if .Overview.Slowest}}
+      <ul class="ov-list ov-bars">
+        {{- range .Overview.Slowest}}
+        <li class="ov-brow ov-brow--fav">
+          <span class="ov-brow__k">{{template "favicon" (monogram .Name .URL 18)}}{{template "ovName" .}}</span>
+          <span class="ov-bar" role="img" aria-label="Average {{.AvgText}}"><i style="width:{{.Width}}%"></i></span>
+          <span class="ov-brow__v"><b>{{.AvgText}}</b></span>
+        </li>
+        {{- end}}
+      </ul>
+      {{- else}}
+      <p class="ov-none">No fetch times yet.</p>
+      {{- end}}
+    </div>
+  </section>
 </div>
 {{- end}}
 </div>
@@ -170,3 +286,12 @@
 {{/* The answer to a refresh after an ingestion run starts or ends: the Overview
      and the nav badge, both out of band. */}}
 {{define "sourceLiveOverview"}}{{template "sourcesOverview" .}}{{template "sourceNavBadge" .Counts}}{{end}}
+
+{{/* A source's name, linking to its row in Manage. */}}
+{{define "ovName"}}<a class="ov-name" href="/sources/manage#src-{{.ID}}" title="{{.Name}}">{{.Name}}</a>{{end}}
+
+{{/* The 8-week bar chart of stored items. Takes a row with Spark and SparkLabel. */}}
+{{define "spark"}}<span class="spark" role="img" aria-label="{{.SparkLabel}}"><svg viewBox="0 0 64 20" width="64" height="20" aria-hidden="true">{{range .Spark}}<rect class="{{.Class}}" x="{{.X}}" y="{{.Y}}" width="{{.W}}" height="{{.H}}" rx="1"/>{{end}}</svg></span>{{end}}
+
+{{/* The stacked bar of score tiers. */}}
+{{define "tierBar"}}<span class="tier{{if .Empty}} tier--empty{{end}}" role="img" aria-label="{{.Label}}">{{range .Segs}}<span class="tier__s tier__s--{{.Class}}" style="flex-grow:{{.N}}" title="{{.Title}}"></span>{{end}}</span>{{end}}

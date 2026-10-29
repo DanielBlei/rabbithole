@@ -46,13 +46,14 @@ type feedRowData struct {
 	Host string // URL's host — the compact label under the feed name
 	Type string // resolved kind; the row badges anything but rss
 
-	Enabled bool
-	Deleted bool
-	Since   string
-	SinceOn string
-	Cap     string // max_items, or "—" when uncapped
-	CapOn   string
-	Tags    []string
+	Enabled  bool
+	Deleted  bool
+	Since    string
+	SinceOn  string
+	Cap      string // max_items, or "—" when uncapped
+	MaxItems int    // Cap as a number, 0 when uncapped
+	CapOn    string
+	Tags     []string
 	// TagsAttr is Tags comma-joined — the row's data-tags, which the page's
 	// client-side search matches against alongside the name and URL.
 	TagsAttr string
@@ -85,6 +86,9 @@ type feedRowData struct {
 	// TickOK and TickErr count the attempts in Ticks, for the strip's label
 	// and the page's fetch success rate.
 	TickOK, TickErr int
+
+	// Stats is the feed's volume, signal and fetch time, filled by applyStats.
+	Stats rowStats
 }
 
 // feedTick is one attempt in the history strip. Class is "ok", "err", "flaky"
@@ -106,6 +110,7 @@ func toFeedRow(f config.ResolvedFeed, h store.FeedHealth, now time.Time) feedRow
 		Enabled:  f.Enabled,
 		Since:    shortDur(f.Since),
 		Cap:      capLabel(f.MaxItems),
+		MaxItems: f.MaxItems,
 		Tags:     f.Tags,
 		TagsAttr: strings.Join(f.Tags, ","),
 	}

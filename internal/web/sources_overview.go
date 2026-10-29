@@ -4,8 +4,10 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -18,6 +20,13 @@ import (
 
 // maxSuggestions is how many Library sources the Overview suggests.
 const maxSuggestions = 4
+
+// Callout and slowest-list limits, and the narrowest a slowest bar is drawn.
+const (
+	maxNoisy   = 3
+	maxSlowest = 3
+	minBarPct  = 3
+)
 
 // overviewData is the Sources Overview page: the health of the live sources,
 // what needs attention, and the last ingestion run. Removed sources are left
@@ -41,13 +50,26 @@ type overviewData struct {
 	Failing []overviewName
 	Flaky   []overviewName
 	Never   []overviewName
-	// AllClear is set when nothing is failing, flaky or waiting for a first run.
+	// Quiet lists the ok sources with no new item for quietDays days or more.
+	Quiet []ovQuiet
+	// AllClear is set when nothing is failing, flaky, gone quiet or waiting
+	// for a first run.
 	AllClear bool
 	// LastRun is how long ago the newest finished run ended, empty when there
 	// is none or a run is still going.
 	LastRun string
 
 	Ingest ingestBarData
+
+	// Volume is the active sources by stored items per week, most first. Active
+	// means on and fetched at least once; Signal and Slowest cover the same.
+	Volume []ovVolRow
+	// VolumeSkipped counts the live sources left out of Volume: off, or
+	// waiting for the first run.
+	VolumeSkipped int
+	Signal        ovSignal
+	// Slowest is the three active sources with the longest average fetch.
+	Slowest []ovSlow
 
 	// Library holds the suggestions and the coverage. It is nil when they are
 	// hidden: first run, or no library loaded.
@@ -87,6 +109,56 @@ type ovCovGroup struct {
 	Added int
 	Total int
 	Pct   int
+}
+
+// ovQuiet is a source named in the attention list as gone quiet.
+type ovQuiet struct {
+	ID   string
+	Name string
+	Days int
+}
+
+// ovVolRow is one source in the volume list. Hint is set for a source gone quiet.
+type ovVolRow struct {
+	ID, Name, URL string
+	Hint          string
+	PerWeek       float64
+	PerWeekText   string
+	Spark         []sparkBar
+	SparkLabel    string
+}
+
+// ovCall is a source named in a signal callout.
+type ovCall struct {
+	ID, Name, URL string
+	Hint          string
+}
+
+// ovSignal is the Signal section: the two callouts and a row per active source.
+type ovSignal struct {
+	// Scored is whether any listed source has a scored item.
+	Scored bool
+	Best   *ovCall
+	Noisy  []ovCall
+	Rows   []ovSigRow
+}
+
+// ovSigRow is one source in the signal list. Thin rows lack the scored items
+// for the share to mean anything.
+type ovSigRow struct {
+	ID, Name, URL string
+	Eng           string
+	Bar           tierBar
+	Thin          bool
+	// Lead is the bold line of the share column and Hint the line under it.
+	Lead, Hint string
+}
+
+// ovSlow is one source in the slowest list. Width is the bar's percentage.
+type ovSlow struct {
+	ID, Name, URL string
+	AvgText       string
+	Width         int
 }
 
 // healthSeg is one state's share of the health bar and legend. Link is the
@@ -155,7 +227,9 @@ func overviewFrom(data sourcesData) overviewData {
 	ov.RateText = ratePercent(okTicks, total)
 	ov.RateOK, ov.RateTotal = okTicks, total
 
-	attention := len(ov.Failing) + len(ov.Flaky)
+	ov.addStats(data.Rows)
+
+	attention := len(ov.Failing) + len(ov.Flaky) + len(ov.Quiet)
 	ov.Brief = fmt.Sprintf("%s, ", plural(ov.Total, "source", "sources"))
 	if attention == 0 {
 		ov.Brief += "all healthy."
@@ -166,8 +240,9 @@ func overviewFrom(data sourcesData) overviewData {
 		}
 		ov.Brief += fmt.Sprintf("%d %s attention.", attention, verb)
 	}
+	ov.Brief += ov.briefTail()
 
-	ov.AllClear = len(ov.Failing) == 0 && len(ov.Flaky) == 0 && len(ov.Never) == 0
+	ov.AllClear = len(ov.Failing) == 0 && len(ov.Flaky) == 0 && len(ov.Quiet) == 0 && len(ov.Never) == 0
 	if !ingest.Running && ingest.Status != "none" {
 		ov.LastRun = ingest.When
 	}
@@ -330,4 +405,192 @@ func libraryCoverage(snap library.Snapshot, states map[string]store.PlanRow) ovC
 		}
 	}
 	return cov
+}
+
+// SkippedNote words how many live sources the volume list leaves out.
+func (ov overviewData) SkippedNote() string {
+	return plural(ov.VolumeSkipped, "source", "sources") + " not shown: off or waiting for the first run."
+}
+
+// briefTail is the closing line of the brief: the busiest source and the one
+// with the best signal, whichever exist.
+func (ov overviewData) briefTail() string {
+	busy := len(ov.Volume) > 0 && ov.Volume[0].PerWeek > 0
+	best := ov.Signal.Best != nil
+	switch {
+	case busy && best && ov.Volume[0].ID == ov.Signal.Best.ID:
+		return " " + ov.Volume[0].Name + " brings the most items and has the best signal."
+	case busy && best:
+		return " " + ov.Volume[0].Name + " brings the most items and " + ov.Signal.Best.Name + " has the best signal."
+	case busy:
+		return " " + ov.Volume[0].Name + " brings the most items."
+	case best:
+		return " " + ov.Signal.Best.Name + " has the best signal."
+	}
+	return ""
+}
+
+// addStats fills the quiet list and the Volume, Signal and Slowest sections
+// from the rows' stats.
+func (ov *overviewData) addStats(rows []feedRowData) {
+	var active []feedRowData
+	for _, r := range rows {
+		if r.Deleted {
+			continue
+		}
+		if r.Stats.Quiet {
+			ov.Quiet = append(ov.Quiet, ovQuiet{ID: r.ID, Name: r.Name, Days: r.Stats.QuietDays})
+		}
+		if r.State == feedStateOff || r.State == feedStateNever {
+			ov.VolumeSkipped++
+			continue
+		}
+		active = append(active, r)
+	}
+	ov.Volume = volumeRows(active)
+	ov.Signal = signalOf(active)
+	ov.Slowest = slowestOf(active)
+}
+
+// volumeRows lists the sources by stored items per week, most first.
+func volumeRows(active []feedRowData) []ovVolRow {
+	sorted := slices.Clone(active)
+	slices.SortStableFunc(sorted, func(a, b feedRowData) int {
+		return cmp.Compare(b.Stats.PerWeek, a.Stats.PerWeek)
+	})
+	out := make([]ovVolRow, len(sorted))
+	for i, r := range sorted {
+		out[i] = ovVolRow{
+			ID:          r.ID,
+			Name:        r.Name,
+			URL:         r.URL,
+			PerWeek:     r.Stats.PerWeek,
+			PerWeekText: r.Stats.PerWeekText,
+			Spark:       r.Stats.Spark,
+			SparkLabel:  r.Stats.SparkLabel,
+		}
+		if r.Stats.Quiet {
+			out[i].Hint = fmt.Sprintf("No new items in %d days", r.Stats.QuietDays)
+		}
+	}
+	return out
+}
+
+// signalOf builds the Signal section: sources with enough scored items first,
+// by share, then the rest by how many they have. The callouts pick from the
+// sources with at least noisyMinScored scored items.
+func signalOf(active []feedRowData) ovSignal {
+	sorted := slices.Clone(active)
+	slices.SortStableFunc(sorted, func(a, b feedRowData) int {
+		if a.Stats.Sig.Enough != b.Stats.Sig.Enough {
+			if a.Stats.Sig.Enough {
+				return -1
+			}
+			return 1
+		}
+		if a.Stats.Sig.Enough {
+			return cmp.Compare(b.Stats.Sig.Share, a.Stats.Sig.Share)
+		}
+		return cmp.Compare(b.Stats.Sig.Scored, a.Stats.Sig.Scored)
+	})
+	var sig ovSignal
+	sig.Rows = make([]ovSigRow, len(sorted))
+	for i, r := range sorted {
+		sig.Rows[i] = sigRow(r)
+		sig.Scored = sig.Scored || r.Stats.Sig.Scored > 0
+	}
+
+	var solid []feedRowData
+	for _, r := range active {
+		if r.Stats.Sig.Scored >= noisyMinScored {
+			solid = append(solid, r)
+		}
+	}
+	byShare := slices.Clone(solid)
+	slices.SortStableFunc(byShare, func(a, b feedRowData) int {
+		return cmp.Compare(b.Stats.Sig.Share, a.Stats.Sig.Share)
+	})
+	var bestID string
+	if len(byShare) > 0 && byShare[0].Stats.Sig.Share > 0 {
+		c := callOf(byShare[0])
+		sig.Best, bestID = &c, byShare[0].ID
+	}
+	var noisy []feedRowData
+	for _, r := range solid {
+		if r.Stats.Sig.Share <= noisyShare && r.ID != bestID {
+			noisy = append(noisy, r)
+		}
+	}
+	slices.SortStableFunc(noisy, func(a, b feedRowData) int {
+		return cmp.Compare(a.Stats.Sig.Share, b.Stats.Sig.Share)
+	})
+	for _, r := range noisy[:min(len(noisy), maxNoisy)] {
+		sig.Noisy = append(sig.Noisy, callOf(r))
+	}
+	return sig
+}
+
+// callOf is a callout entry: the source and its share.
+func callOf(r feedRowData) ovCall {
+	sg := r.Stats.Sig
+	return ovCall{
+		ID: r.ID, Name: r.Name, URL: r.URL,
+		Hint: fmt.Sprintf("%d of %d scored are %s (%d%%)", sg.High, sg.Scored, highPlus(), sg.Pct),
+	}
+}
+
+// sigRow is a source's row in the signal list.
+func sigRow(r feedRowData) ovSigRow {
+	sg, e := r.Stats.Sig, r.Stats.Eng
+	row := ovSigRow{
+		ID:   r.ID,
+		Name: r.Name,
+		URL:  r.URL,
+		Bar:  sg.Bar,
+		Thin: !sg.Enough,
+		Eng: fmt.Sprintf(
+			"read %d · hidden %d · bookmarked %d · thumbs %d up, %d down",
+			e.Read,
+			e.Hidden,
+			e.Bookmarked,
+			e.Up,
+			e.Down,
+		),
+	}
+	if !sg.Enough {
+		row.Lead = "Not enough data yet"
+		row.Hint = fmt.Sprintf("%d scored, %d needed", sg.Scored, minScored)
+		return row
+	}
+	row.Lead = fmt.Sprintf("%d%%", sg.Pct)
+	row.Hint = fmt.Sprintf("%d of %d scored are %s", sg.High, sg.Scored, highPlus())
+	if sg.Unscored > 0 {
+		row.Hint += fmt.Sprintf(", %d unscored", sg.Unscored)
+	}
+	return row
+}
+
+// slowestOf lists the maxSlowest active sources with the longest average
+// fetch. A bar is its share of the slowest, at least minBarPct wide.
+func slowestOf(active []feedRowData) []ovSlow {
+	var timed []feedRowData
+	for _, r := range active {
+		if r.Stats.AvgMs > 0 {
+			timed = append(timed, r)
+		}
+	}
+	slices.SortStableFunc(timed, func(a, b feedRowData) int { return b.Stats.AvgMs - a.Stats.AvgMs })
+	if len(timed) == 0 {
+		return nil
+	}
+	top := timed[0].Stats.AvgMs
+	out := make([]ovSlow, 0, maxSlowest)
+	for _, r := range timed[:min(len(timed), maxSlowest)] {
+		width := int(math.Round(float64(r.Stats.AvgMs) / float64(top) * 100))
+		out = append(
+			out,
+			ovSlow{ID: r.ID, Name: r.Name, URL: r.URL, AvgText: r.Stats.AvgText, Width: max(minBarPct, width)},
+		)
+	}
+	return out
 }

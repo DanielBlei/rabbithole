@@ -4,7 +4,10 @@
 package web
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf16"
 )
@@ -196,6 +199,8 @@ func (r feedRowData) StateText() string {
 		return fmt.Sprintf("Failing ×%d", r.FailStreak)
 	case r.State == feedStateFlaky:
 		return fmt.Sprintf("Flaky ×%d", r.FailStreak)
+	case r.Stats.Quiet:
+		return "Gone quiet"
 	case r.State == feedStateOK && r.LastFetch != "":
 		return "Fetched " + r.LastFetch
 	}
@@ -209,7 +214,7 @@ func (r feedRowData) StateTone() string {
 		return "dim"
 	case r.State == feedStateError:
 		return "bad"
-	case r.State == feedStateFlaky:
+	case r.State == feedStateFlaky, r.Stats.Quiet:
 		return "warn"
 	}
 	return "dim"
@@ -234,4 +239,103 @@ func tagColor(name string) int {
 		h = h<<5 + h + uint32(u)
 	}
 	return int(h % 8)
+}
+
+// Sort keys of the Manage sort menu. The same words are the ?sort= deep link.
+const (
+	srcSortName   = "name"
+	srcSortItems  = "items"
+	srcSortSignal = "signal"
+	srcSortLast   = "last"
+)
+
+// SortMenu is the Manage sort menu. The list is ordered by the script from the
+// rows' data- attributes.
+func (d sourcesData) SortMenu() listboxData {
+	return listboxData{
+		ID: "srcSortMenu", Label: "Sort sources", Key: "Sort", Name: "srcsort",
+		Value: srcSortName, Default: srcSortName, Inline: true,
+		Options: []listboxOpt{
+			{Value: srcSortName, Label: "Name"},
+			{Value: srcSortItems, Label: "Stored items per week"},
+			{Value: srcSortSignal, Label: "Signal"},
+			{Value: srcSortLast, Label: "Last item"},
+		},
+	}
+}
+
+// TagMenu is the Manage tag menu: every tag in use by a live source, with how
+// many live sources carry it. Tags match without regard to case and the first
+// spelling seen is the one shown. It travels out of band after a mutation, so
+// the counts stay true; the script restores the pick afterwards.
+func (d sourcesData) TagMenu() listboxData {
+	type tagCount struct {
+		name string
+		n    int
+	}
+	var tags []tagCount
+	at := make(map[string]int)
+	for _, r := range d.Rows {
+		if r.Deleted {
+			continue
+		}
+		seen := make(map[string]bool)
+		for _, t := range r.Tags {
+			key := strings.ToLower(t)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			i, ok := at[key]
+			if !ok {
+				i = len(tags)
+				at[key] = i
+				tags = append(tags, tagCount{name: t})
+			}
+			tags[i].n++
+		}
+	}
+	slices.SortFunc(tags, func(a, b tagCount) int {
+		return cmp.Compare(strings.ToLower(a.name), strings.ToLower(b.name))
+	})
+	opts := []listboxOpt{{Value: "", Label: "All tags"}}
+	for _, t := range tags {
+		opts = append(opts, listboxOpt{Value: t.name, Label: fmt.Sprintf("%s (%d)", t.name, t.n), Short: t.name})
+	}
+	return listboxData{
+		ID: "srcTagMenu", Label: "Filter by tag", Key: "Tag", Name: "srctag",
+		Options: opts, Inline: true, OOB: d.Counts.OOB,
+	}
+}
+
+// PerWeekAttr is the row's data-perweek: the stored items per week, unrounded.
+func (r feedRowData) PerWeekAttr() string {
+	return strconv.FormatFloat(r.Stats.PerWeek, 'f', -1, 64)
+}
+
+// SignalAttr is the row's data-signal: the high-signal percentage, empty when
+// there is not enough scored data to say.
+func (r feedRowData) SignalAttr() string {
+	if !r.Stats.Sig.Enough {
+		return ""
+	}
+	return strconv.Itoa(r.Stats.Sig.Pct)
+}
+
+// LastAttr is the row's data-last: when its newest item was stored, in unix
+// seconds, empty when it has none.
+func (r feedRowData) LastAttr() string {
+	if r.Stats.Last.IsZero() {
+		return ""
+	}
+	return strconv.FormatInt(r.Stats.Last.Unix(), 10)
+}
+
+// SigTitle is the tooltip of the Signal cell: the counts behind the figure.
+func (r feedRowData) SigTitle() string {
+	g := r.Stats.Sig
+	if !g.Enough {
+		return fmt.Sprintf("Only %d scored so far (needs %d), %d unscored", g.Scored, minScored, g.Unscored)
+	}
+	return fmt.Sprintf("%d of %d scored are %s, %d unscored", g.High, g.Scored, highPlus(), g.Unscored)
 }

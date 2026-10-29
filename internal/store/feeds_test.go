@@ -17,6 +17,7 @@ type attempt struct {
 	errMsg   string
 	items    int
 	ageHours int
+	elapsed  time.Duration
 }
 
 // recordAttempts writes the given attempts for one feed, oldest first.
@@ -25,12 +26,13 @@ func recordAttempts(t *testing.T, db *Store, feedID, name string, attempts []att
 	base := time.Now().Truncate(time.Second)
 	for i, a := range attempts {
 		f := FeedFetch{
-			FeedID: feedID,
-			Name:   name,
-			URL:    "http://" + name + ".test/feed",
-			Items:  a.items,
-			Error:  a.errMsg,
-			At:     base.Add(-time.Duration(a.ageHours) * time.Hour),
+			FeedID:  feedID,
+			Name:    name,
+			URL:     "http://" + name + ".test/feed",
+			Items:   a.items,
+			Error:   a.errMsg,
+			Elapsed: a.elapsed,
+			At:      base.Add(-time.Duration(a.ageHours) * time.Hour),
 		}
 		if err := db.RecordFeedFetches(context.Background(), []FeedFetch{f}); err != nil {
 			t.Fatalf("record attempt %d: %v", i, err)
@@ -279,7 +281,7 @@ func TestFeedAttemptsRecorded(t *testing.T) {
 	recordAttempts(t, db, "feed-1", "Feed", []attempt{
 		{items: 1, ageHours: 3},
 		{errMsg: "boom", ageHours: 2},
-		{items: 3, ageHours: 1},
+		{items: 3, ageHours: 1, elapsed: 1500 * time.Millisecond},
 	})
 
 	got := attemptsFor(t, db, "feed-1")
@@ -290,8 +292,14 @@ func TestFeedAttemptsRecorded(t *testing.T) {
 	if !got[0].OK() || got[0].Items != 3 {
 		t.Errorf("newest = %+v, want the 3-item success", got[0])
 	}
+	if got[0].Elapsed != 1500*time.Millisecond {
+		t.Errorf("newest Elapsed = %v, want 1.5s", got[0].Elapsed)
+	}
 	if got[1].OK() || got[1].Error != "boom" {
 		t.Errorf("second = %+v, want the failure", got[1])
+	}
+	if got[1].Elapsed != 0 {
+		t.Errorf("second Elapsed = %v, want 0 when not recorded", got[1].Elapsed)
 	}
 
 	// An unknown feed has no entry at all, and that is not an error.

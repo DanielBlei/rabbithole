@@ -5,6 +5,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -571,6 +572,51 @@ func TestSourcesRenameRefilesItems(t *testing.T) {
 	}
 	if len(sources) != 1 || sources[0].Source != "New Name" {
 		t.Errorf("items were not re-filed: %+v", sources)
+	}
+}
+
+// A live run files new items under the name it resolved at start, so a rename
+// waits for it; any other edit goes through.
+func TestSourcesRenameRefusedDuringRun(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	w, db := sourcesTestWeb(t, config.FeedsDoc{
+		Feeds: []config.Feed{{Name: "Old Name", URL: srv.URL + "/feed"}},
+	})
+	w.ing.SetClient(srv.Client())
+	if err := w.ing.Start(t.Context(), store.IngestTriggerManual); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { w.ing.Shutdown(context.Background()) })
+	if !w.ing.Status().Running {
+		t.Fatal("run is not live")
+	}
+
+	id := feedID(t, db, "Old Name")
+	out := postForm(t, w, "/sources/feed/"+id, url.Values{"name": {"New Name"}, "url": {srv.URL + "/feed"}})
+	if !strings.Contains(out, "finish or cancel the ingest run before renaming") {
+		t.Errorf("rename not refused; body=%s", out)
+	}
+	if got := mustFeeds(t, db)[0].Name; got != "Old Name" {
+		t.Errorf("name = %q after a refused rename", got)
+	}
+
+	out = postForm(
+		t,
+		w,
+		"/sources/feed/"+id,
+		url.Values{"name": {"Old Name"}, "url": {srv.URL + "/feed"}, "tags": {"x"}},
+	)
+	if strings.Contains(out, "before renaming") {
+		t.Errorf("a save without a rename was refused; body=%s", out)
 	}
 }
 
