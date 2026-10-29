@@ -145,9 +145,9 @@
 </span>
 {{end}}
 
-{{/* A reply that repaints only the body: the list or the plan, and the count
-     line. */}}
-{{define "libraryReply"}}{{template "libraryBody" .}}{{template "libraryMeta" .}}{{end}}
+{{/* A reply that repaints only the body: the list or the plan, the count line
+     and, when an action may have changed it, the nav badge. */}}
+{{define "libraryReply"}}{{template "libraryBody" .}}{{template "libraryMeta" .}}{{with .Badge}}{{template "sourceNavBadge" .}}{{end}}{{end}}
 
 {{/* The Try again reply: the section, and the nav group out of band. */}}
 {{define "libraryRefresh"}}{{template "sourcesLibrary" .Page}}{{template "sourcesLibNav" .Nav}}{{end}}

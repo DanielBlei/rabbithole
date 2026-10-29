@@ -63,6 +63,9 @@ type libraryPage struct {
 	// MetaOOB sends the header's count line out of band, for a reply that
 	// repaints only the body.
 	MetaOOB bool
+	// Badge is the Manage link's failing count, sent out of band by a reply to an
+	// action. Restoring a source can change it.
+	Badge *sourceCounts
 }
 
 // Meta is the line under the description.
@@ -388,6 +391,7 @@ func (s *Web) writeLibraryBody(
 		status = &importStatus{Err: libraryOfflineCopy}
 	}
 	page.Plan, page.Import, page.MetaOOB = plan, status, true
+	page.Badge = s.navBadge(r.Context())
 	s.renderFragment(w, "libraryReply", page)
 }
 

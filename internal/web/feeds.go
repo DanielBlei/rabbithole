@@ -57,6 +57,14 @@ type feedRowData struct {
 	// TagsAttr is Tags comma-joined — the row's data-tags, which the page's
 	// client-side search matches against alongside the name and URL.
 	TagsAttr string
+	// OwnTagsAttr is the source's own tags comma-joined, without the ones it only
+	// inherits from the defaults: the row's data-own-tags, what Remove tag offers.
+	OwnTagsAttr string
+
+	// DeletedAt is when a removed source was removed, zero when unknown or live.
+	// DeletedAgo words it for the state text and DeletedTitle gives the full time.
+	DeletedAt  time.Time
+	DeletedAgo string
 
 	// Selected marks the feed whose editor is open, and Editor is that editor.
 	Selected bool

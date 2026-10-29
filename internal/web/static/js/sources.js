@@ -15,6 +15,11 @@
 // An editor lives in its source's unit (#src-{id}), which the server swaps
 // alone; closing one is done here by removing it, so no request is made.
 //
+// Ticked rows are kept in a Set, not in the rows, so they survive a swap; it
+// only ever holds rows that are on screen. The bulk bar acts on it: the server
+// renders the bar and its buttons, this file shows it, builds the Remove tag
+// menu from the ticked rows' own tags and adds their ids to each request.
+//
 // Loaded on every page by the layout. Every lookup is guarded, so it costs
 // nothing on a page where none of this markup exists.
 (function () {
@@ -35,6 +40,11 @@
   var focusField = null; // 'url' when Edit URL asked for the address
   var flashAfter = null; // unit to flash once its swap lands
   var refocusForm = null; // the editor whose form was just submitted
+  var sel = new Set(); // ids of the ticked rows, always a subset of the visible ones
+  var selQueued = false;
+  var tagOpen = false; // the bulk bar's Add tag input is showing
+  var rmKey = null; // the tags the Remove tag menu was built from
+  var focusSel = false; // a bulk Remove or Restore is in flight: refocus when the selection empties
 
   function input() { return document.querySelector('[data-src-query]'); }
   function query() {
@@ -127,6 +137,7 @@
       row.hidden = !hit;
       if (hit) shown++;
     });
+    syncSel();
 
     var toolbar = document.querySelector('[data-src-toolbar]');
     if (toolbar) toolbar.hidden = rows.length === 0;
@@ -193,6 +204,7 @@
       if (filter === 'all') u.searchParams.delete('state'); else u.searchParams.set('state', filter);
       if (!tag) u.searchParams.delete('tag'); else u.searchParams.set('tag', tag);
       if (sort === 'name') u.searchParams.delete('sort'); else u.searchParams.set('sort', sort);
+      u.searchParams.delete('select');
       history.replaceState(null, '', u.pathname + u.search + u.hash);
     } catch (e) { /* not fatal */ }
   }
@@ -227,6 +239,215 @@
     pick('srctag', '');
     apply();
     syncURL();
+  }
+
+  // ---- selection and the bulk bar ----------------------------------------
+  function bar() { return document.querySelector('[data-src-bulk]'); }
+  function rowID(row) { return row.id.slice(4); }
+  function visibleRows() {
+    return Array.prototype.filter.call(document.querySelectorAll('#srcBody [data-src-row]'), function (row) { return !row.hidden; });
+  }
+
+  // The union of the ticked rows' own tags, one spelling each, sorted.
+  function ownTags() {
+    var seen = {}, out = [];
+    sel.forEach(function (id) {
+      var unit = document.getElementById('src-' + id);
+      if (!unit) return;
+      (unit.dataset.ownTags || '').split(',').forEach(function (t) {
+        t = t.trim();
+        if (t && !seen[t.toLowerCase()]) { seen[t.toLowerCase()] = true; out.push(t); }
+      });
+    });
+    return out.sort(function (a, b) { return a.localeCompare(b, undefined, {sensitivity: 'base'}); });
+  }
+
+  function node(tagName, cls) {
+    var el = document.createElement(tagName);
+    if (cls) el.className = cls;
+    return el;
+  }
+
+  // The Remove tag menu: the markup of partials/listbox.html, built here
+  // because its options depend on the ticked rows. The first option is the
+  // button's label and stays hidden; picking a tag resets the menu to it.
+  function tagMenu(tags) {
+    var m = node('div', 'stp-menu stp-menu--inline');
+    m.id = 'srcBulkRm';
+    m.setAttribute('data-stp-menu', '');
+    m.setAttribute('data-default', '');
+    var b = node('button', 'stp-menu__btn');
+    b.type = 'button';
+    b.setAttribute('data-stp-menubtn', '');
+    b.setAttribute('aria-haspopup', 'listbox');
+    b.setAttribute('aria-expanded', 'false');
+    b.setAttribute('aria-label', 'Remove tag from the selected sources');
+    var cur = node('span', 'stp-menu__cur');
+    cur.setAttribute('data-stp-menucur', '');
+    cur.textContent = 'Remove tag';
+    b.appendChild(cur);
+    b.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg>');
+    var ul = node('ul', 'stp-menu__list');
+    ul.setAttribute('role', 'listbox');
+    ul.tabIndex = -1;
+    ul.setAttribute('aria-label', 'Remove tag');
+    ul.hidden = true;
+    var radios = node('div', 'stp-sr');
+    radios.hidden = true;
+    [''].concat(tags).forEach(function (v) {
+      var li = node('li');
+      li.setAttribute('role', 'option');
+      li.dataset.value = v;
+      li.dataset.label = 'Remove tag';
+      li.setAttribute('aria-selected', 'false');
+      li.hidden = !v;
+      var n = node('span', 'stp-menu__n');
+      n.textContent = v || 'Remove tag';
+      li.appendChild(n);
+      ul.appendChild(li);
+      var r = node('input');
+      r.type = 'radio';
+      r.name = 'srcbulkrm';
+      r.value = v;
+      r.checked = !v;
+      r.setAttribute('aria-label', v || 'Remove tag');
+      radios.appendChild(r);
+    });
+    m.appendChild(b);
+    m.appendChild(ul);
+    m.appendChild(radios);
+    return m;
+  }
+
+  function paintRm(tags) {
+    var host = document.querySelector('[data-src-bulk-rm]');
+    if (!host) return;
+    var key = tags.join('\n');
+    if (key === rmKey) return;
+    rmKey = key;
+    host.replaceChildren();
+    host.hidden = !tags.length;
+    if (!tags.length) return;
+    host.appendChild(tagMenu(tags));
+    if (window.rhListbox) window.rhListbox.init(host);
+  }
+
+  function paintBar(n) {
+    var el = bar();
+    if (!el) return;
+    el.hidden = n === 0;
+    var removed = filter === 'removed';
+    if (!n || removed) tagOpen = false;
+    var count = el.querySelector('[data-src-bulk-n]');
+    if (count) count.textContent = n ? n + ' selected' : '';
+    if (!n) {
+      el.parentNode.style.setProperty('--mg-bulk-h', '0px');
+      return;
+    }
+    var live = el.querySelector('[data-src-bulk-live]');
+    var gone = el.querySelector('[data-src-bulk-removed]');
+    if (live) live.hidden = removed;
+    if (gone) gone.hidden = !removed;
+    var box = el.querySelector('[data-src-bulk-tagbox]');
+    var open = el.querySelector('[data-src-bulk-tag]');
+    if (box) box.hidden = !tagOpen;
+    if (open) open.hidden = tagOpen;
+    paintRm(removed ? [] : ownTags());
+    el.parentNode.style.setProperty('--mg-bulk-h', el.offsetHeight + 8 + 'px');
+  }
+
+  // Drops ids whose row is gone or hidden, then repaints every tick, the
+  // select-all box and the bar from the Set.
+  function paintSel() {
+    var rows = visibleRows();
+    var seen = {};
+    rows.forEach(function (row) { seen[rowID(row)] = true; });
+    sel.forEach(function (id) { if (!seen[id]) sel.delete(id); });
+    var n = 0;
+    document.querySelectorAll('#srcBody [data-src-row]').forEach(function (row) {
+      var on = sel.has(rowID(row));
+      if (on) n++;
+      var box = row.querySelector('[data-src-pick]');
+      if (box) box.checked = on;
+      var line = row.querySelector(':scope > .mg-row');
+      if (line) line.classList.toggle('is-sel', on);
+    });
+    var all = document.querySelector('[data-src-all]');
+    if (all) {
+      all.disabled = rows.length === 0;
+      all.checked = rows.length > 0 && n === rows.length;
+      all.indeterminate = n > 0 && n < rows.length;
+    }
+    paintBar(n);
+    if (!n && focusSel) { focusSel = false; focusSelAll(); }
+  }
+
+  // oobAfterSwap fires once per swapped row, so repaints wait for the frame.
+  function syncSel() {
+    if (selQueued) return;
+    selQueued = true;
+    requestAnimationFrame(function () { selQueued = false; paintSel(); });
+  }
+
+  function focusSelAll() {
+    var all = document.querySelector('[data-src-all]');
+    var target = all && !all.disabled ? all : input();
+    if (target) target.focus();
+  }
+
+  function clearSel() {
+    sel.clear();
+    paintSel();
+  }
+
+  function openTagBox(open) {
+    tagOpen = open;
+    paintBar(sel.size);
+    var el = bar();
+    var target = el && el.querySelector(open ? '[data-src-bulk-tagin]' : '[data-src-bulk-tag]');
+    if (target) target.focus({preventScroll: true});
+  }
+
+  // A bulk action would act on a row whose editor has unsaved changes.
+  function bulkGuard(run) {
+    var dirty = dirtyEditor();
+    var unit = dirty && unitOf(dirty);
+    if (dirty && unit && sel.has(unit.id.slice(4))) showGuard(dirty, run);
+    else run();
+  }
+
+  // net.js asks before an Undo that would put back a source whose editor has
+  // unsaved changes: ids are the sources the undo covers.
+  window.rhSourcesGuard = function (ids, run) {
+    var dirty = dirtyEditor();
+    var unit = dirty && unitOf(dirty);
+    if (dirty && unit && ids.indexOf(unit.id.slice(4)) !== -1) showGuard(dirty, run);
+    else run();
+  };
+
+  // The deep link from the Overview: ?select=id,id ticks those sources, with
+  // every filter back on All so none is hidden.
+  function selectFromURL(raw) {
+    var ids = raw.split(',').filter(function (id) {
+      return /^[\w-]+$/.test(id) && document.getElementById('src-' + id);
+    });
+    if (!ids.length) return;
+    var field = input();
+    if (field) field.value = '';
+    tag = '';
+    pick('srctag', '');
+    filter = 'all';
+    syncPills();
+    apply();
+    sel.clear();
+    ids.forEach(function (id) { sel.add(id); });
+    paintSel();
+    syncURL();
+    var first = document.getElementById('src-' + ids[0]);
+    if (first && !first.hidden) {
+      scrollToUnit(first, 'start');
+      flashRow(ids[0]);
+    }
   }
 
   // ---- needs-attention block --------------------------------------------
@@ -464,6 +685,44 @@
     var t = e.target;
     if (!t.closest) return;
 
+    // Add tag with nothing typed makes no request.
+    if (t.closest('[data-src-bulk-tagbox] [data-src-bulk-act]')) {
+      var typed = document.querySelector('[data-src-bulk-tagin]');
+      if (typed && !typed.value.replace(/,/g, '').trim()) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (window.rhToast) window.rhToast.show('Tag name is required.');
+        typed.focus({preventScroll: true});
+        return;
+      }
+    }
+
+    // A menu closes on any scroll, so a Remove tag button clipped by the bar's
+    // own scroll is brought fully into view first and the click replayed.
+    var rmBtn = t.closest('[data-src-bulk-rm] [data-stp-menubtn]');
+    if (rmBtn && rmBtn.dataset.srcFit !== '1') {
+      var strip = bar();
+      var sr = strip.getBoundingClientRect();
+      var br = rmBtn.getBoundingClientRect();
+      if (br.left < sr.left || br.right > sr.right) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        strip.scrollLeft += br.left < sr.left ? br.left - sr.left - 8 : br.right - sr.right + 8;
+        rmBtn.dataset.srcFit = '1';
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            rmBtn.click();
+            delete rmBtn.dataset.srcFit;
+          });
+        });
+        return;
+      }
+    }
+
+    if (t.closest('[data-src-bulk-tag]')) { openTagBox(true); return; }
+    if (t.closest('[data-src-bulk-tagx]')) { openTagBox(false); return; }
+    if (t.closest('[data-src-bulk-clear]')) { clearSel(); focusSelAll(); return; }
+
     var toggle = t.closest('[data-src-attn]');
     if (toggle) {
       attnOpen = toggle.getAttribute('aria-expanded') !== 'true';
@@ -497,17 +756,20 @@
     if (t.closest('[data-src-showall]')) { setFilter('all'); return; }
 
     // Anything that would replace or close a dirty editor asks first: opening
-    // another source, adding, or a switch on the source being edited. Controls
-    // inside the editor, and in dialogs, are their own business.
-    var act = t.closest('[data-src-open],[data-src-add],[data-src-repaint],[data-src-import],[hx-target]');
-    if (!act || act.closest('.mg-ed') || act.closest('#modal,#modalTop')) return;
+    // another source, adding, a switch on the source being edited, or its own
+    // Remove. Other controls inside the editor, and in dialogs, are their own
+    // business.
+    var act = t.closest('[data-src-open],[data-src-add],[data-src-repaint],[data-src-import],[data-src-bulk-act],[hx-target]');
+    if (!act || (act.closest('.mg-ed') && !act.matches('[data-src-remove]')) || act.closest('#modal,#modalTop')) return;
     var opens = act.matches('[data-src-open]');
     var target = act.getAttribute('hx-target') || '';
     var unit = /^#src-[\w-]+$/.test(target) ? document.querySelector(target) : null;
     var own = unit && unit.querySelector(':scope > .mg-ed');
     var dirty = dirtyEditor();
+    var dirtyUnit = dirty && unitOf(dirty);
     var replaces = opens || target === '#srcBody' || (own && own === dirty) ||
-      act.matches('[data-src-add],[data-src-repaint],[data-src-import]');
+      act.matches('[data-src-add],[data-src-repaint],[data-src-import]') ||
+      (act.matches('[data-src-bulk-act]') && !!dirtyUnit && sel.has(dirtyUnit.id.slice(4)));
     if (dirty && replaces && act.dataset.srcReplay !== '1') {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -526,6 +788,17 @@
     var path = e.detail.path || '';
     // A switch pressed while its editor is open keeps the editor open.
     if (target && /\/enabled$/.test(path) && target.querySelector(':scope > .mg-ed')) e.detail.parameters.open = '1';
+    // The bulk bar acts on the ticked rows.
+    var from = e.detail.elt;
+    if (/^\/sources\/(bulk|export)$/.test(path) && from && from.closest && from.closest('[data-src-bulk]')) {
+      e.detail.parameters.ids = Array.from(sel).join(',');
+      if (e.detail.parameters.action === 'addtag') {
+        var tagin = document.querySelector('[data-src-bulk-tagin]');
+        e.detail.parameters.tag = tagin ? tagin.value.trim() : '';
+      }
+      var act = e.detail.parameters.action;
+      if (act === 'remove' || act === 'restore') focusSel = true;
+    }
     // A live refresh leaves out the rows being edited.
     if (/^\/sources\/live\b/.test(path)) {
       var ids = [];
@@ -533,6 +806,27 @@
         ids.push(f.closest('.mg-item').id.slice(4));
       });
       e.detail.parameters.open = ids.join(',');
+    }
+  });
+
+  // A bulk request is over: the Add tag input closes once the tag went in, and
+  // a Remove or Restore that changed nothing leaves focus where it was.
+  document.body.addEventListener('htmx:afterRequest', function (e) {
+    var from = e.detail.elt;
+    if (!from || !from.closest || !from.closest('[data-src-bulk]')) return;
+    if (e.detail.successful && from.closest('[data-src-bulk-tagbox]')) {
+      var tagin = document.querySelector('[data-src-bulk-tagin]');
+      if (tagin) tagin.value = '';
+      openTagBox(false);
+    }
+    paintSel();
+    focusSel = false;
+    // The Remove tag menu is rebuilt from the rows' new tags: focus goes to the
+    // new button, or to select-all when no tag is left to remove.
+    if (e.detail.successful && from.matches('[data-src-bulk-rm]')) {
+      var menuBtn = from.querySelector('[data-stp-menubtn]');
+      if (menuBtn && !from.hidden) menuBtn.focus({preventScroll: true});
+      else focusSelAll();
     }
   });
 
@@ -557,8 +851,32 @@
   });
 
   document.addEventListener('change', function (e) {
-    if (e.target.matches('input[name="srctag"]')) { setTag(e.target.value); return; }
-    if (e.target.matches('input[name="srcsort"]')) { setSort(e.target.value); return; }
+    var t = e.target;
+    if (t.matches('input[name="srctag"]')) { setTag(t.value); return; }
+    if (t.matches('input[name="srcsort"]')) { setSort(t.value); return; }
+    if (t.matches('[data-src-pick]')) {
+      if (t.checked) sel.add(t.value); else sel.delete(t.value);
+      paintSel();
+    } else if (t.matches('[data-src-all]')) {
+      visibleRows().forEach(function (row) {
+        if (t.checked) sel.add(rowID(row)); else sel.delete(rowID(row));
+      });
+      paintSel();
+    } else if (t.matches('input[name="srcbulkrm"]')) {
+      var v = t.value;
+      t.closest('[data-stp-menu]').querySelectorAll('input[name="srcbulkrm"]').forEach(function (r) { r.checked = r.value === ''; });
+      if (!v) return;
+      bulkGuard(function () {
+        htmx.ajax('POST', '/sources/bulk', {source: document.querySelector('[data-src-bulk-rm]'), swap: 'none', values: {action: 'removetag', tag: v}});
+      });
+    }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || !e.target.matches || !e.target.matches('[data-src-bulk-tagin]')) return;
+    e.preventDefault();
+    var go = bar() && bar().querySelector('[data-src-bulk-tagbox] [data-src-bulk-act]');
+    if (go) go.click();
   });
 
   // A pill that would hide the source being edited asks first. Keep editing
@@ -577,13 +895,19 @@
   });
 
   // Esc works outward: an open modal first (modal.js, which this file runs
-  // ahead of, so step aside), then the editor, then the search text. From the
-  // search box the text goes first: that is where the key was pressed. Both
+  // ahead of, so step aside), then the bulk bar's tag input, then the editor,
+  // then the search text, and last the ticked rows. From the search box the
+  // text goes first: that is where the key was pressed. Both
   // modal.js and this are bound on document, where stopPropagation does nothing
   // to a sibling listener, so this file is loaded ahead of modal.js to run first.
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape' || e.defaultPrevented) return;
     if (document.documentElement.classList.contains('modal-open')) return;
+    if (e.target.closest && e.target.closest('[data-src-bulk-tagin]')) {
+      e.stopImmediatePropagation();
+      openTagBox(false);
+      return;
+    }
     var field = e.target.closest && e.target.closest('[data-src-query]');
     if (field && field.value) {
       e.stopImmediatePropagation();
@@ -593,7 +917,10 @@
     }
     if (e.target.closest && e.target.closest('.tagput__suggest')) return;
     var form = (e.target.closest && e.target.closest('.mg-ed')) || document.querySelector('#srcBody .mg-ed');
-    if (!form) return;
+    if (!form) {
+      if (sel.size) { e.stopImmediatePropagation(); clearSel(); }
+      return;
+    }
     e.stopImmediatePropagation();
     guardThen(function () { closeEditor(form); }, null);
   });
@@ -804,8 +1131,10 @@
     var id = open ? open.closest('.mg-item').id.slice(4) : (hash && hash[1]);
     // /sources/manage?add=1 opens the add form.
     var add = document.querySelector('[data-src-add]');
+    var pickIDs = params.get('select');
     setTimeout(function () {
-      if (id && id !== 'new') reveal(id);
+      if (pickIDs) selectFromURL(pickIDs);
+      else if (id && id !== 'new') reveal(id);
       else if (params.get('add') === '1' && add) add.click();
     }, 0);
   });

@@ -16,7 +16,10 @@
   var openMenu = null;
   var seq = 0;
 
-  function opts(m){ return Array.prototype.slice.call(m.querySelectorAll('[role="option"]')); }
+  function allOpts(m){ return Array.prototype.slice.call(m.querySelectorAll('[role="option"]')); }
+  // The options a pointer or key can reach: a hidden one only supplies the
+  // button's label while it is picked.
+  function opts(m){ return allOpts(m).filter(function(o){ return !o.hidden; }); }
   function radio(m, v){
     return Array.prototype.slice.call(m.querySelectorAll('input[type="radio"]')).filter(function(r){ return r.value === v; })[0];
   }
@@ -26,7 +29,7 @@
   }
   function sync(m){
     var v = picked(m), cur = m.querySelector('[data-stp-menucur]'), b = m.querySelector('[data-stp-menubtn]'), on = null;
-    opts(m).forEach(function(o){
+    allOpts(m).forEach(function(o){
       var is = o.dataset.value === v;
       o.setAttribute('aria-selected', is ? 'true' : 'false');
       if (is) on = o;

@@ -191,6 +191,8 @@ func (r feedRowData) MoreTagsTitle() string {
 // have none: the strip itself says they are waiting.
 func (r feedRowData) StateText() string {
 	switch {
+	case r.Deleted && r.DeletedAgo != "":
+		return "Removed " + r.DeletedAgo
 	case r.Deleted:
 		return "Removed"
 	case r.State == feedStateOff:
@@ -205,6 +207,15 @@ func (r feedRowData) StateText() string {
 		return "Fetched " + r.LastFetch
 	}
 	return ""
+}
+
+// StateTitle is the tooltip of the state text: the full time a removed source
+// was removed. Empty for every other state.
+func (r feedRowData) StateTitle() string {
+	if !r.Deleted || r.DeletedAt.IsZero() {
+		return ""
+	}
+	return "Removed " + r.DeletedAt.Local().Format("2 Jan 2006, 15:04")
 }
 
 // StateTone colours StateText: dim, bad or warn.

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -87,6 +88,8 @@ type sourcesData struct {
 
 	// Import is the outcome of a feeds-file import, shown above the list.
 	Import *importStatus
+	// Flash is the toast marker of a bulk or undo response.
+	Flash flashData
 }
 
 // importStatus is what a feeds-file import reports: counts and warnings, or why
@@ -193,7 +196,11 @@ type defaultsData struct {
 type exportData struct {
 	YAML      string
 	FeedCount int
-	Err       string
+	// Selected is set for an export of chosen sources rather than the whole set.
+	Selected bool
+	// Msg is a plain explanation shown in place of the file; Err is a failure.
+	Msg string
+	Err string
 }
 
 // handleSources renders the Sources overview page.
@@ -383,51 +390,87 @@ func enabledOn(own *bool, defaults config.FeedDefaults) bool {
 // handleSourceEnabled parks or unparks a feed from its row in the list, always
 // as an explicit value. The response is the row's unit; the editor stays open
 // when the request says it was (open=1), and the page asks before a dirty one
-// is replaced.
+// is replaced. A request that sets undo=1 also gets a toast with an Undo.
 func (s *Web) handleSourceEnabled(w http.ResponseWriter, r *http.Request) {
-	on := r.FormValue("enabled") == onChoice
-	id := r.PathValue("id")
-	if err := s.db.SetFeedEnabled(r.Context(), id, &on); err != nil {
-		httpFeedError(w, err)
-		return
-	}
-	s.afterFeedChange(r.Context())
-	s.writeUnit(w, r, id, unitOpts{open: r.FormValue("open") == "1", oob: true})
-}
-
-// handleSourceConfirmDelete asks before removing a feed. A dialog rather than a
-// second button beside the first: the button appeared where the pointer already
-// was, which is the one place a confirmation should never be.
-func (s *Web) handleSourceConfirmDelete(w http.ResponseWriter, r *http.Request) {
-	feed, err := s.db.FeedByID(r.Context(), r.PathValue("id"))
-	if err != nil {
-		httpFeedError(w, err)
-		return
-	}
-	s.renderFragment(w, "sourceConfirmDelete", feed)
-}
-
-// handleSourceDelete parks a feed out of sight. The row survives, so its fetch
-// history stays attached and re-seeding won't bring it back. The response is the
-// unit in its removed state, plus the closing of the confirm dialog.
-func (s *Web) handleSourceDelete(w http.ResponseWriter, r *http.Request) {
 	ctx, id := r.Context(), r.PathValue("id")
-	if err := s.db.SoftDeleteFeed(ctx, id); err != nil {
+	on := r.FormValue("enabled") == onChoice
+	var flash flashData
+	if r.FormValue("undo") == "1" {
+		feed, err := s.db.FeedByID(ctx, id)
+		if err != nil {
+			httpFeedError(w, err)
+			return
+		}
+		states, err := s.db.SetFeedsEnabled(ctx, []string{id}, on)
+		if err != nil {
+			httpFeedError(w, err)
+			return
+		}
+		op, verb := store.BulkDisable, "Disabled "
+		if on {
+			op, verb = store.BulkEnable, "Enabled "
+		}
+		flash = s.undoFlash(verb+feed.Name, op, "", states)
+	} else if err := s.db.SetFeedEnabled(ctx, id, &on); err != nil {
 		httpFeedError(w, err)
 		return
 	}
 	s.afterFeedChange(ctx)
-	s.writeUnit(w, r, id, unitOpts{oob: true, modalDone: true})
+	s.writeUnit(w, r, id, unitOpts{open: r.FormValue("open") == "1", oob: true, flash: flash})
 }
 
-func (s *Web) handleSourceRestore(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if err := s.db.RestoreFeed(r.Context(), id); err != nil {
+// handleSourceDelete parks a feed out of sight. The row survives, so its fetch
+// history stays attached and re-seeding won't bring it back. There is no
+// confirmation: the response is the unit in its removed state and a toast whose
+// Undo restores it.
+func (s *Web) handleSourceDelete(w http.ResponseWriter, r *http.Request) {
+	ctx, id := r.Context(), r.PathValue("id")
+	feed, err := s.db.FeedByID(ctx, id)
+	if err != nil {
 		httpFeedError(w, err)
 		return
 	}
-	s.afterFeedChange(r.Context())
-	s.writeUnit(w, r, id, unitOpts{oob: true})
+	states, err := s.db.SoftDeleteFeeds(ctx, []string{id})
+	if err != nil {
+		httpFeedError(w, err)
+		return
+	}
+	s.afterFeedChange(ctx)
+	s.writeUnit(w, r, id, unitOpts{oob: true, flash: s.undoFlash("Removed "+feed.Name, store.BulkRemove, "", states)})
+}
+
+// handleSourceRestore brings a removed feed back and offers to remove it again.
+func (s *Web) handleSourceRestore(w http.ResponseWriter, r *http.Request) {
+	ctx, id := r.Context(), r.PathValue("id")
+	feed, err := s.db.FeedByID(ctx, id)
+	if err != nil {
+		httpFeedError(w, err)
+		return
+	}
+	states, err := s.db.RestoreFeeds(ctx, []string{id})
+	if err != nil {
+		httpFeedError(w, err)
+		return
+	}
+	s.afterFeedChange(ctx)
+	s.writeUnit(w, r, id, unitOpts{oob: true, flash: s.undoFlash("Restored "+feed.Name, store.BulkRestore, "", states)})
+}
+
+// undoFlash records a change in the undo log and returns its toast. A change
+// that touched no row has nothing to undo, so it gets no toast.
+func (s *Web) undoFlash(msg string, op store.BulkOp, tag string, states []store.FeedState) flashData {
+	if len(states) == 0 {
+		return flashData{}
+	}
+	ids := make([]string, len(states))
+	for i, st := range states {
+		ids[i] = st.ID
+	}
+	return flashData{
+		Msg:  msg,
+		Undo: s.undo.put(undoEntry{op: op, tag: tag, states: states}, s.clock()),
+		IDs:  strings.Join(ids, ","),
+	}
 }
 
 func (s *Web) handleSourceDefaults(w http.ResponseWriter, r *http.Request) {
@@ -523,7 +566,9 @@ func (s *Web) handleSourceImport(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSourceExport renders the live set as a seed file: the same YAML shape
-// feeds.yaml uses, so it can be copied straight back out to one.
+// feeds.yaml uses, so it can be copied straight back out to one. With ids it
+// renders just those sources and leaves the defaults out, since the file is a
+// share and whoever imports it has defaults of their own.
 func (s *Web) handleSourceExport(w http.ResponseWriter, r *http.Request) {
 	var data exportData
 	doc, err := s.db.FeedsDoc(r.Context())
@@ -531,6 +576,22 @@ func (s *Web) handleSourceExport(w http.ResponseWriter, r *http.Request) {
 		data.Err = err.Error()
 		s.renderFragment(w, "sourceExport", data)
 		return
+	}
+	if r.URL.Query().Has("ids") {
+		ids, ok := parseBulkIDs(r.URL.Query().Get("ids"))
+		if !ok {
+			http.Error(w, bulkTooManyCopy, http.StatusBadRequest)
+			return
+		}
+		data.Selected = true
+		doc = config.FeedsDoc{Feeds: slices.DeleteFunc(doc.Feeds, func(f config.Feed) bool {
+			return !slices.Contains(ids, f.ID)
+		})}
+		if len(doc.Feeds) == 0 {
+			data.Msg = "None of the selected sources exist any more."
+			s.renderFragment(w, "sourceExport", data)
+			return
+		}
 	}
 	raw, err := config.MarshalFeeds(doc)
 	if err != nil {
@@ -540,6 +601,40 @@ func (s *Web) handleSourceExport(w http.ResponseWriter, r *http.Request) {
 	}
 	data.YAML, data.FeedCount = raw, len(doc.Feeds)
 	s.renderFragment(w, "sourceExport", data)
+}
+
+// navBadge is the Manage link's failing count, out of band. It reads only the
+// feeds and their history, which is all the count needs, and is nil when they
+// cannot be read.
+func (s *Web) navBadge(ctx context.Context) *sourceCounts {
+	failing, err := s.failingCount(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("read nav badge")
+		return nil
+	}
+	return &sourceCounts{OOB: true, Failing: failing}
+}
+
+func (s *Web) failingCount(ctx context.Context) (int, error) {
+	doc, err := s.db.FeedsDoc(ctx)
+	if err != nil {
+		return 0, err
+	}
+	resolved, err := config.ResolveFeeds(doc)
+	if err != nil {
+		return 0, err
+	}
+	health, err := s.db.FeedHealthByID(ctx, feedStripLen)
+	if err != nil {
+		return 0, err
+	}
+	now, n := s.clock(), 0
+	for _, f := range resolved {
+		if toFeedRow(f, health[f.ID], now).State == feedStateError {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // sourcesData assembles the Sources page model: the resolved feed set joined with each feed's
@@ -554,7 +649,7 @@ func (s *Web) sourcesData(ctx context.Context, selected string, withStats bool) 
 	if err != nil {
 		return sourcesData{}, err
 	}
-	deleted, err := s.db.DeletedFeeds(ctx)
+	deleted, removedAt, err := s.db.DeletedFeedsAt(ctx)
 	if err != nil {
 		return sourcesData{}, err
 	}
@@ -603,7 +698,11 @@ func (s *Web) sourcesData(ctx context.Context, selected string, withStats bool) 
 			return sourcesData{}, err
 		}
 		for _, f := range gone {
-			data.Rows = append(data.Rows, removedRow(f, health[f.ID], now))
+			row := removedRow(f, health[f.ID], now)
+			if at, ok := removedAt[f.ID]; ok {
+				row.DeletedAt, row.DeletedAgo = at, agoPhrase(at, now)
+			}
+			data.Rows = append(data.Rows, row)
 		}
 	}
 
@@ -634,8 +733,28 @@ func (s *Web) sourcesData(ctx context.Context, selected string, withStats bool) 
 			}
 		}
 	}
+	own := ownTagsByID(doc.Feeds, deleted)
+	for i := range data.Rows {
+		data.Rows[i].OwnTagsAttr = strings.Join(own[data.Rows[i].ID], ",")
+	}
 	data.stampAll()
 	return data, nil
+}
+
+// ownTagsByID maps each source to the tags it sets itself, which the merged
+// list on its row does not tell apart from the defaults'.
+func ownTagsByID(lists ...[]config.Feed) map[string][]string {
+	out := make(map[string][]string)
+	for _, feeds := range lists {
+		for _, f := range feeds {
+			id := f.ID
+			if id == "" {
+				id = config.FeedID(f.URL)
+			}
+			out[id] = f.Tags
+		}
+	}
+	return out
 }
 
 // stamp copies the page's blank-field fallbacks onto an editor, wherever it
@@ -816,8 +935,8 @@ type unitOpts struct {
 	// oob adds the out-of-band updates a mutation owes the page: summary,
 	// filter counts, nav badge and attention block.
 	oob bool
-	// modalDone also closes the confirm dialog the request came from.
-	modalDone bool
+	// flash is the toast marker sent after the unit, when it has a message.
+	flash flashData
 }
 
 // writeUnit answers with one source's list unit: its row, and its editor when
@@ -858,16 +977,14 @@ func (s *Web) writeUnit(w http.ResponseWriter, r *http.Request, id string, o uni
 		w.Header().Set(feedCountHeader, strconv.Itoa(data.Counts.Total))
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if o.modalDone {
-		if _, err := w.Write(
-			[]byte(`<span id="sourcesDeleteDone" hx-swap-oob="innerHTML:#modalTop"></span>`),
-		); err != nil {
-			log.Error().Err(err).Msg("write delete response")
-			return
-		}
-	}
 	if err := feedTmpl.ExecuteTemplate(w, "sourceUnit", data); err != nil {
 		log.Error().Err(err).Msg("render source unit")
+		return
+	}
+	if o.flash.Msg != "" {
+		if err := feedTmpl.ExecuteTemplate(w, "sourceFlash", o.flash); err != nil {
+			log.Error().Err(err).Msg("render source flash")
+		}
 	}
 }
 

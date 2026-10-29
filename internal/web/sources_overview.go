@@ -143,6 +143,15 @@ type ovSignal struct {
 	Rows   []ovSigRow
 }
 
+// NoisySelect is the noisy callout's sources as the ids of Manage's ?select=.
+func (s ovSignal) NoisySelect() string {
+	ids := make([]string, len(s.Noisy))
+	for i, c := range s.Noisy {
+		ids[i] = c.ID
+	}
+	return strings.Join(ids, ",")
+}
+
 // ovSigRow is one source in the signal list. Thin rows lack the scored items
 // for the share to mean anything.
 type ovSigRow struct {

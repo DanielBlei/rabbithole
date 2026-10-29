@@ -6,20 +6,22 @@
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__frame" role="dialog" aria-modal="true" aria-label="Export feeds">
     <div class="modal__bar">
-      <span class="modal__title">export &mdash; <span class="modal__path">{{.FeedCount}} feed{{if ne .FeedCount 1}}s{{end}}</span></span>
+      <span class="modal__title">{{if .Selected}}Export {{.FeedCount}} selected source{{if ne .FeedCount 1}}s{{end}}{{else}}export &mdash; <span class="modal__path">{{.FeedCount}} feed{{if ne .FeedCount 1}}s{{end}}</span>{{end}}</span>
       <span class="modal__acts">
         <button class="src__copy" type="button" data-copy="#srcExportYaml">copy</button>
         <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
       </span>
     </div>
 
-    {{if .Err}}
+    {{if .Msg}}
+      <div class="modal__error">{{.Msg}}</div>
+    {{else if .Err}}
       <div class="modal__error">could not render the feed set: {{.Err}}</div>
     {{else}}
       <pre class="yml"><code id="srcExportYaml">{{.YAML}}</code></pre>
     {{end}}
 
-    <div class="modal__foot">save this as a file to reproduce the set on a fresh install, then import it from the Sources page</div>
+    <div class="modal__foot">{{if .Selected}}Save this as sources.yaml to import these sources somewhere else. Default tags and settings are left out.{{else}}save this as a file to reproduce the set on a fresh install, then import it from the Sources page{{end}}</div>
   </div>
 </div>
 {{end}}

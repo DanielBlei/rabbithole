@@ -151,6 +151,7 @@
             <span class="ov-call__k">Best signal</span>
             <div class="ov-call__who">{{template "favicon" (monogram .Name .URL 20)}}{{template "ovName" .}}</div>
             <p class="sh-hint">{{.Hint}}</p>
+            <a class="clk-btn clk-btn--link ov-call__go" href="/sources/manage?select={{.ID}}">Review in Manage</a>
           </div>
           {{- end}}
           {{- if .Overview.Signal.Noisy}}
@@ -162,6 +163,7 @@
               <p class="sh-hint">{{.Hint}}</p>
             </div>
             {{- end}}
+            <a class="clk-btn clk-btn--link ov-call__go" href="/sources/manage?select={{.Overview.Signal.NoisySelect}}">Review in Manage</a>
           </div>
           {{- end}}
         </div>

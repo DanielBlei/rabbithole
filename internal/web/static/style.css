@@ -1774,7 +1774,6 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 .modal__frame--ask{width:min(440px,92vw);}
 .ask{padding:18px 20px 16px;display:flex;flex-direction:column;gap:10px;}
 .ask__lead{margin:0;font-size:1.45rem;color:var(--title);}
-.ask__name{color:var(--accent);}
 .ask__sub{margin:0;font-size:1.2rem;line-height:1.6;color:var(--text-dim);}
 .ask__sub em{color:var(--text);font-style:normal;}
 
@@ -2051,8 +2050,6 @@ button.modal__act{border:0;font:inherit;}
 .sdet__btn:hover{background:var(--fill-hover);color:var(--text);}
 .sdet__btn--go{background:var(--tint);color:var(--accent);}
 .sdet__btn--go:hover{background:var(--tint);color:var(--accent);filter:brightness(1.25);}
-.sdet__btn--del{color:var(--warn);}
-.sdet__btn--del:hover{background:rgba(255,83,112,.14);color:var(--warn);}
 
 /* The same form inside a modal: it scrolls on its own so the title bar stays. */
 .sdet--defaults{min-height:0;overflow-y:auto;}
@@ -2218,14 +2215,16 @@ summary.sh-nav__h:focus-visible{outline:1px solid var(--accent);outline-offset:1
 /* list: a table when wide, two-line rows when narrow (driven by the list's own width) */
 .mg-listwrap{container-type:inline-size;}
 .mg-hrow,.mg-row{display:grid;align-items:center;gap:4px 12px;min-width:0;padding:0 14px 0 12px;
-  grid-template-columns:minmax(170px,1fr) 132px 104px 116px 96px 62px 58px;}
+  grid-template-columns:28px minmax(170px,1fr) 132px 104px 116px 96px 62px 58px;}
 .mg-meta{display:contents;}
+.mg-th-narrow{display:none;}
 .mg-hrow{min-height:34px;border-bottom:1px solid var(--hairline-strong);font-size:1.05rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);}
-.mg-item{position:relative;scroll-margin-top:calc(var(--topbar-h) + 16px);box-shadow:0 -1px 0 var(--hairline);}
+.mg-item{position:relative;scroll-margin-top:calc(var(--topbar-h) + 16px + var(--mg-bulk-h,0px));box-shadow:0 -1px 0 var(--hairline);}
 .mg-item:first-child,.mg-hrow+.mg-item{box-shadow:none;}
 .mg-row{position:relative;min-height:54px;padding-top:7px;padding-bottom:7px;transition:background .14s var(--ease);}
 .mg-row:hover{background:var(--fill);}
 .mg-row.is-open{background:var(--fill);}
+.mg-row.is-sel{background:var(--tint);}
 .mg-row.is-failing::before,.mg-row.is-flaky::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:2px;border-radius:0 2px 2px 0;background:var(--warn);}
 .mg-row.is-flaky::before{background:var(--caution);}
 .mg-c{display:flex;align-items:center;gap:8px;min-width:0;}
@@ -2252,13 +2251,20 @@ summary.sh-nav__h:focus-visible{outline:1px solid var(--accent);outline-offset:1
 .mg-tagrow{display:flex;align-items:center;gap:6px;min-width:0;}
 .mg-c--tog{justify-content:flex-start;}
 .mg-c--act{justify-content:flex-end;}
+.mg-c--chk{justify-content:center;}
+.mg-c--chk .stp-check{width:28px;height:28px;min-height:0;padding:0;justify-content:center;background:none;}
+.mg-c--chk .stp-check:hover{background:none;}
 .src-page .mg-edit{padding:0 14px;}
-/* The wide table needs 836px: seven tracks (738px), six 12px gaps and the row's
-   12px and 14px padding. Up to 835px of list width each row becomes two lines. */
-@container (max-width:835px){
-  .mg-hrow{display:none;}
-  .mg-row{grid-template-columns:minmax(0,1fr) auto auto;grid-template-areas:"src tog act" "health health health" "meta meta meta";
+/* The wide table needs 876px: eight tracks (766px), seven 12px gaps and the
+   row's 12px and 14px padding. Up to 875px of list width each row becomes two
+   lines and the header shrinks to the select-all tick. */
+@container (max-width:875px){
+  .mg-hrow{grid-template-columns:28px minmax(0,1fr);grid-template-areas:"chk src";padding:0 10px 0 12px;}
+  .mg-hrow>:is(.mg-c--health,.mg-c--tog,.mg-c--act),.mg-hrow .mg-meta,.mg-th-wide{display:none;}
+  .mg-th-narrow{display:inline-flex;align-items:center;min-height:34px;font-size:1.2rem;letter-spacing:0;text-transform:none;cursor:pointer;}
+  .mg-row{grid-template-columns:28px minmax(0,1fr) auto auto;grid-template-areas:"chk src tog act" ". health health health" ". meta meta meta";
     row-gap:6px;padding:9px 10px 10px 12px;}
+  .mg-c--chk{grid-area:chk;}
   .mg-c--src{grid-area:src;}
   .mg-c--tog{grid-area:tog;}
   .mg-c--act{grid-area:act;}
@@ -2268,6 +2274,29 @@ summary.sh-nav__h:focus-visible{outline:1px solid var(--accent);outline-offset:1
   .mg-meta .mg-c--tags{overflow:visible;max-width:100%;}
   .mg-vol,.mg-sig{flex-direction:row;align-items:center;gap:8px;}
   .mg-k{display:block;font-size:1rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);}
+}
+
+/* bulk bar: sticks under the topbar while rows are ticked; the script sets
+   --mg-bulk-h so a scrolled-to row lands below it. No backdrop blur: it would
+   make the Remove tag menu position against the bar. */
+.mg-bulk{position:sticky;top:calc(var(--topbar-h) + 8px);z-index:12;display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  padding:8px 12px;border-radius:var(--r-md);background:var(--card);border:1px solid var(--hairline-strong);
+  box-shadow:var(--card-shadow),0 10px 24px rgba(0,0,0,.28);}
+.mg-bulk[hidden],.mg-bulk [hidden]{display:none;}
+.mg-bulk__g{display:contents;}
+.mg-bulk__n{margin-right:4px;font-size:1.3rem;font-weight:500;color:var(--accent);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.mg-bulk__tag{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.mg-bulk__in{width:150px;}
+.mg-bulk__rm{display:inline-flex;}
+.mg-bulk .stp-menu{width:auto;}
+@media (max-width:520px){
+  .mg-th-narrow{min-height:44px;}
+  .mg-c--chk .stp-check::after,.mg-hrow .stp-check::after{content:"";position:absolute;inset:-8px -16px -8px 0;}
+  .mg-bulk{flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;padding:6px 10px;}
+  .mg-bulk::-webkit-scrollbar{display:none;}
+  .mg-bulk>*,.mg-bulk__g>*,.mg-bulk__tag>*{flex:none;}
+  .mg-bulk__tag{flex-wrap:nowrap;}
+  .mg-bulk .clk-btn,.mg-bulk .clk-btn.clk-btn--link,.mg-bulk .stp-in,.mg-bulk .stp-menu__btn{height:44px;}
 }
 
 /* fetch history strip: one tick per attempt, oldest left */
@@ -2621,6 +2650,7 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
 .ov-call__item+.ov-call__item{margin-top:2px;}
 .ov-call__who{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%;}
 .ov-call p{margin:0;font-size:1.2rem;}
+.ov-call__go{margin-top:auto;margin-left:-8px;}
 :root[data-theme="minimal"] .ov-call{background:none;box-shadow:inset 0 0 0 1px var(--hairline-strong);}
 
 /* Tier bar: high, mid, low, unscored */
@@ -3662,6 +3692,27 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
 .toast__x:hover{color:var(--accent);}
 .toast__x:focus-visible{outline:1px solid var(--accent);outline-offset:2px;border-radius:4px;}
 @media (prefers-reduced-motion: reduce){ .toast{transition:none;} }
+.toast--ok{border-left-color:var(--accent);}
+.toast__act{
+  position:relative;flex:none;font-family:inherit;cursor:pointer;
+  height:24px;padding:0 8px;border:0;border-radius:6px;
+  background:none;color:var(--accent);font-size:1.25rem;line-height:1;
+  transition:background .15s ease;
+}
+.toast__act:hover{background:var(--tint);}
+.toast__act:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
+@media (max-width: 520px){
+  .toast__act::after{content:"";position:absolute;inset:-10px -4px;}
+  .toast__x{position:relative;min-width:20px;height:16px;}
+  .toast__x::after{content:"";position:absolute;inset:-14px -12px;}
+}
+:root[data-theme="minimal"] .toast{
+  background:var(--bg-2);
+  border-top-color:transparent;border-right-color:transparent;border-bottom-color:transparent;
+  -webkit-backdrop-filter:none;backdrop-filter:none;
+  box-shadow:inset 0 0 0 1px var(--hairline-strong);
+}
+:root[data-theme="minimal"] .toast--ok{border-left-color:var(--accent);}
 
 /* ══════════════ layout layer (settings → Theme) ═════════════════════════════
    The chrome layout, picked in Settings → Theme and reflected by theme.js as
@@ -4025,7 +4076,8 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
 :root[data-theme="minimal"] .mg-hist__r{box-shadow:0 -1px 0 var(--hairline-strong);}
 :root[data-theme="minimal"] .mg-hist__r:first-child{box-shadow:none;}
 :root[data-theme="minimal"] .plan__list,:root[data-theme="minimal"] .plan__row{border-color:var(--hairline-strong);}
-:root[data-theme="minimal"] .plan .stp-check{background:none;}
+:root[data-theme="minimal"] .plan .stp-check,:root[data-theme="minimal"] .mg-c--chk .stp-check{background:none;}
+:root[data-theme="minimal"] .mg-bulk{background:var(--bg-2);border-color:transparent;box-shadow:inset 0 0 0 1px var(--hairline-strong);}
 /* The Library: hairlines where Default has fills. */
 :root[data-theme="minimal"] :is(.li-list,.li-row,.li-empty){border-color:var(--hairline-strong);}
 :root[data-theme="minimal"] .li .stp-check{background:none;}
@@ -4705,7 +4757,10 @@ body:has(.stp-savebar:not([hidden])) .stp-body{padding-bottom:88px;}
 .stp-menu__p{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim);font-variant-numeric:tabular-nums;}
 .stp-menu__list [role="option"][aria-selected="true"] .stp-menu__p{color:var(--accent);}
 /* Phones: a 44px hit area around the 32px button without growing it. */
-@media (max-width:520px){ .stp-menu__btn{position:relative;} .stp-menu__btn::after{content:"";position:absolute;inset:-6px 0;} }
+@media (max-width:520px){
+  .stp-menu__btn{position:relative;} .stp-menu__btn::after{content:"";position:absolute;inset:-6px 0;}
+  .stp-menu__list [role="option"]{min-height:44px;}
+}
 @media (prefers-reduced-motion:reduce){ .stp-menu__list{animation:none;} .stp-menu__btn svg{transition:none;} }
 .stp-row--wide .wx-loc{padding:0;}
 .wx-loc__line{display:flex;gap:8px;align-items:center;}

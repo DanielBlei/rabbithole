@@ -134,10 +134,10 @@
 
   <div class="mg-ed__foot">
     {{if .Adding}}<span></span>{{else}}
-    {{/* Asks in a dialog stacked over Sources, not inline under the pointer
-         that has just clicked. */}}
-    <button class="clk-btn clk-btn--danger" type="button" hx-get="/sources/feed/{{.ID}}/confirm-delete"
-            hx-target="#modalTop" hx-swap="innerHTML">Remove</button>
+    {{/* Removes at once; the toast that answers carries the Undo. The editor goes
+         with the source, so sources.js asks first when it has unsaved changes. */}}
+    <button class="clk-btn clk-btn--danger" type="button" data-src-remove hx-delete="/sources/feed/{{.ID}}"
+            hx-target="#src-{{.ID}}" hx-swap="outerHTML">Remove</button>
     {{end}}
     <span class="mg-ed__r">
       <span class="mg-ed__dirty" data-src-dirty="" aria-live="polite"></span>
@@ -152,28 +152,4 @@
     </span>
   </div>
 </form>
-{{end}}
-
-{{/* Confirming a delete. Stacked in #modalTop over Sources, so Escape drops
-     back to the feed you were looking at with nothing done. The delete is soft
-     — worth saying, because it changes what "delete" means here. */}}
-{{define "sourceConfirmDelete"}}
-<div class="modal" id="sourceDeleteModal">
-  <div class="modal__backdrop" data-modal-close></div>
-  <div class="modal__frame modal__frame--ask" role="dialog" aria-modal="true" aria-label="Delete feed">
-    <div class="modal__bar">
-      <span class="modal__title">delete feed</span>
-      <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
-    </div>
-    <div class="ask">
-      <p class="ask__lead">Delete <span class="ask__name">{{.Name}}</span>?</p>
-      <p class="ask__sub">Its history is kept and can be restored via the <em>Removed</em> filter.</p>
-      <div class="ask__foot">
-        <button class="sdet__btn" type="button" data-modal-close>cancel</button>
-        <button class="sdet__btn sdet__btn--del" type="button"
-                hx-delete="/sources/feed/{{.ID}}" hx-target="#src-{{.ID}}" hx-swap="outerHTML">delete</button>
-      </div>
-    </div>
-  </div>
-</div>
 {{end}}

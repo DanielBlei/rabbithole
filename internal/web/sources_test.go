@@ -509,36 +509,24 @@ func TestSourcesSaveAnswersWithTheUnit(t *testing.T) {
 	}
 }
 
-// Deleting asks first, in a dialog stacked over Sources rather than a second
-// button under the pointer that just clicked the first one.
-func TestSourcesDeleteAsksBeforeItActs(t *testing.T) {
+// Deleting acts at once and answers with the unit in its removed state plus a
+// toast marker whose token undoes it. There is no confirmation to open.
+func TestSourcesDeleteIsImmediateAndUndoable(t *testing.T) {
 	w, db := sourcesTestWeb(t, config.FeedsDoc{
 		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
 	})
 	id := feedID(t, db, "Alpha")
 
-	ask := get(t, w, "/sources/feed/"+id+"/confirm-delete")
-	if !strings.Contains(ask, `class="modal"`) || !strings.Contains(ask, "Alpha") {
-		t.Errorf("no dialog naming the feed; body=%s", ask)
-	}
-	if !strings.Contains(ask, `hx-delete="/sources/feed/`+id+`"`) {
-		t.Errorf("the dialog does not carry the delete; body=%s", ask)
-	}
-	// Asking must not act.
-	if len(mustFeeds(t, db)) != 1 {
-		t.Fatal("opening the confirmation deleted the feed")
-	}
-
 	rec := httptest.NewRecorder()
-	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/sources/feed/"+id, nil))
-	body := rec.Body.String()
-
-	if !strings.Contains(body, `hx-swap-oob="innerHTML:#modalTop"`) {
-		t.Errorf("the confirmation dialog was left open; body=%s", body)
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/sources/feed/"+id+"/confirm-delete", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("the confirm route answers %d, want it gone", rec.Code)
 	}
-	wantAttrs(t, "delete button", tagWith(t, ask, "hx-delete", "/sources/feed/"+id), map[string]string{
-		"hx-target": "#src-" + id, "hx-swap": "outerHTML",
-	})
+
+	body := deleteSource(t, w, id)
+	if len(mustFeeds(t, db)) != 0 {
+		t.Fatal("the delete did not remove the feed")
+	}
 	// The answer is that source's unit in its removed state, not the whole list.
 	if !strings.Contains(body, `<div class="mg-item" id="src-`+id+`"`) || !strings.Contains(body, `data-removed="1"`) {
 		t.Errorf("no removed unit; body=%s", body)
@@ -548,6 +536,15 @@ func TestSourcesDeleteAsksBeforeItActs(t *testing.T) {
 	}
 	if !strings.Contains(body, `Removed <i class="mg-n">1</i>`) {
 		t.Errorf("the pill counts did not follow the delete; body=%s", body)
+	}
+	token := flashToken(t, body, "Removed Alpha")
+
+	undo := postForm(t, w, "/sources/undo/"+token, nil)
+	if len(mustFeeds(t, db)) != 1 {
+		t.Fatalf("undo did not restore the feed; body=%s", undo)
+	}
+	if !strings.Contains(undo, `aria-label="Fetch Alpha"`) || strings.Contains(undo, `data-msg=`) {
+		t.Errorf("undo did not send the live row without a toast; body=%s", undo)
 	}
 }
 
@@ -1420,10 +1417,10 @@ func TestSourcesAttentionCardsFailingSources(t *testing.T) {
 	})
 	wantAttrs(t, "Disable", tagWith(t, out, "aria-label", "Disable Broken"), map[string]string{
 		"hx-post": "/sources/feed/" + id + "/enabled", "hx-target": "#src-" + id, "hx-swap": "outerHTML",
-		"hx-vals": `{"enabled":"off"}`,
+		"hx-vals": `{"enabled":"off","undo":"1"}`,
 	})
 	wantAttrs(t, "Remove", tagWith(t, out, "aria-label", "Remove Broken"), map[string]string{
-		"hx-get": "/sources/feed/" + id + "/confirm-delete", "hx-target": "#modalTop", "hx-swap": "innerHTML",
+		"hx-delete": "/sources/feed/" + id, "hx-target": "#src-" + id, "hx-swap": "outerHTML",
 	})
 	if strings.Contains(out, "Nothing failing") {
 		t.Error("the all-clear line is shown beside a failing source")

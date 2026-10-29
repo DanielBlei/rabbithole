@@ -5,6 +5,8 @@
      Library. The Library has nothing to refresh on an ingestion run. */}}
 {{define "content"}}
 <div class="src-page">
+  {{/* Where a response's toast marker lands (static/js/net.js reads it). */}}
+  <div id="srcFlash" hidden></div>
   {{template "sourcesNav" .}}
   <div class="src-page__main">
     {{/* An ingestion run starting or ending anywhere on the page (static/js/ingest.js

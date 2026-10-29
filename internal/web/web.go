@@ -96,6 +96,7 @@ type Web struct {
 	// now is the clock the Sources page reads; nil is time.Now.
 	now      func() time.Time
 	srcStats statsCache // per-source volume and signal, shared by every Sources response
+	undo     undoLog    // recent Manage changes their Undo toast can reverse
 
 	sessions *sessionStore // logged-in browsers, in memory: a restart logs everyone out
 	limiter  *loginLimiter
@@ -201,6 +202,8 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /sources/library/restore", s.handleLibraryRestore)
 	mux.HandleFunc("POST /sources/library/refresh", s.handleLibraryRefresh)
 	mux.HandleFunc("POST /sources", s.handleSourceAdd)
+	mux.HandleFunc("POST /sources/bulk", s.handleSourcesBulk)
+	mux.HandleFunc("POST /sources/undo/{token}", s.handleSourcesUndo)
 	mux.HandleFunc("POST /sources/import", s.handleSourceImport)
 	mux.HandleFunc("POST /sources/import/preview", s.handleSourceImportPreview)
 	mux.HandleFunc("POST /sources/import/apply", s.handleSourceImportApply)
@@ -208,7 +211,6 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /sources/feed/{id}", s.handleSourceSave)
 	mux.HandleFunc("POST /sources/feed/{id}/enabled", s.handleSourceEnabled)
 	mux.HandleFunc("POST /sources/feed/{id}/restore", s.handleSourceRestore)
-	mux.HandleFunc("GET /sources/feed/{id}/confirm-delete", s.handleSourceConfirmDelete)
 	mux.HandleFunc("DELETE /sources/feed/{id}", s.handleSourceDelete)
 	mux.HandleFunc("GET /ingest", s.handleIngest)
 	mux.HandleFunc("GET /ingest/status", s.handleIngestStatus)

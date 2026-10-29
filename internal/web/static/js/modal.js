@@ -1,6 +1,6 @@
 // The modal layers, bottom to top: the first-run welcome, then #modal for the
 // base htmx dialog, then #modalTop for one stacked over it (the Sources page
-// opens defaults, export and confirm-delete there). This owns dismissal, the
+// opens defaults and export there). This owns dismissal, the
 // page scroll lock, and keeping focus inside the topmost open frame.
 //
 // The two htmx layers are containers htmx swaps a fragment into, so they are

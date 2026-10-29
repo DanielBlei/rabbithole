@@ -40,6 +40,29 @@
     <div class="mg-filterwrap">{{template "sourceFilters" .Counts}}</div>
   </div>
 
+  {{/* Acts on the ticked rows. static/js/sources.js shows it with a tick, picks
+       the group for the filter, and adds the ids to each request. */}}
+  <div class="mg-bulk" role="toolbar" aria-label="Bulk actions" data-src-bulk hidden>
+    <span class="mg-bulk__n" data-src-bulk-n aria-live="polite"></span>
+    <span class="mg-bulk__g" data-src-bulk-live>
+      <button class="clk-btn" type="button" data-src-bulk-act hx-post="/sources/bulk" hx-swap="none" hx-vals='{"action":"enable"}'>Enable</button>
+      <button class="clk-btn" type="button" data-src-bulk-act hx-post="/sources/bulk" hx-swap="none" hx-vals='{"action":"disable"}'>Disable</button>
+      <button class="clk-btn" type="button" data-src-bulk-tag>Add tag</button>
+      <span class="mg-bulk__tag" data-src-bulk-tagbox hidden>
+        <input class="stp-in mg-bulk__in" type="text" placeholder="Tag name" aria-label="Tag to add" autocomplete="off" spellcheck="false" data-src-bulk-tagin>
+        <button class="clk-btn clk-btn--go" type="button" data-src-bulk-act hx-post="/sources/bulk" hx-swap="none" hx-vals='{"action":"addtag"}'>Add</button>
+        <button class="clk-btn clk-btn--link" type="button" data-src-bulk-tagx>Cancel</button>
+      </span>
+      <span class="mg-bulk__rm" data-src-bulk-rm></span>
+      <button class="clk-btn clk-btn--danger" type="button" data-src-bulk-act hx-post="/sources/bulk" hx-swap="none" hx-vals='{"action":"remove"}'>Remove</button>
+      <button class="clk-btn" type="button" data-src-bulk-export hx-get="/sources/export" hx-target="#modalTop" hx-swap="innerHTML">Export selected</button>
+    </span>
+    <span class="mg-bulk__g" data-src-bulk-removed hidden>
+      <button class="clk-btn" type="button" data-src-bulk-act hx-post="/sources/bulk" hx-swap="none" hx-vals='{"action":"restore"}'>Restore</button>
+    </span>
+    <button class="clk-btn clk-btn--link" type="button" data-src-bulk-clear>Clear</button>
+  </div>
+
   {{template "sourcesBody" .}}
 </section>
 <div class="src-page__foot">defaults: {{.Defaults}}</div>
@@ -100,9 +123,9 @@
                       data-src-reveal="{{.ID}}" data-src-focus="url">Edit URL</button>
               <button class="clk-btn" type="button" aria-label="Disable {{.Name}}"
                       hx-post="/sources/feed/{{.ID}}/enabled" hx-target="#src-{{.ID}}" hx-swap="outerHTML"
-                      hx-vals='{"enabled":"off"}'>Disable</button>
+                      hx-vals='{"enabled":"off","undo":"1"}'>Disable</button>
               <button class="clk-btn clk-btn--danger" type="button" aria-label="Remove {{.Name}}"
-                      hx-get="/sources/feed/{{.ID}}/confirm-delete" hx-target="#modalTop" hx-swap="innerHTML">Remove</button>
+                      hx-delete="/sources/feed/{{.ID}}" hx-target="#src-{{.ID}}" hx-swap="outerHTML">Remove</button>
             </div>
           </article>
           {{end}}
@@ -141,7 +164,8 @@
     {{if .Rows}}
     <div class="mg-table" data-src-list>
       <div class="mg-hrow">
-        <span class="mg-c mg-c--src">Source</span>
+        <span class="mg-c mg-c--chk"><label class="stp-check"><input type="checkbox" id="pick-all" aria-label="Select all listed sources" data-src-all><span class="stp-check__box" aria-hidden="true"></span></label></span>
+        <span class="mg-c mg-c--src"><span class="mg-th-wide">Source</span><label class="mg-th-narrow" for="pick-all">Select all</label></span>
         <span class="mg-c mg-c--health">Fetching</span>
         <div class="mg-meta">
           <span class="mg-c mg-c--tags">Tags</span>

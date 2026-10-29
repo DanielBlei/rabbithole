@@ -372,8 +372,14 @@ func TestOverviewRendersSections(t *testing.T) {
 			t.Errorf("missing %q", want)
 		}
 	}
-	if strings.Contains(out, "Review in Manage") {
-		t.Error("the callouts have a Review in Manage button")
+	for _, name := range []string{"Alpha", "Beta"} {
+		href := `href="/sources/manage?select=` + feedID(t, db, name) + `">Review in Manage</a>`
+		if !strings.Contains(out, href) {
+			t.Errorf("no Review in Manage link for %s; want %s", name, href)
+		}
+	}
+	if n := strings.Count(out, ">Review in Manage</a>"); n != 2 {
+		t.Errorf("%d Review in Manage links, want one per callout", n)
 	}
 
 	order := []string{

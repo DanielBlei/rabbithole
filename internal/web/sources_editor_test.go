@@ -59,8 +59,8 @@ func TestSourcesEditorOpensInsideItsUnit(t *testing.T) {
 			t.Errorf("missing %q; body=%s", want, out)
 		}
 	}
-	wantAttrs(t, "remove", tagWith(t, out, "hx-get", "/sources/feed/"+id+"/confirm-delete"), map[string]string{
-		"hx-target": "#modalTop", "hx-swap": "innerHTML", "type": "button",
+	wantAttrs(t, "remove", tagWith(t, out, "hx-delete", "/sources/feed/"+id), map[string]string{
+		"hx-target": "#src-" + id, "hx-swap": "outerHTML", "type": "button", "data-src-remove": present,
 	})
 	// One unit, not the page, and no pane beside the list.
 	for _, bad := range []string{`id="srcBody"`, `id="src-` + feedID(t, db, "Beta") + `"`, "src__cols--detail", "srcDetail"} {
@@ -358,7 +358,7 @@ func TestSourcesEditorHintsFollowTheOrigin(t *testing.T) {
 	}
 }
 
-// The delete answers with the unit in its removed state and closes the dialog;
+// The delete answers with the unit in its removed state and a toast marker;
 // restoring answers with the live unit. Neither repaints the list.
 func TestSourcesRemoveAndRestoreAnswerWithTheUnit(t *testing.T) {
 	w, db := sourcesTestWeb(t, config.FeedsDoc{Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}}})
@@ -366,7 +366,7 @@ func TestSourcesRemoveAndRestoreAnswerWithTheUnit(t *testing.T) {
 
 	removed := deleteSource(t, w, id)
 	for _, want := range []string{
-		`<span id="sourcesDeleteDone" hx-swap-oob="innerHTML:#modalTop"></span>`,
+		`id="srcFlash" hx-swap-oob="true" data-msg="Removed Alpha" data-undo="`,
 		`<div class="mg-item" id="src-` + id + `"`,
 		`mg-row is-removed`,
 		`aria-label="Restore Alpha"`,
