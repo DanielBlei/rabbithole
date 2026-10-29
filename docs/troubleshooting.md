@@ -166,3 +166,35 @@ forwards the public name (`Host: rabbit.example.com`) is refused for the same re
 needs `--tls-cert` and `--tls-key`, or `--insecure-http` when a TLS proxy sits in front (see
 [auth.md](auth.md)). Cross-origin POSTs are refused as well, so the page and its
 requests must use the same public name.
+
+## A feed on my network or in Docker stopped fetching
+
+**What you see.** A feed on your own network fails on the Sources page with "This address is on a
+private network. Set RABBITHOLE_ALLOW_PRIVATE_FETCH=1 to allow private addresses."
+
+**Why.** Feeds on private addresses are refused by default. That covers
+`localhost` and `127.0.0.1`, LAN ranges such as `192.168.x.x` and `10.x.x.x`, Docker networks such
+as `172.16.x.x` to `172.31.x.x`, and Tailscale addresses (`100.64.x.x`). Typical cases are a
+self-hosted blog on your network, or RSS-Bridge, RSSHub or FreshRSS running in Docker next to
+Rabbit Hole.
+
+**What to do.**
+
+1. Allow private addresses. Add this line to `./.env`:
+
+   ```
+   RABBITHOLE_ALLOW_PRIVATE_FETCH=1
+   ```
+
+   In a container, add it to the `environment:` list instead:
+
+   ```yaml
+   environment:
+     RABBITHOLE_ALLOW_PRIVATE_FETCH: "1"
+   ```
+
+2. Restart `rabbithole serve`. A running server keeps the environment it started with.
+3. The next run fetches those feeds.
+
+Link-local addresses, including cloud metadata (`169.254.x.x`), stay blocked, and so does a public
+feed that redirects into your network. See [Fetching feeds](configuration.md#fetching-feeds).

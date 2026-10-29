@@ -358,7 +358,9 @@ User-Agent.
   feed. A feed over the cap fails with "The feed is larger than 16 MiB."
 - Private and loopback addresses are refused, so a feed on your LAN or `localhost` fails with a
   note naming `RABBITHOLE_ALLOW_PRIVATE_FETCH`. Set it to `1` (in `./.env` or the environment) to
-  fetch those feeds. Link-local addresses, cloud metadata included, stay blocked.
+  fetch those feeds. Typical cases are a self-hosted blog on your network and RSS-Bridge, RSSHub or
+  FreshRSS running in Docker next to Rabbit Hole. Link-local addresses, cloud metadata included,
+  stay blocked. See [the troubleshooting entry](troubleshooting.md#a-feed-on-my-network-or-in-docker-stopped-fetching).
 - A redirect from a public address into a private one is blocked even with
   `RABBITHOLE_ALLOW_PRIVATE_FETCH=1`; a feed that starts on your LAN may redirect within it. The
   rule stops a feed (or an open redirect on a trusted host) from bouncing the server into the
