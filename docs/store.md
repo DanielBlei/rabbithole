@@ -4,7 +4,9 @@ Everything persists through `internal/store`, on one of two engines. A file path
 local default, kept in your per-user data folder (`~/.local/share/rabbithole/rabbithole.db` on
 Linux). A `postgres://` URL is Postgres instead, for reaching the same store from more than one
 machine. The location comes from `--db`, `RABBITHOLE_DB`, a `--config` file's `store` block, or the
-default, in that order; see [configuration](configuration.md#store-location).
+default, in that order; see [configuration](configuration.md#store-location). The `--config` flag
+is deprecated in favour of `config import`. A `store` block locates the store only for the command
+that reads the file; it is never saved, so later commands still need `--db` or `RABBITHOLE_DB`.
 
 ## One implementation, two engines
 
@@ -485,8 +487,9 @@ was never configured picks up new defaults on upgrade.
 
 Rows are never updated or deleted. A rollback copies an old row forward as a new latest version.
 The table is added to an existing database on the first start of a release that has it, with no
-schema bump, and nothing else changes. Written by the Settings page, `rabbithole config import`, `config rollback`
-and `--config`; read on every ingest run and web request, cached by version.
+schema bump, and nothing else changes. Written by the Settings page, `rabbithole config import`,
+`config rollback` and the deprecated `--config` flag; read on every ingest run and web request,
+cached by version.
 
 ## An ingest run, end to end
 

@@ -44,7 +44,7 @@ lists every setting with its default, to copy lines from.
 
 | What | Where | Changed with |
 |---|---|---|
-| Run settings: model, scoring, your name | The store | The Settings page, `config import`, or `serve --config` |
+| Run settings: model, scoring, your name | The store | The Settings page or `config import` (the deprecated `serve --config` still works) |
 | Feeds (sources) | The store | The Sources page, `sources import` |
 | Interest profiles | The store | Settings → Profiles |
 | Where the store is, the listen address, TLS | Flags and the environment | `--db` or `RABBITHOLE_DB`, `--addr`, the `--tls-*` flags |
@@ -264,9 +264,47 @@ itself be rolled back.
 
 ### The --config file
 
-If the file is your source of truth (a container, a systemd unit, a cron job), pass
-`--config <file>` to any command. The file is applied when it changes since it was last applied.
-Edits made in the app or with `config import` are kept until then. In detail:
+> **Deprecated.** `--config` still works exactly as before, but it will be removed in a future
+> release. Import the file explicitly instead:
+>
+> ```sh
+> rabbithole config import config.yaml
+> rabbithole serve
+> ```
+>
+> Those commands use the default store, which is correct when `config.yaml` has no `store:` block.
+> If it has one, the block locates the store for the import only; it is never saved. Give both
+> commands the same location with `RABBITHOLE_DB` (or `--db`), or the import and the server will
+> use different databases:
+>
+> ```sh
+> # Custom SQLite store
+> export RABBITHOLE_DB=/srv/rabbithole/rabbithole.db
+> rabbithole config import config.yaml
+> rabbithole serve
+>
+> # Postgres store
+> export RABBITHOLE_DB='postgres://rabbithole@db.example.com:5432/rabbithole'
+> export RABBITHOLE_DB_PASSWORD='...'
+> rabbithole config import config.yaml
+> rabbithole serve
+>
+> # Or pass the same --db to both commands
+> rabbithole --db /srv/rabbithole/rabbithole.db config import config.yaml
+> rabbithole --db /srv/rabbithole/rabbithole.db serve
+> ```
+>
+> For Postgres, set `RABBITHOLE_DB_PASSWORD` (or put it in `./.env`) as usual; the config import
+> never saves the password.
+>
+> This is the replacement workflow for containers, systemd units and cron jobs. Run
+> `config import` as part of setup, then start the command without `--config`. Import is
+> idempotent: an unchanged file reports `config unchanged` and saves nothing.
+
+The rest of this section describes the deprecated flag's behavior for existing setups. If the file
+is your source of truth (a container, a systemd unit, a cron job), pass `--config <file>` to any
+command. The file is applied when it changes since it was last applied. Edits made in the app or
+with `config import` are kept until then. In detail:
 
 - If the file has not changed since it was last applied, nothing happens on start.
 - When it has changed, it replaces the whole settings document. There is no per-field merge: a
@@ -289,7 +327,8 @@ WRN config version 3 (from import of ./other.yaml, saved 14:02) replaced by ./co
 
 If you edit with export and import, leave `--config` off. The `store` block of a `--config` file
 only locates the store, see [Store location](#store-location). It is never saved.
-`eval benchmark` reads `--config` without importing it.
+Keep using the same `--db` or `RABBITHOLE_DB` for every command so they all reach the same store.
+`eval benchmark` still reads `--config` without importing it; that use is deprecated too.
 
 ## Feeds
 
@@ -394,6 +433,13 @@ Supported search parameters include `q`, `query`, `search_query` and
 `open_access` and `min_citations`. Crossref-style `query.publisher-name` and
 `query.container-title` are also accepted.
 
+On Crossref, `publisher` is sent to the API as `query.publisher-name`. Returned
+works are then kept when the saved value appears, case-insensitively, anywhere
+in Crossref's publisher name after trimming and collapsing whitespace. Short
+names therefore match Crossref's long-form values: `IEEE` matches
+`Institute of Electrical and Electronics Engineers (IEEE)`, and `Springer`
+matches the `Springer Nature ...` variants.
+
 `since` and `max_items` are applied by the common ingest pipeline after provider
 results are normalized.
 
@@ -482,9 +528,9 @@ The first of these wins:
 
 1. `--db <path or url>`
 2. the `RABBITHOLE_DB` environment variable (also read from `./.env`)
-3. the `store` block of the `--config` file, if you pass one (`db_path` or `url`, never both,
-   plus `max_conns` and `conn_max_lifetime` for Postgres). It only locates the store and is never
-   saved.
+3. the `store` block of a config file passed with the deprecated `--config` flag, if you pass one
+   (`db_path` or `url`, never both, plus `max_conns` and `conn_max_lifetime` for Postgres). It
+   only locates the store and is never saved.
 4. the default
 
 `rabbithole store path` prints which store this command line would use and why, without creating
@@ -521,8 +567,9 @@ RABBITHOLE_DB_PASSWORD=...
 
 The database must already exist. rabbithole creates its tables, not the database. Postgres is never
 a fallback: if it cannot be reached, the command fails instead of quietly using a local file.
-`--db-max-conns` and `--db-conn-max-lifetime` (or the same two fields in a `--config` file's
-`store` block) tune the pool and are an error beside a SQLite path.
+`--db-max-conns` and `--db-conn-max-lifetime` (or the same two fields in the `store` block of a
+config file passed with the deprecated `--config` flag) tune the pool and are an error beside a
+SQLite path.
 
 **One process at a time.** Whichever engine you choose, only one `rabbithole serve` may point at
 a store at a time; machines take turns. On Postgres the second server is refused at startup
@@ -640,9 +687,9 @@ notes to yourself in it.
 ### Importing a profile file
 
 A v0.2.x config could name a profile file with `profile:`. rabbithole reads that file only when you
-import that config (with `--config` or `config import`), and only when the import saves a new
-version. Its text becomes a local profile, selected if none is active yet. After that the file is
-not read again, so edit the local copy under Settings → Profiles.
+import that config (with `config import`; the deprecated `--config` flag also imports it), and only
+when the import saves a new version. Its text becomes a local profile, selected if none is active
+yet. After that the file is not read again, so edit the local copy under Settings → Profiles.
 
 [`docs/examples/prompts/profile.md`](https://github.com/DanielBlei/rabbithole/blob/main/docs/examples/prompts/profile.md)
 is the built-in Default as a file, for pasting into a new profile.
@@ -677,10 +724,11 @@ inference:
 
 - **Unset** (the default): the built-in prompt is used.
 - **Your own text**: the prompt is stored with the settings and used verbatim. Choose Custom text
-  on the Settings page and write it there. In a config file you may give a path instead: `rabbithole config import` and
-  `--config` read the file once (a relative path is taken from the config file's folder), strip HTML
-  comments (`<!-- ... -->`) and store its text, so editing the file later changes nothing until you
-  import again. A file uploaded in the web UI must hold the text itself, never a path.
+  on the Settings page and write it there. In a config file you may give a path instead:
+  `rabbithole config import` reads the file once (the deprecated `--config` flag does too; a relative
+  path is taken from the config file's folder), strips HTML comments (`<!-- ... -->`) and stores its
+  text, so editing the file later changes nothing until you import again. A file uploaded in the web
+  UI must hold the text itself, never a path.
   [`docs/examples/prompts/system.md`](https://github.com/DanielBlei/rabbithole/blob/main/docs/examples/prompts/system.md) carries the
   built-in prompt's exact text as a starting point to copy from.
 - **`false`**: no system message is sent at all. Useful for a model whose own Modelfile or chat
@@ -719,21 +767,21 @@ sent.
 Earlier releases read `config.yaml` at every start. Settings now live in the store, and no file
 is read unless you name it.
 
-1. **Import your old config once.** Pass it on a start, or import it by itself:
+1. **Import your old config once.** Run the explicit import:
 
    ```sh
-   rabbithole serve --config ./rabbithole/config.yaml
-   # or
    rabbithole config import ./rabbithole/config.yaml
    ```
 
    The settings are saved as version 1. A literal `api_key` moves to `./.env` and the store keeps
    only the reference. Fields your provider does not read are dropped with a warning. A
    `ingest.feeds` or `profile` written in the file is imported once, with that import. If the file
-   also has a `store` block, it keeps locating your store.
-2. **Decide whether to keep passing `--config`.** If you do, the file is applied again whenever it
-   changes (see [The --config file](#the---config-file)). If you do not, drop it after the first import
-   and edit with `config export` and `config import`.
+   also has a `store` block, it locates your store for this import only; the block is not saved.
+   Pass `--db` or set `RABBITHOLE_DB` for later commands so they reach the same store.
+2. **Change settings with import and export.** Use `config export` and `config import` from then on.
+   The deprecated `--config` flag still re-applies a file whenever it changes (see
+   [The --config file](#the---config-file)); existing setups can keep using it until it is removed,
+   but new setups should not start.
 3. **Your data.** The store is found in this order: the per-user directory, then `./data/rabbithole.db`,
    then `./rabbithole/data/rabbithole.db`. A legacy store is still used, with a deprecation warning,
    until v0.4.0. To move it to the new default:
@@ -763,6 +811,6 @@ store locator. A Postgres user should move to `RABBITHOLE_DB` and `RABBITHOLE_DB
 - **An explicit `think: true` differs from leaving `think` out.** Both run with thinking on, but
   the stored form is hashed differently, so a file that spells out the default counts as a new
   version the first time you import it over one that omits it.
-- **One `--config` per shared store.** With Postgres shared by several instances, pass `--config`
-  on one of them, see [The --config file](#the---config-file).
+- **One `--config` per shared store.** With the deprecated flag and Postgres shared by several
+  instances, pass `--config` on one of them, see [The --config file](#the---config-file).
 

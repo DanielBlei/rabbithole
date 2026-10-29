@@ -10,8 +10,9 @@ rabbithole [global flags] <command>
 
 | Command | What it does |
 |---|---|
-| [`serve`](#serve) | Serve the web UI and the JSON API, behind the login |
 | [`ingest`](#ingest) | Fetch the feeds, score what is new, record it, and optionally write a markdown digest |
+| [`digest`](#digest) | Print a daily or weekly Markdown digest of already-scored articles |
+| [`serve`](#serve) | Serve the web UI and the JSON API, behind the login |
 | [`config`](#config) | Export, import, list and roll back the saved settings |
 | [`sources`](#sources) | Import and export the feed set |
 | [`store`](#store) | Show where the store lives |
@@ -27,20 +28,50 @@ run uses the defaults.
 | Flag | Description | Default |
 |---|---|---|
 | `--db` | Where the store is: a SQLite path or a `postgres://` URL. Also `RABBITHOLE_DB` | a file in your user data dir, see [Store location](configuration.md#store-location) |
-| `--config` | A config file to import on start. It is applied when it changes since it was last applied; edits made in Settings are kept until then. A change saves a new version. A `store` block in it only locates the store. Optional | none |
+| `--config` | **Deprecated:** import a config file on start. Use `rabbithole config import FILE` instead. For compatibility it still behaves as before: it is applied when it changes since it was last applied; edits made in Settings are kept until then. A change saves a new version. A `store` block in it only locates the store for that command and is never saved. Optional | none |
 | `--env-file` | The env file read for `RABBITHOLE_*` variables the environment does not set | `./.env` |
 | `--db-max-conns` | Postgres only: cap the connection pool | `10` |
 | `--db-conn-max-lifetime` | Postgres only: how long one pooled connection may live, e.g. `30m` | `30m` |
 | `--debug` | Log each stage with timings: settings, per-feed fetches, filtering, scoring batches and per-item scores, selection, write | off |
 | `--trace` | Additionally log raw model prompts and responses; implies `--debug` | off |
 
-`--config` is an import, not a requirement. On the `config` subcommands it only locates the store and
-is never imported. The details are in [The --config file](configuration.md#the---config-file).
+Import settings explicitly instead of using `--config`:
+
+```sh
+rabbithole config import config.yaml
+rabbithole serve
+```
+
+If `config.yaml` has a `store:` block, pass the same `--db` value to both commands or set
+`RABBITHOLE_DB`; the block locates the store for the import and is never saved. For Postgres, set
+`RABBITHOLE_DB_PASSWORD` as well.
+
+The flag still works for existing setups. It is an import, not a requirement, and on the `config`
+subcommands it only locates the store and is never imported. The details and migration steps are in
+[The --config file](configuration.md#the---config-file).
 
 The store location is `--db`, then `RABBITHOLE_DB`, then the `--config` file's `store` block, then the
 default. On the first start with no store, a terminal gets the question
 `Create a new SQLite store at ...? [Y/n]`; `n` creates nothing and exits 0. Without a terminal the
 store is created and a hint is logged. A Postgres password comes from `RABBITHOLE_DB_PASSWORD`.
+
+## digest
+
+```
+rabbithole digest [--period daily|weekly] [--limit N]
+```
+
+Prints a Markdown reading digest to stdout from articles already scored and stored. The default
+period is the previous complete UTC day (limit 10); `--period weekly` selects the previous
+complete Monday-to-Monday UTC week (limit 20). Both periods include their start and exclude their
+end. `--limit` must be between 1 and 50. Articles without an LLM score are omitted; user ratings
+do not affect relevance order. No feeds are fetched and no model is called.
+
+```
+rabbithole digest
+rabbithole digest --period weekly
+rabbithole digest --period daily --limit 5
+```
 
 ## ingest
 
@@ -81,10 +112,11 @@ to finish.
 | `--no-env-write` | Settings never writes a pasted API key to `.env`: the paste action is hidden and the endpoint refuses |
 | `--dev` | Serve the CSS, scripts and fonts `no-cache`, so an edit shows on the next reload instead of up to 5 minutes later. For working on them; `DEV=1 make serve` passes it |
 
-With `--config`, the log says `config imported from <file>; edits in Settings are kept until the file changes`, and
-the settings page shows the same note. A running `serve` reads the active settings at the start of
-each ingest run, so `config import` and `config rollback` from another terminal apply to the next
-run with no restart. Its environment is fixed at start, so restart it after changing an API key.
+With the deprecated `--config` flag, the log says
+`config imported from <file>; edits in Settings are kept until the file changes`, and the settings
+page shows the same note. A running `serve` reads the active settings at the start of each ingest
+run, so `config import` and `config rollback` from another terminal apply to the next run with no
+restart. Its environment is fixed at start, so restart it after changing an API key.
 
 Without either, an `--addr` that other machines can reach (`:8080`, `0.0.0.0`, a LAN address)
 is refused, since the login would cross the network unencrypted.
@@ -110,7 +142,8 @@ saved version means the defaults. See [configuration.md](configuration.md#import
   equal to the active config changes nothing. Values equal to a default are not saved and stay
   defaults; the command prints how many. YAML and JSON are both read. If it replaces a version saved elsewhere, it prints
   the undo command. An invalid file saves nothing. A literal `api_key` is moved to `./.env`. The
-  file's `store` block locates the store unless `--db` or `RABBITHOLE_DB` is set.
+  file's `store` block locates the store for this import unless `--db` or `RABBITHOLE_DB` is set;
+  it is not saved, so later commands need the same location.
 - **`history`** lists versions, newest first, with their source and time. `*` marks the active one.
   `--limit` defaults to 20; `0` shows all.
 - **`rollback <version>`** copies an earlier version forward as a new latest version, so the history
