@@ -69,7 +69,7 @@ func TestParseProxies(t *testing.T) {
 // RABBITHOLE_LIBRARY_URL=off turns the library off.
 func TestNewLibraryLoaderReadsTheEnvironment(t *testing.T) {
 	t.Setenv(config.LibraryURLEnv, "off")
-	if snap := newLibraryLoader("v1").Snapshot(); !snap.Off || snap.Loaded {
+	if snap := newLibraryLoader("v1", false).Snapshot(); !snap.Off || snap.Loaded {
 		t.Errorf("snapshot = %+v, want off and not loaded", snap)
 	}
 }
@@ -82,14 +82,28 @@ func TestNewLibraryLoaderReachesAMirrorOnAnyPort(t *testing.T) {
 	t.Setenv(config.LibraryURLEnv, srv.URL+"/")
 	t.Setenv(httpclient.AllowPrivateEnv, "1")
 
-	snap := newLibraryLoader("v1").Get(t.Context())
+	snap := newLibraryLoader("v1", false).Get(t.Context())
 	if !snap.Loaded || snap.Off || len(snap.Library.Files) == 0 {
 		t.Fatalf("snapshot = %+v, want the mirror's library loaded", snap)
 	}
 
 	t.Setenv(httpclient.AllowPrivateEnv, "")
-	if snap := newLibraryLoader("v1").Get(t.Context()); snap.Loaded {
+	if snap := newLibraryLoader("v1", false).Get(t.Context()); snap.Loaded {
 		t.Errorf("loaded a loopback mirror without the private opt-in: %+v", snap)
+	}
+}
+
+// --dev reads ./library from disk, and an explicit library URL still wins.
+func TestNewLibraryLoaderDevReadsTheLibraryDirectory(t *testing.T) {
+	t.Chdir("..")
+	t.Setenv(config.LibraryURLEnv, "")
+	if snap := newLibraryLoader("v1", true).Get(t.Context()); !snap.Loaded || len(snap.Library.Files) == 0 {
+		t.Errorf("dev snapshot = %+v, want the disk library loaded", snap)
+	}
+
+	t.Setenv(config.LibraryURLEnv, "off")
+	if snap := newLibraryLoader("v1", true).Snapshot(); !snap.Off || snap.Loaded {
+		t.Errorf("snapshot with off = %+v, want off and not loaded", snap)
 	}
 }
 

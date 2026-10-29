@@ -4,8 +4,10 @@
 package library
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"io/fs"
 	"net/http"
 	"slices"
 	"strings"
@@ -29,6 +31,9 @@ const (
 	defaultTimeout = 5 * time.Second
 	defaultBackoff = 5 * time.Minute
 
+	// dirTTL is the default age after which files read from Options.Dir are read again.
+	dirTTL = 2 * time.Second
+
 	// emptyBackoff caps the retry gap while nothing has loaded yet.
 	emptyBackoff = 30 * time.Second
 	// refreshFloor is the minimum gap between attempts for an explicit Refresh.
@@ -40,7 +45,8 @@ const (
 
 // Options configures NewLoader.
 type Options struct {
-	Client  *http.Client  // nil: the library is never fetched and Snapshot reports not loaded
+	Client  *http.Client  // nil without Dir: the library is never fetched and Snapshot reports not loaded
+	Dir     fs.FS         // when set, the files are read from it instead of fetched, with a 2s TTL and backoff
 	BaseURL string        // directory URL, a trailing slash is added; "off" disables; empty means DefaultBaseURL
 	TTL     time.Duration // age after which a refresh starts, default 1h
 	Timeout time.Duration // bound of one refresh, default 5s
@@ -67,10 +73,11 @@ type fileState struct {
 	lastAttempt time.Time // last time a fetch of this file started
 }
 
-// Loader fetches the library files from a base URL and caches them.
+// Loader fetches the library files from a base URL, or reads them from a directory, and caches them.
 // A refresh runs on its own context, so a caller giving up never aborts it.
 type Loader struct {
 	client  *http.Client
+	dir     fs.FS
 	base    string
 	off     bool
 	ttl     time.Duration
@@ -93,6 +100,7 @@ func NewLoader(o Options) *Loader {
 	base := strings.TrimSpace(o.BaseURL)
 	l := &Loader{
 		client:  o.Client,
+		dir:     o.Dir,
 		base:    base,
 		off:     strings.EqualFold(base, offValue),
 		ttl:     durationOr(o.TTL, defaultTTL),
@@ -101,6 +109,10 @@ func NewLoader(o Options) *Loader {
 		now:     o.Now,
 		log:     o.Log,
 		files:   map[string]*fileState{},
+	}
+	if o.Dir != nil {
+		l.ttl = durationOr(o.TTL, dirTTL)
+		l.backoff = durationOr(o.Backoff, dirTTL)
 	}
 	for _, typ := range knownTypes {
 		l.files[fileName(typ)] = &fileState{}
@@ -188,7 +200,7 @@ func (l *Loader) unlockedSnapshot() Snapshot {
 }
 
 func (l *Loader) enabled() bool {
-	return !l.off && l.client != nil
+	return !l.off && (l.client != nil || l.dir != nil)
 }
 
 // dueLocked reports whether a file needs a fetch: its last understood answer is older than the TTL
@@ -275,37 +287,29 @@ func (l *Loader) refresh(ch chan struct{}, names []string) {
 	close(ch)
 }
 
-// fetchFile requests one file with the last ETag. reached is true when the response was understood
+// fetchFile loads one file from the source. reached is true when the answer was understood
 // (not modified, accepted, or needing a newer app); changed is true when new bytes were accepted.
 // A failure keeps the last good bytes.
 func (l *Loader) fetchFile(ctx context.Context, name string) (reached, changed bool) {
 	st := l.files[name]
 	log := l.log.With().Str("file", name).Logger()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, l.base+name, nil)
-	if err != nil {
-		log.Warn().Err(err).Msg("library request")
-		return false, false
+	var data []byte
+	var etag string
+	var ok bool
+	if l.dir != nil {
+		data, ok = l.readDir(name, log)
+		if ok && st.data != nil && bytes.Equal(data, st.data) {
+			st.newer = false
+			return true, false
+		}
+	} else {
+		data, etag, ok = l.httpGet(ctx, st, name, log)
+		if ok && data == nil {
+			st.newer = false
+			return true, false
+		}
 	}
-	if st.data != nil && st.etag != "" {
-		req.Header.Set("If-None-Match", st.etag)
-	}
-	resp, err := l.client.Do(req)
-	if err != nil {
-		log.Warn().Err(err).Msg("library fetch")
-		return false, false
-	}
-	defer resp.Body.Close() //nolint:errcheck // nothing to do on a failed close
-	switch {
-	case resp.StatusCode == http.StatusNotModified && st.data != nil:
-		st.newer = false
-		return true, false
-	case resp.StatusCode != http.StatusOK:
-		log.Warn().Int("status", resp.StatusCode).Msg("library fetch")
-		return false, false
-	}
-	data, err := io.ReadAll(httpclient.LimitBody(resp.Body, maxFileBytes))
-	if err != nil {
-		log.Warn().Err(err).Msg("library read")
+	if !ok {
 		return false, false
 	}
 
@@ -320,8 +324,60 @@ func (l *Loader) fetchFile(ctx context.Context, name string) (reached, changed b
 	if len(diags) > 0 {
 		log.Debug().Str("findings", diags.Err().Error()).Msg("library file findings")
 	}
-	st.data, st.etag, st.newer = data, resp.Header.Get("ETag"), false
+	st.data, st.etag, st.newer = data, etag, false
 	return true, true
+}
+
+// readDir reads one file of the directory source, bounded by maxFileBytes.
+func (l *Loader) readDir(name string, log zerolog.Logger) ([]byte, bool) {
+	f, err := l.dir.Open(name)
+	if err != nil {
+		log.Warn().Err(err).Msg("library read")
+		return nil, false
+	}
+	defer f.Close() //nolint:errcheck // nothing to do on a failed close
+	data, err := io.ReadAll(httpclient.LimitBody(f, maxFileBytes))
+	if err != nil {
+		log.Warn().Err(err).Msg("library read")
+		return nil, false
+	}
+	return data, true
+}
+
+// httpGet requests one file with the last ETag. ok with nil data means not modified.
+func (l *Loader) httpGet(
+	ctx context.Context,
+	st *fileState,
+	name string,
+	log zerolog.Logger,
+) (data []byte, etag string, ok bool) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, l.base+name, nil)
+	if err != nil {
+		log.Warn().Err(err).Msg("library request")
+		return nil, "", false
+	}
+	if st.data != nil && st.etag != "" {
+		req.Header.Set("If-None-Match", st.etag)
+	}
+	resp, err := l.client.Do(req)
+	if err != nil {
+		log.Warn().Err(err).Msg("library fetch")
+		return nil, "", false
+	}
+	defer resp.Body.Close() //nolint:errcheck // nothing to do on a failed close
+	switch {
+	case resp.StatusCode == http.StatusNotModified && st.data != nil:
+		return nil, "", true
+	case resp.StatusCode != http.StatusOK:
+		log.Warn().Int("status", resp.StatusCode).Msg("library fetch")
+		return nil, "", false
+	}
+	data, err = io.ReadAll(httpclient.LimitBody(resp.Body, maxFileBytes))
+	if err != nil {
+		log.Warn().Err(err).Msg("library read")
+		return nil, "", false
+	}
+	return data, resp.Header.Get("ETag"), true
 }
 
 // assemble parses every accepted file together so the cross-file checks run. The caller holds mu.

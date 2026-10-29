@@ -295,7 +295,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	srv.ManagedBy(configPath)
 	srv.EnvFile(s.env, serveNoEnvWrite)
 	srv.StoreInfo(s.storeInfo)
-	srv.Library(newLibraryLoader(buildVersion()))
+	srv.Library(newLibraryLoader(buildVersion(), serveDev))
 	httpSrv := newHTTPServer(serveAddr, srv.Routes(), tlsConfig)
 	// Bound here rather than in the goroutine, so a taken port fails the command.
 	ln, err := net.Listen("tcp", serveAddr)
@@ -375,9 +375,15 @@ func libraryBase(raw string) (base string, custom bool, err error) {
 
 // newLibraryLoader builds the loader of the source library. Nothing is fetched
 // until the Sources page asks. The default host is reached on 80 and 443 only;
-// a mirror chosen through the environment may use any port.
-func newLibraryLoader(version string) *library.Loader {
-	base, custom, err := libraryBase(os.Getenv(config.LibraryURLEnv))
+// a mirror chosen through the environment may use any port. With dev set and no
+// library URL in the environment, ./library is read from disk when it holds rss.yaml.
+func newLibraryLoader(version string, dev bool) *library.Loader {
+	raw := os.Getenv(config.LibraryURLEnv)
+	if _, err := os.Stat(filepath.Join("library", "rss.yaml")); dev && strings.TrimSpace(raw) == "" && err == nil {
+		log.Info().Msg("reading the Library from ./library")
+		return library.NewLoader(library.Options{Dir: os.DirFS("library"), Log: log})
+	}
+	base, custom, err := libraryBase(raw)
 	if err != nil {
 		log.Warn().Err(err).Msg("ignoring the library URL, using the default")
 	}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 )
 
@@ -620,5 +621,36 @@ func TestLoaderNilClient(t *testing.T) {
 		if snap.Loaded || snap.Off || snap.Library == nil {
 			t.Fatalf("snapshot = %+v, want not loaded, not off, non-nil Library", snap)
 		}
+	}
+}
+
+// A directory source loads like a fetched one, flags a newer schema and shows an edit once its TTL passes.
+func TestLoaderReadsADirectory(t *testing.T) {
+	rss, academic := repoFile(t, "rss.yaml"), repoFile(t, "academic.yaml")
+	newer := strings.Replace(string(academic), "schema_version: 1", "schema_version: 2", 1)
+	fsys := fstest.MapFS{"rss.yaml": {Data: rss}, "academic.yaml": {Data: []byte(newer)}}
+	clk := newClock()
+	l := NewLoader(Options{Dir: fsys, Now: clk.now})
+
+	snap := l.Get(t.Context())
+	requireFiles(t, snap, "rss.yaml")
+	if snap.Notice != NeedsNewerVersion {
+		t.Fatalf("Notice = %q, want %q", snap.Notice, NeedsNewerVersion)
+	}
+
+	fsys["academic.yaml"] = &fstest.MapFile{Data: academic}
+	l.Snapshot()
+	settle(l)
+	if got := l.Snapshot(); len(got.Library.Files) != 1 {
+		t.Fatalf("files = %v, want the cache before the TTL", fileNames(got.Library))
+	}
+
+	clk.advance(3 * time.Second)
+	l.Snapshot()
+	settle(l)
+	snap = l.Snapshot()
+	requireFiles(t, snap, "rss.yaml", "academic.yaml")
+	if snap.Notice != "" {
+		t.Errorf("Notice = %q, want none after the edit", snap.Notice)
 	}
 }

@@ -336,6 +336,8 @@ so and offers **Try again**; nothing else on the page waits for it.
 
 - `RABBITHOLE_LIBRARY_URL` loads the library from another directory URL (a mirror or a fork that holds
   `rss.yaml` and `academic.yaml`), on any port. `off` turns the Library off.
+- From a checkout, `make serve DEV=1` reads the Library from `./library` instead (unless
+  `RABBITHOLE_LIBRARY_URL` is set), so an edit shows within seconds without pushing.
 - The usual `HTTPS_PROXY` and `NO_PROXY` variables are honoured. With a proxy, the proxy resolves
   hostnames, so they are not checked here; IP addresses and `localhost` in a URL still are.
 - The fetch refuses private and loopback addresses. For a mirror on your own network set

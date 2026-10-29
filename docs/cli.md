@@ -79,7 +79,7 @@ to finish.
 | `--insecure-http` | Allow plain HTTP on an address other than loopback, for a TLS proxy on another host |
 | `--trusted-proxies` | Comma-separated networks or addresses whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed; default `127.0.0.0/8,::1/128`, empty trusts none |
 | `--no-env-write` | Settings never writes a pasted API key to `.env`: the paste action is hidden and the endpoint refuses |
-| `--dev` | Serve the CSS, scripts and fonts `no-cache`, so an edit shows on the next reload instead of up to 5 minutes later. For working on them; `DEV=1 make serve` passes it |
+| `--dev` | Serve the CSS, scripts and fonts `no-cache`, so an edit shows on the next reload instead of up to 5 minutes later, and read the Library from `./library` when it exists and `RABBITHOLE_LIBRARY_URL` is unset. For working on them; `DEV=1 make serve` passes it |
 
 With `--config`, the log says `config imported from <file>; edits in Settings are kept until the file changes`, and
 the settings page shows the same note. A running `serve` reads the active settings at the start of
