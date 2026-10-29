@@ -2,15 +2,17 @@
      SPDX-License-Identifier: Apache-2.0 */}}
 
 {{/* The Overview section of Sources: the health of every live source, what needs
-     attention, and the ingestion bar. With no sources it is the first-run prompt. */}}
+     attention, the ingestion bar, and, once the library has loaded, its suggestions
+     and coverage. With no sources it is the first-run prompt. */}}
 {{define "sourcesOverview"}}
 <div id="srcOverview"{{if .Counts.OOB}} hx-swap-oob="true"{{end}}>
 {{- if .Overview.FirstRun}}
 <section class="ov-empty-state">
   <h1>No sources yet</h1>
-  <p>Add a feed you already read, or import a sources file.</p>
+  <p>Add a feed you already read, or start from the Library: it has ready-made feeds grouped by topic.</p>
   <div class="ov-empty-state__a">
     <a class="clk-btn clk-btn--go" href="/sources/manage?add=1">Add a source</a>
+    <a class="clk-btn" href="/sources/library">Browse the Library</a>
     <a class="clk-btn" href="/sources/manage">Import</a>
   </div>
 </section>
@@ -93,10 +95,77 @@
       {{- end}}
     </div>
   </section>
+
+  {{- with .Overview.Library}}
+  <section class="stp-group" aria-labelledby="ovSug">
+    <header class="stp-group__h">
+      <div><h3 id="ovSug"><span class="stp-group__t">Library suggestions</span></h3></div>
+      <p>Based on the tags of your sources.</p>
+    </header>
+    <div class="ov-body">
+      {{- if .Suggestions}}
+      <ul class="ov-list">
+        {{- range .Suggestions}}{{template "ovSuggestion" .}}{{end}}
+      </ul>
+      {{- else}}
+      <p class="ov-none">No suggestions right now. Tag your sources and the Library can match them.</p>
+      {{- end}}
+      <a class="ov-link" href="/sources/library">Browse the Library</a>
+    </div>
+  </section>
+  {{template "ovCoverage" .Coverage}}
+  {{- end}}
 </div>
 {{- end}}
 </div>
 {{end}}
+
+{{/* One suggested Library source. Add posts the key to the Library apply, whose
+     reply is this row again: Subscribed once added, or why it was not. */}}
+{{define "ovSuggestion"}}
+<li class="ov-grow" id="ov-sug-{{.ID}}">
+  {{template "favicon" (monogram .Name .URL 20)}}
+  <div class="ov-who"><b class="ov-name" title="{{.Name}}">{{.Name}}</b>{{if .Why}}<span class="sh-hint">{{.Why}}</span>{{end}}</div>
+  <span class="libact">
+    {{- if .Done}}
+    <span class="stp-chip stchip--subscribed">Subscribed</span>
+    {{- else if .Err}}
+    <span class="libact__why" title="{{.Err}}">{{.Err}}</span>
+    {{- else}}
+    <form class="libact__f" hx-post="/sources/library/apply" hx-target="closest li" hx-swap="outerHTML">
+      <input type="hidden" name="pick" value="{{.Key}}">
+      <input type="hidden" name="view" value="suggestion">
+      <button class="clk-btn clk-btn--go" type="submit" aria-label="Add {{.Name}}">Add</button>
+    </form>
+    {{- end}}
+  </span>
+</li>
+{{end}}
+
+{{/* How much of each Library group is added. */}}
+{{define "ovCoverage"}}
+<section class="stp-group" id="ovCoverage" aria-labelledby="ovCov"{{if .OOB}} hx-swap-oob="true"{{end}}>
+  <header class="stp-group__h">
+    <div><h3 id="ovCov"><span class="stp-group__t">Library coverage</span></h3></div>
+    <p>How much of each Library group you have added.</p>
+  </header>
+  <div class="ov-body">
+    <p class="ov-big"><b>{{.Added}}</b> of {{.Total}} library sources added</p>
+    <ul class="ov-list">
+      {{- range .Groups}}
+      <li class="ov-brow">
+        <a class="ov-brow__k" href="/sources/library/{{.Name}}" title="{{.Title}}">{{.Title}}</a>
+        <span class="ov-bar" role="img" aria-label="{{.Added}} of {{.Total}} added"><i style="width:{{.Pct}}%"></i></span>
+        <span class="ov-brow__v"><b>{{.Added}}</b> of {{.Total}}</span>
+      </li>
+      {{- end}}
+    </ul>
+  </div>
+</section>
+{{end}}
+
+{{/* The answer to the Overview's Add: the row, and the coverage out of band. */}}
+{{define "ovSuggestionReply"}}{{template "ovSuggestion" .Row}}{{template "ovCoverage" .Coverage}}{{end}}
 
 {{/* The answer to a refresh after an ingestion run starts or ends: the Overview
      and the nav badge, both out of band. */}}

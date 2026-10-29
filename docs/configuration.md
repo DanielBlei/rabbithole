@@ -46,6 +46,7 @@ lists every setting with its default, to copy lines from.
 |---|---|---|
 | Run settings: model, scoring, your name | The store | The Settings page, `config import`, or `serve --config` |
 | Feeds (sources) | The store | The Sources page, `sources import` |
+| The source library | GitHub, fetched on a Sources visit | `RABBITHOLE_LIBRARY_URL`, see [The source library](#the-source-library) |
 | Interest profiles | The store | Settings → Profiles |
 | Where the store is, the listen address, TLS | Flags and the environment | `--db` or `RABBITHOLE_DB`, `--addr`, the `--tls-*` flags |
 | Secrets (API keys, the Postgres password) | The environment or `./.env` | Your shell profile, or editing `.env` |
@@ -324,6 +325,26 @@ startup. See [cli.md](cli.md#sources).
 
 An old config whose `ingest.feeds` names a feeds file is honoured only when you import that config
 (see [Upgrading from v0.2.x](#upgrading-from-v02x)).
+
+### The source library
+
+The **Library** in the Sources side menu lists ready-made feeds grouped by topic, and the Overview
+suggests some that match the tags of your sources. The lists are fetched from the project's GitHub
+`main` branch the first time you open Sources, never at startup, and cached for an hour. A fix to
+the library reaches every install within that hour. If GitHub is unreachable, the Library page says
+so and offers **Try again**; nothing else on the page waits for it.
+
+- `RABBITHOLE_LIBRARY_URL` loads the library from another directory URL (a mirror or a fork that holds
+  `rss.yaml` and `academic.yaml`), on any port. `off` turns the Library off.
+- The usual `HTTPS_PROXY` and `NO_PROXY` variables are honoured. With a proxy, the proxy resolves
+  hostnames, so they are not checked here; IP addresses and `localhost` in a URL still are.
+- The fetch refuses private and loopback addresses. For a mirror on your own network set
+  `RABBITHOLE_ALLOW_PRIVATE_FETCH=1`. Link-local addresses, cloud metadata included, stay blocked.
+  A bad `RABBITHOLE_LIBRARY_URL` (not `off`, not an http or https URL with a host) is logged at
+  startup and the default is used. A redirect from https to http is refused.
+
+Both variables can be set in `./.env` like the other `RABBITHOLE_*` ones. Contributing a source:
+[`library/README.md`](https://github.com/DanielBlei/rabbithole/blob/main/library/README.md).
 
 ### Feed URLs
 

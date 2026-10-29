@@ -1,0 +1,153 @@
+{{/* SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+     SPDX-License-Identifier: Apache-2.0 */}}
+
+{{/* The Library section of Sources: the ready-made sources, grouped, with the
+     state of each against your own. The header and the filter tools sit outside
+     #libBody, so an action repaints the list without wiping the filter box. The
+     plan replaces the list in #libBody and the list stays in the page, hidden.
+     static/js/library.js owns the filter, the ticks and the Add bar. */}}
+{{define "sourcesLibrary"}}
+<section class="li" id="lib" data-lib data-scope="{{.Scope}}">
+  <header class="li-head" data-lib-head>
+    <h1 class="li-title">{{.Title}}</h1>
+    <p class="li-desc">{{.Desc}}</p>
+    {{- if or .Off .Offline}}
+    {{- if .Offline}}
+    <div class="li-retry"><button class="clk-btn clk-btn--go" type="button" hx-post="/sources/library/refresh" hx-target="#lib" hx-swap="outerHTML">Try again</button></div>
+    {{- end}}
+    {{- else}}
+    {{template "libraryMeta" .}}
+    {{- with .Notice}}<p class="li-notice" role="status">{{.}}</p>{{end}}
+    {{- end}}
+  </header>
+  {{- if not (or .Off .Offline)}}
+  <div class="li-tools" data-lib-tools>
+    <div class="li-tools__top">
+      <div class="mg-search li-search">
+        <span class="mg-search__i" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+        <input class="stp-in mg-search__in" type="search" placeholder="Filter, or try @subscribed"
+               aria-label="Filter the Library" autocomplete="off" spellcheck="false" data-lib-filter>
+        <button class="mg-search__x" type="button" aria-label="Clear filter" title="Clear filter" hidden data-lib-filter-clear><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+      <span class="li-count" aria-live="polite" data-lib-count></span>
+    </div>
+    <div class="li-tokens" role="group" aria-label="Filter shortcuts">
+      <button class="li-tok" type="button" aria-pressed="false" title="Already in your sources" data-lib-token="@subscribed">@subscribed</button>
+      <button class="li-tok" type="button" aria-pressed="false" title="Sources you removed" data-lib-token="@removed">@removed</button>
+      <button class="li-tok" type="button" aria-pressed="false" title="Ready to add" data-lib-token="@add">@add</button>
+    </div>
+    {{- if .Labels}}
+    <div class="li-labels" role="group" aria-label="Filter by label">
+      {{- range .Labels}}<button class="li-lbl" type="button" aria-pressed="false" data-lib-label="{{.Name}}">{{.Name}}<small>{{.Count}}</small></button>{{end}}
+    </div>
+    {{- end}}
+  </div>
+  {{template "libraryBody" .}}
+  {{/* The picked keys ride in hidden fields the script keeps in step. */}}
+  <form class="li-bar" role="region" aria-label="Selected entries" hidden data-lib-bar
+        hx-post="/sources/library/plan" hx-target="#libBody" hx-swap="outerHTML">
+    <span class="li-bar__t" data-lib-bar-text></span>
+    <button class="clk-btn clk-btn--link" type="button" data-lib-bar-clear>Clear</button>
+    <button class="clk-btn clk-btn--go" type="submit" data-lib-bar-add></button>
+  </form>
+  {{- end}}
+</section>
+{{end}}
+
+{{/* The count line under the description. A reply that repaints only the body
+     sends it out of band. */}}
+{{define "libraryMeta"}}<p class="li-meta" id="libMeta"{{if .MetaOOB}} hx-swap-oob="true"{{end}}>{{.Meta}}</p>{{end}}
+
+{{/* The list, or the plan in its place, with the banner of the last action. */}}
+{{define "libraryBody"}}
+<div class="li-body" id="libBody">
+  {{- with .Import}}
+  {{if .Err}}<div class="sdet__err src__import" role="alert">{{.Err}}</div>
+  {{else}}<div class="sdet__ok src__import" role="status">{{.Msg}}</div>{{end}}
+  {{- end}}
+  <div class="li-main" data-lib-list{{if .Plan}} hidden{{end}}>
+    {{- if .Empty}}
+    <div class="li-empty"><p class="li-empty__t">Nothing in the Library yet.</p></div>
+    {{- else}}
+    <p class="li-done" data-lib-done{{if not .AllAdded}} hidden{{end}}>You have everything in {{.Scope}}.</p>
+    <div class="li-empty" data-lib-empty hidden>
+      <p class="li-empty__t" data-lib-empty-text></p>
+      <button class="clk-btn clk-btn--link" type="button" data-lib-reset>Clear filters</button>
+    </div>
+    {{- range .Sections}}{{template "librarySection" .}}{{end}}
+    {{- end}}
+  </div>
+  <div class="li-plan" data-lib-plan>
+    {{- with .Plan}}
+    <button class="li-back" type="button" data-plan-cancel><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>Back to the Library</button>
+    {{template "sourcePlan" .}}
+    {{- end}}
+  </div>
+</div>
+{{end}}
+
+{{define "librarySection"}}
+<section class="li-sec{{if .Single}} li-sec--single{{end}}" data-lib-sec data-title="{{.Title}}">
+  <header class="li-sec__h">
+    {{- if .Single}}<span></span>
+    {{- else}}<div class="li-sec__t"><h3>{{.Title}}</h3><span class="li-sec__n" data-lib-sec-count>{{len .Entries}}</span></div>{{end}}
+    <button class="li-sec__sel" type="button" hidden data-lib-sec-select></button>
+  </header>
+  {{- if not .Single}}<p class="li-sec__d">{{.Desc}}</p>{{end}}
+  <ul class="li-list">
+    {{- range .Entries}}{{template "libraryRow" .}}{{end}}
+  </ul>
+</section>
+{{end}}
+
+{{define "libraryRow"}}
+<li class="li-row" id="lib-{{.ID}}" data-state="{{.State}}" data-key="{{.Key}}" data-hay="{{.Hay}}">
+  <div class="li-row__sel">
+    {{- if eq .State "add"}}<label class="stp-check"><input type="checkbox" value="{{.Key}}" aria-label="Select {{.Name}}" data-lib-pick><span class="stp-check__box"></span></label>
+    {{- else}}<span aria-hidden="true"></span>{{end}}
+  </div>
+  <div class="li-row__ico">{{template "favicon" (monogram .Name .URL 28)}}</div>
+  <div class="li-row__main">
+    <div class="li-row__top"><span class="li-row__nm">{{.Name}}</span>{{if .Kind}}<span class="stp-chip li-kind">{{.Kind}}</span>{{end}}</div>
+    <p class="li-row__desc">{{.Desc}}</p>
+    {{- if or .Labels .MaxItems}}
+    <div class="li-row__meta">
+      {{- with .Labels}}<span class="li-tags">{{range .}}<button class="tag tag--c{{.Color}} li-chip" type="button" aria-pressed="false" title="Filter by {{.Name}}" data-lib-chip="{{.Name}}">{{.Name}}</button>{{end}}</span>{{end}}
+      {{- if .MaxItems}}<span class="li-row__cap">max {{.MaxItems}} per run</span>{{end}}
+    </div>
+    {{- end}}
+  </div>
+  <div class="li-row__act">{{template "libraryAction" .}}</div>
+</li>
+{{end}}
+
+{{/* What a row offers: Add posts its key straight to the apply, Restore posts
+     it to be matched to the removed source. */}}
+{{define "libraryAction"}}
+<span class="libact">
+  {{- if eq .State "add"}}
+  <form class="libact__f" hx-post="/sources/library/apply" hx-target="#libBody" hx-swap="outerHTML">
+    <input type="hidden" name="pick" value="{{.Key}}">
+    <button class="clk-btn clk-btn--go" type="submit" aria-label="Add {{.Name}}">Add</button>
+  </form>
+  {{- else if eq .State "subscribed"}}
+  <span class="stp-chip stchip--subscribed">{{.Chip}}</span>
+  {{- else if eq .State "removed"}}
+  <span class="stp-chip stchip--removed">{{.Chip}}</span>
+  <form class="libact__f" hx-post="/sources/library/restore" hx-target="#libBody" hx-swap="outerHTML">
+    <input type="hidden" name="key" value="{{.Key}}">
+    <button class="clk-btn" type="submit" aria-label="Restore {{.Name}}">Restore</button>
+  </form>
+  {{- else}}
+  <span class="stp-chip stchip--conflict">{{.Chip}}</span>
+  <span class="libact__why" title="{{.Reason}}">{{.Reason}}</span>
+  {{- end}}
+</span>
+{{end}}
+
+{{/* A reply that repaints only the body: the list or the plan, and the count
+     line. */}}
+{{define "libraryReply"}}{{template "libraryBody" .}}{{template "libraryMeta" .}}{{end}}
+
+{{/* The Try again reply: the section, and the nav group out of band. */}}
+{{define "libraryRefresh"}}{{template "sourcesLibrary" .Page}}{{template "sourcesLibNav" .Nav}}{{end}}

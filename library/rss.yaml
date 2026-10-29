@@ -5,6 +5,7 @@ type: rss
 description: Feeds the RSS ingestor reads, grouped for the welcome checklist.
 groups:
   - name: blogs
+    title: Blogs
     description: Project and engineering blogs from the AI and cloud-native stack.
     sources:
       - name: Kubernetes blog
@@ -103,6 +104,7 @@ groups:
         labels: [Linux, Open Source]
 
   - name: releases
+    title: Releases
     description: GitHub release feeds for the projects you run.
     sources:
       - name: Kubernetes releases
@@ -201,6 +203,7 @@ groups:
         labels: [Releases, Kubernetes]
 
   - name: community
+    title: Community
     description: Link aggregators filtered for signal.
     sources:
       - name: Hacker News front page
@@ -254,6 +257,7 @@ groups:
         labels: [Community]
 
   - name: arxiv-categories
+    title: arXiv categories
     description: Every new arXiv paper in a category. High volume, so each is capped per run.
     sources:
       - name: arXiv cs.LG (Machine Learning)

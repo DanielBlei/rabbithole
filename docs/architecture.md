@@ -144,7 +144,8 @@ internal/rank         Scorer interface, prompt/JSON parsing, batching, selection
 internal/inference    provider factory (ollama | openai | vllm | heuristic)
 internal/ollama       Ollama JSON-mode client
 internal/vllm         OpenAI-compatible JSON-mode client, in openai and vllm flavors
-internal/httpclient   shared HTTP transport (bearer auth injection)
+internal/httpclient   shared HTTP transport (bearer auth injection), plus the safe client that refuses private addresses
+internal/library      the source library: format checks and the loader that fetches it from GitHub main
 internal/retry        exponential backoff for a still-starting-up inference server
 internal/digest       markdown renderer
 internal/store        SQLite or Postgres (items, profiles, feed config, config versions, run history, user state)

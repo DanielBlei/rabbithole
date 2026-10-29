@@ -591,3 +591,27 @@ func TestSourcesImportApplyAcceptsAURLEncodedForm(t *testing.T) {
 		t.Errorf("live feeds = %d, want Alpha and Delta", got)
 	}
 }
+
+// TestSourcePlanCancelWithoutGet renders the plan with no CancelGet: each
+// Cancel is a client-side button with no htmx attributes, in both the error
+// and the normal state.
+func TestSourcePlanCancelWithoutGet(t *testing.T) {
+	cancelRe := regexp.MustCompile(`<button[^>]*data-plan-cancel[^>]*>`)
+	for name, p := range map[string]*importPlan{
+		"error":  {Title: "Preview", Err: "bad file"},
+		"normal": {Title: "Preview", Counts: []planCount{{Status: "new", Label: "New", N: 1}}},
+	} {
+		var b bytes.Buffer
+		if err := feedTmpl.ExecuteTemplate(&b, "sourcePlan", p); err != nil {
+			t.Fatalf("%s: render sourcePlan: %v", name, err)
+		}
+		tags := cancelRe.FindAllString(b.String(), -1)
+		if len(tags) != 1 {
+			t.Fatalf("%s: got %d data-plan-cancel buttons, want 1; body=%s", name, len(tags), b.String())
+		}
+		got := parseTag(tags[0])
+		wantAttrs(t, name+" cancel", got, map[string]string{"data-plan-cancel": present, "type": "button"})
+		lacksAttr(t, name+" cancel", got, "hx-get")
+		lacksAttr(t, name+" cancel", got, "hx-target")
+	}
+}

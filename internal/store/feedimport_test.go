@@ -330,8 +330,8 @@ func TestPlanImportPicksDeletedTwin(t *testing.T) {
 		if err != nil {
 			t.Fatalf("PlanImport: %v", err)
 		}
-		if plan[0].Status != PlanRemoved || plan[0].id != want {
-			t.Errorf("%s: row = %q id %q, want removed id %q", name, plan[0].Status, plan[0].id, want)
+		if plan[0].Status != PlanRemoved || plan[0].ID != want {
+			t.Errorf("%s: row = %q id %q, want removed id %q", name, plan[0].Status, plan[0].ID, want)
 		}
 	}
 }

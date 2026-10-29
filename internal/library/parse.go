@@ -46,6 +46,7 @@ type draftFile struct {
 // draftGroup is a valid group; refs are its source indexes into parser.refs.
 type draftGroup struct {
 	group Group
+	line  int
 	refs  []int
 }
 
@@ -60,6 +61,9 @@ var keyHints = map[string]string{
 	"aliases":     "reserved for #40 item tags",
 	"categories":  "renamed to groups",
 }
+
+// newerSchema is the finding text for a schema_version this package cannot read.
+const newerSchema = "is newer than supported"
 
 var groupNamePattern = regexp.MustCompile("^[a-z0-9-]+$")
 
@@ -83,11 +87,63 @@ func ParseFS(fsys fs.FS) (*Library, Diagnostics) {
 	if parsed == 0 {
 		p.diags = append(p.diags, Diagnostic{Message: "no library files found"})
 	}
-	diags, dropped := checkLibrary(p.refs)
+	skip := p.dropRepeatedGroups()
+	diags, dropped := p.checkRefs(skip)
 	p.diags = append(p.diags, diags...)
 	lib := p.build(dropped)
 	p.diags.sort()
 	return lib, p.diags
+}
+
+// dropRepeatedGroups removes each group whose name an earlier file already uses, reports it, and returns
+// the indexes of the sources it held.
+func (p *parser) dropRepeatedGroups() map[int]bool {
+	skip := map[int]bool{}
+	first := map[string]string{} // group name to first file
+	for i := range p.files {
+		df := &p.files[i]
+		kept := df.groups[:0]
+		for _, dg := range df.groups {
+			name := dg.group.Name
+			if other, ok := first[name]; ok {
+				p.report(
+					fileCtx{name: df.file.Name},
+					name,
+					dg.line,
+					fmt.Sprintf("duplicate group name %q (also in %s)", name, other),
+				)
+				for _, idx := range dg.refs {
+					skip[idx] = true
+				}
+				continue
+			}
+			first[name] = df.file.Name
+			kept = append(kept, dg)
+		}
+		df.groups = kept
+	}
+	return skip
+}
+
+// checkRefs runs checkLibrary over the sources not in skip and returns the dropped indexes in p.refs terms.
+func (p *parser) checkRefs(skip map[int]bool) (Diagnostics, map[int]bool) {
+	live := make([]sourceRef, 0, len(p.refs))
+	index := make([]int, 0, len(p.refs)) // live position to p.refs index
+	for i, ref := range p.refs {
+		if !skip[i] {
+			live = append(live, ref)
+			index = append(index, i)
+		}
+	}
+	diags, dropped := checkLibrary(live)
+	out := map[int]bool{}
+	for i := range skip {
+		out[i] = true
+	}
+	for i := range dropped {
+		out[index[i]] = true
+	}
+	return diags, out
 }
 
 // compareFileNames orders library files rss, then academic, then unknown stems by name.
@@ -228,7 +284,12 @@ func (p *parser) checkSchemaVersion(fc fileCtx, sv *yaml.Node) bool {
 	n, isInt := intValue(sv)
 	switch {
 	case isInt && n > SchemaVersion:
-		p.report(fc, "", sv.Line, fmt.Sprintf("schema_version %d is newer than supported %d", n, SchemaVersion))
+		p.diags = append(p.diags, Diagnostic{
+			File:    fc.name,
+			Line:    sv.Line,
+			Message: fmt.Sprintf("schema_version %d %s %d", n, newerSchema, SchemaVersion),
+			Code:    CodeNewerSchema,
+		})
 		return false
 	case !isInt || n != SchemaVersion:
 		p.report(fc, "", sv.Line, fmt.Sprintf("schema_version must be the integer %d, got %q", SchemaVersion, sv.Value))
@@ -284,13 +345,14 @@ func (p *parser) parseGroup(fc fileCtx, i int, n *yaml.Node, seen map[string]boo
 	if nameOK {
 		path = name
 	}
-	p.reportUnknown(fc, path, n, "name", "description", "sources")
+	p.reportUnknown(fc, path, n, "name", "title", "description", "sources")
 	fieldsOK := p.checkGroupFields(fc, path, n, vals)
 	if !nameOK || !fieldsOK || len(problems) > 0 {
 		return draftGroup{}, false
 	}
 
-	dg := draftGroup{group: Group{Name: name, Description: vals["description"].Value}}
+	title := groupTitle(name, vals["title"])
+	dg := draftGroup{group: Group{Name: name, Title: title, Description: vals["description"].Value}, line: n.Line}
 	for si, src := range vals["sources"].Content {
 		if idx, ok := p.parseSource(fc, name, si, src); ok {
 			dg.refs = append(dg.refs, idx)
@@ -319,9 +381,22 @@ func (p *parser) groupName(fc fileCtx, path string, owner *yaml.Node, vals map[s
 	return nm.Value, true
 }
 
-// checkGroupFields reports the description and sources problems of a group.
+// groupTitle returns the title value, or the name as words when there is none.
+func groupTitle(name string, t *yaml.Node) string {
+	if t != nil {
+		return t.Value
+	}
+	words := strings.ReplaceAll(name, "-", " ")
+	return strings.ToUpper(words[:1]) + words[1:]
+}
+
+// checkGroupFields reports the title, description and sources problems of a group.
 func (p *parser) checkGroupFields(fc fileCtx, path string, n *yaml.Node, vals map[string]*yaml.Node) bool {
 	ok := true
+	if t, has := vals["title"]; has && (!isStr(t) || !singleLine(t.Value)) {
+		p.report(fc, path, t.Line, "title must be a non-empty single line")
+		ok = false
+	}
 	if p.requireKey(fc, path, n, vals, "description") {
 		if d := vals["description"]; !isStr(d) || !singleLine(d.Value) {
 			p.report(fc, path, d.Line, "description must be a non-empty single line")

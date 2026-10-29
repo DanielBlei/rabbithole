@@ -169,6 +169,39 @@ func TestParseFSValidFile(t *testing.T) {
 	}
 }
 
+func TestParseFSGroupTitle(t *testing.T) {
+	titled := func(title string) string {
+		return fileYAML(goodTop, "  - name: llm-systems\n    title: "+title+
+			"\n    description: Engineering blogs.\n    sources:\n"+goodSource)
+	}
+	t.Run("explicit title", func(t *testing.T) {
+		lib, diags := parseOne("rss.yaml", titled("Agents, RAG and evals"))
+		if len(diags) != 0 || lib.Files[0].Groups[0].Title != "Agents, RAG and evals" {
+			t.Fatalf("title = %q, diags = %+v", lib.Files[0].Groups[0].Title, diags)
+		}
+	})
+	t.Run("fallback from the name", func(t *testing.T) {
+		body := fileYAML(goodTop,
+			groupItem("llm-systems", "Engineering blogs.", goodSource),
+			groupItem("blogs", "Engineering blogs.", otherSource))
+		lib, diags := parseOne("rss.yaml", body)
+		if len(diags) != 0 {
+			t.Fatalf("diags = %+v, want none", diags)
+		}
+		got := []string{lib.Files[0].Groups[0].Title, lib.Files[0].Groups[1].Title}
+		if !slices.Equal(got, []string{"Llm systems", "Blogs"}) {
+			t.Fatalf("titles = %q, want [Llm systems Blogs]", got)
+		}
+	})
+	runParseCases(t, []parseCase{
+		{name: "title blank", body: titled(`""`), want: "title must be a non-empty single line", path: "llm-systems"},
+		{name: "title multi-line", body: titled("|\n      one\n      two"),
+			want: "title must be a non-empty single line", path: "llm-systems"},
+		{name: "title is an int", body: titled("5"), want: "title must be a non-empty single line",
+			path: "llm-systems"},
+	})
+}
+
 func TestParseFSBacklogIgnored(t *testing.T) {
 	lib, diags := parseFiles(map[string]string{
 		"backlog.yaml": "\t: [garbage: :\n",
@@ -269,6 +302,9 @@ func TestParseFSSkippedFileOnlyFileLevelFindings(t *testing.T) {
 		t.Fatalf("diags = %+v, want exactly one", diags)
 	}
 	requireDiag(t, diags, "rss.yaml", "", "newer than supported")
+	if diags[0].Code != CodeNewerSchema {
+		t.Errorf("Code = %q, want %q", diags[0].Code, CodeNewerSchema)
+	}
 	if files, _, _ := shapeOf(lib); files != 0 {
 		t.Fatalf("kept %d files, want none", files)
 	}
@@ -463,6 +499,37 @@ func TestParseFSCrossFile(t *testing.T) {
 		}
 		if !slices.Equal(names, []string{"Go blog", "arXiv agentic coding"}) {
 			t.Errorf("kept sources %q, want the rss source and the other academic source", names)
+		}
+	})
+
+	t.Run("duplicate group name across files", func(t *testing.T) {
+		// the academic group shares a name with the rss group, so it and its sources are dropped.
+		academicDup := fileYAML(academicTop,
+			groupItem("blogs", "Agent research.", sourceItem("name: Dropped paper",
+				"url: https://arxiv.org/search?q=dropped", "description: Gone.", "labels: [AI]")),
+			groupItem("papers", "Agent research.", sourceItem("name: Kept paper",
+				"url: https://arxiv.org/search?q=kept", "description: Stays.", "labels: [AI]")))
+		lib, diags := parseFiles(map[string]string{"rss.yaml": goodRSS, "academic.yaml": academicDup})
+		if len(diags) != 1 {
+			t.Fatalf("diags = %+v, want one finding", diags)
+		}
+		requireDiag(t, diags, "academic.yaml", "blogs", `duplicate group name "blogs" (also in rss.yaml)`)
+		files, groups, names := shapeOf(lib)
+		if files != 2 || groups != 2 || !slices.Equal(names, []string{"Go blog", "Kept paper"}) {
+			t.Fatalf("kept files %d groups %d sources %q, want 2 2 [Go blog Kept paper]", files, groups, names)
+		}
+	})
+
+	t.Run("dropped group does not claim names", func(t *testing.T) {
+		// the dropped group holds "Taken", which must not make the later same-name source a repeat.
+		academicDup := fileYAML(academicTop,
+			groupItem("blogs", "Agent research.", sourceItem("name: Taken", "url: https://arxiv.org/search?q=a",
+				"description: Gone.", "labels: [AI]")),
+			groupItem("papers", "Agent research.", sourceItem("name: Taken", "url: https://arxiv.org/search?q=b",
+				"description: Stays.", "labels: [AI]")))
+		_, diags := parseFiles(map[string]string{"rss.yaml": goodRSS, "academic.yaml": academicDup})
+		if len(diags) != 1 {
+			t.Fatalf("diags = %+v, want only the group finding", diags)
 		}
 	})
 

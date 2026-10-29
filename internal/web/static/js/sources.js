@@ -89,7 +89,7 @@
 
     var toolbar = document.querySelector('[data-src-toolbar]');
     if (toolbar) toolbar.hidden = rows.length === 0;
-    var x = document.querySelector('.mg-search__x');
+    var x = document.querySelector('.mg-search__x[data-src-clear]');
     if (x) x.hidden = !q;
 
     var count = document.querySelector('[data-src-matches]');

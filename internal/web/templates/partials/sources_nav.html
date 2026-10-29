@@ -10,9 +10,28 @@
     <span class="sh-nav__h">My sources</span>
     <a class="sh-ni{{if eq .Section "overview"}} is-on{{end}}" href="/sources"{{if eq .Section "overview"}} aria-current="page"{{end}}>Overview</a>
     <a class="sh-ni{{if eq .Section "manage"}} is-on{{end}}" href="/sources/manage"{{if eq .Section "manage"}} aria-current="page"{{end}}>Manage{{template "sourceNavBadge" .Counts}}</a>
+    <span class="sh-nav__sep" aria-hidden="true"></span>
+    {{template "sourcesLibNav" .LibNav}}
   </div>
 </nav>
 {{end}}
+
+{{/* The Library group of the nav. Until the library has loaded it is the one
+     link; after, a group with a link per Library group. The wrapper takes no
+     box of its own. */}}
+{{define "sourcesLibNav"}}<div id="srcLibNav"{{if .OOB}} hx-swap-oob="true"{{end}}>
+{{- if .Groups}}
+<details class="sh-nav__grp" open>
+  <summary class="sh-nav__h">Library</summary>
+  <a class="sh-ni{{if .AllOn}} is-on{{end}}" href="/sources/library"{{if .AllOn}} aria-current="page"{{end}}><span class="sh-ni__t">All</span><span class="sh-ni__n">{{.Total}}</span></a>
+  {{- range .Groups}}
+  <a class="sh-ni{{if .On}} is-on{{end}}" href="/sources/library/{{.Name}}"{{if .On}} aria-current="page"{{end}}><span class="sh-ni__t">{{.Title}}</span><span class="sh-ni__n">{{.Count}}</span></a>
+  {{- end}}
+</details>
+{{- else}}
+<a class="sh-ni{{if .AllOn}} is-on{{end}}" href="/sources/library"{{if .AllOn}} aria-current="page"{{end}}>Library</a>
+{{- end}}
+</div>{{end}}
 
 {{/* The failing count on the Manage link. Re-rendered out of band by every
      mutation, so it stays equal to the Failing pill. The wrapper takes no box

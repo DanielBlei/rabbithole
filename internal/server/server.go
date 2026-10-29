@@ -24,6 +24,7 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/httpgzip"
 	"github.com/DanielBlei/rabbithole/internal/httplog"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
+	"github.com/DanielBlei/rabbithole/internal/library"
 	"github.com/DanielBlei/rabbithole/internal/store"
 	"github.com/DanielBlei/rabbithole/internal/web"
 )
@@ -44,6 +45,7 @@ type Server struct {
 	env        *config.EnvFile // set by EnvFile: where api key variables come from and pasted keys go
 	noEnvWrite bool            // set by EnvFile: refuse pasted keys
 	storeInfo  *web.StoreInfo  // set by StoreInfo: what boot knew about the store
+	library    *library.Loader // set by Library: the source library the Sources page browses
 }
 
 // New returns a Server backed by db, reading the run config from src. addr is the
@@ -73,6 +75,9 @@ func (s *Server) EnvFile(e *config.EnvFile, noWrite bool) { s.env, s.noEnvWrite 
 // StoreInfo hands the settings page the store boot opened.
 func (s *Server) StoreInfo(i web.StoreInfo) { s.storeInfo = &i }
 
+// Library hands the Sources page the loader of the source library.
+func (s *Server) Library(l *library.Loader) { s.library = l }
+
 // Dev serves the embedded assets no-cache, so an edited stylesheet or script
 // shows on the next reload instead of after the normal cache window.
 func (s *Server) Dev(on bool) { s.dev = on }
@@ -88,6 +93,7 @@ func (s *Server) Routes() http.Handler {
 	w.SetDev(s.dev)
 	w.SetManagedBy(s.managedBy)
 	w.SetEnvFile(s.env, s.noEnvWrite)
+	w.SetLibrary(s.library)
 	if s.storeInfo != nil {
 		w.SetStoreInfo(*s.storeInfo)
 	}

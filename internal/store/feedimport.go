@@ -44,7 +44,8 @@ type PlanRow struct {
 	Status       PlanStatus
 	Reason       string
 
-	id string // the deleted row a removed entry restores
+	// ID is the stored feed a removed entry matches; empty otherwise.
+	ID string
 }
 
 // ApplyResult counts what an apply did. Skipped is picks that no longer plan as
@@ -141,9 +142,9 @@ func (s *Store) planImportTx(ctx context.Context, tx *sql.Tx, doc config.FeedsDo
 			row.ExistingName = match.name
 			row.Reason = "Already in your sources as " + match.name
 		case hasMatch:
-			row.Status, row.Reason, row.id = PlanRemoved, planReasonRemoved, match.id
+			row.Status, row.Reason, row.ID = PlanRemoved, planReasonRemoved, match.id
 			if nameHeld && holder.id != match.id {
-				row.Status, row.Reason, row.id = PlanConflict, nameReason, ""
+				row.Status, row.Reason, row.ID = PlanConflict, nameReason, ""
 			}
 		case nameHeld:
 			row.Status, row.Reason = PlanConflict, nameReason
@@ -157,7 +158,7 @@ func (s *Store) planImportTx(ctx context.Context, tx *sql.Tx, doc config.FeedsDo
 		if row.Status == PlanNew || row.Status == PlanRemoved {
 			nameKey := feedNameKey(f.Name)
 			if seen[feedURLKey(f.URL)] || seen[nameKey] {
-				row.Status, row.Reason, row.id = PlanConflict, planReasonDuplicate, ""
+				row.Status, row.Reason, row.ID = PlanConflict, planReasonDuplicate, ""
 			} else {
 				seen[feedURLKey(f.URL)] = true
 				seen[nameKey] = true
@@ -191,7 +192,7 @@ func (s *Store) ApplyImport(ctx context.Context, doc config.FeedsDoc, pick map[s
 				}
 				result.Added++
 			case PlanRemoved:
-				if err := s.restoreFeedTx(ctx, tx, row.id, row.Feed); err != nil {
+				if err := s.restoreFeedTx(ctx, tx, row.ID, row.Feed); err != nil {
 					return err
 				}
 				result.Restored++

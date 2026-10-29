@@ -1,7 +1,8 @@
 {{/* What importing a file would do, one row per entry, before anything is
      written. Standalone: the apply form posts to .ApplyTo and swaps into
-     .ApplyTarget, and Cancel fetches .CancelGet into .CancelTarget, so the
-     dialog below and a page can both draw it. The file rides along in a hidden
+     .ApplyTarget, and Cancel fetches .CancelGet into .CancelTarget. With no
+     .CancelGet, Cancel is a data-plan-cancel button for the page to handle. So
+     the dialog below and a page can both draw it. The file rides along in a hidden
      field so the apply reads the same text the preview did. static/js/sources.js
      keeps the select-all box and the apply label in step with the ticks. */}}
 {{define "sourcePlan"}}
@@ -10,7 +11,7 @@
   {{if .Err}}
   <div class="sdet__err" role="alert">{{.Err}}</div>
   <div class="plan__bar">
-    <button class="clk-btn" type="button" hx-get="{{.CancelGet}}" hx-target="{{.CancelTarget}}" hx-swap="innerHTML">Cancel</button>
+    {{if .CancelGet}}<button class="clk-btn" type="button" hx-get="{{.CancelGet}}" hx-target="{{.CancelTarget}}" hx-swap="innerHTML">Cancel</button>{{else}}<button class="clk-btn" type="button" data-plan-cancel>Cancel</button>{{end}}
   </div>
   {{else}}
   <div class="plan__legend" aria-label="Status counts">
@@ -39,7 +40,7 @@
     {{if .ApplyErr}}<div class="sdet__err" role="alert">{{.ApplyErr}}</div>{{end}}
     <div class="plan__bar">
       <label class="stp-check"><input type="checkbox" aria-label="Select all new" data-plan-all{{if .ApplyOff}} disabled{{end}}><span class="stp-check__box"></span><span class="stp-check__t">Select all new</span></label>
-      <button class="clk-btn" type="button" hx-get="{{.CancelGet}}" hx-target="{{.CancelTarget}}" hx-swap="innerHTML">Cancel</button>
+      {{if .CancelGet}}<button class="clk-btn" type="button" hx-get="{{.CancelGet}}" hx-target="{{.CancelTarget}}" hx-swap="innerHTML">Cancel</button>{{else}}<button class="clk-btn" type="button" data-plan-cancel>Cancel</button>{{end}}
       <button class="clk-btn clk-btn--go" type="submit" data-plan-apply{{if .ApplyOff}} disabled{{end}}>{{.ApplyLabel}}</button>
     </div>
   </form>

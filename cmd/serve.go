@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/httpclient"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
+	"github.com/DanielBlei/rabbithole/internal/library"
 	"github.com/DanielBlei/rabbithole/internal/server"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -289,6 +293,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	srv.ManagedBy(configPath)
 	srv.EnvFile(s.env, serveNoEnvWrite)
 	srv.StoreInfo(s.storeInfo)
+	srv.Library(newLibraryLoader(buildVersion()))
 	httpSrv := newHTTPServer(serveAddr, srv.Routes(), tlsConfig)
 	// Bound here rather than in the goroutine, so a taken port fails the command.
 	ln, err := net.Listen("tcp", serveAddr)
@@ -340,6 +345,53 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	case err := <-errCh:
 		return err
 	}
+}
+
+// libraryTimeout bounds one request to the library host.
+const libraryTimeout = 5 * time.Second
+
+// libraryBase reads RABBITHOLE_LIBRARY_URL: empty is the default, "off" turns the
+// library off, anything else must be an http(s) URL with a host. custom is true
+// for a mirror other than the default. A bad value is an error and the default
+// is returned with it.
+func libraryBase(raw string) (base string, custom bool, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return library.DefaultBaseURL, false, nil
+	}
+	if strings.EqualFold(raw, "off") {
+		return "off", false, nil
+	}
+	u, perr := url.Parse(raw)
+	if perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return library.DefaultBaseURL, false, fmt.Errorf(
+			"%s must be off or an http(s) URL with a host, got %q", config.LibraryURLEnv, raw)
+	}
+	same := strings.EqualFold(strings.TrimRight(raw, "/"), strings.TrimRight(library.DefaultBaseURL, "/"))
+	return raw, !same, nil
+}
+
+// newLibraryLoader builds the loader of the source library. Nothing is fetched
+// until the Sources page asks. The default host is reached on 80 and 443 only;
+// a mirror chosen through the environment may use any port.
+func newLibraryLoader(version string) *library.Loader {
+	base, custom, err := libraryBase(os.Getenv(config.LibraryURLEnv))
+	if err != nil {
+		log.Warn().Err(err).Msg("ignoring the library URL, using the default")
+	}
+	client := httpclient.NewSafe(httpclient.Options{
+		Timeout:      libraryTimeout,
+		MaxRedirects: 3,
+		UserAgent:    "rabbithole/" + version + " (+https://github.com/DanielBlei/rabbithole)",
+		AllowPrivate: httpclient.AllowPrivateFromEnv(),
+		AnyPort:      custom,
+		Proxy:        http.ProxyFromEnvironment,
+	})
+	return library.NewLoader(library.Options{
+		Client:  client,
+		BaseURL: base,
+		Log:     log,
+	})
 }
 
 // logActiveConfig says which config version is in force, or that the defaults are.

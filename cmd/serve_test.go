@@ -3,7 +3,16 @@
 
 package cmd
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/httpclient"
+	"github.com/DanielBlei/rabbithole/internal/library"
+)
 
 func TestCheckListen(t *testing.T) {
 	tests := []struct {
@@ -54,5 +63,69 @@ func TestParseProxies(t *testing.T) {
 	}
 	if _, err := parseProxies([]string{"proxy.lan"}); err == nil {
 		t.Error("a hostname was accepted as a proxy network")
+	}
+}
+
+// RABBITHOLE_LIBRARY_URL=off turns the library off.
+func TestNewLibraryLoaderReadsTheEnvironment(t *testing.T) {
+	t.Setenv(config.LibraryURLEnv, "off")
+	if snap := newLibraryLoader("v1").Snapshot(); !snap.Off || snap.Loaded {
+		t.Errorf("snapshot = %+v, want off and not loaded", snap)
+	}
+}
+
+// A mirror named in the environment loads on any port, once private addresses
+// are allowed.
+func TestNewLibraryLoaderReachesAMirrorOnAnyPort(t *testing.T) {
+	srv := httptest.NewServer(http.FileServer(http.Dir("../library")))
+	defer srv.Close()
+	t.Setenv(config.LibraryURLEnv, srv.URL+"/")
+	t.Setenv(httpclient.AllowPrivateEnv, "1")
+
+	snap := newLibraryLoader("v1").Get(t.Context())
+	if !snap.Loaded || snap.Off || len(snap.Library.Files) == 0 {
+		t.Fatalf("snapshot = %+v, want the mirror's library loaded", snap)
+	}
+
+	t.Setenv(httpclient.AllowPrivateEnv, "")
+	if snap := newLibraryLoader("v1").Get(t.Context()); snap.Loaded {
+		t.Errorf("loaded a loopback mirror without the private opt-in: %+v", snap)
+	}
+}
+
+func TestLibraryBase(t *testing.T) {
+	tests := []struct {
+		raw     string
+		base    string
+		custom  bool
+		wantErr bool
+	}{
+		{"", library.DefaultBaseURL, false, false},
+		{"  ", library.DefaultBaseURL, false, false},
+		{"off", "off", false, false},
+		{" OFF ", "off", false, false},
+		{library.DefaultBaseURL, library.DefaultBaseURL, false, false},
+		{
+			strings.TrimSuffix(library.DefaultBaseURL, "/"),
+			strings.TrimSuffix(library.DefaultBaseURL, "/"),
+			false,
+			false,
+		},
+		{"https://mirror.example/library/", "https://mirror.example/library/", true, false},
+		{"http://127.0.0.1:8081/lib", "http://127.0.0.1:8081/lib", true, false},
+		{"ftp://mirror.example/library/", library.DefaultBaseURL, false, true},
+		{"mirror.example/library", library.DefaultBaseURL, false, true},
+		{"https:///library", library.DefaultBaseURL, false, true},
+		{"/library", library.DefaultBaseURL, false, true},
+		{"://bad", library.DefaultBaseURL, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			base, custom, err := libraryBase(tt.raw)
+			if base != tt.base || custom != tt.custom || (err != nil) != tt.wantErr {
+				t.Errorf("libraryBase(%q) = %q, %v, %v; want %q, %v, err=%v",
+					tt.raw, base, custom, err, tt.base, tt.custom, tt.wantErr)
+			}
+		})
 	}
 }

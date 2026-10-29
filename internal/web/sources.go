@@ -20,6 +20,7 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/httplog"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
+	"github.com/DanielBlei/rabbithole/internal/library"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -48,6 +49,10 @@ type sourcesData struct {
 	Section string
 	// Overview is the Overview page's model, filled only when Section is overview.
 	Overview overviewData
+	// Library is the Library page's model, filled only when Section is library.
+	Library *libraryPage
+	// LibNav is the nav's Library group, on every section.
+	LibNav libNav
 
 	Counts sourceCounts
 	// Attention is the Manage status block: failing sources, flaky notes and the
@@ -199,22 +204,36 @@ func (s *Web) handleSourcesManage(w http.ResponseWriter, r *http.Request) {
 	s.renderSourcesPage(w, r, r.URL.Query().Get("feed"), "manage")
 }
 
-// renderSourcesPage writes one Sources page. The chrome is filled here rather
-// than in sourcesData, which also serves the htmx mutations and has no use for it.
+// renderSourcesPage writes one Sources page.
 func (s *Web) renderSourcesPage(w http.ResponseWriter, r *http.Request, selected, section string) {
-	ctx := r.Context()
-	data, err := s.sourcesData(ctx, selected)
+	data, err := s.sourcesPageData(r.Context(), selected, section)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	s.writeSourcesPage(w, data)
+}
+
+// sourcesPageData is the model of a whole Sources page. The chrome is filled
+// here rather than in sourcesData, which also serves the htmx mutations and has
+// no use for it. The nav reads the library without waiting for it.
+func (s *Web) sourcesPageData(ctx context.Context, selected, section string) (sourcesData, error) {
+	data, err := s.sourcesData(ctx, selected)
+	if err != nil {
+		return sourcesData{}, err
 	}
 	data.Title = "Sources"
 	data.Active = "sources"
 	data.Chrome = s.chrome(ctx)
 	data.Section = section
+	data.LibNav = libNavFor(s.library.Snapshot(), section, "")
 	if section == "overview" {
-		data.Overview = overviewFrom(data)
+		data.Overview = s.overview(ctx, data)
 	}
+	return data, nil
+}
+
+func (s *Web) writeSourcesPage(w http.ResponseWriter, data sourcesData) {
 	var buf bytes.Buffer
 	if err := sourcesTmpl.ExecuteTemplate(&buf, "layout", data); err != nil {
 		log.Error().Err(err).Msg("render sources")
@@ -241,7 +260,7 @@ func (s *Web) handleSourcesLive(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	name := "sourceLiveManage"
 	if r.URL.Query().Get("page") == "overview" {
-		data.Overview = overviewFrom(data)
+		data.Overview = s.overview(r.Context(), data)
 		name = "sourceLiveOverview"
 	} else {
 		open := make(map[string]bool)
@@ -586,7 +605,7 @@ func (s *Web) sourcesData(ctx context.Context, selected string) (sourcesData, er
 	bar.Note = true
 	data.Attention = newAttention(data.Rows, data.Counts.Total, bar)
 
-	data.AllTags = strings.Join(tagUniverse(resolved), ",")
+	data.AllTags = strings.Join(withLibraryLabels(tagUniverse(resolved), s.library.Snapshot()), ",")
 	// A removed source has no editor: restoring it is the only way back.
 	for i := range data.Rows {
 		if row := &data.Rows[i]; selected != "" && row.ID == selected && !row.Deleted {
@@ -707,6 +726,27 @@ func tagUniverse(feeds []config.ResolvedFeed) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// withLibraryLabels appends the library's labels to the tags in use, skipping
+// any that differ only in case: the first casing wins.
+func withLibraryLabels(tags []string, snap library.Snapshot) []string {
+	if !snap.Loaded || snap.Off {
+		return tags
+	}
+	seen := make(map[string]bool, len(tags))
+	for _, t := range tags {
+		seen[strings.ToLower(t)] = true
+	}
+	for _, e := range libraryEntries(snap) {
+		for _, l := range e.Source.Labels {
+			if k := strings.ToLower(l); !seen[k] {
+				seen[k] = true
+				tags = append(tags, l)
+			}
+		}
+	}
+	return tags
 }
 
 // detailFor builds the editor for a source. The lookup goes to the store rather

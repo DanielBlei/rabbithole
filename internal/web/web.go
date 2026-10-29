@@ -22,6 +22,7 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/httplog"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
+	"github.com/DanielBlei/rabbithole/internal/library"
 	"github.com/DanielBlei/rabbithole/internal/profilemgr"
 	"github.com/DanielBlei/rabbithole/internal/rank"
 	"github.com/DanielBlei/rabbithole/internal/store"
@@ -88,6 +89,7 @@ type Web struct {
 	src      config.Source
 	ing      *ingest.Manager
 	profiles *profilemgr.Service
+	library  *library.Loader
 
 	sessions *sessionStore // logged-in browsers, in memory: a restart logs everyone out
 	limiter  *loginLimiter
@@ -112,6 +114,7 @@ func New(db *store.Store, src config.Source, ing *ingest.Manager) *Web {
 	return &Web{
 		db: db, src: src, ing: ing,
 		profiles: profilemgr.New(db),
+		library:  library.NewLoader(library.Options{}),
 		sessions: newSessionStore(), limiter: newLoginLimiter(),
 		hashing: make(chan struct{}, hashSlots), trusted: DefaultTrustedProxies,
 	}
@@ -185,6 +188,12 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /sources/export", s.handleSourceExport)
 	mux.HandleFunc("GET /sources/import", s.handleSourceImportDialog)
 	mux.HandleFunc("GET /sources/feed/{id}", s.handleSourceSelect)
+	mux.HandleFunc("GET /sources/library", s.handleLibrary)
+	mux.HandleFunc("GET /sources/library/{group}", s.handleLibraryGroup)
+	mux.HandleFunc("POST /sources/library/plan", s.handleLibraryPlan)
+	mux.HandleFunc("POST /sources/library/apply", s.handleLibraryApply)
+	mux.HandleFunc("POST /sources/library/restore", s.handleLibraryRestore)
+	mux.HandleFunc("POST /sources/library/refresh", s.handleLibraryRefresh)
 	mux.HandleFunc("POST /sources", s.handleSourceAdd)
 	mux.HandleFunc("POST /sources/import", s.handleSourceImport)
 	mux.HandleFunc("POST /sources/import/preview", s.handleSourceImportPreview)
@@ -275,6 +284,14 @@ func (s *Web) staticControl() string {
 // no-cache, so a rebuild shows on the next reload rather than after the normal
 // cache window.
 func (s *Web) SetDev(on bool) { s.dev = on }
+
+// SetLibrary sets the loader the Library page reads. Without one the library
+// reports not loaded and nothing is fetched.
+func (s *Web) SetLibrary(l *library.Loader) {
+	if l != nil {
+		s.library = l
+	}
+}
 
 // SetManagedBy names the --config file, so the settings page can say that edits
 // made there are kept until the file changes.

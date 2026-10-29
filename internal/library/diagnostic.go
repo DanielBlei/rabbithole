@@ -11,12 +11,16 @@ import (
 	"strings"
 )
 
+// CodeNewerSchema marks a file whose schema_version is newer than this package reads.
+const CodeNewerSchema = "newer_schema"
+
 // Diagnostic is one finding about the library files.
 type Diagnostic struct {
 	File    string // file name, e.g. "rss.yaml"
 	Line    int    // 1-based, 0 when unknown
 	Path    string // "group" or "group/source name", empty at file level
 	Message string
+	Code    string // machine-readable kind for findings callers act on, empty otherwise
 }
 
 // String formats the finding as "file:line: path: message", omitting the line when 0, the path when empty and

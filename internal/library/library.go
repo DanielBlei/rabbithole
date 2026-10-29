@@ -5,6 +5,8 @@
 // file per ingestion type, sources grouped for display.
 package library
 
+import "slices"
+
 // SchemaVersion is the newest library file format this package reads.
 const SchemaVersion = 1
 
@@ -33,6 +35,7 @@ type File struct {
 // Group is an ordered set of sources; file order is display order.
 type Group struct {
 	Name        string
+	Title       string // display name; the name as words when the file has none
 	Description string
 	Sources     []Source
 }
@@ -46,13 +49,11 @@ type Source struct {
 	MaxItems    int      // 0 when unset
 }
 
+// knownTypes lists the types in Library.Files order.
+var knownTypes = []Type{TypeRSS, TypeAcademic}
+
 // typeOrder ranks known types for Library.Files ordering; ok is false for an unknown stem.
 func typeOrder(t Type) (rank int, ok bool) {
-	switch t {
-	case TypeRSS:
-		return 0, true
-	case TypeAcademic:
-		return 1, true
-	}
-	return 0, false
+	i := slices.Index(knownTypes, t)
+	return i, i >= 0
 }

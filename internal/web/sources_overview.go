@@ -4,9 +4,20 @@
 package web
 
 import (
+	"context"
 	"fmt"
+	"slices"
 	"strings"
+
+	"github.com/rs/zerolog/log"
+
+	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/library"
+	"github.com/DanielBlei/rabbithole/internal/store"
 )
+
+// maxSuggestions is how many Library sources the Overview suggests.
+const maxSuggestions = 4
 
 // overviewData is the Sources Overview page: the health of the live sources,
 // what needs attention, and the last ingestion run. Removed sources are left
@@ -37,6 +48,45 @@ type overviewData struct {
 	LastRun string
 
 	Ingest ingestBarData
+
+	// Library holds the suggestions and the coverage. It is nil when they are
+	// hidden: first run, or no library loaded.
+	Library *overviewLibrary
+}
+
+// overviewLibrary is the two Library sections of the Overview.
+type overviewLibrary struct {
+	Suggestions []ovSuggestion
+	Coverage    ovCoverage
+}
+
+// ovSuggestion is one suggested Library source. Done and Err are the states of
+// its row after the Add button was used.
+type ovSuggestion struct {
+	Key  string
+	ID   string
+	Name string
+	URL  string
+	Why  string
+	Done bool
+	Err  string
+}
+
+// ovCoverage is how much of the Library is added, in total and per group.
+type ovCoverage struct {
+	// OOB sends the section out of band, for a reply that is not the whole page.
+	OOB    bool
+	Added  int
+	Total  int
+	Groups []ovCovGroup
+}
+
+type ovCovGroup struct {
+	Name  string
+	Title string
+	Added int
+	Total int
+	Pct   int
 }
 
 // healthSeg is one state's share of the health bar and legend. Link is the
@@ -150,4 +200,134 @@ func plural(n int, one, many string) string {
 		return fmt.Sprintf("%d %s", n, one)
 	}
 	return fmt.Sprintf("%d %s", n, many)
+}
+
+// overview is the Overview model: the live sources and, from the cached
+// library, the suggestions and coverage. It never waits for the network.
+func (s *Web) overview(ctx context.Context, data sourcesData) overviewData {
+	ov := overviewFrom(data)
+	if !ov.FirstRun {
+		ov.Library = s.overviewLibrary(ctx, s.library.Snapshot(), data.Rows)
+	}
+	return ov
+}
+
+// overviewLibrary builds the Library sections, or nil when the library has
+// nothing to show.
+func (s *Web) overviewLibrary(ctx context.Context, snap library.Snapshot, rows []feedRowData) *overviewLibrary {
+	if snap.Off || !snap.Loaded || len(libraryEntries(snap)) == 0 {
+		return nil
+	}
+	states, err := s.libraryStates(ctx, snap)
+	if err != nil {
+		log.Error().Err(err).Msg("plan the library for the overview")
+		return nil
+	}
+	return &overviewLibrary{
+		Suggestions: librarySuggestions(snap, states, rows),
+		Coverage:    libraryCoverage(snap, states),
+	}
+}
+
+// librarySuggestions picks the addable Library sources that share a label with
+// a live source's tags, case-insensitively. A source scores 100 per matching
+// label plus how many live sources carry each of them; ties keep library order.
+func librarySuggestions(snap library.Snapshot, states map[string]store.PlanRow, rows []feedRowData) []ovSuggestion {
+	freq := liveTagFrequency(rows)
+	type cand struct {
+		sug   ovSuggestion
+		score int
+	}
+	var cands []cand
+	for _, e := range libraryEntries(snap) {
+		key := config.FeedURLKey(e.Source.URL)
+		if state, _ := libraryState(states[key]); state != libStateAdd {
+			continue
+		}
+		why, score := suggestionMatch(e.Source.Labels, freq)
+		if score == 0 {
+			continue
+		}
+		cands = append(cands, cand{score: score, sug: ovSuggestion{
+			Key: key, ID: config.FeedID(e.Source.URL), Name: e.Source.Name, URL: e.Source.URL, Why: why,
+		}})
+	}
+	slices.SortStableFunc(cands, func(a, b cand) int { return b.score - a.score })
+	out := make([]ovSuggestion, 0, maxSuggestions)
+	for _, c := range cands[:min(len(cands), maxSuggestions)] {
+		out = append(out, c.sug)
+	}
+	return out
+}
+
+// liveTagFrequency counts, case-insensitively, how many live sources carry each tag.
+func liveTagFrequency(rows []feedRowData) map[string]int {
+	freq := make(map[string]int)
+	for _, r := range rows {
+		if r.Deleted {
+			continue
+		}
+		for _, t := range r.Tags {
+			freq[strings.ToLower(t)]++
+		}
+	}
+	return freq
+}
+
+// suggestionMatch is the "Matches your tags" hint for a source's labels and its
+// score; the score is 0 when no label matches a live tag.
+func suggestionMatch(labels []string, freq map[string]int) (why string, score int) {
+	var matched []string
+	for _, l := range labels {
+		if n := freq[strings.ToLower(l)]; n > 0 {
+			matched = append(matched, l)
+			score += 100 + n
+		}
+	}
+	if len(matched) == 0 {
+		return "", 0
+	}
+	return "Matches your tags: " + strings.Join(matched, ", "), score
+}
+
+// suggestionWhy recomputes the hint of the first picked entry from the sources
+// stored right now, before an add makes the entry match itself.
+func (s *Web) suggestionWhy(ctx context.Context, snap library.Snapshot, pick map[string]bool) string {
+	doc, err := s.db.FeedsDoc(ctx)
+	if err != nil {
+		return ""
+	}
+	rows := make([]feedRowData, len(doc.Feeds))
+	for i, f := range doc.Feeds {
+		rows[i].Tags = f.Tags
+	}
+	for _, e := range libraryEntries(snap) {
+		if pick[config.FeedURLKey(e.Source.URL)] {
+			why, _ := suggestionMatch(e.Source.Labels, liveTagFrequency(rows))
+			return why
+		}
+	}
+	return ""
+}
+
+// libraryCoverage counts the added sources of each group.
+func libraryCoverage(snap library.Snapshot, states map[string]store.PlanRow) ovCoverage {
+	var cov ovCoverage
+	for _, f := range snap.Library.Files {
+		for _, g := range f.Groups {
+			cg := ovCovGroup{Name: g.Name, Title: g.Title, Total: len(g.Sources)}
+			for _, src := range g.Sources {
+				if state, _ := libraryState(states[config.FeedURLKey(src.URL)]); state == libStateSubscribed {
+					cg.Added++
+				}
+			}
+			if cg.Total > 0 {
+				cg.Pct = cg.Added * 100 / cg.Total
+			}
+			cov.Added += cg.Added
+			cov.Total += cg.Total
+			cov.Groups = append(cov.Groups, cg)
+		}
+	}
+	return cov
 }

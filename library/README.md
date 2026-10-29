@@ -1,8 +1,9 @@
 # Source library
 
-Curated, verified sources a new install can pick from. A later release loads
-them on the welcome page. For now, copy a source into your feeds file by hand
-and import it (`rabbithole sources import feeds.yaml`).
+Curated, verified sources a new install can pick from. The Library page of
+Sources fetches these files from `main`, so a merged change reaches every
+install within an hour. Changes are additive only, and a file with a newer
+`schema_version` than the app understands shows an update notice instead.
 
 ## Files
 
@@ -33,8 +34,9 @@ groups:
 1. The filename is the ingestion type, and `type` must equal it.
 2. Top-level key order is `schema_version`, `type`, `description`, `groups`.
 3. Groups are an ordered list (file order is display order). `name` is a
-   lowercase slug unique within the file, `description` is one line, `sources`
-   is non-empty.
+   lowercase slug unique across the library, optional `title` is the display
+   name on one line (without it the name is shown as words, `llm-systems`
+   as `Llm systems`), `description` is one line, `sources` is non-empty.
 4. Source keys are `name`, `url`, `description`, `labels`, and optional
    `max_items` (a positive integer) only for high-volume sources. The library
    is its own format, not the feeds file. No `type`, `since`, `enabled` or

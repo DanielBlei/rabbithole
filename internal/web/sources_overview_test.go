@@ -4,11 +4,17 @@
 package web
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/library"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -44,7 +50,9 @@ func TestOverviewEmptyStoreAsksForASource(t *testing.T) {
 
 	for _, want := range []string{
 		"No sources yet",
+		"Add a feed you already read, or start from the Library: it has ready-made feeds grouped by topic.",
 		`<a class="clk-btn clk-btn--go" href="/sources/manage?add=1">Add a source</a>`,
+		`<a class="clk-btn" href="/sources/library">Browse the Library</a>`,
 		`<a class="clk-btn" href="/sources/manage">Import</a>`,
 	} {
 		if !strings.Contains(out, want) {
@@ -183,5 +191,275 @@ func TestOverviewLeavesOutRemovedSources(t *testing.T) {
 	}
 	if strings.Contains(out, "ov-att--") {
 		t.Errorf("removed source listed in attention; body=%s", out)
+	}
+}
+
+const overviewLibraryYAML = `schema_version: 1
+type: rss
+description: Test library.
+groups:
+  - name: alpha
+    description: First group.
+    sources:
+      - name: Alpha One
+        url: https://a.test/1
+        description: One.
+        labels: [Go, Open Source]
+      - name: Alpha Two
+        url: https://a.test/2
+        description: Two.
+        labels: [Go]
+      - name: Alpha Three
+        url: https://a.test/3
+        description: Three.
+        labels: [Rust]
+      - name: Alpha Four
+        url: https://a.test/4
+        description: Four.
+        labels: [Infra, Go, Open Source]
+  - name: beta
+    description: Second group.
+    sources:
+      - name: Beta One
+        url: https://b.test/1
+        description: One.
+        labels: [Python]
+      - name: Beta Two
+        url: https://b.test/2
+        description: Two.
+        labels: [Go]
+      - name: Beta Three
+        url: https://b.test/3
+        description: Three.
+        labels: [Go]
+      - name: Beta Four
+        url: https://b.test/4
+        description: Four.
+        labels: [Go]
+`
+
+// overviewLibraryWeb is a Web over doc with a loaded library of
+// overviewLibraryYAML.
+func overviewLibraryWeb(t *testing.T, doc config.FeedsDoc) (*Web, *store.Store) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rss.yaml" {
+			http.NotFound(rw, r)
+			return
+		}
+		_, _ = rw.Write([]byte(overviewLibraryYAML))
+	}))
+	t.Cleanup(srv.Close)
+	w, db := sourcesTestWeb(t, doc)
+	w.SetLibrary(library.NewLoader(library.Options{Client: srv.Client(), BaseURL: srv.URL}))
+	if snap := w.library.Get(t.Context()); !snap.Loaded {
+		t.Fatalf("test library did not load: %+v", snap)
+	}
+	return w, db
+}
+
+// goFeeds are live sources whose tags match the Go labels of the test library.
+func goFeeds() []config.Feed {
+	return []config.Feed{
+		{Name: "Mine", URL: "https://mine.test/f", Tags: []string{"go", "open source"}},
+		{Name: "Mine too", URL: "https://mine.test/g", Tags: []string{"Go"}},
+	}
+}
+
+// suggestionNames lists the names of the suggestion rows in page order.
+func suggestionNames(body string) []string {
+	var out []string
+	for _, m := range regexp.MustCompile(`(?s)<li class="ov-grow"[^>]*>.*?<b class="ov-name" title="([^"]*)"`).FindAllStringSubmatch(body, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+func TestOverviewSuggestionsRankByTagMatch(t *testing.T) {
+	w, _ := overviewLibraryWeb(t, config.FeedsDoc{Feeds: goFeeds()})
+	out := get(t, w, "/sources")
+
+	want := []string{"Alpha One", "Alpha Four", "Alpha Two", "Beta Two"}
+	if got := suggestionNames(out); !slices.Equal(got, want) {
+		t.Errorf("suggestions = %v, want %v", got, want)
+	}
+	for _, s := range []string{
+		"Library suggestions", "Based on the tags of your sources.",
+		"Matches your tags: Go, Open Source", ">Browse the Library</a>",
+		`name="pick" value="` + libKey("https://a.test/1") + `"`, `name="view" value="suggestion"`,
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("missing %q", s)
+		}
+	}
+	if strings.Index(out, "Needs attention") > strings.Index(out, "Library suggestions") {
+		t.Errorf("suggestions come before Needs attention")
+	}
+}
+
+func TestOverviewSuggestionsSkipUnavailableSources(t *testing.T) {
+	w, db := overviewLibraryWeb(t, config.FeedsDoc{Feeds: append(goFeeds(),
+		config.Feed{Name: "Alpha One", URL: "https://a.test/1", Tags: []string{"go"}},
+		config.Feed{Name: "Alpha Two", URL: "https://a.test/2"},
+		config.Feed{Name: "Alpha Four", URL: "https://elsewhere.test/4"},
+	)})
+	if err := db.SoftDeleteFeed(t.Context(), feedID(t, db, "Alpha Two")); err != nil {
+		t.Fatalf("SoftDeleteFeed: %v", err)
+	}
+	out := get(t, w, "/sources")
+
+	want := []string{"Beta Two", "Beta Three", "Beta Four"}
+	if got := suggestionNames(out); !slices.Equal(got, want) {
+		t.Errorf("suggestions = %v, want %v (not subscribed, removed or name-taken)", got, want)
+	}
+}
+
+func TestOverviewSuggestionsEmptyWithoutMatchingTags(t *testing.T) {
+	w, _ := overviewLibraryWeb(t, config.FeedsDoc{Feeds: []config.Feed{
+		{Name: "Mine", URL: "https://mine.test/f", Tags: []string{"cooking"}},
+	}})
+	out := get(t, w, "/sources")
+
+	for _, s := range []string{
+		"No suggestions right now. Tag your sources and the Library can match them.",
+		">Browse the Library</a>", "Library coverage",
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("missing %q", s)
+		}
+	}
+	if n := len(suggestionNames(out)); n != 0 {
+		t.Errorf("%d suggestions with no matching tags", n)
+	}
+}
+
+func TestOverviewCoverageCountsPerGroup(t *testing.T) {
+	w, _ := overviewLibraryWeb(t, config.FeedsDoc{Feeds: []config.Feed{
+		{Name: "Alpha One", URL: "https://a.test/1"},
+		{Name: "Beta Two", URL: "https://b.test/2"},
+		{Name: "Beta Three", URL: "https://b.test/3"},
+	}})
+	out := get(t, w, "/sources")
+
+	for _, s := range []string{
+		"Library coverage", "How much of each Library group you have added.",
+		`<p class="ov-big"><b>3</b> of 8 library sources added</p>`,
+		`href="/sources/library/alpha"`, `<b>1</b> of 4`, `style="width:25%"`, `aria-label="1 of 4 added"`,
+		`href="/sources/library/beta"`, `<b>2</b> of 4`, `style="width:50%"`,
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("missing %q", s)
+		}
+	}
+}
+
+func TestOverviewLibrarySectionsHidden(t *testing.T) {
+	tests := []struct {
+		name  string
+		doc   config.FeedsDoc
+		setup func(*Web)
+	}{
+		{"first run", config.FeedsDoc{}, nil},
+		{
+			"not loaded",
+			config.FeedsDoc{Feeds: goFeeds()},
+			func(w *Web) { w.SetLibrary(library.NewLoader(library.Options{})) },
+		},
+		{
+			"off",
+			config.FeedsDoc{Feeds: goFeeds()},
+			func(w *Web) { w.SetLibrary(library.NewLoader(library.Options{BaseURL: "off"})) },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w, _ := overviewLibraryWeb(t, tt.doc)
+			if tt.setup != nil {
+				tt.setup(w)
+			}
+			out := get(t, w, "/sources")
+			for _, s := range []string{"Library suggestions", "Library coverage"} {
+				if strings.Contains(out, s) {
+					t.Errorf("%s shown", s)
+				}
+			}
+		})
+	}
+}
+
+func TestOverviewLiveCarriesLibrarySections(t *testing.T) {
+	w, _ := overviewLibraryWeb(t, config.FeedsDoc{Feeds: goFeeds()})
+	out := get(t, w, "/sources/live?page=overview")
+
+	for _, s := range []string{`id="srcOverview"`, "Library suggestions", "Library coverage", "Alpha One"} {
+		if !strings.Contains(out, s) {
+			t.Errorf("live overview missing %q", s)
+		}
+	}
+}
+
+func TestOverviewAddSwapsTheSuggestionRow(t *testing.T) {
+	w, db := overviewLibraryWeb(t, config.FeedsDoc{Feeds: goFeeds()})
+	key := libKey("https://a.test/1")
+	out := postLibrary(t, w, "/sources/library/apply", url.Values{"pick": {key}, "view": {"suggestion"}}, nil)
+
+	for _, s := range []string{
+		`<li class="ov-grow" id="ov-sug-` + config.FeedID("https://a.test/1") + `"`,
+		`<span class="stp-chip stchip--subscribed">Subscribed</span>`, "Matches your tags: Go",
+		`id="ovCoverage"`, `hx-swap-oob="true"`, `<b>1</b> of 8 library sources added`,
+	} {
+		if !strings.Contains(out, s) {
+			t.Errorf("reply missing %q; body=%s", s, out)
+		}
+	}
+	if strings.Contains(out, `type="submit"`) || strings.Contains(out, "libBody") {
+		t.Errorf("reply still offers Add or repaints the Library; body=%s", out)
+	}
+	feeds, err := db.Feeds(t.Context())
+	if err != nil {
+		t.Fatalf("Feeds: %v", err)
+	}
+	if !slices.ContainsFunc(feeds, func(f config.Feed) bool { return f.URL == "https://a.test/1" }) {
+		t.Errorf("Alpha One was not added; feeds=%+v", feeds)
+	}
+
+	again := postLibrary(t, w, "/sources/library/apply", url.Values{"pick": {key}, "view": {"suggestion"}}, nil)
+	if !strings.Contains(again, "libact__why") || strings.Contains(again, "Subscribed</span>") {
+		t.Errorf("a second add should say why it did nothing; body=%s", again)
+	}
+	if code := postFormCode(
+		w,
+		"/sources/library/apply",
+		url.Values{"pick": {"nope"}, "view": {"suggestion"}},
+	); code != http.StatusBadRequest {
+		t.Errorf("unknown pick: status = %d, want 400", code)
+	}
+}
+
+func TestManageTagPoolAppendsLibraryLabels(t *testing.T) {
+	w, _ := overviewLibraryWeb(t, config.FeedsDoc{Feeds: []config.Feed{
+		{Name: "Mine", URL: "https://mine.test/f", Tags: []string{"go"}},
+	}})
+	out := get(t, w, "/sources/manage")
+
+	if want := `data-all-tags="go,Open Source,Rust,Infra,Python"`; !strings.Contains(out, want) {
+		t.Errorf("missing %q", want)
+	}
+}
+
+func TestWithLibraryLabelsWithoutFeeds(t *testing.T) {
+	w, _ := overviewLibraryWeb(t, config.FeedsDoc{})
+	got := withLibraryLabels(nil, w.library.Snapshot())
+	if want := []string{"Go", "Open Source", "Rust", "Infra", "Python"}; !slices.Equal(got, want) {
+		t.Errorf("labels = %v, want %v", got, want)
+	}
+	if got := withLibraryLabels(
+		[]string{"x"},
+		library.NewLoader(library.Options{}).Snapshot(),
+	); !slices.Equal(
+		got,
+		[]string{"x"},
+	) {
+		t.Errorf("not loaded changed the pool: %v", got)
 	}
 }

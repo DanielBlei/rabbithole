@@ -5,6 +5,7 @@ type: academic
 description: Saved paper searches. The URL host picks the provider (arXiv, Crossref, Semantic Scholar).
 groups:
   - name: llm-systems
+    title: LLM systems
     description: LLM inference, serving and efficiency research.
     sources:
       - name: "arXiv: speculative decoding"
@@ -33,6 +34,7 @@ groups:
         labels: [AI, Inference, Papers]
 
   - name: agents-rag-evals
+    title: Agents, RAG and evals
     description: Coding agents, retrieval-augmented generation and LLM evaluation.
     sources:
       - name: "arXiv: RAG research"
@@ -51,6 +53,7 @@ groups:
         labels: [AI, Research, Papers]
 
   - name: journals
+    title: Journals
     description: Newest articles from computing journals, by ISSN via Crossref.
     sources:
       - name: Communications of the ACM

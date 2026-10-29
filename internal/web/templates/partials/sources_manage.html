@@ -157,10 +157,11 @@
          live source shows it from the script. */}}
     <div class="mg-empty" data-src-empty="first"{{if or .Counts.Total .Rows .Adding}} hidden{{end}}>
       <h2>No sources yet</h2>
-      <p>Sources are the feeds The Rabbit Hole reads. Paste a site address to add your first one, or import a sources file.</p>
+      <p>Sources are the feeds The Rabbit Hole reads. Paste a site address to add your first one, import a sources file, or start from the Library.</p>
       <div class="mg-empty__a">
         <button class="clk-btn clk-btn--go" type="button" hx-get="/sources/new" hx-target="#srcBody" hx-swap="outerHTML" data-src-add>Add a source</button>
         <button class="clk-btn" type="button" data-src-import hx-get="/sources/import" hx-target="#modalTop" hx-swap="innerHTML">Import</button>
+        <a class="clk-btn" href="/sources/library">Browse the Library</a>
       </div>
     </div>
   </div>

@@ -49,6 +49,9 @@ type importPlan struct {
 
 	ApplyTo, ApplyTarget    string
 	CancelGet, CancelTarget string
+
+	// AddOnly keeps removed rows out of the selection: the plan can only add.
+	AddOnly bool
 }
 
 type planCount struct {
@@ -158,23 +161,30 @@ func (s *Web) planFile(ctx context.Context, name, text string) (*importPlan, err
 		p.Err = err.Error()
 		return p, nil
 	}
+	return s.planDoc(ctx, p, *doc)
+}
+
+// planDoc fills p with the rows and legend counts of doc planned against the
+// stored feeds. p keeps its title and targets. A doc with no entries comes back
+// as a plan holding Err; only a store failure is an error.
+func (s *Web) planDoc(ctx context.Context, p *importPlan, doc config.FeedsDoc) (*importPlan, error) {
 	if len(doc.Feeds) == 0 {
 		where := "this file"
-		if name != "" {
-			where = name
+		if p.Name != "" {
+			where = p.Name
 		}
 		p.Err = fmt.Sprintf(
 			"No sources found in %s. Expected a sources: or feeds: list with a name and url for each.", where)
 		return p, nil
 	}
-	rows, err := s.db.PlanImport(ctx, *doc)
+	rows, err := s.db.PlanImport(ctx, doc)
 	if err != nil {
 		return nil, err
 	}
 	n := make(map[store.PlanStatus]int)
 	for _, row := range rows {
 		n[row.Status]++
-		pick := row.Status == store.PlanNew || row.Status == store.PlanRemoved
+		pick := row.Status == store.PlanNew || (row.Status == store.PlanRemoved && !p.AddOnly)
 		p.Rows = append(p.Rows, planRowView{
 			PlanRow: row, Label: planLabels[row.Status],
 			Selectable: pick, Checked: row.Status == store.PlanNew,
