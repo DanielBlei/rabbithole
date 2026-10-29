@@ -58,6 +58,9 @@ type probeResult struct {
 	retryAfter time.Duration
 }
 
+// ingestClient is the client ingestion fetches through.
+var ingestClient = feeds.NewClient("network-test")
+
 // liveClient does not follow redirects, so the probe sees the first response.
 var liveClient = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
@@ -193,7 +196,7 @@ func rssOutcome(ctx context.Context, job liveJob) liveOutcome {
 			retryAfter: probe.retryAfter,
 		}
 	}
-	res := feeds.FetchAll(ctx, []feeds.Source{{Name: job.name, URL: job.url}})[0]
+	res := feeds.FetchAll(ctx, ingestClient, []feeds.Source{{Name: job.name, URL: job.url}})[0]
 	if res.Err != nil {
 		return liveOutcome{reason: errReason(res.Err), retryable: true}
 	}
@@ -202,7 +205,7 @@ func rssOutcome(ctx context.Context, job liveJob) liveOutcome {
 
 // academicOutcome runs the saved search through the app's academic fetcher.
 func academicOutcome(ctx context.Context, job liveJob) liveOutcome {
-	res := fetchAcademic(ctx, []feeds.Source{{Name: job.name, URL: job.url}})[0]
+	res := fetchAcademic(ctx, ingestClient, []feeds.Source{{Name: job.name, URL: job.url}})[0]
 	if res.Err != nil {
 		return liveOutcome{reason: errReason(res.Err), retryable: true}
 	}

@@ -5,6 +5,7 @@ package feeds
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/DanielBlei/rabbithole/internal/httpclient"
 )
 
 func TestAcademicFetcherRejectsUnsupportedProvider(t *testing.T) {
@@ -101,6 +104,7 @@ func TestFetchArXiv(t *testing.T) {
 
 	f := NewAcademicFetcher()
 	f.ArXivBaseURL = srv.URL
+	f.Client = srv.Client()
 
 	src := Source{
 		Name: "arXiv AI",
@@ -235,6 +239,7 @@ func TestFetchCrossrefFiltersPublisherAndCanonicalizesDOI(t *testing.T) {
 
 	f := NewAcademicFetcher()
 	f.CrossrefBaseURL = srv.URL
+	f.Client = srv.Client()
 
 	items, err := f.Fetch(
 		context.Background(),
@@ -324,6 +329,7 @@ func TestFetchCrossrefRetries429(t *testing.T) {
 
 	f := NewAcademicFetcher()
 	f.CrossrefBaseURL = srv.URL
+	f.Client = srv.Client()
 
 	items, err := f.Fetch(
 		context.Background(),
@@ -452,6 +458,7 @@ func TestFetchSemanticScholarFiltersAndNormalizes(t *testing.T) {
 
 	f := NewAcademicFetcher()
 	f.SemanticScholarBaseURL = srv.URL
+	f.Client = srv.Client()
 
 	items, err := f.Fetch(
 		context.Background(),
@@ -602,6 +609,7 @@ func TestAcademicProviderHTTPAndDecodeErrors(t *testing.T) {
 			}
 
 			f := NewAcademicFetcher()
+			f.Client = srv.Client()
 			tt.setURL(f, srv.URL)
 
 			_, err := f.Fetch(
@@ -616,6 +624,45 @@ func TestAcademicProviderHTTPAndDecodeErrors(t *testing.T) {
 				t.Fatal("expected error")
 			}
 		})
+	}
+}
+
+func TestFetchArXivOversizeBodyIsTooLarge(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, "<feed><entry><title>")
+		chunk := []byte(strings.Repeat("a", 1<<20))
+		for range 21 {
+			_, _ = w.Write(chunk)
+		}
+	}))
+	defer srv.Close()
+
+	f := NewAcademicFetcher()
+	f.Client = srv.Client()
+	f.ArXivBaseURL = srv.URL
+
+	_, err := f.Fetch(context.Background(), Source{Name: "test"}, AcademicQuery{Provider: "arxiv", Query: "agents"})
+	if !errors.Is(err, httpclient.ErrTooLarge) {
+		t.Fatalf("err = %v, want ErrTooLarge", err)
+	}
+}
+
+func TestAcademicFetcherDefaultClientIsGuarded(t *testing.T) {
+	t.Setenv(httpclient.AllowPrivateEnv, "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("guarded client reached a loopback server")
+	}))
+	defer srv.Close()
+
+	for name, f := range map[string]*AcademicFetcher{
+		"constructor": NewAcademicFetcher(),
+		"fallback":    {},
+	} {
+		f.ArXivBaseURL = srv.URL
+		_, err := f.Fetch(context.Background(), Source{Name: "test"}, AcademicQuery{Provider: "arxiv", Query: "agents"})
+		if !errors.Is(err, httpclient.ErrBlockedAddress) {
+			t.Errorf("%s: err = %v, want ErrBlockedAddress", name, err)
+		}
 	}
 }
 

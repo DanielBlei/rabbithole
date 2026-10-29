@@ -11,6 +11,7 @@ import (
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/digest"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/profilemgr"
 )
@@ -89,6 +90,7 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 	outcome, err := ingest.Run(ctx, run, activeProfile, db, day, ingest.Options{
 		Think:  think,
 		Record: !dryRun,
+		Client: feeds.NewClient(buildVersion()),
 	})
 	if err != nil {
 		return err

@@ -5,11 +5,12 @@ package ingest
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
 
 // fetchRSS fetches RSS/Atom sources through the feeds package.
-func fetchRSS(ctx context.Context, sources []feeds.Source) []feeds.Result {
-	return feeds.FetchAll(ctx, sources)
+func fetchRSS(ctx context.Context, client *http.Client, sources []feeds.Source) []feeds.Result {
+	return feeds.FetchAll(ctx, client, sources)
 }

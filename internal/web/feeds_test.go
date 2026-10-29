@@ -4,12 +4,16 @@
 package web
 
 import (
+	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/httpclient"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -149,6 +153,43 @@ func TestExplainFeedError(t *testing.T) {
 		},
 		{name: "dns", raw: "dial tcp: lookup x.invalid: no such host", want: "does not resolve"},
 		{name: "arxiv 503", raw: "arxiv returned 503 Service Unavailable", want: "arXiv is temporarily unavailable"},
+		{
+			name: "private address",
+			raw:  `Get "http://10.0.0.5/feed": dial tcp 10.0.0.5:80: blocked address: 10.0.0.5 (private range)`,
+			want: "RABBITHOLE_ALLOW_PRIVATE_FETCH=1 to allow private addresses",
+		},
+		{
+			name: "localhost via proxy",
+			raw:  `Get "http://localhost/feed": blocked address: localhost (private range)`,
+			want: "This address is on a private network.",
+		},
+		{
+			name: "metadata address",
+			raw:  `Get "http://169.254.169.254/": dial tcp 169.254.169.254:80: blocked address: 169.254.169.254`,
+			want: "never fetched",
+		},
+		{
+			name: "public to private redirect",
+			raw:  `Get "http://192.168.1.2/feed": dial tcp 192.168.1.2:80: blocked address: public to private redirect: 192.168.1.2`,
+			want: "The feed redirected to a private address, which is blocked.",
+		},
+		{
+			name: "private redirect is not the opt-in hint",
+			raw:  "blocked address: public to private redirect: 10.0.0.1",
+			want: "redirected to a private address",
+		},
+		{
+			name: "too large",
+			raw:  "response body too large: over 16777216 bytes",
+			want: "The feed is larger than 16 MiB.",
+		},
+		{
+			name: "too many redirects",
+			raw:  `Get "https://x.test/f": too many redirects: stopped after 5`,
+			want: "redirects too many times",
+		},
+		{name: "insecure redirect", raw: "insecure redirect: x.test to y.test", want: "plain http"},
+		{name: "unsupported scheme", raw: `unsupported url scheme: "ftp"`, want: "Only http and https"},
 		{name: "unknown falls back", raw: "boom", want: "The fetch failed."},
 		{name: "empty falls back", raw: "", want: "The fetch failed."},
 	}
@@ -159,6 +200,52 @@ func TestExplainFeedError(t *testing.T) {
 				t.Errorf("explainFeedError(%q) = %q, want it to contain %q", c.raw, got, c.want)
 			}
 		})
+	}
+}
+
+// policyError is the error the safe client returns for an IP-literal target;
+// a proxy makes it fail before any connection is tried.
+func policyError(t *testing.T, ip string) error {
+	t.Helper()
+	proxy, _ := url.Parse("http://127.0.0.1:1")
+	c := httpclient.NewSafe(httpclient.Options{
+		Proxy: func(*http.Request) (*url.URL, error) { return proxy, nil },
+	})
+	resp, err := c.Get("http://[" + ip + "]/feed")
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatalf("%s was not blocked", ip)
+	}
+	return err
+}
+
+// The patterns follow the text the httpclient errors produce.
+func TestExplainFeedErrorMatchesHTTPClientErrors(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{fmt.Errorf("%w: 10.0.0.5 (private range)", httpclient.ErrBlockedAddress), "RABBITHOLE_ALLOW_PRIVATE_FETCH"},
+		{fmt.Errorf("%w: 169.254.169.254", httpclient.ErrBlockedAddress), "never fetched"},
+		{policyError(t, "64:ff9b::a00:5"), "RABBITHOLE_ALLOW_PRIVATE_FETCH"},
+		{policyError(t, "64:ff9b::a9fe:a9fe"), "never fetched"},
+		{fmt.Errorf("%w: 10.0.0.5", httpclient.ErrPrivateRedirect), "redirected to a private address"},
+		{httpclient.ErrTooLarge, "larger than 16 MiB"},
+		{fmt.Errorf("%w: stopped after 5", httpclient.ErrTooManyRedirects), "too many times"},
+		{fmt.Errorf("%w: a to b", httpclient.ErrInsecureRedirect), "plain http"},
+	}
+	for _, c := range cases {
+		if got := explainFeedError(c.err.Error()); !strings.Contains(got, c.want) {
+			t.Errorf("explainFeedError(%q) = %q, want it to contain %q", c.err, got, c.want)
+		}
+	}
+	if got := explainFeedError(
+		httpclient.ErrPrivateRedirect.Error(),
+	); strings.Contains(
+		got,
+		httpclient.AllowPrivateEnv,
+	) {
+		t.Errorf("a private redirect points at the opt-in that cannot fix it: %q", got)
 	}
 }
 

@@ -34,21 +34,28 @@ type AcademicFetcher struct {
 // NewAcademicFetcher returns a fetcher configured for the public scholarly APIs.
 func NewAcademicFetcher() *AcademicFetcher {
 	return &AcademicFetcher{
-		Client:                 &http.Client{},
+		Client:                 NewClient(""),
 		ArXivBaseURL:           "https://export.arxiv.org/api/query",
 		CrossrefBaseURL:        "https://api.crossref.org/works",
 		SemanticScholarBaseURL: "https://api.semanticscholar.org/graph/v1/paper/search/bulk",
 	}
 }
 
-// FetchAcademic fetches one academic saved search and normalizes its results
-// into the same Item model used by RSS ingest.
+// FetchAcademic fetches one academic saved search through client and
+// normalizes its results into the same Item model used by RSS ingest. A nil
+// client means NewClient.
 func FetchAcademic(
 	ctx context.Context,
+	client *http.Client,
 	src Source,
 	query AcademicQuery,
 ) ([]Item, error) {
-	return NewAcademicFetcher().Fetch(ctx, src, query)
+	f := NewAcademicFetcher()
+	f.Client = client
+	if client == nil {
+		f.Client = NewClient("")
+	}
+	return f.Fetch(ctx, src, query)
 }
 
 // Fetch executes one academic provider query.
@@ -79,7 +86,7 @@ func (f *AcademicFetcher) client() *http.Client {
 	if f.Client != nil {
 		return f.Client
 	}
-	return http.DefaultClient
+	return NewClient("")
 }
 
 func normalizeAcademicProvider(provider string) string {

@@ -9,6 +9,7 @@ package ingest
 
 import (
 	"context"
+	"net/http"
 	"sort"
 	"time"
 
@@ -26,6 +27,8 @@ import (
 type Options struct {
 	Think  bool // enable model reasoning during scoring
 	Record bool // write the cycle's items and results to the store
+	// Client fetches the feeds; nil means feeds.NewClient.
+	Client *http.Client
 }
 
 // Outcome is the result of one cycle. Rendering it (markdown file, stdout,
@@ -57,6 +60,9 @@ func Run(
 	opts Options,
 ) (Outcome, error) {
 	logger := zerolog.Ctx(ctx)
+	if opts.Client == nil {
+		opts.Client = feeds.NewClient("")
+	}
 	// One read of the feed set for the whole run. The Sources page can edit
 	// feeds while this is in flight, and a run that re-read the store partway
 	// through would fetch one set and tag against another.
@@ -86,7 +92,7 @@ func Run(
 	// dispatchFetch returns one Result per feed, positionally — results[i] is
 	// active[i]'s outcome. That pairing is used directly below rather than
 	// flattening the items and regrouping them by feed name.
-	results := dispatchFetch(ctx, active)
+	results := dispatchFetch(ctx, opts.Client, active)
 	fetched, failed := tallyFetches(results)
 	logger.Info().Int("items", fetched).Int("failed_feeds", failed).
 		Str("elapsed", time.Since(fetchStart).Round(100*time.Millisecond).String()).Msg("fetched items")

@@ -346,6 +346,27 @@ so and offers **Try again**; nothing else on the page waits for it.
 Both variables can be set in `./.env` like the other `RABBITHOLE_*` ones. Contributing a source:
 [`library/README.md`](https://github.com/DanielBlei/rabbithole/blob/main/library/README.md).
 
+### Fetching feeds
+
+Ingestion fetches every feed through the same guarded client as the source library, with these
+limits. Academic sources go through the same guarded client but keep their own size limits and
+User-Agent.
+
+- A fetch takes at most 30 seconds, follows at most 5 redirects, and reads at most 16 MiB per RSS
+  feed. A feed over the cap fails with "The feed is larger than 16 MiB."
+- Private and loopback addresses are refused, so a feed on your LAN or `localhost` fails with a
+  note naming `RABBITHOLE_ALLOW_PRIVATE_FETCH`. Set it to `1` (in `./.env` or the environment) to
+  fetch those feeds. Link-local addresses, cloud metadata included, stay blocked.
+- A redirect from a public address into a private one is blocked even with
+  `RABBITHOLE_ALLOW_PRIVATE_FETCH=1`; a feed that starts on your LAN may redirect within it. The
+  rule stops a feed (or an open redirect on a trusted host) from bouncing the server into the
+  private network. With the opt-out on, a feed host whose own DNS points at a private address is
+  fetched, because that is not a redirect.
+- A redirect from https to http is refused.
+- `HTTPS_PROXY` and `NO_PROXY` are honoured; with a proxy, the proxy resolves hostnames, so only
+  IP addresses and `localhost` in a feed URL are checked.
+- RSS requests identify as `rabbithole/<version>`.
+
 ### Feed URLs
 
 You can leave `https://` off: `example.com/feed.xml` is filled in for you, here and on the

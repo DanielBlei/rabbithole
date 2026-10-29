@@ -14,6 +14,7 @@ import (
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/httpclient"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -168,6 +169,34 @@ var feedErrorExplanations = []struct {
 	re   *regexp.Regexp
 	text string
 }{
+	{
+		regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrPrivateRedirect.Error())),
+		"The feed redirected to a private address, which is blocked.",
+	},
+	{
+		regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrBlockedAddress.Error()) + `.*\(private range\)`),
+		"This address is on a private network. Set " + httpclient.AllowPrivateEnv + "=1 to allow private addresses.",
+	},
+	{
+		regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrBlockedAddress.Error())),
+		"This address is blocked: link-local and cloud metadata addresses are never fetched.",
+	},
+	{
+		regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrTooLarge.Error())),
+		fmt.Sprintf("The feed is larger than %d MiB.", feeds.MaxFeedBytes>>20),
+	},
+	{
+		regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrTooManyRedirects.Error())),
+		"The feed redirects too many times.",
+	},
+	{
+		regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrInsecureRedirect.Error())),
+		"The feed redirected from https to plain http, which is blocked.",
+	},
+	{
+		regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrUnsupportedScheme.Error())),
+		"Only http and https addresses can be fetched.",
+	},
 	{
 		regexp.MustCompile(`\b404\b`),
 		"The site says this address does not exist. The feed probably moved: edit the URL, or remove the source.",

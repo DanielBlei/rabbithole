@@ -5,9 +5,11 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/httpclient"
 )
 
 // dispatchFetch must keep results positional with the feeds it was given, even
@@ -20,7 +22,7 @@ func TestDispatchFetchPreservesOrderAcrossTypes(t *testing.T) {
 		{Name: "C", URL: serveRSS(t, feedRSS("Item C", "https://x.test/c")), Type: config.FeedTypeRSS},
 	}
 
-	results := dispatchFetch(context.Background(), active)
+	results := dispatchFetch(context.Background(), loopbackClient, active)
 	if len(results) != len(active) {
 		t.Fatalf("results = %d, want %d", len(results), len(active))
 	}
@@ -43,11 +45,23 @@ func TestDispatchFetchPreservesOrderAcrossTypes(t *testing.T) {
 	}
 }
 
+// A nil client is the ingestion client, which refuses private addresses.
+func TestDispatchFetchNilClientRefusesLoopback(t *testing.T) {
+	t.Setenv(httpclient.AllowPrivateEnv, "")
+	active := []config.ResolvedFeed{
+		{Name: "Local", URL: serveRSS(t, feedRSS("Item", "https://x.test/a")), Type: config.FeedTypeRSS},
+	}
+	results := dispatchFetch(context.Background(), nil, active)
+	if !errors.Is(results[0].Err, httpclient.ErrBlockedAddress) {
+		t.Errorf("err = %v, want ErrBlockedAddress", results[0].Err)
+	}
+}
+
 // An unregistered type falls back to skipUnimplemented rather than panicking
 // or dropping the feed from the results.
 func TestDispatchFetchFallsBackForUnknownType(t *testing.T) {
 	active := []config.ResolvedFeed{{Name: "Mystery", URL: "https://mystery.test/feed", Type: "podcast"}}
-	results := dispatchFetch(context.Background(), active)
+	results := dispatchFetch(context.Background(), loopbackClient, active)
 	if len(results) != 1 {
 		t.Fatalf("results = %d, want 1", len(results))
 	}

@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -86,6 +88,29 @@ func TestCheckAddr(t *testing.T) {
 			open := checkAddr(addr, true)
 			if (open != nil) != tt.blockedAlways {
 				t.Errorf("AllowPrivate=true: err=%v, want blocked=%v", open, tt.blockedAlways)
+			}
+		})
+	}
+}
+
+func TestCheckAddrNAT64Text(t *testing.T) {
+	tests := []struct {
+		addr        string
+		wantPrivate bool
+	}{
+		{"64:ff9b::a00:5", true},
+		{"64:ff9b::7f00:1", true},
+		{"64:ff9b::a9fe:a9fe", false},
+		{"64:ff9b::1", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.addr, func(t *testing.T) {
+			err := checkAddr(netip.MustParseAddr(tt.addr), false)
+			if err == nil {
+				t.Fatal("not blocked")
+			}
+			if got := strings.Contains(err.Error(), "(private range)"); got != tt.wantPrivate {
+				t.Errorf("err = %q, private range suffix = %v, want %v", err, got, tt.wantPrivate)
 			}
 		})
 	}
@@ -531,4 +556,267 @@ func TestAllowPrivateFromEnv(t *testing.T) {
 			}
 		})
 	}
+}
+
+// publicHost and privateHost are the IPv6 and IPv4 loopback addresses, which
+// bind on every platform; chainClient judges the first public, as a stand-in
+// for a routable address.
+const (
+	publicHost  = "::1"
+	privateHost = "127.0.0.1"
+)
+
+func chainClient(o Options) *http.Client {
+	return newSafe(o, func(a netip.Addr) bool { return a.Unmap().String() == publicHost })
+}
+
+type hitServer struct {
+	*httptest.Server
+	hits *atomic.Int32
+}
+
+// serveOn starts a server on host that redirects /to?u=... and counts requests.
+func serveOn(t *testing.T, host string) hitServer {
+	t.Helper()
+	ln, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
+	if err != nil {
+		t.Skipf("cannot listen on %s: %v", host, err)
+	}
+	hits := new(atomic.Int32)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/to", func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.Redirect(w, r, r.URL.Query().Get("u"), http.StatusFound)
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = io.WriteString(w, "ok")
+	})
+	srv := httptest.NewUnstartedServer(mux)
+	srv.Listener = ln
+	srv.Start()
+	t.Cleanup(srv.Close)
+	return hitServer{srv, hits}
+}
+
+func getBody(t *testing.T, c *http.Client, target string) (string, error) {
+	t.Helper()
+	resp, err := get(t, c, target)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+	return string(b), nil
+}
+
+func redirectTo(from hitServer, to string) string {
+	return from.URL + "/to?u=" + url.QueryEscape(to)
+}
+
+func TestChainControl(t *testing.T) {
+	isPublic := func(a netip.Addr) bool { return a.String() == "93.184.216.34" }
+	tests := []struct {
+		name    string
+		address string
+		anyPort bool
+		wantErr error
+	}{
+		{"public passes", "93.184.216.34:443", false, nil},
+		{"public port rule still applies", "93.184.216.34:8080", false, ErrBlockedAddress},
+		{"public on any port", "93.184.216.34:8080", true, nil},
+		{"loopback is a private redirect", "127.0.0.1:443", false, ErrPrivateRedirect},
+		{"lan is a private redirect", "192.168.1.5:443", false, ErrPrivateRedirect},
+		{"ipv6 loopback", "[::1]:443", false, ErrPrivateRedirect},
+		{"mapped private", "[::ffff:10.0.0.1]:443", false, ErrPrivateRedirect},
+		{"metadata stays plain blocked", "169.254.169.254:80", false, ErrBlockedAddress},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := chainControl(Options{AllowPrivate: true, AnyPort: tt.anyPort}, isPublic)("tcp", tt.address, nil)
+			if !errors.Is(err, tt.wantErr) && (tt.wantErr != nil || err != nil) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantErr != nil && !errors.Is(err, ErrBlockedAddress) {
+				t.Errorf("err %v does not match ErrBlockedAddress", err)
+			}
+			if tt.name == "metadata stays plain blocked" && errors.Is(err, ErrPrivateRedirect) {
+				t.Errorf("always-denied address reported as a private redirect: %v", err)
+			}
+		})
+	}
+}
+
+func TestPrivateRedirectErrorMatchesBlockedAddress(t *testing.T) {
+	if !errors.Is(ErrPrivateRedirect, ErrBlockedAddress) {
+		t.Fatal("ErrPrivateRedirect does not match ErrBlockedAddress")
+	}
+	if errors.Is(ErrBlockedAddress, ErrPrivateRedirect) {
+		t.Fatal("ErrBlockedAddress matches ErrPrivateRedirect")
+	}
+}
+
+func TestSafeClientPublicToPrivateRedirect(t *testing.T) {
+	pub, priv := serveOn(t, publicHost), serveOn(t, privateHost)
+	c := chainClient(Options{AllowPrivate: true, AnyPort: true, MaxRedirects: 5})
+
+	_, err := getBody(t, c, redirectTo(pub, priv.URL+"/feed"))
+	if !errors.Is(err, ErrPrivateRedirect) || !errors.Is(err, ErrBlockedAddress) {
+		t.Fatalf("err = %v, want ErrPrivateRedirect and ErrBlockedAddress", err)
+	}
+	if n := priv.hits.Load(); n != 0 {
+		t.Errorf("private server saw %d requests, want 0", n)
+	}
+
+	t.Run("later hop of a public chain", func(t *testing.T) {
+		mid := redirectTo(pub, redirectTo(pub, priv.URL+"/feed"))
+		if _, err := getBody(t, c, mid); !errors.Is(err, ErrPrivateRedirect) {
+			t.Fatalf("err = %v, want ErrPrivateRedirect", err)
+		}
+	})
+	t.Run("always-denied stays plain blocked", func(t *testing.T) {
+		_, err := getBody(t, c, redirectTo(pub, "http://169.254.169.254/latest"))
+		if !errors.Is(err, ErrBlockedAddress) || errors.Is(err, ErrPrivateRedirect) {
+			t.Fatalf("err = %v, want ErrBlockedAddress only", err)
+		}
+	})
+}
+
+func TestSafeClientPublicToPublicRedirect(t *testing.T) {
+	pub := serveOn(t, publicHost)
+	c := chainClient(Options{AllowPrivate: true, AnyPort: true, MaxRedirects: 5})
+	for range 2 {
+		body, err := getBody(t, c, redirectTo(pub, pub.URL+"/feed"))
+		if err != nil || body != "ok" {
+			t.Fatalf("body = %q, err = %v", body, err)
+		}
+	}
+}
+
+func TestSafeClientPrivateToPublicToPrivateRedirect(t *testing.T) {
+	a, b := serveOn(t, privateHost), serveOn(t, privateHost)
+	pub := serveOn(t, publicHost)
+	c := chainClient(Options{AllowPrivate: true, AnyPort: true, MaxRedirects: 5})
+
+	_, err := getBody(t, c, redirectTo(a, redirectTo(pub, b.URL+"/feed")))
+	if !errors.Is(err, ErrPrivateRedirect) {
+		t.Fatalf("err = %v, want ErrPrivateRedirect", err)
+	}
+	if n := b.hits.Load(); n != 0 {
+		t.Errorf("private server saw %d requests, want 0", n)
+	}
+}
+
+func TestSafeClientPrivateToPrivateRedirect(t *testing.T) {
+	a, b := serveOn(t, privateHost), serveOn(t, privateHost)
+	pub := serveOn(t, publicHost)
+	c := chainClient(Options{AllowPrivate: true, AnyPort: true, MaxRedirects: 5})
+
+	for name, target := range map[string]string{
+		"same host":      redirectTo(a, a.URL+"/feed"),
+		"another server": redirectTo(a, b.URL+"/feed"),
+		"on to a public": redirectTo(a, pub.URL+"/feed"),
+		"back and forth": redirectTo(a, redirectTo(b, a.URL+"/feed")),
+	} {
+		t.Run(name, func(t *testing.T) {
+			body, err := getBody(t, c, target)
+			if err != nil || body != "ok" {
+				t.Fatalf("body = %q, err = %v", body, err)
+			}
+		})
+	}
+
+	t.Run("blocked without AllowPrivate", func(t *testing.T) {
+		_, err := getBody(t, chainClient(Options{AnyPort: true, MaxRedirects: 5}), redirectTo(a, b.URL))
+		if !errors.Is(err, ErrBlockedAddress) {
+			t.Fatalf("err = %v, want ErrBlockedAddress", err)
+		}
+	})
+}
+
+func TestSafeClientRedirectRuleSkipsPooledConnections(t *testing.T) {
+	pub, priv := serveOn(t, publicHost), serveOn(t, privateHost)
+	c := chainClient(Options{AllowPrivate: true, AnyPort: true, MaxRedirects: 5})
+
+	// A private fetch leaves an idle connection to priv in the pool.
+	if body, err := getBody(t, c, priv.URL+"/warm"); err != nil || body != "ok" {
+		t.Fatalf("warm-up: %q, %v", body, err)
+	}
+	before := priv.hits.Load()
+
+	// The public first hop is also served from the pool on the second pass.
+	for i := range 2 {
+		_, err := getBody(t, c, redirectTo(pub, priv.URL+"/feed"))
+		if !errors.Is(err, ErrPrivateRedirect) {
+			t.Fatalf("pass %d: err = %v, want ErrPrivateRedirect", i, err)
+		}
+	}
+	if n := priv.hits.Load(); n != before {
+		t.Errorf("private server saw %d requests through a pooled connection", n-before)
+	}
+
+	// A private chain keeps using the pool and is not blocked.
+	if body, err := getBody(t, c, redirectTo(priv, priv.URL+"/feed")); err != nil || body != "ok" {
+		t.Fatalf("private chain: %q, %v", body, err)
+	}
+}
+
+func TestSafeClientProxiedFirstHopIsPublic(t *testing.T) {
+	priv := serveOn(t, privateHost)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, priv.URL+"/feed", http.StatusFound)
+	}))
+	defer proxy.Close()
+	proxyURL, _ := url.Parse(proxy.URL)
+	// Only the feed host goes through the proxy; the redirect target is dialled
+	// directly, as with a NO_PROXY match.
+	pick := func(r *http.Request) (*url.URL, error) {
+		if r.URL.Hostname() == "feeds.example.test" {
+			return proxyURL, nil
+		}
+		return nil, nil
+	}
+	c := chainClient(Options{AllowPrivate: true, AnyPort: true, MaxRedirects: 5, Proxy: pick})
+
+	_, err := getBody(t, c, "http://feeds.example.test/rss")
+	if !errors.Is(err, ErrPrivateRedirect) {
+		t.Fatalf("err = %v, want ErrPrivateRedirect", err)
+	}
+	if n := priv.hits.Load(); n != 0 {
+		t.Errorf("private server saw %d requests, want 0", n)
+	}
+}
+
+func TestSafeClientRedirectRuleWithProxy(t *testing.T) {
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "via proxy")
+	}))
+	defer proxy.Close()
+	proxyURL, _ := url.Parse(proxy.URL)
+	pick := func(r *http.Request) (*url.URL, error) {
+		if r.URL.Hostname() == "10.0.0.5" || strings.HasSuffix(r.URL.Hostname(), ".test") {
+			return proxyURL, nil
+		}
+		return nil, nil
+	}
+	pub, priv := serveOn(t, publicHost), serveOn(t, privateHost)
+	c := chainClient(Options{AllowPrivate: true, AnyPort: true, MaxRedirects: 5, Proxy: pick})
+
+	t.Run("public chain to a private literal", func(t *testing.T) {
+		if _, err := getBody(t, c, redirectTo(pub, "http://10.0.0.5/feed")); !errors.Is(err, ErrPrivateRedirect) {
+			t.Fatalf("err = %v, want ErrPrivateRedirect", err)
+		}
+	})
+	t.Run("public chain to a proxied hostname", func(t *testing.T) {
+		body, err := getBody(t, c, redirectTo(pub, "http://feeds.example.test/rss"))
+		if err != nil || body != "via proxy" {
+			t.Fatalf("body = %q, err = %v", body, err)
+		}
+	})
+	t.Run("private chain to a private literal", func(t *testing.T) {
+		body, err := getBody(t, c, redirectTo(priv, "http://10.0.0.5/feed"))
+		if err != nil || body != "via proxy" {
+			t.Fatalf("body = %q, err = %v", body, err)
+		}
+	})
 }

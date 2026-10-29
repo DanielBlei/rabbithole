@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -69,6 +70,7 @@ type Manager struct {
 	run      runFunc
 	rescore  rescoreFunc
 	logLevel zerolog.Level // --debug also prints the run's lines in the terminal
+	client   *http.Client  // fetches feeds; nil means feeds.NewClient
 
 	mu     sync.Mutex
 	active *activeRun // nil when idle
@@ -111,6 +113,9 @@ func NewManager(db *store.Store, src config.Source, logLevel zerolog.Level) (*Ma
 		run: Run, rescore: RescoreRecent, logLevel: logLevel,
 	}, nil
 }
+
+// SetClient sets the client runs fetch feeds through; call it before the first run.
+func (m *Manager) SetClient(c *http.Client) { m.client = c }
 
 // Start launches a run in the background and returns immediately. If a run is
 // already in flight it is a no-op — the caller shows the live run instead
@@ -243,6 +248,7 @@ func (m *Manager) execute(
 		outcome, err = m.run(ctx, cfg, activeProfile, m.db, time.Now(), Options{
 			Think:  cfg.Inference.ThinkEnabled(),
 			Record: true,
+			Client: m.client,
 		})
 		counts = store.IngestCounts{
 			Fetched:  outcome.Fetched,

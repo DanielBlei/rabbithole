@@ -5,7 +5,10 @@ package feeds
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"html"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -13,6 +16,8 @@ import (
 
 	"github.com/mmcdole/gofeed"
 	"github.com/rs/zerolog"
+
+	"github.com/DanielBlei/rabbithole/internal/httpclient"
 )
 
 // FetchTimeout bounds how long one source may take to fetch.
@@ -21,6 +26,10 @@ const FetchTimeout = 30 * time.Second
 const (
 	fetchTimeout = FetchTimeout
 	maxParallel  = 8
+	// MaxFeedBytes caps one feed response body.
+	MaxFeedBytes = 16 << 20
+	// maxFeedRedirects is the redirect chain a feed fetch follows.
+	maxFeedRedirects = 5
 	// summaryLimit caps the summary text sent to the scoring model.
 	// Most RSS feeds only provide a short excerpt (300-600 chars) in
 	// <description>, not the full article; the limit guards against
@@ -46,10 +55,32 @@ type Result struct {
 	At      time.Time // when the fetch finished
 }
 
-// FetchAll fetches every source concurrently and returns one Result per
-// source, in the order the sources were given. Individual feed failures are
-// logged and carried on the Result rather than failing the run.
-func FetchAll(ctx context.Context, sources []Source) []Result {
+// NewClient returns the client feed ingestion fetches through: it refuses
+// private and metadata addresses (the private ranges open with
+// RABBITHOLE_ALLOW_PRIVATE_FETCH), follows a few redirects, honours the proxy
+// environment and identifies itself as rabbithole/version.
+func NewClient(version string) *http.Client {
+	if version == "" {
+		version = "dev"
+	}
+	return httpclient.NewSafe(httpclient.Options{
+		Timeout:      fetchTimeout,
+		AnyPort:      true,
+		MaxRedirects: maxFeedRedirects,
+		UserAgent:    "rabbithole/" + version + " (+https://github.com/DanielBlei/rabbithole)",
+		AllowPrivate: httpclient.AllowPrivateFromEnv(),
+		Proxy:        http.ProxyFromEnvironment,
+	})
+}
+
+// FetchAll fetches every source concurrently through client and returns one
+// Result per source, in the order the sources were given. A nil client means
+// NewClient. Individual feed failures are logged and carried on the Result
+// rather than failing the run.
+func FetchAll(ctx context.Context, client *http.Client, sources []Source) []Result {
+	if client == nil {
+		client = NewClient("")
+	}
 	logger := zerolog.Ctx(ctx)
 	sem := make(chan struct{}, maxParallel)
 	// Indexed writes rather than an append under a mutex, so results come back
@@ -67,7 +98,7 @@ func FetchAll(ctx context.Context, sources []Source) []Result {
 			start := time.Now()
 			// gofeed.Parser lazily initializes internal state on first use and
 			// is not goroutine-safe, so each fetch gets its own (cheap) parser.
-			items, err := fetchOne(ctx, gofeed.NewParser(), src)
+			items, err := fetchOne(ctx, newParser(client), src)
 			res := Result{Source: src, Items: items, Err: err, Elapsed: time.Since(start), At: time.Now()}
 			if err != nil {
 				logger.Warn().Str("feed", src.Name).Err(err).Msg("skipping feed")
@@ -82,11 +113,24 @@ func FetchAll(ctx context.Context, sources []Source) []Result {
 	return results
 }
 
+// newParser returns a parser bound to client. The User-Agent is left empty so
+// the client's own applies, and a body past MaxFeedBytes fails the parse.
+func newParser(client *http.Client) *gofeed.Parser {
+	p := gofeed.NewParser()
+	p.Client = client
+	p.UserAgent = ""
+	p.MaxByteSize = MaxFeedBytes
+	return p
+}
+
 func fetchOne(ctx context.Context, parser *gofeed.Parser, src Source) ([]Item, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
 
 	feed, err := parser.ParseURLWithContext(src.URL, ctx)
+	if errors.Is(err, gofeed.ErrResponseTooLarge) {
+		return nil, fmt.Errorf("%w: over %d bytes", httpclient.ErrTooLarge, MaxFeedBytes)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@ package ingest
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -23,7 +24,7 @@ import (
 //	https://arxiv.org/search?q=agentic+coding
 //	https://api.crossref.org/works?q=llm&publisher=ACM
 //	https://www.semanticscholar.org/search?q=code+agents&min_citations=5
-func fetchAcademic(ctx context.Context, sources []feeds.Source) []feeds.Result {
+func fetchAcademic(ctx context.Context, client *http.Client, sources []feeds.Source) []feeds.Result {
 	results := make([]feeds.Result, len(sources))
 
 	for i, src := range sources {
@@ -32,7 +33,7 @@ func fetchAcademic(ctx context.Context, sources []feeds.Source) []feeds.Result {
 
 		var items []feeds.Item
 		if err == nil {
-			items, err = feeds.FetchAcademic(ctx, src, query)
+			items, err = feeds.FetchAcademic(ctx, client, src, query)
 		}
 
 		results[i] = feeds.Result{

@@ -48,7 +48,7 @@ directly the way `items` does.
 ```mermaid
 flowchart TD
     P[resolve active profile once] --> A
-    A[configured sources] --> B[fetch by source type]
+    A[configured sources] --> B[fetch by source type<br/>through the guarded client]
     B --> C{new, and inside<br/>the window?}
     C -- no --> D[skip]
     C -- yes --> E[title + source + summary<br/>summary capped at 1500 chars]
@@ -144,7 +144,7 @@ internal/rank         Scorer interface, prompt/JSON parsing, batching, selection
 internal/inference    provider factory (ollama | openai | vllm | heuristic)
 internal/ollama       Ollama JSON-mode client
 internal/vllm         OpenAI-compatible JSON-mode client, in openai and vllm flavors
-internal/httpclient   shared HTTP transport (bearer auth injection), plus the safe client that refuses private addresses
+internal/httpclient   shared HTTP transport (bearer auth injection), plus the safe client (library and feed fetches) that refuses private addresses
 internal/library      the source library: format checks and the loader that fetches it from GitHub main
 internal/retry        exponential backoff for a still-starting-up inference server
 internal/digest       markdown renderer

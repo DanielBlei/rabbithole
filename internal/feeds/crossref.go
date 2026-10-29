@@ -7,13 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/DanielBlei/rabbithole/internal/httpclient"
 )
 
 var (
@@ -150,7 +151,7 @@ func (f *AcademicFetcher) fetchCrossref(
 
 	var doc crossrefResponse
 	if err := json.NewDecoder(
-		io.LimitReader(resp.Body, 30<<20),
+		httpclient.LimitBody(resp.Body, 30<<20),
 	).Decode(&doc); err != nil {
 		return nil, fmt.Errorf("decode crossref json: %w", err)
 	}

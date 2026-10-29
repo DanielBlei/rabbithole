@@ -7,12 +7,13 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/DanielBlei/rabbithole/internal/httpclient"
 )
 
 type arxivFeed struct {
@@ -92,7 +93,7 @@ func (f *AcademicFetcher) fetchArXiv(
 
 	var doc arxivFeed
 	if err := xml.NewDecoder(
-		io.LimitReader(resp.Body, 20<<20),
+		httpclient.LimitBody(resp.Body, 20<<20),
 	).Decode(&doc); err != nil {
 		return nil, fmt.Errorf("decode arxiv atom: %w", err)
 	}
