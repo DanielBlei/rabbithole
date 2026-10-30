@@ -162,9 +162,14 @@ var dsnPragmas = []string{
 }
 
 // dsn builds the sqlite connection string, carrying the pragmas as _pragma
-// query params.
+// query params. Read-write transactions begin IMMEDIATE, so one that reads and
+// then writes takes the write lock up front and waits on busy_timeout. A
+// deferred one fails with SQLITE_BUSY_SNAPSHOT as soon as another connection
+// commits after its first read, which busy_timeout cannot retry. Read-only
+// transactions stay deferred and keep reading a snapshot without the lock.
 func dsn(path string) string {
 	q := url.Values{}
+	q.Set("_txlock", "immediate")
 	for _, p := range dsnPragmas {
 		q.Add("_pragma", p)
 	}
