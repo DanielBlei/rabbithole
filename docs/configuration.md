@@ -374,7 +374,8 @@ User-Agent.
 - Source icons come from the site each feed links to. They are fetched in the background after you
   add or change a source and at the end of each ingestion run, never while a page loads, and follow
   the same private-address rule. A site with no usable icon (or only an SVG one) shows a letter
-  tile instead.
+  tile instead. The Library rows use icons shipped with the Library, so browsing it contacts no
+  site you did not add.
 
 ### Feed URLs
 

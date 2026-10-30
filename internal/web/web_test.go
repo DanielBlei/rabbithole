@@ -776,6 +776,7 @@ func TestRoutesRegister(t *testing.T) {
 		{"GET", "/feed", "GET /feed"},
 		{"GET", "/maze", "GET /maze"},
 		{"GET", "/icons/abc", "GET /icons/{feedID}"},
+		{"GET", "/icons/library/abc", "GET /icons/library/{id}"},
 		{"GET", "/settings", "GET /settings"},
 		{"GET", "/settings/x", "GET /settings/{tab}"},
 		{"POST", "/settings/review", "POST /settings/review"},

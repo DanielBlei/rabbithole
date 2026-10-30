@@ -40,16 +40,18 @@ const (
 
 	iconCallTimeout    = 12 * time.Second
 	iconRequestTimeout = 5 * time.Second
-	// iconMaxSide is the largest accepted width or height in pixels.
-	iconMaxSide = 512
+	// IconMaxSide is the largest accepted width or height in pixels.
+	IconMaxSide = 512
 	// iconGoodSide is the smallest side a declared icon needs to rank first.
 	iconGoodSide = 32
 	// iconCandidates is how many declared icons are tried before /favicon.ico.
 	iconCandidates = 3
 	// icoTries is how many payloads of one ICO are tried.
 	icoTries = 3
-	// darkLuma is the mean luma (0 to 255) below which a glyph counts as dark.
+	// darkLuma is the Rec.709 luma (0 to 255) below which a visible pixel counts as dark.
 	darkLuma = 90
+	// darkShare is the percentage of visible pixels that must be dark for a glyph to count as dark.
+	darkShare = 40
 )
 
 // ErrNoIcon means the site has no icon this package accepts.
@@ -410,18 +412,18 @@ func checkSide(w, h int) error {
 	if w <= 0 || h <= 0 {
 		return badIcon("empty image")
 	}
-	if w > iconMaxSide || h > iconMaxSide {
-		return badIcon("image %dx%d over %d", w, h, iconMaxSide)
+	if w > IconMaxSide || h > IconMaxSide {
+		return badIcon("image %dx%d over %d", w, h, IconMaxSide)
 	}
 	return nil
 }
 
-// isDark reports a dark glyph that vanishes on a dark page: mean Rec.709 luma of
-// the visible pixels under darkLuma and at least a tenth of the pixels
-// transparent, so an opaque black tile is not a glyph.
+// isDark reports a glyph that is mostly dark and so vanishes on a dark page: at
+// least darkShare percent of its visible pixels under darkLuma, and at least a
+// tenth of all pixels transparent, so an opaque black tile is not a glyph. A
+// bright accent on a dark glyph does not change the verdict.
 func isDark(img *image.NRGBA) bool {
-	var visible, transparent int
-	var luma float64
+	var visible, transparent, dark int
 	b := img.Bounds()
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		row := img.Pix[(y-b.Min.Y)*img.Stride:]
@@ -432,14 +434,16 @@ func isDark(img *image.NRGBA) bool {
 				continue
 			}
 			visible++
-			luma += 0.2126*float64(p[0]) + 0.7152*float64(p[1]) + 0.0722*float64(p[2])
+			if 0.2126*float64(p[0])+0.7152*float64(p[1])+0.0722*float64(p[2]) < darkLuma {
+				dark++
+			}
 		}
 	}
 	if visible == 0 {
 		return false
 	}
 	total := visible + transparent
-	return luma/float64(visible) < darkLuma && transparent*10 >= total
+	return dark*100 >= visible*darkShare && transparent*10 >= total
 }
 
 var pngSignature = []byte("\x89PNG\r\n\x1a\n")

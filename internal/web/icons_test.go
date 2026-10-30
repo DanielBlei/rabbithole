@@ -11,12 +11,15 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/library"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -315,8 +318,18 @@ func TestOverviewSuggestionDrawsTheIcon(t *testing.T) {
 	}
 }
 
+// Without baked icons, only a subscribed source's own icon shows on a Library row.
 func TestLibraryRowsDrawTheIconOfASubscribedSourceOnly(t *testing.T) {
 	w, db := libraryTestWeb(t, config.FeedsDoc{})
+	files := fstest.MapFS{}
+	for _, name := range []string{"rss.yaml", "academic.yaml"} {
+		data, err := os.ReadFile("../../library/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[name] = &fstest.MapFile{Data: data}
+	}
+	w.SetLibrary(library.NewLoader(library.Options{Dir: files}))
 	all := libraryEntries(w.library.Get(t.Context()))
 	if len(all) < 2 {
 		t.Fatalf("library has %d entries", len(all))

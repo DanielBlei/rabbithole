@@ -169,9 +169,9 @@ func TestSourcesPageUnreachableLibraryStillRenders(t *testing.T) {
 			t.Error("nav lists groups of a library that did not load")
 		}
 	}
-	// One load reads each of the two library files.
-	if n := loads.Load(); n != 2 {
-		t.Errorf("requests = %d, want one load of both files", n)
+	// One load reads each of the three library files.
+	if n := loads.Load(); n != 3 {
+		t.Errorf("requests = %d, want one load of every file", n)
 	}
 }
 

@@ -456,11 +456,33 @@ func TestIconDark(t *testing.T) {
 		}
 		return img
 	}
+	// split paints an 8x8 glyph on a transparent 16x16 canvas: its first n columns in a, the rest in b.
+	split := func(n int, a, b color.NRGBA) image.Image {
+		img := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+		for y := 4; y < 12; y++ {
+			for x := 4; x < 12; x++ {
+				c := b
+				if x-4 < n {
+					c = a
+				}
+				img.SetNRGBA(x, y, c)
+			}
+		}
+		return img
+	}
+	// Colours of the arXiv and GitHub site icons: a dark red stroke beside a light grey one, and
+	// near black.
+	arxivRed := color.NRGBA{R: 179, G: 32, B: 37, A: 255}
+	arxivGrey := color.NRGBA{R: 179, G: 172, B: 165, A: 255}
+	githubBlack := color.NRGBA{R: 24, G: 22, B: 22, A: 255}
 	cases := []struct {
 		name string
 		img  image.Image
 		dark bool
 	}{
+		{"arxiv: half dark red, half light grey, mostly transparent", split(4, arxivRed, arxivGrey), true},
+		{"github: near black glyph", glyph(githubBlack), true},
+		{"bright logo with a dark minority", split(2, arxivRed, arxivGrey), false},
 		{"black glyph on transparent", glyph(color.NRGBA{A: 255}), true},
 		{"white glyph on transparent", glyph(color.NRGBA{R: 255, G: 255, B: 255, A: 255}), false},
 		{"mid grey glyph", glyph(color.NRGBA{R: 128, G: 128, B: 128, A: 255}), false},

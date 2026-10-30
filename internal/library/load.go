@@ -6,6 +6,7 @@ package library
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"io/fs"
 	"net/http"
@@ -61,13 +62,16 @@ type Snapshot struct {
 	Notice  string // set when a file needs a newer version of the app
 	Loaded  bool   // at least one file was accepted
 	Off     bool   // the library is turned off
+	// Icons are the baked site icons by source id, empty when the library ships none. Not modified.
+	Icons map[string]Icon
 }
 
 // fileState is what the loader knows about one library file.
 type fileState struct {
-	data  []byte // last accepted bytes
-	etag  string // validator of data
-	newer bool   // the server's copy needs a newer app
+	data  []byte  // last accepted bytes
+	etag  string  // validator of data
+	newer bool    // the server's copy needs a newer app
+	icons IconSet // parsed data, for the icons file
 
 	lastOK      time.Time // last time the server's answer for this file was understood
 	lastAttempt time.Time // last time a fetch of this file started
@@ -114,8 +118,8 @@ func NewLoader(o Options) *Loader {
 		l.ttl = durationOr(o.TTL, dirTTL)
 		l.backoff = durationOr(o.Backoff, dirTTL)
 	}
-	for _, typ := range knownTypes {
-		l.files[fileName(typ)] = &fileState{}
+	for _, name := range readNames() {
+		l.files[name] = &fileState{}
 	}
 	if base == "" {
 		l.base = DefaultBaseURL
@@ -131,6 +135,15 @@ func NewLoader(o Options) *Loader {
 }
 
 func fileName(typ Type) string { return string(typ) + ".yaml" }
+
+// readNames lists every file a refresh reads: the YAML files, then the baked icons.
+func readNames() []string {
+	names := make([]string, 0, len(knownTypes)+1)
+	for _, typ := range knownTypes {
+		names = append(names, fileName(typ))
+	}
+	return append(names, IconsFile)
+}
 
 func durationOr(d, def time.Duration) time.Duration {
 	if d > 0 {
@@ -236,8 +249,7 @@ func (l *Loader) startLocked(all bool) chan struct{} {
 	now := l.now()
 	l.lastAttempt = now
 	var names []string
-	for _, typ := range knownTypes {
-		name := fileName(typ)
+	for _, name := range readNames() {
 		st := l.files[name]
 		if all || l.dueLocked(st, now) {
 			st.lastAttempt = now
@@ -272,13 +284,14 @@ func (l *Loader) refresh(ch chan struct{}, names []string) {
 	if changed || !l.done {
 		l.snap.Library = l.assemble()
 	}
+	l.snap.Icons = l.files[IconsFile].icons.Icons
 	l.snap.Notice = ""
 	l.snap.Loaded = false
-	for _, st := range l.files {
+	for name, st := range l.files {
 		if st.newer {
 			l.snap.Notice = NeedsNewerVersion
 		}
-		if st.data != nil {
+		if st.data != nil && name != IconsFile {
 			l.snap.Loaded = true
 		}
 	}
@@ -287,30 +300,39 @@ func (l *Loader) refresh(ch chan struct{}, names []string) {
 	close(ch)
 }
 
+// rawResult is the outcome of reading one file from the source.
+type rawResult int
+
+const (
+	rawFailed  rawResult = iota // the source could not be read; keep the last good bytes
+	rawSame                     // the bytes are those already accepted
+	rawNew                      // new bytes
+	rawMissing                  // the source has no such file (404, or absent on disk)
+)
+
 // fetchFile loads one file from the source. reached is true when the answer was understood
 // (not modified, accepted, or needing a newer app); changed is true when new bytes were accepted.
-// A failure keeps the last good bytes.
+// A failure keeps the last good bytes. The icons file may be missing: that is no baked icons.
 func (l *Loader) fetchFile(ctx context.Context, name string) (reached, changed bool) {
 	st := l.files[name]
 	log := l.log.With().Str("file", name).Logger()
-	var data []byte
-	var etag string
-	var ok bool
-	if l.dir != nil {
-		data, ok = l.readDir(name, log)
-		if ok && st.data != nil && bytes.Equal(data, st.data) {
-			st.newer = false
-			return true, false
-		}
-	} else {
-		data, etag, ok = l.httpGet(ctx, st, name, log)
-		if ok && data == nil {
-			st.newer = false
-			return true, false
-		}
-	}
-	if !ok {
+	data, etag, res := l.fetchRaw(ctx, st, name, name == IconsFile, log)
+	switch res {
+	case rawFailed:
 		return false, false
+	case rawSame:
+		st.newer = false
+		return true, false
+	case rawMissing:
+		changed = st.data != nil
+		st.data, st.etag, st.newer, st.icons = nil, "", false, IconSet{}
+		if name == IconsFile {
+			log.Debug().Msg("library has no icons file")
+		}
+		return true, changed
+	}
+	if name == IconsFile {
+		return l.acceptIcons(st, data, etag, log)
 	}
 
 	lib, diags := ParseFS(fstest.MapFS{name: {Data: data}})
@@ -328,33 +350,78 @@ func (l *Loader) fetchFile(ctx context.Context, name string) (reached, changed b
 	return true, true
 }
 
-// readDir reads one file of the directory source, bounded by maxFileBytes.
-func (l *Loader) readDir(name string, log zerolog.Logger) ([]byte, bool) {
-	f, err := l.dir.Open(name)
+// acceptIcons parses the icons file and keeps it when it is the format. An entry that fails
+// validation is dropped and the rest are kept. A file from a newer app is ignored with a
+// warning and no notice: icons are cosmetic, and the last good set stays.
+func (l *Loader) acceptIcons(st *fileState, data []byte, etag string, log zerolog.Logger) (reached, changed bool) {
+	set, err := ParseIcons(data)
 	if err != nil {
-		log.Warn().Err(err).Msg("library read")
-		return nil, false
+		log.Warn().Err(err).Msg("library icons rejected")
+		return errors.Is(err, errNewerIcons), false
 	}
-	defer f.Close() //nolint:errcheck // nothing to do on a failed close
-	data, err := io.ReadAll(httpclient.LimitBody(f, maxFileBytes))
-	if err != nil {
-		log.Warn().Err(err).Msg("library read")
-		return nil, false
+	if len(set.Dropped) > 0 {
+		log.Debug().Strs("ids", set.Dropped).Msg("library icons dropped")
 	}
-	return data, true
+	st.data, st.etag, st.newer, st.icons = data, etag, false, set
+	return true, true
 }
 
-// httpGet requests one file with the last ETag. ok with nil data means not modified.
+// fetchRaw reads the named file from the directory or the base URL. A missing file is reported
+// as rawMissing only when optional is set, otherwise it is a failure.
+func (l *Loader) fetchRaw(
+	ctx context.Context,
+	st *fileState,
+	name string,
+	optional bool,
+	log zerolog.Logger,
+) (data []byte, etag string, res rawResult) {
+	if l.dir != nil {
+		data, missing, ok := l.readDir(name, optional, log)
+		switch {
+		case missing:
+			return nil, "", rawMissing
+		case !ok:
+			return nil, "", rawFailed
+		case st.data != nil && bytes.Equal(data, st.data):
+			return nil, "", rawSame
+		}
+		return data, "", rawNew
+	}
+	return l.httpGet(ctx, st, name, optional, log)
+}
+
+// readDir reads one file of the directory source, bounded by maxFileBytes. missing is set for an
+// optional file that is not there.
+func (l *Loader) readDir(name string, optional bool, log zerolog.Logger) (data []byte, missing, ok bool) {
+	f, err := l.dir.Open(name)
+	if err != nil {
+		if optional && errors.Is(err, fs.ErrNotExist) {
+			return nil, true, false
+		}
+		log.Warn().Err(err).Msg("library read")
+		return nil, false, false
+	}
+	defer f.Close() //nolint:errcheck // nothing to do on a failed close
+	data, err = io.ReadAll(httpclient.LimitBody(f, maxFileBytes))
+	if err != nil {
+		log.Warn().Err(err).Msg("library read")
+		return nil, false, false
+	}
+	return data, false, true
+}
+
+// httpGet requests one file with the last ETag. A 304 is rawSame.
 func (l *Loader) httpGet(
 	ctx context.Context,
 	st *fileState,
 	name string,
+	optional bool,
 	log zerolog.Logger,
-) (data []byte, etag string, ok bool) {
+) (data []byte, etag string, res rawResult) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, l.base+name, nil)
 	if err != nil {
 		log.Warn().Err(err).Msg("library request")
-		return nil, "", false
+		return nil, "", rawFailed
 	}
 	if st.data != nil && st.etag != "" {
 		req.Header.Set("If-None-Match", st.etag)
@@ -362,29 +429,31 @@ func (l *Loader) httpGet(
 	resp, err := l.client.Do(req)
 	if err != nil {
 		log.Warn().Err(err).Msg("library fetch")
-		return nil, "", false
+		return nil, "", rawFailed
 	}
 	defer resp.Body.Close() //nolint:errcheck // nothing to do on a failed close
 	switch {
 	case resp.StatusCode == http.StatusNotModified && st.data != nil:
-		return nil, "", true
+		return nil, "", rawSame
+	case resp.StatusCode == http.StatusNotFound && optional:
+		return nil, "", rawMissing
 	case resp.StatusCode != http.StatusOK:
 		log.Warn().Int("status", resp.StatusCode).Msg("library fetch")
-		return nil, "", false
+		return nil, "", rawFailed
 	}
 	data, err = io.ReadAll(httpclient.LimitBody(resp.Body, maxFileBytes))
 	if err != nil {
 		log.Warn().Err(err).Msg("library read")
-		return nil, "", false
+		return nil, "", rawFailed
 	}
-	return data, resp.Header.Get("ETag"), true
+	return data, resp.Header.Get("ETag"), rawNew
 }
 
 // assemble parses every accepted file together so the cross-file checks run. The caller holds mu.
 func (l *Loader) assemble() *Library {
 	fsys := fstest.MapFS{}
 	for name, st := range l.files {
-		if st.data != nil {
+		if st.data != nil && name != IconsFile {
 			fsys[name] = &fstest.MapFile{Data: st.data}
 		}
 	}

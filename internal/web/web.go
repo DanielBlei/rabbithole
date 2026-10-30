@@ -239,6 +239,7 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /items/{id}/rate", s.handleRate)
 	mux.HandleFunc("POST /todos", s.handleAddTodo)
 	mux.Handle("GET /icons/{feedID}", httplog.QuietHandler(http.HandlerFunc(s.handleIcon)))
+	mux.Handle("GET /icons/library/{id}", httplog.QuietHandler(http.HandlerFunc(s.handleLibraryIcon)))
 	mux.HandleFunc("POST /todos/{id}/toggle", s.handleToggleTodo)
 	mux.HandleFunc("POST /todos/{id}/tags", s.handleSetTodoTags)
 	mux.HandleFunc("DELETE /todos/{id}", s.handleDeleteTodo)
