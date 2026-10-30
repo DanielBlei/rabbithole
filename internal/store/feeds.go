@@ -127,7 +127,7 @@ const (
 
 	sqlInsertFeedFetch = `INSERT INTO feed_fetches
 		(feed_id, feed_name, url, status, error, items, elapsed_ms, fetched_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
 
 	// The latest attempt per feed, plus the last successful attempt's time and
 	// the number of failures since it. One windowed query rather than a query
@@ -224,31 +224,11 @@ func (s *Store) SyncSourceTags(ctx context.Context, tags map[string][]string) er
 }
 
 // RecordFeedFetches appends one history row per fetch outcome, in a single
-// transaction. Callers treat a failure here as non-fatal — history is
+// transaction. Callers treat a failure here as non-fatal: history is
 // observability, and losing it must never fail an otherwise good ingest run.
+// The rows belong to no run; RecordRunFetches links them to one.
 func (s *Store) RecordFeedFetches(ctx context.Context, fetches []FeedFetch) error {
-	if len(fetches) == 0 {
-		return nil
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	stmt, err := s.prepareTx(ctx, tx, sqlInsertFeedFetch)
-	if err != nil {
-		return fmt.Errorf("prepare feed fetch insert: %w", err)
-	}
-	defer func() { _ = stmt.Close() }()
-
-	for _, f := range fetches {
-		if _, err := stmt.ExecContext(ctx, f.FeedID, f.Name, f.URL, f.status(),
-			f.Error, f.Items, f.Elapsed.Milliseconds(), sqlTime(f.At)); err != nil {
-			return fmt.Errorf("insert feed fetch %q: %w", f.Name, err)
-		}
-	}
-	return tx.Commit()
+	return s.RecordRunFetches(ctx, 0, fetches)
 }
 
 // FeedHealthByID aggregates every feed's fetch history into its current

@@ -165,6 +165,10 @@ erDiagram
         INTEGER run_id PK "FK to ingest_history"
         TEXT log
     }
+    ingest_run_fetches {
+        INTEGER run_id PK "FK to ingest_history"
+        INTEGER fetch_id PK "feed_fetches.id, no FK"
+    }
     todos {
         INTEGER id PK
         TEXT title
@@ -177,8 +181,10 @@ erDiagram
     }
 
     ingest_history ||--o| ingest_run_logs : "cascade delete"
+    ingest_history ||--o{ ingest_run_fetches : "cascade delete"
     ingest_history }o..o{ items : "a run writes items"
     ingest_history }o..o{ feed_fetches : "a run writes fetches"
+    ingest_run_fetches }o..o| feed_fetches : "by fetch_id, no constraint"
     items }o..o{ feed_fetches : "same feed, by name/url"
     feeds }o..o{ feed_fetches : "by id, no constraint"
     feeds }o..o{ items : "by name"
@@ -396,7 +402,15 @@ the log bodies along.
 | `error` | TEXT | Failure message for `error` / `cancelled` |
 
 `ingest_run_logs` is `run_id` (PK, FK → `ingest_history` `ON DELETE CASCADE`) plus `log`.
-It holds the only real foreign key in the database.
+`ingest_run_fetches` is `(run_id, fetch_id)` (PK; `run_id` FK → `ingest_history`
+`ON DELETE CASCADE`), one row per `feed_fetches` row a server run wrote, so a run can list
+which feeds it fetched and which failed. `fetch_id` has no foreign key, like every other
+reference to `feed_fetches`: a link whose fetch row was pruned is ignored on read and swept
+by the next prune. The CLI `ingest` and rescore runs write no links. These two tables hold
+the only real foreign keys in the database.
+
+`PruneIngestRuns` keeps the newest 100 runs and the log bodies of the newest 25, and runs at
+the end of every run. A `running` row is never deleted.
 
 ```mermaid
 stateDiagram-v2
@@ -660,10 +674,9 @@ every role already; put the tables anywhere else and the grant is part of the se
 
 ## Known gaps
 
-- **Unbounded growth.** Only `feed_fetches` prunes on its own; `items` has `items prune` but
-  nothing calls it for you. `ingest_history`, `ingest_run_logs` and completed `todos` grow
-  forever. Nothing is large enough to matter yet, but `ingest_run_logs` is the first to
-  watch, it stores whole run logs.
+- **Unbounded growth.** `feed_fetches` and the run history (`ingest_history`,
+  `ingest_run_logs`, `ingest_run_fetches`) prune on their own; `items` has `items prune` but
+  nothing calls it for you. Completed `todos` grow forever.
 - **Deleting does not shrink the file.** `auto_vacuum(incremental)` only takes on a database
   created with it, so on an existing one freed pages go to the freelist and get reused
   rather than returned. Reclaiming disk means running `VACUUM` by hand with the server

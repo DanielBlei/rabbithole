@@ -31,6 +31,10 @@ const maxLogLines = 800
 // The run's own context may already be cancelled, so the write gets its own.
 const finishTimeout = 5 * time.Second
 
+// pruneTimeout bounds the history trim after a run, which can delete many rows
+// and logs.
+const pruneTimeout = 30 * time.Second
+
 // runFunc matches Run's signature; Manager calls through it so tests can
 // substitute a stub instead of a real fetch→score→record cycle.
 type runFunc func(
@@ -329,6 +333,7 @@ func (m *Manager) execute(
 			Think:  cfg.Inference.ThinkEnabled(),
 			Record: true,
 			Client: m.client,
+			RunID:  run.id,
 		})
 		sites = outcome.Sites
 		counts = store.IngestCounts{
@@ -373,6 +378,13 @@ func (m *Manager) execute(
 	// failure must never fail the run.
 	if ferr := m.db.SaveIngestRunLog(finishCtx, run.id, buf.snapshot()); ferr != nil {
 		zlog.Error().Err(ferr).Int64("run", run.id).Msg("saving ingest run log failed")
+	}
+	// Trim old runs once this one is finished: the row is no longer 'running',
+	// so it counts toward the retained newest. Best-effort, like the log save.
+	pruneCtx, pruneCancel := context.WithTimeout(context.Background(), pruneTimeout)
+	defer pruneCancel()
+	if ferr := m.db.PruneIngestRuns(pruneCtx, 0, 0); ferr != nil {
+		zlog.Error().Err(ferr).Int64("run", run.id).Msg("pruning ingest history failed")
 	}
 
 	// The one line a plain serve prints for a run, and all an unattended run

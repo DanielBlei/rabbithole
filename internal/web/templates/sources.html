@@ -1,8 +1,9 @@
 {{/* SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
      SPDX-License-Identifier: Apache-2.0 */}}
 
-{{/* The Sources page: a section nav over the Overview, the Manage editor or the
-     Library. The Library has nothing to refresh on an ingestion run. */}}
+{{/* The Sources page: a section nav over the Overview, the Manage editor, the
+     Library or the Ingestion runs. The Library has nothing to refresh on an
+     ingestion run; Ingestion refreshes its own runs block. */}}
 {{define "content"}}
 <div class="src-page">
   {{/* Where a response's toast marker lands (static/js/net.js reads it). */}}
@@ -11,8 +12,9 @@
   <div class="src-page__main">
     {{/* An ingestion run starting or ending anywhere on the page (static/js/ingest.js
          raises the event) refreshes this page's live parts out of band. */}}
-    {{if ne .Section "library"}}<span hidden hx-get="/sources/live?page={{.Section}}" hx-trigger="sources-ingest-change from:body" hx-swap="none"></span>{{end}}
-    {{if eq .Section "manage"}}{{template "sourcesManage" .}}{{else if eq .Section "library"}}{{template "sourcesLibrary" .Library}}{{else}}{{template "sourcesOverview" .}}{{end}}
+    {{if or (eq .Section "overview") (eq .Section "manage")}}<span hidden hx-get="/sources/live?page={{.Section}}" hx-trigger="sources-ingest-change from:body" hx-swap="none"></span>{{end}}
+    {{if eq .Section "ingestion"}}<span hidden hx-get="/ingestion/live?page={{.Ingestion.Page}}" hx-trigger="sources-ingest-change from:body" hx-swap="none"></span>{{end}}
+    {{if eq .Section "manage"}}{{template "sourcesManage" .}}{{else if eq .Section "library"}}{{template "sourcesLibrary" .Library}}{{else if eq .Section "ingestion"}}{{template "sourcesIngestion" .Ingestion}}{{else}}{{template "sourcesOverview" .}}{{end}}
   </div>
 </div>
 {{end}}

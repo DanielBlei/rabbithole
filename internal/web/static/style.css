@@ -2349,7 +2349,7 @@ summary.sh-nav__h:focus-visible{outline:1px solid var(--accent);outline-offset:1
 .plan__nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--title);font-size:1.35rem;}
 .plan__url{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim);font-family:var(--font-mono);font-size:1.1rem;}
 .plan__tags{display:flex;flex-wrap:wrap;gap:6px;min-width:0;}
-.plan__why{color:var(--text-dim);font-size:1.15rem;line-height:1.4;overflow-wrap:anywhere;}
+.plan__why{color:var(--text-dim);font-size:1.15rem;line-height:16px;overflow-wrap:anywhere;}
 .plan__row[data-status="removed"] .plan__why,.plan__row[data-status="conflict"] .plan__why{color:var(--caution);}
 .plan__row[data-status="invalid"] .plan__why{color:var(--warn);}
 .plan__bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;}
@@ -2684,7 +2684,7 @@ a.ov-legend__a:focus-visible{outline:1px solid var(--accent);outline-offset:2px;
 .ov-link:hover{text-decoration:underline;text-underline-offset:3px;}
 .ov-link:focus-visible,.ov-brow__k:focus-visible{outline:1px solid var(--accent);outline-offset:2px;border-radius:4px;}
 .ov-who{display:grid;gap:2px;min-width:0;}
-.ov-who .sh-hint{font-size:1.15rem;line-height:1.4;overflow-wrap:anywhere;}
+.ov-who .sh-hint{font-size:1.15rem;line-height:16px;overflow-wrap:anywhere;}
 .ov-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:1.35rem;font-weight:500;color:var(--title);}
 .ov-grow{display:grid;grid-template-columns:20px minmax(0,1fr) auto;align-items:center;gap:10px;padding:9px 0;min-height:44px;}
 .ov-grow .libact{justify-content:flex-end;max-width:260px;}
@@ -2764,6 +2764,78 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
   .ov-grow .libact{grid-column:2;justify-content:flex-start;max-width:none;}
   .ov-brow{grid-template-columns:minmax(0,1fr) 5.5rem;row-gap:4px;}
   .ov-brow .ov-bar{grid-column:1 / -1;grid-row:2;}
+}
+
+/* --- Sources: Ingestion (recent runs, run detail, pager) -------------------
+   Line heights are px so a row measures the same in both looks, whose rem base
+   differs. Every rule on the runs table is scoped to the outer table with child
+   combinators, so the per-feed table inside a detail row keeps its own look. */
+.ov--page .ov-top+#ingLive{margin-top:20px;}
+.in-table{width:100%;margin-top:6px;border-collapse:collapse;font-size:1.3rem;line-height:18px;font-variant-numeric:tabular-nums;}
+.in-table>thead th{padding:0 12px 8px 0;text-align:left;font-size:1.05rem;font-weight:400;letter-spacing:.07em;text-transform:uppercase;color:var(--text-dim);border-bottom:1px solid var(--line);}
+.in-table>thead th:nth-child(3),.in-table>thead th:nth-child(4){text-align:right;padding-right:28px;}
+.in-table>tbody>tr>td{padding:10px 12px 10px 0;vertical-align:baseline;color:var(--text-dim);}
+.in-table>tbody+tbody>.in-r>td{border-top:1px solid var(--hairline);}
+.in-table>tbody>.in-r>td:nth-child(2),.in-table>tbody>.in-r>td:nth-child(3){color:var(--title);}
+.in-table>tbody>.in-r>.in-n{text-align:right;padding-right:28px;}
+.in-st{display:inline-flex;align-items:center;gap:8px;line-height:18px;}
+.in-table>tbody[data-status="error"] .in-st{color:var(--warn);}
+.in-err{display:block;margin-top:2px;color:var(--warn);font-size:1.15rem;line-height:16px;overflow-wrap:anywhere;}
+.in-table>tbody>.in-r>.in-tog{padding:0;text-align:right;vertical-align:middle;}
+.in-tog__b{display:inline-grid;place-items:center;width:28px;height:28px;margin:0;padding:0;border:0;border-radius:var(--r-sm);background:var(--fill);color:var(--text-dim);font:inherit;font-size:1.1rem;line-height:1;cursor:pointer;}
+.in-tog__b:hover{background:var(--fill-hover);color:var(--text);}
+.in-tog__b:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
+.in-table>tbody>.in-d>td{padding:4px 0 16px;}
+.in-cnt{margin:0 0 10px;font-size:1.2rem;line-height:18px;color:var(--text-dim);font-variant-numeric:tabular-nums;}
+.in-cnt b{color:var(--title);font-weight:500;}
+.in-h{margin:14px 0 6px;font-size:1.05rem;font-weight:400;letter-spacing:.07em;text-transform:uppercase;color:var(--text-dim);}
+.in-none{margin:0;font-size:1.2rem;color:var(--text-dim);}
+.in-feeds{width:100%;border-collapse:collapse;font-size:1.2rem;}
+.in-feeds th{padding:0 12px 6px 0;text-align:left;font-size:1.05rem;font-weight:400;letter-spacing:.07em;text-transform:uppercase;color:var(--text-dim);border-bottom:1px solid var(--line);}
+.in-feeds td{padding:6px 12px 6px 0;vertical-align:top;color:var(--text-dim);overflow-wrap:break-word;}
+.in-feeds td:nth-child(2){overflow-wrap:anywhere;}
+.in-feeds tbody tr:first-child td{border-top:0;}
+.in-feeds tbody tr + tr td{border-top:1px solid var(--hairline);}
+.in-feeds td:first-child{color:var(--text);}
+.in-feeds th:nth-child(n+3),.in-feeds td:nth-child(n+3){text-align:right;white-space:nowrap;}
+.in-log{margin:0;max-height:260px;overflow-y:auto;overscroll-behavior:contain;padding:10px 12px;border-radius:var(--r-sm);box-shadow:inset 0 0 0 1px var(--hairline);font-size:1.32rem;line-height:1.6;}
+.in-log .ing-ln--dbg{display:none;}
+.in-pg{display:flex;align-items:center;flex-wrap:wrap;gap:6px 16px;font-size:1.2rem;color:var(--text-dim);font-variant-numeric:tabular-nums;}
+.in-pg a{display:inline-flex;align-items:center;min-height:28px;color:var(--accent);}
+.in-pg a:hover{text-decoration:underline;text-underline-offset:3px;}
+.in-pg a:focus-visible{outline:1px solid var(--accent);outline-offset:2px;border-radius:4px;}
+@media (min-width:641px){
+  .in-table>tbody>.in-r>td:not(:nth-child(2)),.in-st{white-space:nowrap;}
+}
+@media (max-width:640px){
+  .in-table>thead{display:none;}
+  .in-table,.in-table>tbody{display:block;}
+  .in-table>tbody>.in-r{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;padding:10px 0;}
+  .in-table>tbody+tbody>.in-r{box-shadow:0 -1px 0 var(--hairline);}
+  .in-table>tbody+tbody>.in-r>td{border-top:0;}
+  .in-table>tbody>.in-r>td{display:block;padding:0;text-align:left;}
+  .in-table>tbody>.in-r>td[data-label]::before{content:attr(data-label) ' ';font-size:1.05rem;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim);margin-right:6px;}
+  .in-table>tbody>.in-r>td:nth-child(1)::before,.in-table>tbody>.in-r>td:nth-child(2)::before{content:none;}
+  .in-table>tbody>.in-r>td:nth-child(1){grid-column:2;grid-row:1;text-align:right;}
+  .in-table>tbody>.in-r>td:nth-child(2){grid-column:1;grid-row:1;}
+  .in-table>tbody>.in-r>td:nth-child(3){grid-column:1;grid-row:2;}
+  .in-table>tbody>.in-r>td:nth-child(4){grid-column:1;grid-row:3;}
+  .in-table>tbody>.in-r>td:nth-child(5){grid-column:1;grid-row:4;}
+  .in-table>tbody>.in-r>.in-tog{grid-column:2;grid-row:2 / span 3;align-self:center;}
+  .in-table>tbody>.in-r>.in-n{padding-right:0;text-align:left;}
+  .in-table>tbody>.in-d{display:block;}
+  .in-table>tbody>.in-d>td{display:block;padding:0 0 14px;}
+}
+@media (max-width:640px),(pointer:coarse){
+  .in-tog__b,.in-pg a{min-width:44px;min-height:44px;}
+}
+:root[data-theme="minimal"] .in-table>tbody+tbody>.in-r>td{border-top-color:var(--hairline-strong);}
+:root[data-theme="minimal"] .in-feeds tbody tr + tr td{border-top-color:var(--hairline-strong);}
+:root[data-theme="minimal"] .in-log{box-shadow:inset 0 0 0 1px var(--hairline-strong);}
+:root[data-theme="minimal"] .in-tog__b{background:none;box-shadow:inset 0 0 0 1px var(--hairline-strong);}
+:root[data-theme="minimal"] .in-tog__b:hover{background:var(--fill-hover);}
+@media (max-width:640px){
+  :root[data-theme="minimal"] .in-table>tbody+tbody>.in-r{box-shadow:0 -1px 0 var(--hairline-strong);}
 }
 
 /* ── Maze: the day-to-day tools home. First widget is the todo board. ────────
@@ -3630,7 +3702,7 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
    it. The bunnies in the account card, the gate and the empty feed, and the
    empty feed's shell line, already pin mono in their own rules. */
 :root[data-fu="plex"]:not([data-theme="minimal"]) :is(.pane__ps,.modal__title,.gate__bar,
-    .sh,.blink,.topbar__bunny,.tile.placeholder,.ing__lines,.modal__path){
+    .sh,.blink,.topbar__bunny,.tile.placeholder,.ing__lines,.in-log,.modal__path){
   font-family:var(--font-mono);
 }
 :root                                  {--ui-scale:.94;}   /* Default's own anchor */

@@ -12,6 +12,8 @@
     <a class="sh-ni{{if eq .Section "manage"}} is-on{{end}}" href="/sources/manage"{{if eq .Section "manage"}} aria-current="page"{{end}}>Manage{{template "sourceNavBadge" .Counts}}</a>
     <span class="sh-nav__sep" aria-hidden="true"></span>
     {{template "sourcesLibNav" .LibNav}}
+    <span class="sh-nav__sep" aria-hidden="true"></span>
+    <a class="sh-ni{{if eq .Section "ingestion"}} is-on{{end}}" href="/ingestion"{{if eq .Section "ingestion"}} aria-current="page"{{end}}>Ingestion</a>
   </div>
 </nav>
 {{end}}

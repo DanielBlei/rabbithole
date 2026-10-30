@@ -46,12 +46,14 @@ type sourcesData struct {
 	Active     string
 	Chrome     chromeData
 	PromptUser string
-	// Section is which Sources page is showing: "overview" or "manage".
+	// Section is which Sources page is showing: overview, manage, library or ingestion.
 	Section string
 	// Overview is the Overview page's model, filled only when Section is overview.
 	Overview overviewData
 	// Library is the Library page's model, filled only when Section is library.
 	Library *libraryPage
+	// Ingestion is the Ingestion page's model, filled only when Section is ingestion.
+	Ingestion ingestionPage
 	// LibNav is the nav's Library group, on every section.
 	LibNav libNav
 	// icons is the page's one read of the stored icons, by feed id.
@@ -244,7 +246,8 @@ func (s *Web) renderSourcesPage(w http.ResponseWriter, r *http.Request, selected
 // up to libraryWait; after that the nav and suggestions read the cache.
 func (s *Web) sourcesPageData(ctx context.Context, selected, section string) (sourcesData, error) {
 	s.awaitLibrary(ctx)
-	data, err := s.sourcesData(ctx, selected, section != "library")
+	// The Library and Ingestion pages draw no source rows, so they skip the stats.
+	data, err := s.sourcesData(ctx, selected, section != "library" && section != "ingestion")
 	if err != nil {
 		return sourcesData{}, err
 	}

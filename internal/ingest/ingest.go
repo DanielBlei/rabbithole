@@ -29,6 +29,9 @@ type Options struct {
 	Record bool // write the cycle's items and results to the store
 	// Client fetches the feeds; nil means feeds.NewClient.
 	Client *http.Client
+	// RunID is the history row of the run this cycle belongs to. Its feed
+	// fetches are linked to it; 0 links none (CLI and dry runs).
+	RunID int64
 }
 
 // Outcome is the result of one cycle. Rendering it (markdown file, stdout,
@@ -103,7 +106,7 @@ func Run(
 	// Per-feed fetch outcomes are recorded whether or not the run records
 	// items: a dead feed should surface even on a --dry-run. Best-effort —
 	// history is observability and must never fail the run.
-	if err := recordFeedFetches(ctx, db, active, results); err != nil {
+	if err := recordFeedFetches(ctx, db, opts.RunID, active, results); err != nil {
 		logger.Warn().Err(err).Msg("recording feed fetch history failed")
 	}
 
@@ -267,10 +270,12 @@ func tallyFetches(results []feeds.Result) (items, failed int) {
 // recordFeedFetches appends each source's fetch outcome to the feed history so
 // a feed that has stopped resolving is visible in the UI instead of only in
 // one run's log, then trims the history to its retention bound. feeds and
-// results are positionally paired (see Run).
+// results are positionally paired (see Run). A positive runID links the rows
+// to that run's history row.
 func recordFeedFetches(
 	ctx context.Context,
 	db *store.Store,
+	runID int64,
 	feedCfgs []config.ResolvedFeed,
 	results []feeds.Result,
 ) error {
@@ -289,7 +294,7 @@ func recordFeedFetches(
 		}
 		fetches = append(fetches, f)
 	}
-	if err := db.RecordFeedFetches(ctx, fetches); err != nil {
+	if err := db.RecordRunFetches(ctx, runID, fetches); err != nil {
 		return err
 	}
 	// Append-only needs a ceiling; trimming here keeps it tied to the only

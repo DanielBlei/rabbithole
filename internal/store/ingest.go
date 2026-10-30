@@ -129,6 +129,8 @@ const (
 
 	sqlListIngestRuns = "SELECT " + ingestColumns + " FROM ingest_history ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?"
 
+	sqlCountIngestRuns = "SELECT COUNT(*) FROM ingest_history"
+
 	// Joins the run's stored log (empty string when none was saved).
 	sqlGetIngestRunWithLog = "SELECT " + ingestColumns + ", COALESCE(l.log, '') " +
 		"FROM ingest_history h LEFT JOIN ingest_run_logs l ON l.run_id = h.id WHERE h.id = ?"
@@ -266,6 +268,15 @@ func (s *Store) ListIngestRuns(ctx context.Context, limit, offset int) (runs []I
 		return runs[:limit], true, nil
 	}
 	return runs, false, nil
+}
+
+// CountIngestRuns returns how many runs are recorded.
+func (s *Store) CountIngestRuns(ctx context.Context) (int, error) {
+	var n int
+	if err := s.queryRow(ctx, sqlCountIngestRuns).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count ingest runs: %w", err)
+	}
+	return n, nil
 }
 
 // SaveIngestRunLog records a run's captured log lines (newline-joined) against

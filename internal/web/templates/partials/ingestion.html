@@ -1,0 +1,121 @@
+{{/* SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+     SPDX-License-Identifier: Apache-2.0 */}}
+
+{{/* The Ingestion section of Sources: the ingest bar and the recent runs, each
+     run one <tbody> so a single htmx swap target exists per run. Everything
+     recorded from a run (feed names, errors, log lines) is untrusted text and
+     only ever rendered through template escaping. */}}
+{{define "sourcesIngestion"}}
+<div class="ov ov--page">
+  <header class="ov-top">
+    <h1>Ingestion</h1>
+    <p class="ov-brief">Ingestion fetches every enabled feed, then scores new items against your profile.</p>
+  </header>
+  {{template "ingestionLive" .}}
+</div>
+{{end}}
+
+{{/* The bar and the runs, one unit. The live refresh sends it whole, out of
+     band, so the bar follows a run started anywhere and every row is collapsed.
+     A bar that is running polls itself; the swap replaces it, so it never polls
+     twice. */}}
+{{define "ingestionLive"}}
+<div id="ingLive"{{if .OOB}} hx-swap-oob="true"{{end}}>
+  {{template "ingestBar" .Bar}}
+  {{template "ingestionRuns" .}}
+</div>
+{{end}}
+
+{{/* The live refresh's answer: the unit and the Manage badge, out of band. */}}
+{{define "ingestionLiveReply"}}{{template "ingestionLive" .}}{{with .Badge}}{{template "sourceNavBadge" .}}{{end}}{{end}}
+
+{{/* The runs block. */}}
+{{define "ingestionRuns"}}
+<section class="stp-group" aria-labelledby="inRuns" id="ingRuns">
+  <header class="stp-group__h">
+    <div><h3 id="inRuns"><span class="stp-group__t">Recent runs</span></h3></div>
+    <p>A run fetches every enabled feed, then scores the new items. Each feed uses its own since and max items.</p>
+  </header>
+  <div class="ov-body">
+    <table class="in-table" data-testid="ingest-history">
+      <caption class="stp-sr">Recent ingestion runs</caption>
+      <thead><tr><th scope="col">Started</th><th scope="col">Status</th><th scope="col">New</th><th scope="col">Duration</th><th scope="col">Trigger</th><th scope="col"><span class="stp-sr">Details</span></th></tr></thead>
+      {{- range .Runs}}
+      {{template "ingestionRow" .}}
+      {{- else}}
+      <tbody><tr><td colspan="6"><p class="ov-brief">No runs yet.</p></td></tr></tbody>
+      {{- end}}
+    </table>
+    {{- if or .HasPrev .HasNext}}
+    <nav class="in-pg" aria-label="Run pages">
+      {{if .HasPrev}}<a href="/ingestion{{if gt .PrevPage 1}}?page={{.PrevPage}}{{end}}" rel="prev">Newer runs</a>{{end}}
+      <span>Page {{.Page}}</span>
+      {{if .HasNext}}<a href="/ingestion?page={{.NextPage}}" rel="next">Older runs</a>{{end}}
+    </nav>
+    {{- end}}
+  </div>
+</section>
+{{end}}
+
+{{/* One run: the summary row and, when open, its detail row. The toggle swaps
+     the whole <tbody>. A run in progress has no toggle. */}}
+{{define "ingestionRow"}}
+<tbody id="run-{{.ID}}" data-status="{{.Status}}">
+  <tr class="in-r">
+    <td data-label="Started"><time datetime="{{.StartedISO}}" title="{{.StartedTitle}}">{{.Started}}</time></td>
+    <td data-label="Status"><span class="in-st"><span class="ingb__dot ingb__dot--{{.Status}}" aria-hidden="true"></span>{{.StatusLabel}}</span>{{if .Err}}<span class="in-err">{{.Err}}</span>{{end}}</td>
+    <td data-label="New" class="in-n">{{.NewCell}}</td>
+    <td data-label="Duration" class="in-n">{{.Duration}}</td>
+    <td data-label="Trigger">{{.TriggerLabel}}</td>
+    <td class="in-tog">
+      {{- if not .Running}}
+      <button type="button" class="in-tog__b" id="run-{{.ID}}-tog" aria-controls="run-{{.ID}}"
+              hx-get="/ingestion/runs/{{.ID}}{{if .Open}}?collapse=1{{end}}"
+              hx-target="#run-{{.ID}}" hx-swap="outerHTML"
+              aria-expanded="{{if .Open}}true{{else}}false{{end}}"
+              aria-label="{{if .Open}}Hide{{else}}Show{{end}} details for the run from {{.Started}}">{{if .Open}}&#9650;{{else}}&#9660;{{end}}</button>
+      {{- end}}
+    </td>
+  </tr>
+  {{- if and .Open .Detail}}
+  <tr class="in-d">
+    <td colspan="6">
+      {{template "ingestionDetail" .Detail}}
+    </td>
+  </tr>
+  {{- end}}
+</tbody>
+{{end}}
+
+{{/* The expanded part of a run. */}}
+{{define "ingestionDetail"}}
+{{- if .Rescore}}
+<p class="in-cnt"><b>{{.Counts.Fetched}}</b> candidates, <b>{{.Counts.Scored}}</b> rescored, <b>{{.Counts.Failed}}</b> failed</p>
+{{- else}}
+<p class="in-cnt"><b>{{.Counts.Fetched}}</b> fetched, <b>{{.Counts.NewItems}}</b> new, <b>{{.Counts.Scored}}</b> scored, <b>{{.Counts.Skipped}}</b> skipped, <b>{{.Counts.Failed}}</b> failed</p>
+{{- end}}
+<h4 class="in-h">Feeds in this run</h4>
+{{- if .HasFeeds}}
+<table class="in-feeds">
+  <thead><tr><th scope="col">Feed</th><th scope="col">Result</th><th scope="col">Items</th><th scope="col">Took</th></tr></thead>
+  <tbody>
+    {{- range .Feeds}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td>{{.Result}}{{if .Why}}<span class="in-err" title="{{.Raw}}">{{.Why}}</span>{{end}}</td>
+      <td>{{.Items}}</td>
+      <td>{{.Took}}</td>
+    </tr>
+    {{- end}}
+  </tbody>
+</table>
+{{- else}}
+<p class="in-none">No per-feed results were recorded for this run.</p>
+{{- end}}
+<h4 class="in-h">Run log</h4>
+{{- if .Logs}}
+<div class="in-log">{{template "ingestLogLines" .Logs}}</div>
+{{- else}}
+<p class="in-none">No log captured for this run.</p>
+{{- end}}
+{{end}}
