@@ -53,6 +53,8 @@ type sourcesData struct {
 	Library *libraryPage
 	// LibNav is the nav's Library group, on every section.
 	LibNav libNav
+	// icons is the page's one read of the stored icons, by feed id.
+	icons map[string]iconRef
 
 	Counts sourceCounts
 	// Attention is the Manage status block: failing sources, flaky notes and the
@@ -717,6 +719,15 @@ func (s *Web) sourcesData(ctx context.Context, selected string, withStats bool) 
 		}
 	}
 
+	// Rows are drawn only where stats are wanted; the Library page and the bulk
+	// planner build rows they never show, so they skip the read.
+	if withStats {
+		data.icons = s.iconRefs(ctx)
+		for i := range data.Rows {
+			data.Rows[i].Icon = data.icons[data.Rows[i].ID]
+		}
+	}
+
 	// One read of the newest run serves the stats cache key and the ingest bar;
 	// a failed read leaves both as if there were no run.
 	last, err := s.db.LastIngestRun(ctx)
@@ -1053,6 +1064,7 @@ func (s *Web) afterFeedChange(ctx context.Context) {
 	if err := s.db.SyncSourceTags(ctx, ingest.ConfiguredTags(configured)); err != nil {
 		log.Warn().Err(err).Msg("syncing feed tags failed")
 	}
+	s.kickIcons()
 }
 
 func defaultsForm(d config.FeedDefaults, errMsg string) defaultsData {

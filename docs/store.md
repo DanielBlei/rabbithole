@@ -195,6 +195,7 @@ Three groups, largely independent:
 |---|---|-------------------------------------|
 | **Feed config** | `feeds`, `feed_defaults` | The feed sources, from the Sources page or an import |
 | **Feed pipeline** | `items`, `feed_fetches` | `internal/ingest`                   |
+| **Feed icons** | `feed_icons` | `internal/ingest`; one row per feed, PNG bytes or the lookup outcome |
 | **Run history** | `ingest_history`, `ingest_run_logs` | `internal/ingest`'s run manager     |
 | **Interest profiles** | `profiles`, `profile_state`, `profile_imports` | Settings UI, CLI/server bootstrap |
 | **Maze boards** | `todos`, `ideas` | The web UI only                     |

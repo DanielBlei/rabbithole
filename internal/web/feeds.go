@@ -98,6 +98,8 @@ type feedRowData struct {
 
 	// Stats is the feed's volume, signal and fetch time, filled by applyStats.
 	Stats rowStats
+	// Icon is the feed's stored icon, zero when it has none.
+	Icon iconRef
 }
 
 // feedTick is one attempt in the history strip. Class is "ok", "err", "flaky"

@@ -106,7 +106,7 @@
     {{- if eq .State "add"}}<label class="stp-check"><input type="checkbox" value="{{.Key}}" aria-label="Select {{.Name}}" data-lib-pick><span class="stp-check__box"></span></label>
     {{- else}}<span aria-hidden="true"></span>{{end}}
   </div>
-  <div class="li-row__ico">{{template "favicon" (monogram .Name .URL 28)}}</div>
+  <div class="li-row__ico">{{template "favicon" (fav .Icon .Name .URL 28)}}</div>
   <div class="li-row__main">
     <div class="li-row__top"><span class="li-row__nm">{{.Name}}</span>{{if .Kind}}<span class="stp-chip li-kind">{{.Kind}}</span>{{end}}</div>
     <p class="li-row__desc">{{.Desc}}</p>

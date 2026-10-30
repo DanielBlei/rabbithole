@@ -49,7 +49,7 @@ func pageTmpl(page string) *template.Template {
 	return template.Must(
 		template.New(page).
 			Funcs(template.FuncMap{
-				"tip": tipFor, "monogram": monogram, "clip": clipText, "tier": tierWords,
+				"tip": tipFor, "monogram": monogram, "fav": fav, "clip": clipText, "tier": tierWords,
 				"findFailed": func() string { return findErrorFallback },
 			}).
 			ParseFS(
@@ -238,6 +238,7 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /items/{id}/bookmark", s.handleBookmark)
 	mux.HandleFunc("POST /items/{id}/rate", s.handleRate)
 	mux.HandleFunc("POST /todos", s.handleAddTodo)
+	mux.Handle("GET /icons/{feedID}", httplog.QuietHandler(http.HandlerFunc(s.handleIcon)))
 	mux.HandleFunc("POST /todos/{id}/toggle", s.handleToggleTodo)
 	mux.HandleFunc("POST /todos/{id}/tags", s.handleSetTodoTags)
 	mux.HandleFunc("DELETE /todos/{id}", s.handleDeleteTodo)

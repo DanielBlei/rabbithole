@@ -8,3 +8,6 @@ var DedupeKey = dedupeKey
 
 // FeedAddress exposes feedAddress to the external test package.
 var FeedAddress = feedAddress
+
+// DecodeIcon exposes decodeIcon to the external test package.
+var DecodeIcon = decodeIcon

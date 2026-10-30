@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -48,9 +49,12 @@ type Source struct {
 // set and no Items — failures are reported, not swallowed, so the caller can
 // record feed health and still carry on with the sources that did work.
 type Result struct {
-	Source  Source
-	Items   []Item
-	Err     error
+	Source Source
+	Items  []Item
+	Err    error
+	// Site is the feed's own site address from its link, empty when the feed
+	// declares none or the source is not a feed.
+	Site    string
 	Elapsed time.Duration
 	At      time.Time // when the fetch finished
 }
@@ -98,8 +102,8 @@ func FetchAll(ctx context.Context, client *http.Client, sources []Source) []Resu
 			start := time.Now()
 			// gofeed.Parser lazily initializes internal state on first use and
 			// is not goroutine-safe, so each fetch gets its own (cheap) parser.
-			items, err := fetchOne(ctx, newParser(client), src)
-			res := Result{Source: src, Items: items, Err: err, Elapsed: time.Since(start), At: time.Now()}
+			items, site, err := fetchOne(ctx, newParser(client), src)
+			res := Result{Source: src, Items: items, Site: site, Err: err, Elapsed: time.Since(start), At: time.Now()}
 			if err != nil {
 				logger.Warn().Str("feed", src.Name).Err(err).Msg("skipping feed")
 			} else {
@@ -123,16 +127,17 @@ func newParser(client *http.Client) *gofeed.Parser {
 	return p
 }
 
-func fetchOne(ctx context.Context, parser *gofeed.Parser, src Source) ([]Item, error) {
+// fetchOne returns a feed's items and its site address (http or https only).
+func fetchOne(ctx context.Context, parser *gofeed.Parser, src Source) ([]Item, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
 
 	feed, err := parser.ParseURLWithContext(src.URL, ctx)
 	if errors.Is(err, gofeed.ErrResponseTooLarge) {
-		return nil, fmt.Errorf("%w: over %d bytes", httpclient.ErrTooLarge, MaxFeedBytes)
+		return nil, "", fmt.Errorf("%w: over %d bytes", httpclient.ErrTooLarge, MaxFeedBytes)
 	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	items := make([]Item, 0, len(feed.Items))
 	for _, it := range feed.Items {
@@ -156,7 +161,26 @@ func fetchOne(ctx context.Context, parser *gofeed.Parser, src Source) ([]Item, e
 			Tags:      src.Tags,
 		})
 	}
-	return items, nil
+	return items, siteLink(src.URL, feed.Link), nil
+}
+
+// siteLink resolves a channel link against the feed's address and keeps it only
+// when it is an http(s) address.
+func siteLink(feedURL, link string) string {
+	link = strings.TrimSpace(link)
+	base, err := url.Parse(feedURL)
+	if link == "" || err != nil {
+		return ""
+	}
+	ref, err := url.Parse(link)
+	if err != nil {
+		return ""
+	}
+	site := base.ResolveReference(ref).String()
+	if SiteOrigin(site) == "" {
+		return ""
+	}
+	return site
 }
 
 var tagRE = regexp.MustCompile(`<[^>]*>`)

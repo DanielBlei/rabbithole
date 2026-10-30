@@ -96,6 +96,8 @@ type libEntry struct {
 	Reason   string
 	// Hay is what the filter's words are matched against, lower case.
 	Hay string
+	// Icon is the icon of the subscribed source with this id, zero otherwise.
+	Icon iconRef
 }
 
 type libLabel struct {
@@ -221,6 +223,7 @@ func (s *Web) libraryPageFor(ctx context.Context, snap library.Snapshot, group s
 		return nil, err
 	}
 
+	icons := s.iconRefs(ctx)
 	counts := make(map[string]int)
 	addable := 0
 	for _, f := range snap.Library.Files {
@@ -238,6 +241,7 @@ func (s *Web) libraryPageFor(ctx context.Context, snap library.Snapshot, group s
 				if f.Type != library.TypeRSS {
 					e.Kind = string(f.Type)
 				}
+				e.Icon = icons[e.ID]
 				e.State, e.Chip = libraryState(states[key])
 				e.Reason = states[key].Reason
 				for _, l := range src.Labels {
@@ -528,6 +532,7 @@ func (s *Web) writeSuggestion(
 		row.Done = true
 		s.afterFeedChange(ctx)
 	}
+	row.Icon = s.iconRefs(ctx)[row.ID]
 	states, err := s.libraryStates(ctx, snap)
 	if err != nil {
 		httpFeedError(w, err)

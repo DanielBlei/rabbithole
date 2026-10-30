@@ -92,6 +92,7 @@ type ovSuggestion struct {
 	Why  string
 	Done bool
 	Err  string
+	Icon iconRef
 }
 
 // ovCoverage is how much of the Library is added, in total and per group.
@@ -121,6 +122,7 @@ type ovQuiet struct {
 // ovVolRow is one source in the volume list. Hint is set for a source gone quiet.
 type ovVolRow struct {
 	ID, Name, URL string
+	Icon          iconRef
 	Hint          string
 	PerWeek       float64
 	PerWeekText   string
@@ -131,6 +133,7 @@ type ovVolRow struct {
 // ovCall is a source named in a signal callout.
 type ovCall struct {
 	ID, Name, URL string
+	Icon          iconRef
 	Hint          string
 }
 
@@ -156,6 +159,7 @@ func (s ovSignal) NoisySelect() string {
 // for the share to mean anything.
 type ovSigRow struct {
 	ID, Name, URL string
+	Icon          iconRef
 	Eng           string
 	Bar           tierBar
 	Thin          bool
@@ -166,6 +170,7 @@ type ovSigRow struct {
 // ovSlow is one source in the slowest list. Width is the bar's percentage.
 type ovSlow struct {
 	ID, Name, URL string
+	Icon          iconRef
 	AvgText       string
 	Width         int
 }
@@ -291,14 +296,16 @@ func plural(n int, one, many string) string {
 func (s *Web) overview(ctx context.Context, data sourcesData) overviewData {
 	ov := overviewFrom(data)
 	if !ov.FirstRun {
-		ov.Library = s.overviewLibrary(ctx, s.library.Snapshot(), data.Rows)
+		ov.Library = s.overviewLibrary(ctx, s.library.Snapshot(), data.Rows, data.icons)
 	}
 	return ov
 }
 
 // overviewLibrary builds the Library sections, or nil when the library has
 // nothing to show.
-func (s *Web) overviewLibrary(ctx context.Context, snap library.Snapshot, rows []feedRowData) *overviewLibrary {
+func (s *Web) overviewLibrary(
+	ctx context.Context, snap library.Snapshot, rows []feedRowData, icons map[string]iconRef,
+) *overviewLibrary {
 	if snap.Off || !snap.Loaded || len(libraryEntries(snap)) == 0 {
 		return nil
 	}
@@ -307,8 +314,12 @@ func (s *Web) overviewLibrary(ctx context.Context, snap library.Snapshot, rows [
 		log.Error().Err(err).Msg("plan the library for the overview")
 		return nil
 	}
+	sugg := librarySuggestions(snap, states, rows)
+	for i := range sugg {
+		sugg[i].Icon = icons[sugg[i].ID]
+	}
 	return &overviewLibrary{
-		Suggestions: librarySuggestions(snap, states, rows),
+		Suggestions: sugg,
 		Coverage:    libraryCoverage(snap, states),
 	}
 }
@@ -473,6 +484,7 @@ func volumeRows(active []feedRowData) []ovVolRow {
 			ID:          r.ID,
 			Name:        r.Name,
 			URL:         r.URL,
+			Icon:        r.Icon,
 			PerWeek:     r.Stats.PerWeek,
 			PerWeekText: r.Stats.PerWeekText,
 			Spark:       r.Stats.Spark,
@@ -543,7 +555,7 @@ func signalOf(active []feedRowData) ovSignal {
 func callOf(r feedRowData) ovCall {
 	sg := r.Stats.Sig
 	return ovCall{
-		ID: r.ID, Name: r.Name, URL: r.URL,
+		ID: r.ID, Name: r.Name, URL: r.URL, Icon: r.Icon,
 		Hint: fmt.Sprintf("%d of %d scored are %s (%d%%)", sg.High, sg.Scored, highPlus(), sg.Pct),
 	}
 }
@@ -555,6 +567,7 @@ func sigRow(r feedRowData) ovSigRow {
 		ID:   r.ID,
 		Name: r.Name,
 		URL:  r.URL,
+		Icon: r.Icon,
 		Bar:  sg.Bar,
 		Thin: !sg.Enough,
 		Eng: fmt.Sprintf(
@@ -596,10 +609,10 @@ func slowestOf(active []feedRowData) []ovSlow {
 	out := make([]ovSlow, 0, maxSlowest)
 	for _, r := range timed[:min(len(timed), maxSlowest)] {
 		width := int(math.Round(float64(r.Stats.AvgMs) / float64(top) * 100))
-		out = append(
-			out,
-			ovSlow{ID: r.ID, Name: r.Name, URL: r.URL, AvgText: r.Stats.AvgText, Width: max(minBarPct, width)},
-		)
+		out = append(out, ovSlow{
+			ID: r.ID, Name: r.Name, URL: r.URL, Icon: r.Icon,
+			AvgText: r.Stats.AvgText, Width: max(minBarPct, width),
+		})
 	}
 	return out
 }

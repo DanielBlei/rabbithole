@@ -331,18 +331,23 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		srv.Drain()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
-		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("shutdown: %w", err)
+		httpErr := httpSrv.Shutdown(shutdownCtx)
+		if httpErr != nil {
+			log.Error().Err(httpErr).Msg("http shutdown failed")
 		}
 
 		// Drain any in-flight ingest run before the deferred db.Close() runs,
 		// so it never writes through a closed *sql.DB. Its own timeout budget,
 		// separate from the HTTP drain above, so a slow HTTP shutdown doesn't
-		// shortchange the run's chance to wind down cleanly.
+		// shortchange the run's chance to wind down cleanly. It runs even when
+		// the HTTP drain failed.
 		mgrShutdownCtx, mgrCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer mgrCancel()
 		mgr.Shutdown(mgrShutdownCtx)
 
+		if httpErr != nil {
+			return fmt.Errorf("shutdown: %w", httpErr)
+		}
 		err := <-errCh
 		log.Info().Msg("server stopped")
 		return err

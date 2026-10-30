@@ -87,13 +87,18 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 		Msg("interest profile resolved")
 
 	day := time.Now()
+	client := feeds.NewClient(buildVersion())
 	outcome, err := ingest.Run(ctx, run, activeProfile, db, day, ingest.Options{
 		Think:  think,
 		Record: !dryRun,
-		Client: feeds.NewClient(buildVersion()),
+		Client: client,
 	})
 	if err != nil {
 		return err
+	}
+	if !dryRun {
+		// After the digest is printed, so the lookups never delay it.
+		defer func() { ingest.RefreshIcons(ctx, db, client, outcome.Sites, time.Now()) }()
 	}
 	if len(outcome.Unseen) == 0 {
 		fmt.Println("No new items to score.")

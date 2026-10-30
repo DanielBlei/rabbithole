@@ -91,11 +91,11 @@ func TestMonogramColorArxiv(t *testing.T) {
 func TestFaviconRender(t *testing.T) {
 	tmpl := pageTmpl("feed.html")
 	if _, err := tmpl.New("t").
-		Parse(`{{template "favicon" (monogram "Alpha" "https://alpha.test/f" 20)}}`); err != nil {
+		Parse(`{{template "favicon" (fav .Icon "Alpha" "https://alpha.test/f" 20)}}`); err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "t", nil); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "t", struct{ Icon iconRef }{}); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()

@@ -15,7 +15,7 @@
     </div>
 
     <div class="mg-c mg-c--src">
-      {{template "favicon" (monogram .Name .URL 20)}}
+      {{template "favicon" (fav .Icon .Name .URL 20)}}
       <div class="mg-name">
         <span class="mg-nm"><span class="mg-nm__t" title="{{.Name}}">{{.Name}}</span></span>
         <span class="mg-host" title="{{.URL}}">{{.ShortHost}}{{.KindNote}}</span>

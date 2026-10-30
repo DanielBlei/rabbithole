@@ -371,6 +371,10 @@ User-Agent.
 - `HTTPS_PROXY` and `NO_PROXY` are honoured; with a proxy, the proxy resolves hostnames, so only
   IP addresses and `localhost` in a feed URL are checked.
 - RSS requests identify as `rabbithole/<version>`.
+- Source icons come from the site each feed links to. They are fetched in the background after you
+  add or change a source and at the end of each ingestion run, never while a page loads, and follow
+  the same private-address rule. A site with no usable icon (or only an SVG one) shows a letter
+  tile instead.
 
 ### Feed URLs
 

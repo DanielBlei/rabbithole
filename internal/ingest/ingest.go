@@ -40,6 +40,9 @@ type Outcome struct {
 	Scored  int           // items the model scored, across all feeds
 	Skipped int           // items skipped as already scored
 	Failed  int           // items the model failed to score
+	// Sites pairs every fetched feed with the site that stands for it, for the
+	// icon pass that follows the run.
+	Sites []IconSite
 }
 
 // Run fetches every feed in cfg, then processes the feeds one at a time: each
@@ -136,7 +139,7 @@ func Run(
 	// run early (a DB error, a backend that fails to resolve) still returns
 	// accurate counts for the feeds already completed, instead of resetting
 	// everything to zero.
-	outcome := Outcome{}
+	outcome := Outcome{Sites: iconSites(active, results)}
 	for i, f := range active {
 		feedItems := results[i].Items
 		if len(feedItems) == 0 {

@@ -75,6 +75,18 @@ type Manager struct {
 	mu     sync.Mutex
 	active *activeRun // nil when idle
 	buf    *logBuffer // most recent run's log, kept after the run finishes
+
+	// Icon passes run outside the run slot. iconMu admits one pass at a time;
+	// root is their context, cancelled by Shutdown; bg tracks them so Shutdown
+	// can wait; pending records a kick that arrived while a pass held iconMu. The
+	// root, closed, pending and bg's Add are guarded by mu, and iconMu is released
+	// under mu so a kick is either run by the finishing pass or starts its own.
+	iconMu  sync.Mutex
+	root    context.Context
+	stop    context.CancelFunc
+	closed  bool
+	pending bool
+	bg      sync.WaitGroup
 }
 
 // activeRun is the in-flight cycle's handle.
@@ -179,19 +191,84 @@ func (m *Manager) Cancel() {
 	}
 }
 
-// Shutdown cancels any in-flight run and blocks until it has finished, or ctx
-// is done, whichever comes first. A no-op when idle.
+// Shutdown cancels any in-flight run and icon pass and blocks until they have
+// finished, or ctx is done, whichever comes first. No pass starts afterwards.
 func (m *Manager) Shutdown(ctx context.Context) {
 	m.mu.Lock()
+	m.closed = true
+	m.rootLocked()
+	m.stop()
 	run := m.active
 	m.mu.Unlock()
-	if run == nil {
+
+	if run != nil {
+		run.cancel()
+		select {
+		case <-run.done:
+		case <-ctx.Done():
+			return
+		}
+	}
+	idle := make(chan struct{})
+	go func() {
+		m.bg.Wait()
+		close(idle)
+	}()
+	select {
+	case <-idle:
+	case <-ctx.Done():
+	}
+}
+
+// rootLocked returns the context icon passes run on, creating it on first use.
+// Callers hold m.mu.
+func (m *Manager) rootLocked() context.Context {
+	if m.root == nil {
+		m.root, m.stop = context.WithCancel(context.Background())
+	}
+	return m.root
+}
+
+// KickIcons looks up the icons of feeds that have none or a stale one, in the
+// background. A kick that arrives while a pass runs is not dropped: the running
+// pass is followed by one more. It does nothing after Shutdown.
+func (m *Manager) KickIcons() {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
 		return
 	}
-	run.cancel()
-	select {
-	case <-run.done:
-	case <-ctx.Done():
+	if !m.iconMu.TryLock() {
+		m.pending = true
+		m.mu.Unlock()
+		return
+	}
+	ctx := m.rootLocked()
+	m.bg.Add(1)
+	m.mu.Unlock()
+
+	go func() {
+		defer m.bg.Done()
+		RefreshIcons(ctx, m.db, m.client, nil, time.Now())
+		m.endIconPass(ctx)
+	}()
+}
+
+// endIconPass finishes the pass that holds iconMu: while kicks arrived during it,
+// it runs one more kick pass per round, then releases iconMu. After Shutdown a
+// pending kick is dropped.
+func (m *Manager) endIconPass(ctx context.Context) {
+	for {
+		m.mu.Lock()
+		if !m.pending || m.closed {
+			m.pending = false
+			m.iconMu.Unlock()
+			m.mu.Unlock()
+			return
+		}
+		m.pending = false
+		m.mu.Unlock()
+		RefreshIcons(ctx, m.db, m.client, nil, time.Now())
 	}
 }
 
@@ -225,7 +302,10 @@ func (m *Manager) execute(
 
 	runLogger := newRunLogger(buf, m.logLevel)
 	ctx = runLogger.WithContext(ctx)
-	var counts store.IngestCounts
+	var (
+		counts store.IngestCounts
+		sites  []IconSite
+	)
 	// One snapshot for the whole run: a config change lands on the next run.
 	cfg, _, err := m.src.Active(ctx)
 	if err != nil {
@@ -250,6 +330,7 @@ func (m *Manager) execute(
 			Record: true,
 			Client: m.client,
 		})
+		sites = outcome.Sites
 		counts = store.IngestCounts{
 			Fetched:  outcome.Fetched,
 			NewItems: len(outcome.Unseen),
@@ -313,9 +394,24 @@ func (m *Manager) execute(
 		Str("took", time.Since(run.started).Round(time.Second).String()).
 		Msg("scoring run finished")
 
+	// The pass is claimed under the lock that frees the slot, so Shutdown either
+	// sees it in bg or stops it from starting. It follows a run that succeeded
+	// and reported the sites it fetched.
 	m.mu.Lock()
 	m.active = nil
+	pass := run.kind == RunKindIngest && status == store.IngestStatusOK && sites != nil && !m.closed
+	var passCtx context.Context
+	if pass {
+		passCtx = m.rootLocked()
+		m.bg.Add(1)
+	}
 	m.mu.Unlock()
+	if pass {
+		defer m.bg.Done()
+		m.iconMu.Lock()
+		RefreshIcons(passCtx, m.db, m.client, sites, time.Now())
+		m.endIconPass(passCtx)
+	}
 }
 
 // newRunLogger builds the logger for one run. Everything lands in buf, which the

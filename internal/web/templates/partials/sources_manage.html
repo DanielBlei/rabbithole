@@ -109,7 +109,7 @@
           {{range .Failing}}
           <article class="mg-card">
             <div class="mg-card__top">
-              {{template "favicon" (monogram .Name .URL 20)}}
+              {{template "favicon" (fav .Icon .Name .URL 20)}}
               <b class="mg-card__nm">{{.Name}}</b>
               <span class="mg-chip mg-chip--bad">&times;{{.FailStreak}}</span>
             </div>

@@ -119,7 +119,7 @@
         <ul class="ov-list">
           {{- range .Overview.Volume}}
           <li class="ov-vrow">
-            {{template "favicon" (monogram .Name .URL 20)}}
+            {{template "favicon" (fav .Icon .Name .URL 20)}}
             <div class="ov-who">{{template "ovName" .}}{{if .Hint}}<span class="sh-hint">{{.Hint}}</span>{{end}}</div>
             {{template "spark" .}}
             <span class="ov-num"><b>{{.PerWeekText}}</b><span class="sh-hint"> /wk</span></span>
@@ -149,7 +149,7 @@
           {{- with .Overview.Signal.Best}}
           <div class="ov-call ov-call--good">
             <span class="ov-call__k">Best signal</span>
-            <div class="ov-call__who">{{template "favicon" (monogram .Name .URL 20)}}{{template "ovName" .}}</div>
+            <div class="ov-call__who">{{template "favicon" (fav .Icon .Name .URL 20)}}{{template "ovName" .}}</div>
             <p class="sh-hint">{{.Hint}}</p>
             <a class="clk-btn clk-btn--link ov-call__go" href="/sources/manage?select={{.ID}}">Review in Manage</a>
           </div>
@@ -159,7 +159,7 @@
             <span class="ov-call__k">Noisy, low signal</span>
             {{- range .Overview.Signal.Noisy}}
             <div class="ov-call__item">
-              <div class="ov-call__who">{{template "favicon" (monogram .Name .URL 20)}}{{template "ovName" .}}</div>
+              <div class="ov-call__who">{{template "favicon" (fav .Icon .Name .URL 20)}}{{template "ovName" .}}</div>
               <p class="sh-hint">{{.Hint}}</p>
             </div>
             {{- end}}
@@ -177,7 +177,7 @@
         <ul class="ov-list">
           {{- range .Overview.Signal.Rows}}
           <li class="ov-srow{{if .Thin}} is-thin{{end}}">
-            {{template "favicon" (monogram .Name .URL 20)}}
+            {{template "favicon" (fav .Icon .Name .URL 20)}}
             <div class="ov-who">{{template "ovName" .}}<span class="sh-hint ov-eng">{{.Eng}}</span></div>
             <span class="ov-srow__bar">{{template "tierBar" .Bar}}</span>
             <span class="ov-share"><b>{{.Lead}}</b><span class="sh-hint">{{.Hint}}</span></span>
@@ -222,7 +222,7 @@
       <ul class="ov-list ov-bars">
         {{- range .Overview.Slowest}}
         <li class="ov-brow ov-brow--fav">
-          <span class="ov-brow__k">{{template "favicon" (monogram .Name .URL 18)}}{{template "ovName" .}}</span>
+          <span class="ov-brow__k">{{template "favicon" (fav .Icon .Name .URL 18)}}{{template "ovName" .}}</span>
           <span class="ov-bar" role="img" aria-label="Average {{.AvgText}}"><i style="width:{{.Width}}%"></i></span>
           <span class="ov-brow__v"><b>{{.AvgText}}</b></span>
         </li>
@@ -242,7 +242,7 @@
      reply is this row again: Subscribed once added, or why it was not. */}}
 {{define "ovSuggestion"}}
 <li class="ov-grow" id="ov-sug-{{.ID}}">
-  {{template "favicon" (monogram .Name .URL 20)}}
+  {{template "favicon" (fav .Icon .Name .URL 20)}}
   <div class="ov-who"><b class="ov-name" title="{{.Name}}">{{.Name}}</b>{{if .Why}}<span class="sh-hint">{{.Why}}</span>{{end}}</div>
   <span class="libact">
     {{- if .Done}}

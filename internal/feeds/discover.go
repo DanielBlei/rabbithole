@@ -295,48 +295,15 @@ type feedRef struct {
 // deduplicated, in document order with comment feeds last.
 func declaredFeeds(head []byte, final *url.URL) []feedRef {
 	type link struct{ href, title string }
-	var (
-		links   []link
-		baseRaw string
-	)
-	z := html.NewTokenizer(bytes.NewReader(head))
-scan:
-	for {
-		switch z.Next() {
-		case html.ErrorToken:
-			break scan
-		case html.EndTagToken:
-			if name, _ := z.TagName(); string(name) == "head" {
-				break scan
-			}
-		case html.StartTagToken, html.SelfClosingTagToken:
-			name, hasAttr := z.TagName()
-			switch string(name) {
-			case "body":
-				break scan
-			case "base":
-				attrs := tagAttrs(z, hasAttr)
-				if href := strings.TrimSpace(attrs["href"]); baseRaw == "" && href != "" {
-					baseRaw = href
-				}
-			case "link":
-				attrs := tagAttrs(z, hasAttr)
-				if !hasToken(attrs["rel"], "alternate") || !feedLinkType(attrs["type"]) {
-					continue
-				}
-				if href := strings.TrimSpace(attrs["href"]); href != "" {
-					links = append(links, link{href: href, title: CollapseWhitespace(attrs["title"])})
-				}
-			}
+	var links []link
+	base := headLinks(bytes.NewReader(head), final, func(attrs map[string]string) {
+		if !hasToken(attrs["rel"], "alternate") || !feedLinkType(attrs["type"]) {
+			return
 		}
-	}
-
-	base := final
-	if baseRaw != "" {
-		if u, err := final.Parse(baseRaw); err == nil {
-			base = u
+		if href := strings.TrimSpace(attrs["href"]); href != "" {
+			links = append(links, link{href: href, title: CollapseWhitespace(attrs["title"])})
 		}
-	}
+	})
 
 	var posts, comments []feedRef
 	seen := map[string]bool{}
@@ -359,6 +326,44 @@ scan:
 		}
 	}
 	return append(posts, comments...)
+}
+
+// headLinks scans a page head, calling visit with the attributes of each <link>
+// until </head> or <body>. It returns the address hrefs resolve against: the
+// first <base href> resolved against final, else final.
+func headLinks(r io.Reader, final *url.URL, visit func(attrs map[string]string)) *url.URL {
+	var baseRaw string
+	z := html.NewTokenizer(r)
+scan:
+	for {
+		switch z.Next() {
+		case html.ErrorToken:
+			break scan
+		case html.EndTagToken:
+			if name, _ := z.TagName(); string(name) == "head" {
+				break scan
+			}
+		case html.StartTagToken, html.SelfClosingTagToken:
+			name, hasAttr := z.TagName()
+			switch string(name) {
+			case "body":
+				break scan
+			case "base":
+				attrs := tagAttrs(z, hasAttr)
+				if href := strings.TrimSpace(attrs["href"]); baseRaw == "" && href != "" {
+					baseRaw = href
+				}
+			case "link":
+				visit(tagAttrs(z, hasAttr))
+			}
+		}
+	}
+	if baseRaw != "" {
+		if u, err := final.Parse(baseRaw); err == nil {
+			return u
+		}
+	}
+	return final
 }
 
 // tagAttrs returns the current tag's attributes, keyed by lowercase name; the

@@ -82,6 +82,7 @@
   --fill:rgba(255,255,255,.055);       /* resting control fill (replaces outlines) */
   --fill-hover:rgba(255,255,255,.10);
   --tint:rgba(128,203,196,.14);        /* selected control tint */
+  --fav-plate:#E3EAEE;                 /* light plate under a dark source icon */
 
   /* Source health, glow and tint roles (aliases of the palette above), plus the eight monogram hues. */
   --health-ok:var(--score-high);
@@ -2117,11 +2118,15 @@ summary.sh-nav__h:focus-visible{outline:1px solid var(--accent);outline-offset:1
   .sh-ni__n--bad{margin-left:8px;}
 }
 
-/* Monogram: a letter tile standing in for a source favicon. --fs sets the size
-   (inline style per tile); --fc is the hue, picked by the fav--c{n} class. */
+/* Source favicon tile: the stored icon (.fav__i) or, with none, a letter
+   monogram. Both fill the same --fs box, so a row never changes size between
+   them; --fs sets the size (inline style per tile) and --fc the monogram hue,
+   picked by the fav--c{n} class. A dark glyph sits on the light .fav--dark plate. */
 .fav{--fs:20px;flex:none;display:inline-grid;place-items:center;width:var(--fs);height:var(--fs);
   border-radius:5px;overflow:hidden;background:var(--fill);}
 .fav__m{font-weight:500;font-size:calc(var(--fs) * .55);line-height:1;}
+.fav__i{display:block;width:calc(var(--fs) - 4px);height:calc(var(--fs) - 4px);object-fit:contain;}
+.fav--dark{background:var(--fav-plate);}
 .fav--c0{--fc:var(--tc0);}
 .fav--c1{--fc:var(--tc1);}
 .fav--c2{--fc:var(--tc2);}
