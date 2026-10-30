@@ -281,6 +281,9 @@ func TestImportPlansIDSquatterAsConflict(t *testing.T) {
 	if plan[1].Status != PlanNew {
 		t.Errorf("row 1 = %q, want new", plan[1].Status)
 	}
+	if !plan[0].IDTaken || plan[1].IDTaken {
+		t.Errorf("IDTaken = %v, %v, want true, false", plan[0].IDTaken, plan[1].IDTaken)
+	}
 
 	res, err := db.ApplyImport(ctx, doc, map[string]bool{config.FeedURLKey(old): true})
 	if !errors.Is(err, ErrNothingToImport) || res.Skipped != 1 {
@@ -288,6 +291,29 @@ func TestImportPlansIDSquatterAsConflict(t *testing.T) {
 	}
 	if n := feedCount(t, db); n != 1 {
 		t.Errorf("feeds = %d, want only the edited source", n)
+	}
+}
+
+// A name that is also taken must not hide the id squatter: renaming would not
+// let the entry in.
+func TestImportPlansIDSquatterWithTakenName(t *testing.T) {
+	db := openTestStore(t)
+	ctx := t.Context()
+	const old = "https://old.test/feed"
+	id, err := db.AddFeed(ctx, config.Feed{Name: "Edited", URL: old})
+	if err != nil {
+		t.Fatalf("AddFeed: %v", err)
+	}
+	if _, err := db.UpdateFeed(ctx, id, config.Feed{Name: "Edited", URL: "https://new.test/feed"}); err != nil {
+		t.Fatalf("UpdateFeed: %v", err)
+	}
+
+	plan, err := db.PlanImport(ctx, config.FeedsDoc{Feeds: []config.Feed{{Name: "Edited", URL: old}}})
+	if err != nil {
+		t.Fatalf("PlanImport: %v", err)
+	}
+	if plan[0].Status != PlanConflict || plan[0].Reason != planReasonIDTaken || !plan[0].IDTaken {
+		t.Errorf("row = %+v, want the id conflict", plan[0])
 	}
 }
 
@@ -333,5 +359,81 @@ func TestPlanImportPicksDeletedTwin(t *testing.T) {
 		if plan[0].Status != PlanRemoved || plan[0].ID != want {
 			t.Errorf("%s: row = %q id %q, want removed id %q", name, plan[0].Status, plan[0].ID, want)
 		}
+	}
+}
+
+func TestLookupFeedURL(t *testing.T) {
+	db := openTestStore(t)
+	ctx := t.Context()
+	liveID := insertRawFeed(t, db, "Live", "https://Live.test/feed/")
+	goneID := insertRawFeed(t, db, "Gone", "https://gone.test/feed")
+	if err := db.SoftDeleteFeed(ctx, goneID); err != nil {
+		t.Fatalf("SoftDeleteFeed: %v", err)
+	}
+
+	live := FeedMatch{State: FeedMatchLive, ID: liveID, Name: "Live"}
+	gone := FeedMatch{State: FeedMatchRemoved, ID: goneID, Name: "Gone"}
+	cases := []struct {
+		name string
+		url  string
+		want FeedMatch
+	}{
+		{"none", "https://fresh.test/feed", FeedMatch{State: FeedMatchNone}},
+		{"blank", "  ", FeedMatch{State: FeedMatchNone}},
+		{"live", "https://Live.test/feed/", live},
+		{"live trailing slash dropped", "https://live.test/feed", live},
+		{"live host case", "HTTPS://LIVE.TEST/feed", live},
+		{"live without scheme", "live.test/feed", live},
+		{"live path case differs", "https://live.test/Feed", FeedMatch{State: FeedMatchNone}},
+		{"removed", "https://gone.test/feed", gone},
+		{"removed twin key", "https://GONE.test/feed/", gone},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := db.LookupFeedURL(ctx, c.url)
+			if err != nil {
+				t.Fatalf("LookupFeedURL: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("LookupFeedURL(%q) = %+v, want %+v", c.url, got, c.want)
+			}
+		})
+	}
+}
+
+// A live row wins its key over deleted twins, whatever order the rows sit in.
+func TestLookupFeedURLPrefersLiveOverRemovedTwin(t *testing.T) {
+	db := openTestStore(t)
+	ctx := t.Context()
+	gone := insertRawFeed(t, db, "Old", "https://twin.test/feed")
+	if err := db.SoftDeleteFeed(ctx, gone); err != nil {
+		t.Fatalf("SoftDeleteFeed: %v", err)
+	}
+	live := insertRawFeed(t, db, "New", "https://twin.test/feed/")
+
+	got, err := db.LookupFeedURL(ctx, "https://twin.test/feed")
+	if err != nil {
+		t.Fatalf("LookupFeedURL: %v", err)
+	}
+	if got.State != FeedMatchLive || got.ID != live || got.Name != "New" {
+		t.Errorf("match = %+v, want the live twin %q", got, live)
+	}
+}
+
+func TestPlanImportSubscribedRowCarriesID(t *testing.T) {
+	db := openTestStore(t)
+	liveID := insertRawFeed(t, db, "Live", "https://live.test/feed")
+	plan, err := db.PlanImport(t.Context(), config.FeedsDoc{Feeds: []config.Feed{
+		{Name: "Whatever", URL: "https://Live.test/feed/"},
+		{Name: "Fresh", URL: "https://fresh.test/feed"},
+	}})
+	if err != nil {
+		t.Fatalf("PlanImport: %v", err)
+	}
+	if plan[0].Status != PlanSubscribed || plan[0].ID != liveID {
+		t.Errorf("subscribed row = %q id %q, want id %q", plan[0].Status, plan[0].ID, liveID)
+	}
+	if plan[1].Status != PlanNew || plan[1].ID != "" {
+		t.Errorf("new row = %q id %q, want no id", plan[1].Status, plan[1].ID)
 	}
 }

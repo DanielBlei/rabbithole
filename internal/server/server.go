@@ -46,6 +46,9 @@ type Server struct {
 	noEnvWrite bool            // set by EnvFile: refuse pasted keys
 	storeInfo  *web.StoreInfo  // set by StoreInfo: what boot knew about the store
 	library    *library.Loader // set by Library: the source library the Sources page browses
+	// FeedClient is the guarded client the Add form's find and preview fetch
+	// through; nil uses a default one.
+	FeedClient *http.Client
 }
 
 // New returns a Server backed by db, reading the run config from src. addr is the
@@ -94,6 +97,7 @@ func (s *Server) Routes() http.Handler {
 	w.SetManagedBy(s.managedBy)
 	w.SetEnvFile(s.env, s.noEnvWrite)
 	w.SetLibrary(s.library)
+	w.SetFeedClient(s.FeedClient)
 	if s.storeInfo != nil {
 		w.SetStoreInfo(*s.storeInfo)
 	}

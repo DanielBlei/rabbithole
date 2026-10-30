@@ -156,12 +156,23 @@ type feedDetail struct {
 	// explain a tag the feed doesn't list itself.
 	InheritedTags []string
 
+	// AdvOpen opens the Advanced block of the add form, so a rejected since or
+	// max items is in view.
+	AdvOpen bool
+
 	Err    string // validation failure, rendered against the form
 	Notice string // something that worked but is worth saying, e.g. items re-filed
 
 	// Side is the panel beside the form: the source's last 30 days and fetch
 	// history. Nil while adding.
 	Side *sideData
+}
+
+// ShowStep2 is whether the add form shows its details step: once there are
+// values or an error to see. A fresh form, or one that only reports an add,
+// starts at the find step.
+func (d *feedDetail) ShowStep2() bool {
+	return d.Err != "" || d.Name != "" || d.URL != ""
 }
 
 // TypeChoices is what the type picker offers. A feed seeded with a kind the
@@ -1155,8 +1166,25 @@ func addFormWithError(r *http.Request, err error) *feedDetail {
 		MaxItems:      r.FormValue("max_items"),
 		TagsValue:     r.FormValue("tags"),
 		Tags:          splitCommaList(r.FormValue("tags")),
+		AdvOpen:       tuningRejected(r),
 		Err:           err.Error(),
 	}
+}
+
+// tuningRejected is whether the posted since or max items is one the form
+// refuses, which is what the Advanced block is opened for.
+func tuningRejected(r *http.Request) bool {
+	if raw := strings.TrimSpace(r.FormValue("since")); raw != "" {
+		if d, err := config.ParseDuration(raw); err != nil || d <= 0 {
+			return true
+		}
+	}
+	if raw := strings.TrimSpace(r.FormValue("max_items")); raw != "" {
+		if n, err := strconv.Atoi(raw); err != nil || n < 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func editFormWithError(r *http.Request, id string, err error) *feedDetail {

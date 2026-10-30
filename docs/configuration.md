@@ -360,7 +360,8 @@ User-Agent.
   note naming `RABBITHOLE_ALLOW_PRIVATE_FETCH`. Set it to `1` (in `./.env` or the environment) to
   fetch those feeds. Typical cases are a self-hosted blog on your network and RSS-Bridge, RSSHub or
   FreshRSS running in Docker next to Rabbit Hole. Link-local addresses, cloud metadata included,
-  stay blocked. See [the troubleshooting entry](troubleshooting.md#a-feed-on-my-network-or-in-docker-stopped-fetching).
+  stay blocked. Find feeds and Preview in the Add form follow the same rule. See
+  [the troubleshooting entry](troubleshooting.md#a-feed-on-my-network-or-in-docker-stopped-fetching).
 - A redirect from a public address into a private one is blocked even with
   `RABBITHOLE_ALLOW_PRIVATE_FETCH=1`; a feed that starts on your LAN may redirect within it. The
   rule stops a feed (or an open redirect on a trusted host) from bouncing the server into the

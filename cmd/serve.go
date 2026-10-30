@@ -287,9 +287,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	mgr.SetClient(feeds.NewClient(buildVersion()))
+	feedClient := feeds.NewClient(buildVersion())
+	mgr.SetClient(feedClient)
 
 	srv := server.New(db, src, serveAddr, mgr, log)
+	srv.FeedClient = feedClient
 	srv.TrustProxies(proxies)
 	srv.Dev(serveDev)
 	srv.ManagedBy(configPath)

@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -246,6 +247,74 @@ func TestExplainFeedErrorMatchesHTTPClientErrors(t *testing.T) {
 		httpclient.AllowPrivateEnv,
 	) {
 		t.Errorf("a private redirect points at the opt-in that cannot fix it: %q", got)
+	}
+}
+
+func TestExplainFetchErrorReportsUnknown(t *testing.T) {
+	if text, ok := explainFetchError("boom"); ok || text != "" {
+		t.Errorf("explainFetchError(boom) = %q, %v, want no match", text, ok)
+	}
+	text, ok := explainFetchError("http error: 404 Not Found")
+	if !ok || !strings.Contains(text, "edit the URL") {
+		t.Errorf("explainFetchError(404) = %q, %v, want the ingestion wording", text, ok)
+	}
+}
+
+func TestExplainFindError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "fallback",
+			err:  fmt.Errorf("boom"),
+			want: "Could not reach that address. Check it for typos, or enter the details yourself.",
+		},
+		{
+			name: "deadline",
+			err:  context.DeadlineExceeded,
+			want: "The site took too long to answer. Try again, or paste the feed link.",
+		},
+		{
+			name: "client timeout",
+			err:  fmt.Errorf("Get \"https://x.invalid/\": Client.Timeout exceeded"),
+			want: "The site took too long to answer. Try again, or paste the feed link.",
+		},
+		{
+			name: "404",
+			err:  fmt.Errorf("http error: 404 Not Found"),
+			want: "The site says this address does not exist. Check it for typos.",
+		},
+		{
+			name: "404 in the url only",
+			err:  fmt.Errorf("Get \"https://x.test/404\": boom"),
+			want: findErrorFallback,
+		},
+		{name: "limited", err: fmt.Errorf("http error: 429 Too Many Requests"), want: findLimitedText},
+		{name: "no host", err: fmt.Errorf("dial tcp: lookup x.invalid: no such host"), want: findNoHostText},
+		{name: "web page", err: fmt.Errorf("failed to detect feed type"), want: findWebPageText},
+		{name: "no feed", err: feeds.ErrNoFeed, want: findNoFeedText},
+		{name: "no feed wrapped", err: fmt.Errorf("x: %w", feeds.ErrNoFeed), want: findNoFeedText},
+		{name: "not a page", err: feeds.ErrNotPage, want: "That address is not a web page or a feed."},
+		{
+			name: "private address reused",
+			err:  fmt.Errorf("%w: 10.0.0.5 (private range)", httpclient.ErrBlockedAddress),
+			want: "RABBITHOLE_ALLOW_PRIVATE_FETCH=1 to allow private addresses",
+		},
+		{
+			name: "metadata address reused",
+			err:  fmt.Errorf("%w: 169.254.169.254", httpclient.ErrBlockedAddress),
+			want: "never fetched",
+		},
+		{name: "too large reused", err: httpclient.ErrTooLarge, want: "The feed is larger than 16 MiB."},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := explainFindError(c.err); !strings.Contains(got, c.want) {
+				t.Errorf("explainFindError(%q) = %q, want it to contain %q", c.err, got, c.want)
+			}
+		})
 	}
 }
 
@@ -543,5 +612,20 @@ func TestClipText(t *testing.T) {
 	got := clipText(long)
 	if r := []rune(got); len(r) != maxErrorText+1 || r[maxErrorText] != '…' {
 		t.Errorf("clipText cut to %d runes ending %q", len(r), string(r[len(r)-1]))
+	}
+}
+
+func TestFeedHTTPUsesTheSetClientElseOneDefault(t *testing.T) {
+	set := &http.Client{}
+	w := &Web{}
+	w.SetFeedClient(set)
+	if got := w.feedHTTP(); got != set {
+		t.Errorf("feedHTTP = %p, want the client that was set (%p)", got, set)
+	}
+
+	bare := &Web{}
+	first, second := bare.feedHTTP(), bare.feedHTTP()
+	if first == nil || first != second {
+		t.Errorf("default client = %p then %p, want one shared client", first, second)
 	}
 }

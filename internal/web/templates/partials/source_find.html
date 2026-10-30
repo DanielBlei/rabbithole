@@ -1,0 +1,78 @@
+{{/* SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+     SPDX-License-Identifier: Apache-2.0 */}}
+
+{{/* The answers to the Add form's find controls. Titles and addresses in them
+     come from remote sites: they are printed as text and in data- attributes,
+     never as a link target, a request value or script.
+
+     A candidate radio names a form that does not exist (form="ed-cand-none"),
+     so it has no owner: FormData and the dirty state never see it, and it still
+     forms a group with the others by name. static/js/sources.js reads its
+     data-name, data-url and data-type on a pick and copies the row's
+     [data-src-cand-prev] block into the preview panel. */}}
+
+{{define "sourceCandidates"}}
+{{- if .Err -}}
+<div class="sdet__err mg-find__err" role="alert" tabindex="-1">{{.Err}}{{if .Manual}} You can also <button class="clk-btn clk-btn--link" type="button" data-src-manual="">enter the details yourself</button>.{{end}}</div>
+{{- else -}}
+<p class="sh-hint mg-cands__head">{{.Head}}</p>
+<ul class="mg-cands__list" role="radiogroup" aria-label="Feeds found">
+  {{- range .Cands}}
+  <li class="mg-cand" data-state="{{.State}}">
+    <label class="mg-cand__pick" for="ed-cand-{{.Index}}">
+      <input type="radio" id="ed-cand-{{.Index}}" name="cand" form="ed-cand-none" value="{{.Index}}"
+             data-name="{{.Name}}" data-url="{{.URL}}" data-type="rss"{{if .Disabled}} disabled{{end}}>
+      <span class="mg-cand__t">{{.Name}}</span>
+    </label>
+    <span class="stp-chip mg-cand__kind">{{.Kind}}</span>
+    <span class="mg-cand__n">{{.Posts}}</span>
+    <span class="mg-cand__url" title="{{.URL}}">{{.URL}}</span>
+    {{if eq .State "subscribed" -}}
+    <span class="mg-cand__note" data-src-note="">
+      <span class="stp-chip stchip--subscribed">Already in your sources</span>
+      <button class="clk-btn clk-btn--link" type="button" data-src-reveal="{{.ID}}">Show it</button>
+    </span>
+    {{- else if eq .State "removed" -}}
+    <span class="mg-cand__note" data-src-note="">
+      <span class="stp-chip stchip--removed">Removed earlier</span>
+      <button class="clk-btn" type="button" data-src-restore="{{.ID}}" hx-post="/sources/feed/{{.ID}}/restore"
+              hx-params="none" hx-target="#src-{{.ID}}" hx-swap="outerHTML">Restore</button>
+    </span>
+    {{- else if eq .State "conflict" -}}
+    <span class="mg-cand__note mg-cand__note--warn">A source named "{{.Name}}" exists with another address. Pick it and rename it in step 2.</span>
+    {{- else if eq .State "blocked" -}}
+    <span class="mg-cand__note mg-cand__note--warn">{{.Note}}</span>
+    {{- end}}
+    <div class="mg-cand__prev" data-src-cand-prev="" hidden>{{template "sourcePreviewBody" .Latest}}</div>
+  </li>
+  {{- end}}
+</ul>
+{{- end}}
+{{end}}
+
+{{/* The newest posts of a feed, or why they cannot be shown. */}}
+{{define "sourcePreview"}}{{if .Err}}<p class="sdet__err" role="alert">{{.Err}}</p>{{else}}{{template "sourcePreviewBody" .}}{{end}}{{end}}
+
+{{define "sourcePreviewBody"}}
+<p class="mg-prev__t">Recent posts</p>
+{{- if .Items}}
+<ul class="mg-prev__list">
+  {{- range .Items}}
+  <li><span class="mg-prev__ti">{{.Title}}</span>{{with .Ago}}<span class="sh-hint">{{.}}</span>{{end}}</li>
+  {{- end}}
+</ul>
+<p class="sh-hint">Preview only. Nothing is saved until you add the source.</p>
+{{- else}}
+<p class="sh-hint">This feed has no posts yet. You can still add it.</p>
+{{- end}}
+{{end}}
+
+{{/* The note under the Address field when it names a source already stored. */}}
+{{define "sourceDup"}}
+<span class="mg-dup__t" data-src-note="">
+  {{- if .Live}}Already in your sources as {{.Name}}. <button class="clk-btn clk-btn--link" type="button" data-src-reveal="{{.ID}}">Show it</button>
+  {{- else}}You removed {{.Name}} earlier. <button class="clk-btn" type="button" data-src-restore="{{.ID}}" hx-post="/sources/feed/{{.ID}}/restore"
+          hx-params="none" hx-target="#src-{{.ID}}" hx-swap="outerHTML">Restore</button>
+  {{- end}}
+</span>
+{{end}}

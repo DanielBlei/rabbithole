@@ -4,6 +4,7 @@
 package web
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"net/url"
@@ -176,66 +177,77 @@ func removedRow(f config.ResolvedFeed, h store.FeedHealth, now time.Time) feedRo
 	return row
 }
 
-// feedErrorExplanations maps raw fetch errors to plain-language reasons. The
-// first match wins, so the more specific patterns come first.
-var feedErrorExplanations = []struct {
+// feedErrorExplanation is one pattern and its reason. find, when set, replaces
+// text in the Add form's find flow, where there is no ingestion to re-run and
+// no source yet to edit or remove.
+type feedErrorExplanation struct {
 	re   *regexp.Regexp
 	text string
-}{
+	find string
+}
+
+// feedErrorExplanations maps raw fetch errors to plain-language reasons. The
+// first match wins, so the more specific patterns come first.
+var feedErrorExplanations = []feedErrorExplanation{
 	{
-		regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrPrivateRedirect.Error())),
-		"The feed redirected to a private address, which is blocked.",
+		re:   regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrPrivateRedirect.Error())),
+		text: "The feed redirected to a private address, which is blocked.",
 	},
 	{
-		regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrBlockedAddress.Error()) + `.*\(private range\)`),
-		"This address is on a private network. Set " + httpclient.AllowPrivateEnv + "=1 to allow private addresses.",
+		re:   regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrBlockedAddress.Error()) + `.*\(private range\)`),
+		text: "This address is on a private network. Set " + httpclient.AllowPrivateEnv + "=1 to allow private addresses.",
 	},
 	{
-		regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrBlockedAddress.Error())),
-		"This address is blocked: link-local and cloud metadata addresses are never fetched.",
+		re:   regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrBlockedAddress.Error())),
+		text: "This address is blocked: link-local and cloud metadata addresses are never fetched.",
 	},
 	{
-		regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrTooLarge.Error())),
-		fmt.Sprintf("The feed is larger than %d MiB.", feeds.MaxFeedBytes>>20),
+		re:   regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrTooLarge.Error())),
+		text: fmt.Sprintf("The feed is larger than %d MiB.", feeds.MaxFeedBytes>>20),
 	},
 	{
-		regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrTooManyRedirects.Error())),
-		"The feed redirects too many times.",
+		re:   regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrTooManyRedirects.Error())),
+		text: "The feed redirects too many times.",
 	},
 	{
-		regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrInsecureRedirect.Error())),
-		"The feed redirected from https to plain http, which is blocked.",
+		re:   regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrInsecureRedirect.Error())),
+		text: "The feed redirected from https to plain http, which is blocked.",
 	},
 	{
-		regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrUnsupportedScheme.Error())),
-		"Only http and https addresses can be fetched.",
+		re:   regexp.MustCompile(regexp.QuoteMeta(httpclient.ErrUnsupportedScheme.Error())),
+		text: schemeText,
 	},
 	{
-		regexp.MustCompile(`\b404\b`),
-		"The site says this address does not exist. The feed probably moved: edit the URL, or remove the source.",
+		re:   regexp.MustCompile(`\b404\b`),
+		text: "The site says this address does not exist. The feed probably moved: edit the URL, or remove the source.",
+		find: findMissingText,
 	},
 	{
-		regexp.MustCompile(`\b429\b`),
-		"The site is limiting how often we fetch it. Wait a while and re-run ingestion; it usually clears on its own.",
+		re:   regexp.MustCompile(`\b429\b`),
+		text: "The site is limiting how often we fetch it. Wait a while and re-run ingestion; it usually clears on its own.",
+		find: findLimitedText,
 	},
 	{
-		regexp.MustCompile(`failed to detect feed type`),
-		"The address returns a web page, not a feed. Paste the feed link instead (often ends in /feed, /rss or .xml).",
+		re:   regexp.MustCompile(`failed to detect feed type`),
+		text: "The address returns a web page, not a feed. Paste the feed link instead (often ends in /feed, /rss or .xml).",
+		find: findWebPageText,
 	},
 	{
-		regexp.MustCompile(`(?i)deadline exceeded|timeout|timed out`),
-		fmt.Sprintf(
+		re: regexp.MustCompile(`(?i)deadline exceeded|timeout|timed out`),
+		text: fmt.Sprintf(
 			"The site took longer than %d seconds to answer. Often temporary: re-run ingestion, or disable it if it keeps happening.",
 			int(feeds.FetchTimeout/time.Second),
 		),
+		find: findTimeoutText,
 	},
 	{
-		regexp.MustCompile(`no such host`),
-		"The host name does not resolve. Check the address for typos, or remove the source if the site is gone.",
+		re:   regexp.MustCompile(`no such host`),
+		text: "The host name does not resolve. Check the address for typos, or remove the source if the site is gone.",
+		find: findNoHostText,
 	},
 	{
-		regexp.MustCompile(`arxiv returned 503`),
-		"arXiv is temporarily unavailable. Usually clears on its own: re-run ingestion later.",
+		re:   regexp.MustCompile(`arxiv returned 503`),
+		text: "arXiv is temporarily unavailable. Usually clears on its own: re-run ingestion later.",
 	},
 }
 
@@ -246,16 +258,77 @@ const feedErrorFallback = "The fetch failed. Re-run ingestion; if it keeps faili
 // failed on, and a URL can contain "404" or "timeout".
 var quotedText = regexp.MustCompile(`"[^"]*"`)
 
-// explainFeedError returns the plain-language reason for a raw fetch error. The
-// quoted URL is left out of the match, so only the error itself picks the reason.
+// schemeText explains an address that is not http or https.
+const schemeText = "Only http and https addresses can be fetched."
+
+// Copy for the Add form's find flow, where the address comes from the visitor
+// and nothing is stored yet.
+const (
+	findErrorFallback = "Could not reach that address. Check it for typos, or enter the details yourself."
+	findTimeoutText   = "The site took too long to answer. Try again, or paste the feed link."
+	findMissingText   = "The site says this address does not exist. Check it for typos."
+	findNoFeedText    = "No feed found on this site. Paste the feed link (often ends in /feed, /rss or .xml)."
+	findNotPageText   = "That address is not a web page or a feed."
+	findLimitedText   = "The site is limiting requests. Wait a minute and try again."
+	findNoHostText    = "That address does not resolve. Check it for typos."
+	findWebPageText   = "That address is a web page, not a feed. Use Find feeds, or paste the feed link (often ends in /feed, /rss or .xml)."
+	findBadAddrText   = "That does not look like a web address. Try something like jvns.ca."
+	findCheckText     = "Could not check your sources. Try again."
+)
+
+// explainFetchError returns the plain-language reason for a raw fetch error and
+// whether any known pattern matched. The quoted URL is left out of the match,
+// so only the error itself picks the reason.
+func explainFetchError(raw string) (string, bool) {
+	e, ok := matchFetchError(raw)
+	return e.text, ok
+}
+
+// explainFeedError is explainFetchError with a generic line for an unknown error.
 func explainFeedError(raw string) string {
+	if text, ok := explainFetchError(raw); ok {
+		return text
+	}
+	return feedErrorFallback
+}
+
+// explainFindError returns the reason a find or preview failed, worded for
+// someone who is adding a source.
+func explainFindError(err error) string {
+	if text, ok := findSentinelError(err); ok {
+		return text
+	}
+	e, ok := matchFetchError(err.Error())
+	switch {
+	case !ok:
+		return findErrorFallback
+	case e.find != "":
+		return e.find
+	default:
+		return e.text
+	}
+}
+
+// findSentinelError words the errors the find flow itself raises.
+func findSentinelError(err error) (string, bool) {
+	switch {
+	case errors.Is(err, feeds.ErrNoFeed):
+		return findNoFeedText, true
+	case errors.Is(err, feeds.ErrNotPage):
+		return findNotPageText, true
+	}
+	return "", false
+}
+
+// matchFetchError finds the first explanation whose pattern matches raw.
+func matchFetchError(raw string) (feedErrorExplanation, bool) {
 	raw = quotedText.ReplaceAllString(raw, `""`)
 	for _, e := range feedErrorExplanations {
 		if e.re.MatchString(raw) {
-			return e.text
+			return e, true
 		}
 	}
-	return feedErrorFallback
+	return feedErrorExplanation{}, false
 }
 
 // failingSince is when the current failure run began, from the store's own

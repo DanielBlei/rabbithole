@@ -44,14 +44,76 @@ type PlanRow struct {
 	Status       PlanStatus
 	Reason       string
 
-	// ID is the stored feed a removed entry matches; empty otherwise.
+	// ID is the stored feed a subscribed or removed entry matches; empty otherwise.
 	ID string
+
+	// IDTaken is set when a source whose address was edited away from this one
+	// still holds its id, so the entry cannot be added under any name. It wins over
+	// a name conflict, which a rename would not clear.
+	IDTaken bool
 }
 
 // ApplyResult counts what an apply did. Skipped is picks that no longer plan as
 // new or removed, or that name no row of the file.
 type ApplyResult struct {
 	Added, Restored, Skipped int
+}
+
+// FeedMatchState says whether an address is already a stored feed.
+type FeedMatchState string
+
+const (
+	FeedMatchNone    FeedMatchState = "none"
+	FeedMatchLive    FeedMatchState = "live"
+	FeedMatchRemoved FeedMatchState = "removed"
+)
+
+// FeedMatch is the stored feed an address stands for. ID and Name are empty
+// when State is FeedMatchNone.
+type FeedMatch struct {
+	State FeedMatchState
+	ID    string
+	Name  string
+}
+
+// LookupFeedURL finds the stored feed rawURL points at, by config.FeedURLKey,
+// so a trailing slash or host case does not hide it. A live feed wins over a
+// removed twin; among removed twins the lowest id does.
+func (s *Store) LookupFeedURL(ctx context.Context, rawURL string) (FeedMatch, error) {
+	key := config.FeedURLKey(config.NormalizeFeedURL(rawURL))
+	match := FeedMatch{State: FeedMatchNone}
+	err := s.inReadTx(ctx, func(tx *sql.Tx) error {
+		rows, err := s.txQuery(ctx, tx, sqlFeedsForImport)
+		if err != nil {
+			return fmt.Errorf("query feeds for lookup: %w", err)
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var id, name, url string
+			var live bool
+			if err := rows.Scan(&id, &name, &url, &live); err != nil {
+				return fmt.Errorf("scan feeds for lookup: %w", err)
+			}
+			if config.FeedURLKey(url) != key {
+				continue
+			}
+			if live {
+				match = FeedMatch{State: FeedMatchLive, ID: id, Name: name}
+				return nil
+			}
+			if match.State == FeedMatchNone {
+				match = FeedMatch{State: FeedMatchRemoved, ID: id, Name: name}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("query feeds for lookup: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return FeedMatch{}, err
+	}
+	return match, nil
 }
 
 // PlanImport classifies every entry of doc against the stored feeds without
@@ -131,6 +193,9 @@ func (s *Store) planImportTx(ctx context.Context, tx *sql.Tx, doc config.FeedsDo
 		}
 		row := PlanRow{Feed: f, Key: config.FeedURLKey(f.URL)}
 		match, hasMatch := matchFor(row.Key, f.Name)
+		// A source whose address was edited keeps the id of the old one. A match
+		// is updated in place, so only an insert can hit a taken id.
+		row.IDTaken = !hasMatch && ids[config.FeedID(f.URL)]
 		holder, nameHeld := byName[f.Name]
 		nameReason := planReasonNameTaken
 		if nameHeld && !holder.live {
@@ -139,6 +204,7 @@ func (s *Store) planImportTx(ctx context.Context, tx *sql.Tx, doc config.FeedsDo
 		switch {
 		case hasMatch && match.live:
 			row.Status = PlanSubscribed
+			row.ID = match.id
 			row.ExistingName = match.name
 			row.Reason = "Already in your sources as " + match.name
 		case hasMatch:
@@ -146,11 +212,10 @@ func (s *Store) planImportTx(ctx context.Context, tx *sql.Tx, doc config.FeedsDo
 			if nameHeld && holder.id != match.id {
 				row.Status, row.Reason, row.ID = PlanConflict, nameReason, ""
 			}
+		case row.IDTaken:
+			row.Status, row.Reason = PlanConflict, planReasonIDTaken
 		case nameHeld:
 			row.Status, row.Reason = PlanConflict, nameReason
-		case ids[config.FeedID(f.URL)]:
-			// A source whose address was edited keeps the id of the old one.
-			row.Status, row.Reason = PlanConflict, planReasonIDTaken
 		default:
 			row.Status = PlanNew
 		}

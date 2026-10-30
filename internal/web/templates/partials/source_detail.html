@@ -3,19 +3,52 @@
      since and max items are the ones you set once and forget. A tuning field
      left blank takes the default: the placeholder is that default and the hint
      says where it comes from. static/js/sources.js owns the dirty state, the
-     discard guard and the live hints. */}}
+     discard guard and the live hints.
+
+     Adding starts with a find step: an address is looked up for its feeds, and
+     picking one (or choosing to type the details) reveals step 2, the fields
+     below. The find input and the candidate radios have no form owner, so
+     neither is part of what the form posts or of the dirty state. */}}
 {{define "sourceEditor"}}
 {{- $id := .ID}}{{if .Adding}}{{$id = "new"}}{{end -}}
 <form class="mg-ed" id="ed-{{$id}}" role="region" aria-label="{{if .Adding}}Add a source{{else}}Edit {{.Name}}{{end}}"
       {{if .Adding}}hx-post="/sources" hx-target="#srcBody"{{else}}hx-post="/sources/feed/{{.ID}}" hx-target="#src-{{.ID}}"{{end}}
-      hx-swap="outerHTML" autocomplete="off" novalidate data-src-ed="{{$id}}">
+      hx-swap="outerHTML" autocomplete="off" novalidate data-src-ed="{{$id}}"{{if .Adding}} data-find-failed="{{findFailed}}"{{end}}>
+  {{- if .Adding}}
+  <header class="mg-add__head">
+    <h2 class="mg-add__t">Add a source</h2>
+    <span class="mg-add__links">
+      <a class="mg-liblink" href="/sources/library">or pick from the Library</a>
+      <button class="clk-btn clk-btn--link" type="button" data-src-close="">Close</button>
+    </span>
+  </header>
+  {{if .Notice}}<p class="sdet__ok mg-ed__msg" role="status" data-src-notice="">{{.Notice}}</p>{{end}}
+
+  <div class="mg-step1">
+    <div class="mg-step__t"><span class="mg-step__n" aria-hidden="true">1</span><label for="ed-find-new">Paste a site or feed address</label></div>
+    <div class="mg-step1__row">
+      {{/* No name, so it never joins the form's values. */}}
+      <input class="stp-in stp-in--mono" id="ed-find-new" type="text" inputmode="url" autocomplete="off" spellcheck="false"
+             placeholder="jvns.ca or https://example.com/feed.xml" aria-describedby="ed-find-hint-new" data-src-find="">
+      <button class="clk-btn clk-btn--go" type="button" data-src-find-go="" data-src-rss-only=""
+              hx-post="/sources/discover" hx-params="none" hx-target="#ed-cands-new" hx-swap="innerHTML"
+              hx-disabled-elt="this">Find feeds</button>
+    </div>
+    <p class="sh-hint" id="ed-find-hint-new">A site address like jvns.ca is enough: we look for its feed. <button class="clk-btn clk-btn--link" type="button" data-src-manual="">Enter the details yourself</button></p>
+  </div>
+  <div class="mg-find" role="status" aria-live="polite" data-src-status=""></div>
+  <div class="mg-cands" id="ed-cands-new" data-src-cands=""></div>
+
+  <div class="mg-step2" data-src-step2=""{{if not .ShowStep2}} hidden{{end}}>
+    <div class="mg-step__t"><span class="mg-step__n" aria-hidden="true">2</span><span>Check the details</span></div>
+  {{- end}}
   <div class="mg-ed__cols">
   <div class="mg-ed__form">
     <div class="fld">
       <label class="fld__lbl" for="ed-name-{{$id}}">Name</label>
       <div class="fld__body">
         <input class="stp-in" id="ed-name-{{$id}}" type="text" name="name" value="{{.Name}}"
-               autocomplete="off" spellcheck="false">
+               autocomplete="off" spellcheck="false"{{if .Adding}} placeholder="e.g. Julia Evans"{{end}}>
       </div>
     </div>
 
@@ -26,9 +59,21 @@
     <div class="fld">
       <label class="fld__lbl" for="ed-url-{{$id}}">Address</label>
       <div class="fld__body">
+        {{if .Adding}}
+        <div class="mg-urlrow">
+          <input class="stp-in stp-in--mono" id="ed-url-{{$id}}" type="text" name="url" value="{{.URL}}"
+                 inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://example.com/feed.xml" data-src-url=""
+                 hx-get="/sources/check" hx-trigger="input changed delay:400ms, change" hx-target="#ed-dup-new" hx-swap="innerHTML">
+          <button class="clk-btn" type="button" data-src-preview="" data-src-rss-only=""
+                  hx-post="/sources/preview" hx-params="none" hx-target="#ed-prev-new" hx-swap="innerHTML"
+                  hx-disabled-elt="this">Preview</button>
+        </div>
+        {{else}}
         <input class="stp-in stp-in--mono" id="ed-url-{{$id}}" type="text" name="url" value="{{.URL}}"
                inputmode="url" autocomplete="off" spellcheck="false" placeholder="example.com/feed.xml" data-src-url="">
+        {{end}}
         <p class="sdet__warn" role="status" data-src-insecure=""{{if not .Insecure}} hidden{{end}}>This address is not encrypted (http). Use https:// if the site supports it.</p>
+        {{if .Adding}}<div class="mg-dup" id="ed-dup-new" role="status" aria-live="polite"></div>{{end}}
       </div>
     </div>
 
@@ -78,23 +123,12 @@
       </div>
     </div>
 
-    <div class="fld">
-      <label class="fld__lbl" for="ed-since-{{$id}}">Since</label>
-      <div class="fld__body">
-        <input class="stp-in stp-in--mono stp-in--sm" id="ed-since-{{$id}}" type="text" name="since" value="{{.Since}}"
-               placeholder="{{.DefaultSince}}" autocomplete="off" spellcheck="false">
-        <p class="sh-hint" data-src-hint="since" data-fallback="{{.DefaultSince}}" data-from="{{.SinceFrom}}" data-own="{{.OwnSince}}"><span data-src-hint-t>{{.SinceHint}}</span>. Use 14d or 12h.</p>
-      </div>
-    </div>
-
-    <div class="fld">
-      <label class="fld__lbl" for="ed-max-{{$id}}">Max items</label>
-      <div class="fld__body">
-        <input class="stp-in stp-in--mono stp-in--sm" id="ed-max-{{$id}}" type="text" name="max_items" value="{{.MaxItems}}"
-               placeholder="{{.DefaultCap}}" inputmode="numeric" autocomplete="off">
-        <p class="sh-hint" data-src-hint="max" data-fallback="{{.DefaultCap}}" data-from="{{.CapFrom}}" data-own="{{.OwnMax}}"><span data-src-hint-t>{{.CapHint}}</span>. 0 means no cap.</p>
-      </div>
-    </div>
+    {{if .Adding}}
+    <details class="mg-adv"{{if .AdvOpen}} open{{end}}>
+      <summary>Advanced: since and max items</summary>
+      <div class="mg-adv__body">{{template "sourceTuning" .}}</div>
+    </details>
+    {{else}}{{template "sourceTuning" .}}{{end}}
   </div>
   {{with .Side}}
   {{/* Read-only. It sits inside the form, so a control added here must be
@@ -126,11 +160,14 @@
     <p class="sh-hint">No fetches yet. The first run fills this in.</p>
     {{end}}
   </aside>
-  {{end}}
+  {{else}}{{if .Adding}}
+  {{/* Filled by a pick or by Preview, empty and out of sight until then. */}}
+  <aside class="mg-prev mg-ed__side" id="ed-prev-new" aria-live="polite"></aside>
+  {{end}}{{end}}
   </div>
 
   {{if .Err}}<p class="sdet__err mg-ed__msg" role="alert">{{.Err}}</p>{{end}}
-  {{if .Notice}}<p class="sdet__ok mg-ed__msg" role="status" data-src-notice="">{{.Notice}}</p>{{end}}
+  {{if and .Notice (not .Adding)}}<p class="sdet__ok mg-ed__msg" role="status" data-src-notice="">{{.Notice}}</p>{{end}}
 
   <div class="mg-ed__foot">
     {{if .Adding}}<span></span>{{else}}
@@ -151,5 +188,31 @@
       {{end}}
     </span>
   </div>
+  {{- if .Adding}}
+  </div>
+  {{- end}}
 </form>
+{{end}}
+
+{{/* Since and max items: the two fields you set once and forget. The edit form
+     shows them in line; the add form folds them away. */}}
+{{define "sourceTuning"}}
+{{- $id := .ID}}{{if .Adding}}{{$id = "new"}}{{end -}}
+    <div class="fld">
+      <label class="fld__lbl" for="ed-since-{{$id}}">Since</label>
+      <div class="fld__body">
+        <input class="stp-in stp-in--mono stp-in--sm" id="ed-since-{{$id}}" type="text" name="since" value="{{.Since}}"
+               placeholder="{{.DefaultSince}}" autocomplete="off" spellcheck="false">
+        <p class="sh-hint" data-src-hint="since" data-fallback="{{.DefaultSince}}" data-from="{{.SinceFrom}}" data-own="{{.OwnSince}}"><span data-src-hint-t>{{.SinceHint}}</span>. Use 14d or 12h.</p>
+      </div>
+    </div>
+
+    <div class="fld">
+      <label class="fld__lbl" for="ed-max-{{$id}}">Max items</label>
+      <div class="fld__body">
+        <input class="stp-in stp-in--mono stp-in--sm" id="ed-max-{{$id}}" type="text" name="max_items" value="{{.MaxItems}}"
+               placeholder="{{.DefaultCap}}" inputmode="numeric" autocomplete="off">
+        <p class="sh-hint" data-src-hint="max" data-fallback="{{.DefaultCap}}" data-from="{{.CapFrom}}" data-own="{{.OwnMax}}"><span data-src-hint-t>{{.CapHint}}</span>. 0 means no cap.</p>
+      </div>
+    </div>
 {{end}}

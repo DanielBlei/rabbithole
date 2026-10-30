@@ -851,8 +851,15 @@ func TestSourcesEditorSidePanelIsReadOnlyAndAbsentWhenAdding(t *testing.T) {
 	}
 
 	add := get(t, w, "/sources/new")
-	if strings.Contains(add, "mg-ed__side") || strings.Contains(add, "Fetch history") {
-		t.Errorf("the add form has a panel; body=%s", add)
+	if strings.Contains(add, "Source activity") || strings.Contains(add, "Fetch history") {
+		t.Errorf("the add form has an activity panel; body=%s", add)
+	}
+	// What sits beside it is the preview, empty until a pick or Preview fills it.
+	wantAttrs(t, "preview", tagWith(t, add, "id", "ed-prev-new"), map[string]string{
+		"class": "mg-prev mg-ed__side", "aria-live": "polite",
+	})
+	if !strings.Contains(add, `id="ed-prev-new" aria-live="polite"></aside>`) {
+		t.Errorf("the preview panel is not empty; body=%s", add)
 	}
 	if !strings.Contains(add, `<div class="mg-ed__cols">`) {
 		t.Errorf("the add form lost its form column; body=%s", add)

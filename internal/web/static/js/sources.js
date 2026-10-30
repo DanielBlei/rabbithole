@@ -15,6 +15,11 @@
 // An editor lives in its source's unit (#src-{id}), which the server swaps
 // alone; closing one is done here by removing it, so no request is made.
 //
+// The add form starts with a find step: Find feeds posts the address typed in
+// the find input (no name, so it is never part of the form), the candidate list
+// comes back as a fragment, and picking a row fills the details step and its
+// preview. See "the add form's find step" below.
+//
 // Ticked rows are kept in a Set, not in the rows, so they survive a swap; it
 // only ever holds rows that are on screen. The bulk bar acts on it: the server
 // renders the bar and its buttons, this file shows it, builds the Remove tag
@@ -507,10 +512,16 @@
     var url = form.querySelector('[data-src-url]');
     var warn = form.querySelector('[data-src-insecure]');
     if (url && warn) warn.hidden = !/^\s*http:\/\//i.test(url.value);
+    // Find and Preview read feeds; a saved search on an academic provider is not one.
+    var type = form.querySelector('[name="type"]:checked');
+    var academic = !!type && type.value === 'academic';
+    form.querySelectorAll('[data-src-rss-only]').forEach(function (el) {
+      el.disabled = academic || el.classList.contains('htmx-request');
+    });
   }
 
   function focusEditor(form, which) {
-    var field = form.querySelector(which === 'url' ? '[name="url"]' : '[name="name"]');
+    var field = form.querySelector(which === 'find' ? '[data-src-find]' : which === 'url' ? '[name="url"]' : '[name="name"]');
     if (!field) return;
     field.focus({preventScroll: true});
     try { field.select(); } catch (e) { /* not selectable */ }
@@ -525,7 +536,7 @@
   function closeEditor(form) {
     var unit = unitOf(form);
     if (!unit) return;
-    if (isAddForm(form)) { unit.remove(); return; }
+    if (isAddForm(form)) { clearTimeout(findTimer); unit.remove(); return; }
     dropFeedParam(unit.id.slice(4));
     form.remove();
     var row = unit.querySelector('.mg-row');
@@ -628,7 +639,11 @@
       var unit = unitOf(form);
       if (scrollOnOpen) scrollToUnit(unit, 'start');
       if (scrollOnOpen || refocusForm === form.dataset.srcEd || isAddForm(form)) {
-        focusEditor(form, scrollOnOpen ? focusField : null);
+        // An add form still at its find step starts in the find input.
+        var step = form.querySelector('[data-src-step2]');
+        var which = scrollOnOpen ? focusField : null;
+        if (isAddForm(form) && step && step.hidden) which = 'find';
+        focusEditor(form, which);
       }
       scrollOnOpen = false;
       focusField = null;
@@ -786,6 +801,12 @@
   document.body.addEventListener('htmx:configRequest', function (e) {
     var target = e.detail.target;
     var path = e.detail.path || '';
+    // Find posts the find input, Preview the Address field.
+    if (path === '/sources/discover' || path === '/sources/preview') {
+      var owner = e.detail.elt && e.detail.elt.closest && e.detail.elt.closest('.mg-ed');
+      var src = owner && owner.querySelector(path === '/sources/discover' ? '[data-src-find]' : '[data-src-url]');
+      e.detail.parameters.url = src ? src.value.trim() : '';
+    }
     // A switch pressed while its editor is open keeps the editor open.
     if (target && /\/enabled$/.test(path) && target.querySelector(':scope > .mg-ed')) e.detail.parameters.open = '1';
     // The bulk bar acts on the ticked rows.
@@ -833,7 +854,12 @@
   document.body.addEventListener('htmx:beforeRequest', function (e) {
     var elt = e.detail.elt;
     var form = elt && elt.closest && elt.closest('.mg-ed');
-    if (form) refocusForm = form.dataset.srcEd;
+    if (!form) return;
+    var path = requestPath(e);
+    if (path === '/sources/discover') startFinding(form);
+    else if (path === '/sources/preview') loadingPreview(form);
+    // The find controls leave the editor where it is.
+    if (!FIND_PATH.test(path)) refocusForm = form.dataset.srcEd;
   });
 
   // Keep what the dirty state and hints show true as the editor is used. The
@@ -952,6 +978,214 @@
     sel.removeAllRanges();
     sel.addRange(range);
   }
+
+  // ---- the add form's find step --------------------------------------------
+  // Find feeds looks an address up for its feeds. The list that comes back holds
+  // radios with no form owner (see partials/source_find.html), so picking one
+  // changes nothing the form posts; pickCandidate copies the row's name, address
+  // and preview into the details step. Preview reads the Address field and Find
+  // the find input, both added to the request in htmx:configRequest.
+  var FIND_PATH = /^\/sources\/(discover|preview|check)$/;
+  var findTimer = null;
+
+  function requestPath(e) {
+    var cfg = e.detail.requestConfig;
+    var path = (cfg && cfg.path) || (e.detail.pathInfo && e.detail.pathInfo.requestPath) || '';
+    return path.split('?')[0];
+  }
+
+  function part(form, name) { return form.querySelector('[data-src-' + name + ']'); }
+  function previewBox(form) { return form.querySelector('.mg-prev'); }
+
+  function hostOf(raw) {
+    try {
+      return new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : 'https://' + raw).host || raw;
+    } catch (err) { return raw; }
+  }
+
+  function spinner(small) {
+    var el = node('span', 'mg-spin' + (small ? ' mg-spin--sm' : ''));
+    el.setAttribute('aria-hidden', 'true');
+    return el;
+  }
+
+  function setStatus(form, text) {
+    var box = part(form, 'status');
+    if (!box) return;
+    box.replaceChildren();
+    if (!text) return;
+    var label = node('span');
+    label.textContent = text;
+    box.appendChild(spinner(false));
+    box.appendChild(label);
+  }
+
+  function startFinding(form) {
+    clearTimeout(findTimer);
+    var cands = part(form, 'cands');
+    if (cands) cands.replaceChildren();
+    var find = part(form, 'find');
+    var raw = find ? find.value.trim() : '';
+    if (!raw) { setStatus(form, ''); return; }
+    setStatus(form, 'Looking for feeds at ' + hostOf(raw) + '...');
+    findTimer = setTimeout(function () {
+      if (form.isConnected) setStatus(form, 'Still looking. Some sites take a few seconds to answer.');
+    }, 1200);
+  }
+
+  function stopFinding(form) {
+    clearTimeout(findTimer);
+    setStatus(form, '');
+  }
+
+  function loadingPreview(form) {
+    var box = previewBox(form);
+    if (!box) return;
+    var title = node('p', 'mg-prev__t');
+    title.textContent = 'Recent posts';
+    var line = node('p', 'sh-hint');
+    line.appendChild(spinner(true));
+    line.appendChild(document.createTextNode(' Loading a preview...'));
+    box.replaceChildren(title, line);
+  }
+
+  // Editing the Address leaves a preview of the old one behind, so it goes, and
+  // a read still in flight is dropped.
+  function clearPreview(form) {
+    var go = part(form, 'preview');
+    if (go && go.classList.contains('htmx-request')) htmx.trigger(go, 'htmx:abort');
+    var box = previewBox(form);
+    if (box) box.replaceChildren();
+  }
+
+  function failedRequest(e) {
+    var elt = e.detail.elt;
+    var form = elt && elt.closest && elt.closest('.mg-ed');
+    var path = requestPath(e);
+    if (!form || (path !== '/sources/discover' && path !== '/sources/preview')) return;
+    var msg = node('div', 'sdet__err' + (path === '/sources/discover' ? ' mg-find__err' : ''));
+    msg.setAttribute('role', 'alert');
+    msg.textContent = form.dataset.findFailed || '';
+    if (path === '/sources/discover') {
+      stopFinding(form);
+      msg.tabIndex = -1;
+      var cands = part(form, 'cands');
+      if (cands) cands.replaceChildren(msg);
+      msg.focus({preventScroll: true});
+    } else {
+      var box = previewBox(form);
+      if (box) box.replaceChildren(msg);
+    }
+  }
+
+  ['htmx:responseError', 'htmx:sendError', 'htmx:timeout'].forEach(function (type) {
+    document.body.addEventListener(type, failedRequest);
+  });
+
+  document.body.addEventListener('htmx:afterRequest', function (e) {
+    var elt = e.detail.elt;
+    var form = elt && elt.closest && elt.closest('.mg-ed');
+    if (!form || !elt.matches) return;
+    if (e.detail.successful && elt.matches('[data-src-find-go]')) stopFinding(form);
+    if (e.detail.successful && elt.matches('[data-src-restore]')) restored(elt);
+    // htmx re-enables a button when its request ends, whatever the Type says.
+    if (elt.matches('[data-src-rss-only]')) paint(form);
+  });
+
+  // The answer is in: a lone feed that can be added is picked for you (focus
+  // lands on Name); with several, focus goes to the first, and an error takes it.
+  function foundFeeds(form) {
+    if (!form) return;
+    var open = form.querySelectorAll('[data-src-cands] input[name="cand"]:not(:disabled)');
+    if (open.length === 1) { pickCandidate(open[0]); return; }
+    if (open.length > 1) { open[0].focus({preventScroll: true}); return; }
+    var err = form.querySelector('[data-src-cands] .mg-find__err');
+    if (err) err.focus({preventScroll: true});
+  }
+
+  function showStep2(form) {
+    var step = part(form, 'step2');
+    if (step) step.hidden = false;
+  }
+
+  function pickCandidate(radio) {
+    var form = radio.closest('.mg-ed');
+    if (!form) return;
+    radio.checked = true;
+    var name = form.querySelector('[name="name"]');
+    var addr = form.querySelector('[name="url"]');
+    var kind = form.querySelector('[name="type"][value="' + (radio.dataset.type === 'academic' ? 'academic' : 'rss') + '"]');
+    if (name) name.value = radio.dataset.name || '';
+    if (addr) addr.value = radio.dataset.url || '';
+    if (kind) kind.checked = true;
+    showStep2(form);
+    var row = radio.closest('.mg-cand');
+    var held = row && row.querySelector('[data-src-cand-prev]');
+    clearPreview(form);
+    var box = previewBox(form);
+    if (box && held) Array.prototype.forEach.call(held.childNodes, function (n) { box.appendChild(n.cloneNode(true)); });
+    var dup = form.querySelector('.mg-dup');
+    if (dup) dup.replaceChildren();
+    paint(form);
+    focusEditor(form, null);
+    var step = part(form, 'step2');
+    if (step && step.scrollIntoView) step.scrollIntoView({block: 'nearest'});
+  }
+
+  // The details step without a find: the typed address carries over.
+  function enterManually(form) {
+    var find = part(form, 'find');
+    var addr = form.querySelector('[name="url"]');
+    showStep2(form);
+    if (addr && find && !addr.value.trim() && find.value.trim()) {
+      addr.value = find.value.trim();
+      addr.dispatchEvent(new Event('input', {bubbles: true}));
+    }
+    paint(form);
+    focusEditor(form, null);
+  }
+
+  // A restored feed is a source again: the note says so and offers to show it.
+  function restored(btn) {
+    var note = btn.closest('[data-src-note]');
+    if (!note) return;
+    var row = note.closest('.mg-cand');
+    if (row) row.dataset.state = 'subscribed';
+    var chip = node('span', 'stp-chip stchip--new');
+    chip.textContent = 'Restored';
+    var show = node('button', 'clk-btn clk-btn--link');
+    show.type = 'button';
+    show.setAttribute('data-src-reveal', btn.dataset.srcRestore);
+    show.textContent = 'Show it';
+    note.replaceChildren(chip, document.createTextNode(' '), show);
+  }
+
+  document.addEventListener('click', function (e) {
+    var manual = e.target.closest && e.target.closest('[data-src-manual]');
+    if (!manual) return;
+    var form = manual.closest('.mg-ed');
+    if (form) enterManually(form);
+  });
+
+  document.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.matches && t.matches('input[name="cand"]') && t.checked) pickCandidate(t);
+  });
+
+  document.addEventListener('input', function (e) {
+    var t = e.target;
+    if (!t.matches || !t.matches('[data-src-url]')) return;
+    var form = t.closest('.mg-ed');
+    if (form && form.dataset.srcEd === 'new') clearPreview(form);
+  });
+
+  // Enter in the find input finds. Left alone it would submit the whole form.
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || e.isComposing || !e.target.matches || !e.target.matches('[data-src-find]')) return;
+    e.preventDefault();
+    var go = e.target.closest('.mg-ed').querySelector('[data-src-find-go]');
+    if (go && !go.disabled) go.click();
+  });
 
   // ---- import ----------------------------------------------------------
   // The Import button opens the dialog (hx-get into #modalTop). A file, picked
@@ -1138,7 +1372,14 @@
       else if (params.get('add') === '1' && add) add.click();
     }, 0);
   });
-  document.body.addEventListener('htmx:afterSwap', function () { refresh(); syncPlan(); });
+  document.body.addEventListener('htmx:afterSwap', function (e) {
+    refresh();
+    syncPlan();
+    // A swap that took the status line away leaves no search to time.
+    if (!document.querySelector('[data-src-status]')) clearTimeout(findTimer);
+    var into = e.detail && e.detail.target;
+    if (into && into.matches && into.matches('[data-src-cands]')) foundFeeds(into.closest('.mg-ed'));
+  });
   // A live refresh swaps rows in out of band; the filters and search apply to
   // them the same way.
   document.body.addEventListener('htmx:oobAfterSwap', refresh);

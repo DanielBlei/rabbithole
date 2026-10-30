@@ -15,11 +15,13 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/httplog"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/library"
@@ -46,7 +48,10 @@ var (
 func pageTmpl(page string) *template.Template {
 	return template.Must(
 		template.New(page).
-			Funcs(template.FuncMap{"tip": tipFor, "monogram": monogram, "clip": clipText, "tier": tierWords}).
+			Funcs(template.FuncMap{
+				"tip": tipFor, "monogram": monogram, "clip": clipText, "tier": tierWords,
+				"findFailed": func() string { return findErrorFallback },
+			}).
 			ParseFS(
 				templatesFS,
 				"templates/layout.html",
@@ -92,6 +97,11 @@ type Web struct {
 	ing      *ingest.Manager
 	profiles *profilemgr.Service
 	library  *library.Loader
+
+	// feedClient is the guarded client the Add form's find and preview fetch
+	// through; nil builds a default one on first use.
+	feedClient     *http.Client
+	feedClientOnce sync.Once
 
 	// now is the clock the Sources page reads; nil is time.Now.
 	now      func() time.Time
@@ -191,6 +201,7 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /sources/manage", s.handleSourcesManage)
 	mux.HandleFunc("GET /sources/new", s.handleSourceNew)
 	mux.HandleFunc("GET /sources/live", s.handleSourcesLive)
+	mux.HandleFunc("GET /sources/check", s.handleSourceCheck)
 	mux.HandleFunc("GET /sources/defaults", s.handleSourceDefaults)
 	mux.HandleFunc("GET /sources/export", s.handleSourceExport)
 	mux.HandleFunc("GET /sources/import", s.handleSourceImportDialog)
@@ -203,6 +214,8 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /sources/library/refresh", s.handleLibraryRefresh)
 	mux.HandleFunc("POST /sources", s.handleSourceAdd)
 	mux.HandleFunc("POST /sources/bulk", s.handleSourcesBulk)
+	mux.HandleFunc("POST /sources/discover", s.handleSourceDiscover)
+	mux.HandleFunc("POST /sources/preview", s.handleSourcePreview)
 	mux.HandleFunc("POST /sources/undo/{token}", s.handleSourcesUndo)
 	mux.HandleFunc("POST /sources/import", s.handleSourceImport)
 	mux.HandleFunc("POST /sources/import/preview", s.handleSourceImportPreview)
@@ -292,6 +305,20 @@ func (s *Web) staticControl() string {
 // no-cache, so a rebuild shows on the next reload rather than after the normal
 // cache window.
 func (s *Web) SetDev(on bool) { s.dev = on }
+
+// SetFeedClient sets the client the Add form's find and preview fetch through;
+// call it before serving. Without one a default guarded client is built on first use.
+func (s *Web) SetFeedClient(c *http.Client) { s.feedClient = c }
+
+// feedHTTP returns the feed client, building the default once when none was set.
+func (s *Web) feedHTTP() *http.Client {
+	s.feedClientOnce.Do(func() {
+		if s.feedClient == nil {
+			s.feedClient = feeds.NewClient("")
+		}
+	})
+	return s.feedClient
+}
 
 // SetLibrary sets the loader the Library page reads. Without one the library
 // reports not loaded and nothing is fetched.
