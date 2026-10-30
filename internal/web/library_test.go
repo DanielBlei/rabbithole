@@ -486,19 +486,10 @@ func TestLibraryDefaultLoaderIsOffline(t *testing.T) {
 	}
 }
 
-// The nav lists the Library groups on every section once the library has
-// loaded, and never waits for it.
+// The nav lists the Library groups on every section; the first visit waits
+// for the library to load.
 func TestSourcesNavListsLibraryGroupsOnceLoaded(t *testing.T) {
 	w, _ := libraryTestWeb(t, config.FeedsDoc{Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}}})
-	before := get(t, w, "/sources/manage")
-	if strings.Contains(before, "<details") {
-		t.Errorf("nav lists groups before the library loaded")
-	}
-	if !strings.Contains(before, `href="/sources/library">Library</a>`) {
-		t.Errorf("nav has no Library link")
-	}
-
-	w.library.Get(t.Context())
 	after := get(t, w, "/sources/manage")
 	for _, want := range []string{
 		`<details class="sh-nav__grp" open>`, `<summary class="sh-nav__h">Library</summary>`,

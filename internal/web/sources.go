@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog/log"
 
@@ -239,8 +240,10 @@ func (s *Web) renderSourcesPage(w http.ResponseWriter, r *http.Request, selected
 
 // sourcesPageData is the model of a whole Sources page. The chrome is filled
 // here rather than in sourcesData, which also serves the htmx mutations and has
-// no use for it. The nav reads the library without waiting for it.
+// no use for it. The library loads on the first visit, so the page waits for it
+// up to libraryWait; after that the nav and suggestions read the cache.
 func (s *Web) sourcesPageData(ctx context.Context, selected, section string) (sourcesData, error) {
+	s.awaitLibrary(ctx)
 	data, err := s.sourcesData(ctx, selected, section != "library")
 	if err != nil {
 		return sourcesData{}, err
@@ -254,6 +257,19 @@ func (s *Web) sourcesPageData(ctx context.Context, selected, section string) (so
 		data.Overview = s.overview(ctx, data)
 	}
 	return data, nil
+}
+
+// libraryWait bounds how long a Sources page waits for a library that has not
+// loaded yet.
+const libraryWait = 1500 * time.Millisecond
+
+// awaitLibrary starts the library load, which outlives the request, and waits
+// for it up to libraryWait while nothing has loaded. A loaded library is
+// returned at once, refreshing in the background when stale.
+func (s *Web) awaitLibrary(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, libraryWait)
+	defer cancel()
+	s.library.Get(ctx)
 }
 
 func (s *Web) writeSourcesPage(w http.ResponseWriter, data sourcesData) {
