@@ -6,19 +6,20 @@
      recorded from a run (feed names, errors, log lines) is untrusted text and
      only ever rendered through template escaping. */}}
 {{define "sourcesIngestion"}}
-<div class="ov ov--page">
+{{/* The log level pills set data-inglvl on this wrapper, which no swap replaces, so
+     the picked level holds across the live polls and refreshes. */}}
+<div class="ov ov--page" id="ingPage">
   <header class="ov-top">
-    <h1>Ingestion</h1>
-    <p class="ov-brief">Ingestion fetches every enabled feed, then scores new items against your profile.</p>
+    <h1><span>Ingestion</span>{{with tip "src-ingest"}}{{template "stpHint" .}}{{end}}</h1>
   </header>
   {{template "ingestionLive" .}}
 </div>
 {{end}}
 
 {{/* The bar and the runs, one unit. The live refresh sends it whole, out of
-     band, so the bar follows a run started anywhere and every row is collapsed.
-     A bar that is running polls itself; the swap replaces it, so it never polls
-     twice. */}}
+     band, so the bar follows a run started anywhere. The live run is open and
+     the rows the page sent as open stay open. A bar that is running polls
+     itself; the swap replaces it, so it never polls twice. */}}
 {{define "ingestionLive"}}
 <div id="ingLive"{{if .OOB}} hx-swap-oob="true"{{end}}>
   {{template "ingestBar" .Bar}}
@@ -33,8 +34,7 @@
 {{define "ingestionRuns"}}
 <section class="stp-group" aria-labelledby="inRuns" id="ingRuns">
   <header class="stp-group__h">
-    <div><h3 id="inRuns"><span class="stp-group__t">Recent runs</span></h3></div>
-    <p>A run fetches every enabled feed, then scores the new items. Each feed uses its own since and max items.</p>
+    <div><h3><span class="stp-group__t" id="inRuns">Recent runs</span>{{with tip "src-runs"}}{{template "stpHint" .}}{{end}}</h3></div>
   </header>
   <div class="ov-body">
     <table class="in-table" data-testid="ingest-history">
@@ -58,22 +58,23 @@
 {{end}}
 
 {{/* One run: the summary row and, when open, its detail row. The toggle swaps
-     the whole <tbody>. A run in progress has no toggle. */}}
+     the whole <tbody>, and a click anywhere on the row presses it (static/js/ingest.js).
+     The live run's log polls for newer lines itself (see ingestionLog). */}}
 {{define "ingestionRow"}}
 <tbody id="run-{{.ID}}" data-status="{{.Status}}">
-  <tr class="in-r">
+  <tr class="in-r{{if not .Toggle}} in-r--static{{end}}">
     <td data-label="Started"><time datetime="{{.StartedISO}}" title="{{.StartedTitle}}">{{.Started}}</time></td>
     <td data-label="Status"><span class="in-st"><span class="ingb__dot ingb__dot--{{.Status}}" aria-hidden="true"></span>{{.StatusLabel}}</span>{{if .Err}}<span class="in-err">{{.Err}}</span>{{end}}</td>
     <td data-label="New" class="in-n">{{.NewCell}}</td>
-    <td data-label="Duration" class="in-n">{{.Duration}}</td>
+    <td data-label="Duration" class="in-n">{{if .Running}}<span class="run-clock" data-elapsed-ms="{{.ElapsedMS}}">{{.Duration}}</span>{{else}}{{.Duration}}{{end}}</td>
     <td data-label="Trigger">{{.TriggerLabel}}</td>
     <td class="in-tog">
-      {{- if not .Running}}
+      {{- if .Toggle}}
       <button type="button" class="in-tog__b" id="run-{{.ID}}-tog" aria-controls="run-{{.ID}}"
               hx-get="/ingestion/runs/{{.ID}}{{if .Open}}?collapse=1{{end}}"
-              hx-target="#run-{{.ID}}" hx-swap="outerHTML"
+              hx-target="#run-{{.ID}}" hx-swap="outerHTML" hx-sync="closest tbody:replace"
               aria-expanded="{{if .Open}}true{{else}}false{{end}}"
-              aria-label="{{if .Open}}Hide{{else}}Show{{end}} details for the run from {{.Started}}">{{if .Open}}&#9650;{{else}}&#9660;{{end}}</button>
+              aria-label="{{if .Open}}Hide{{else}}Show{{end}} details for the run from {{.Started}}"><svg class="in-chev" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       {{- end}}
     </td>
   </tr>
@@ -89,12 +90,16 @@
 
 {{/* The expanded part of a run. */}}
 {{define "ingestionDetail"}}
+{{- if not .Live}}
 {{- if .Rescore}}
 <p class="in-cnt"><b>{{.Counts.Fetched}}</b> candidates, <b>{{.Counts.Scored}}</b> rescored, <b>{{.Counts.Failed}}</b> failed</p>
 {{- else}}
 <p class="in-cnt"><b>{{.Counts.Fetched}}</b> fetched, <b>{{.Counts.NewItems}}</b> new, <b>{{.Counts.Scored}}</b> scored, <b>{{.Counts.Skipped}}</b> skipped, <b>{{.Counts.Failed}}</b> failed</p>
 {{- end}}
+{{- end}}
+{{- if or .HasFeeds (not .Live)}}
 <h4 class="in-h">Feeds in this run</h4>
+{{- end}}
 {{- if .HasFeeds}}
 <table class="in-feeds">
   <thead><tr><th scope="col">Feed</th><th scope="col">Result</th><th scope="col">Items</th><th scope="col">Took</th></tr></thead>
@@ -109,13 +114,36 @@
     {{- end}}
   </tbody>
 </table>
-{{- else}}
+{{- else if not .Live}}
 <p class="in-none">No per-feed results were recorded for this run.</p>
 {{- end}}
-<h4 class="in-h">Run log</h4>
-{{- if .Logs}}
-<div class="in-log">{{template "ingestLogLines" .Logs}}</div>
+<div class="in-logbar">
+  <h4 class="in-h">Run log</h4>
+  {{- if .Live}}<span class="ing__live">● live</span>{{end}}
+  <span class="ing__lvl-pills">
+    <button type="button" data-ing-lvl="info">info</button><button type="button" data-ing-lvl="dbg">debug</button>
+  </span>
+</div>
+{{- if or .HasLog .Live}}
+{{template "ingestionLog" .}}
 {{- else}}
 <p class="in-none">No log captured for this run.</p>
 {{- end}}
 {{end}}
+
+{{/* The log element. It opens with info lines and above; data-dbg marks one that
+     also holds debug lines, which static/js/ingest.js fetches (?full=1&debug=1)
+     the first time the reader picks debug. A live log ends in the cursor that
+     polls for newer lines. */}}
+{{define "ingestionLog"}}
+<div class="in-log" id="run-{{.ID}}-log" data-ing-lines{{if .Debug}} data-dbg{{end}}{{if .Live}} data-live{{end}}>{{if .NoInfo}}<p class="in-empty{{if not .HasLog}} in-empty--wait{{end}}">{{if .HasLog}}No info lines. Pick debug for the rest.{{else if .Live}}Waiting for the first log line.{{else}}No log captured for this run.{{end}}</p>{{end}}{{template "ingestLogLines" .Logs}}{{if .Live}}{{template "ingestionCursor" .}}{{end}}</div>
+{{end}}
+
+{{/* The live log's poll. Its answer replaces it with the newer lines and the
+     next cursor, so the lines already shown, the scroll and a selection are
+     never touched. The cursor carries its log's level: a log that holds debug
+     lines keeps getting them. */}}
+{{define "ingestionCursor"}}<span class="in-cur" id="run-{{.ID}}-cur" hidden hx-get="/ingestion/runs/{{.ID}}/log?after={{.Seq}}{{if .Debug}}&amp;debug=1{{end}}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML"></span>{{end}}
+
+{{/* A live log poll's answer: the newer lines, then the next cursor. */}}
+{{define "ingestionLogAppend"}}{{template "ingestLogLines" .Logs}}{{template "ingestionCursor" .}}{{end}}

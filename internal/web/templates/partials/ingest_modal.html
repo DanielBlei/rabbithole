@@ -29,7 +29,7 @@
     {{if .Running}}
       {{if eq .RunKind "rescore"}}<span class="ing__st ing__st--run">◌ rescoring recent items</span>
       {{else}}<span class="ing__st ing__st--run">◌ running ingest</span>{{end}}
-      <span class="ing__sep">·</span><span class="ing__dim">started {{.StartedAgo}}</span>
+      <span class="ing__sep">·</span><span class="ing__dim">running <span class="run-clock" data-elapsed-ms="{{.ElapsedMS}}">{{.Clock}}</span></span>
       {{if .RunProfile}}<span class="ing__dim">with {{.RunProfile}}</span>{{end}}
     {{else if .Last}}
       {{if eq .Last.Status "ok"}}<span class="ing__st ing__st--ok">✓ ok</span>
@@ -47,8 +47,9 @@
     <div class="ing__errline">{{.Last.Error}}</div>
   {{end}}{{end}}
 
+  {{/* The newest finished run's counts; hidden, not removed, while a run is live so the modal keeps its height. */}}
   {{if .Last}}
-  <div class="ing__counts">
+  <div class="ing__counts{{if .Running}} is-idle{{end}}">
     {{if .Last.Rescore}}
     <span class="ing__cnt">candidates<b>{{.Last.Counts.Fetched}}</b></span>
     <span class="ing__cnt ing__cnt--new">rescored<b>{{.Last.Counts.Scored}}</b></span>
@@ -149,7 +150,7 @@
   {{if .Expanded}}
   <tr class="ing__hist-log">
     <td colspan="6">
-      {{if .Logs}}<div class="ing__lines">{{template "ingestLogLines" .Logs}}</div>
+      {{if .Logs}}<div class="ing__lines" data-ing-lines>{{template "ingestLogLines" .Logs}}</div>
       {{else}}<div class="ing__hist-nolog">no log captured for this run</div>{{end}}
     </td>
   </tr>
@@ -161,7 +162,7 @@
      history row render through this so the two never drift. */}}
 {{define "ingestLogLines"}}
 {{range .}}
-<div class="ing-ln{{if .Debug}} ing-ln--dbg{{end}}"><span class="ing-ln__ts">{{.Time}}</span> <span class="ing-ln__lv ing-ln__lv--{{.Class}}">{{.Level}}</span> {{.Msg}}{{range .Kvs}} <span class="ing-ln__kv">{{.K}}=<b>{{.V}}</b></span>{{end}}</div>
+{{if .Marker}}<div class="ing-ln ing-ln--gap">{{.Msg}}</div>{{else}}<div class="ing-ln{{if .Debug}} ing-ln--dbg{{end}}"><span class="ing-ln__ts">{{.Time}}</span> <span class="ing-ln__lv ing-ln__lv--{{.Class}}">{{.Level}}</span> {{.Msg}}{{range .Kvs}} <span class="ing-ln__kv">{{.K}}=<b>{{.V}}</b></span>{{end}}</div>{{end}}
 {{end}}
 {{end}}
 
@@ -189,7 +190,7 @@
       {{- if eq .Status "none"}}
       <span class="ingb__dot"></span><b>No ingestion run yet</b>
       {{- else if .Running}}
-      <span class="ingb__dot ingb__dot--running"></span><b>Running ingestion</b><span class="ingb__when">started {{.When}}</span>
+      <span class="ingb__dot ingb__dot--running"></span><b>Running ingestion</b><span class="ingb__when">running <span class="run-clock" data-elapsed-ms="{{.ElapsedMS}}">{{.Clock}}</span></span>
       {{- else}}
       <span class="ingb__dot ingb__dot--{{.Status}}"></span>
       <b>{{if eq .Status "ok"}}Last run ok{{else if eq .Status "error"}}Last run failed{{else}}Last run cancelled{{end}}</b>

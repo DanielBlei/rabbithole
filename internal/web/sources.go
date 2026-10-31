@@ -14,7 +14,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rs/zerolog/log"
 
@@ -58,6 +57,8 @@ type sourcesData struct {
 	LibNav libNav
 	// icons is the page's one read of the stored icons, by feed id.
 	icons map[string]iconRef
+	// last is the newest finished run, read once for the page's chrome and bars.
+	last *store.IngestRun
 
 	Counts sourceCounts
 	// Attention is the Manage status block: failing sources, flaky notes and the
@@ -242,37 +243,31 @@ func (s *Web) renderSourcesPage(w http.ResponseWriter, r *http.Request, selected
 
 // sourcesPageData is the model of a whole Sources page. The chrome is filled
 // here rather than in sourcesData, which also serves the htmx mutations and has
-// no use for it. The library loads on the first visit, so the page waits for it
-// up to libraryWait; after that the nav and suggestions read the cache.
+// no use for it. The library is read from the cache and never waited for: a
+// part that needs it before it has loaded draws a placeholder that fills itself
+// in.
 func (s *Web) sourcesPageData(ctx context.Context, selected, section string) (sourcesData, error) {
-	s.awaitLibrary(ctx)
-	// The Library and Ingestion pages draw no source rows, so they skip the stats.
-	data, err := s.sourcesData(ctx, selected, section != "library" && section != "ingestion")
+	// The Library and Ingestion pages draw no source rows, so they read only the
+	// counts.
+	var data sourcesData
+	var err error
+	if section == "library" || section == "ingestion" {
+		data, err = s.sourcesNavData(ctx)
+	} else {
+		data, err = s.sourcesData(ctx, selected, true)
+	}
 	if err != nil {
 		return sourcesData{}, err
 	}
 	data.Title = "Sources"
 	data.Active = "sources"
-	data.Chrome = s.chrome(ctx)
+	data.Chrome = s.chromeWith(ctx, s.ingestChromeFor(s.ing.Status(), data.last))
 	data.Section = section
 	data.LibNav = libNavFor(s.library.Snapshot(), section, "")
 	if section == "overview" {
 		data.Overview = s.overview(ctx, data)
 	}
 	return data, nil
-}
-
-// libraryWait bounds how long a Sources page waits for a library that has not
-// loaded yet.
-const libraryWait = 1500 * time.Millisecond
-
-// awaitLibrary starts the library load, which outlives the request, and waits
-// for it up to libraryWait while nothing has loaded. A loaded library is
-// returned at once, refreshing in the background when stale.
-func (s *Web) awaitLibrary(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, libraryWait)
-	defer cancel()
-	s.library.Get(ctx)
 }
 
 func (s *Web) writeSourcesPage(w http.ResponseWriter, data sourcesData) {
@@ -660,13 +655,48 @@ func (s *Web) failingCount(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	now, n := s.clock(), 0
+	_, failing := countEnabledFailing(resolved, health)
+	return failing, nil
+}
+
+// countEnabledFailing tallies the enabled feeds and the failing ones, the same
+// verdicts toFeedRow gives, without building the rows.
+func countEnabledFailing(resolved []config.ResolvedFeed, health map[string]store.FeedHealth) (enabled, failing int) {
 	for _, f := range resolved {
-		if toFeedRow(f, health[f.ID], now).State == feedStateError {
-			n++
+		if !f.Enabled {
+			continue
+		}
+		enabled++
+		if isFailing(health[f.ID]) {
+			failing++
 		}
 	}
-	return n, nil
+	return enabled, failing
+}
+
+// sourcesNavData is the model of a Sources page that draws no source rows (the
+// Library and Ingestion): the counts the nav and the ingest bar read, and the
+// newest finished run, without building a row per feed.
+func (s *Web) sourcesNavData(ctx context.Context) (sourcesData, error) {
+	doc, err := s.db.FeedsDoc(ctx)
+	if err != nil {
+		return sourcesData{}, err
+	}
+	resolved, err := config.ResolveFeeds(doc)
+	if err != nil {
+		return sourcesData{}, err
+	}
+	health, err := s.db.FeedHealthByID(ctx, feedStripLen)
+	if err != nil {
+		log.Error().Err(err).Msg("read feed health")
+	}
+	data := sourcesData{PromptUser: s.pagePromptUser(ctx), Counts: sourceCounts{Total: len(resolved)}}
+	data.Counts.Enabled, data.Counts.Failing = countEnabledFailing(resolved, health)
+	if data.last, err = s.db.LastIngestRun(ctx); err != nil {
+		log.Error().Err(err).Msg("read ingest bar")
+		data.last = nil
+	}
+	return data, nil
 }
 
 // sourcesData assembles the Sources page model: the resolved feed set joined with each feed's
@@ -754,6 +784,7 @@ func (s *Web) sourcesData(ctx context.Context, selected string, withStats bool) 
 		log.Error().Err(err).Msg("read ingest bar")
 		last = nil
 	}
+	data.last = last
 	if withStats {
 		s.addStats(ctx, &data, health, last, now)
 	}

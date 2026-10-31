@@ -297,13 +297,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	srv.ManagedBy(configPath)
 	srv.EnvFile(s.env, serveNoEnvWrite)
 	srv.StoreInfo(s.storeInfo)
-	srv.Library(newLibraryLoader(buildVersion(), serveDev))
+	libLoader := newLibraryLoader(buildVersion(), serveDev)
+	srv.Library(libLoader)
 	httpSrv := newHTTPServer(serveAddr, srv.Routes(), tlsConfig)
 	// Bound here rather than in the goroutine, so a taken port fails the command.
 	ln, err := net.Listen("tcp", serveAddr)
 	if err != nil {
 		return err
 	}
+	startLibrary(libLoader)
 
 	scheme := "http"
 	if tlsConfig != nil {
@@ -380,8 +382,15 @@ func libraryBase(raw string) (base string, custom bool, err error) {
 	return raw, !same, nil
 }
 
+// startLibrary starts the library's first load in the background, so the
+// Library is ready by the first Sources visit. It returns at once, so it never
+// delays serving, and fetches nothing when the library is off.
+func startLibrary(l *library.Loader) {
+	l.Snapshot()
+}
+
 // newLibraryLoader builds the loader of the source library. Nothing is fetched
-// until the Sources page asks. The default host is reached on 80 and 443 only;
+// until the loader is asked, which serve does once at start. The default host is reached on 80 and 443 only;
 // a mirror chosen through the environment may use any port. With dev set and no
 // library URL in the environment, ./library is read from disk when it holds rss.yaml.
 func newLibraryLoader(version string, dev bool) *library.Loader {

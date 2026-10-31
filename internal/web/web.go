@@ -119,6 +119,9 @@ type Web struct {
 	env       EnvSource  // where api key variables came from, for the settings page
 	storeInfo *StoreInfo // what boot knew about the store, nil when not reported
 
+	// libraryWait bounds how long the Library page waits for a library that has not loaded.
+	libraryWait time.Duration
+
 	envFile    *config.EnvFile // the .env a pasted key is written to
 	noEnvWrite bool            // --no-env-write: pasting a key is refused
 	// scorerCheck builds the scorer for "Test connection"; nil uses the real one.
@@ -130,9 +133,10 @@ type Web struct {
 func New(db *store.Store, src config.Source, ing *ingest.Manager) *Web {
 	return &Web{
 		db: db, src: src, ing: ing,
-		profiles: profilemgr.New(db),
-		library:  library.NewLoader(library.Options{}),
-		sessions: newSessionStore(), limiter: newLoginLimiter(),
+		profiles:    profilemgr.New(db),
+		library:     library.NewLoader(library.Options{}),
+		libraryWait: libraryWaitDefault,
+		sessions:    newSessionStore(), limiter: newLoginLimiter(),
 		hashing: make(chan struct{}, hashSlots), trusted: DefaultTrustedProxies,
 	}
 }
@@ -206,6 +210,7 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /sources/export", s.handleSourceExport)
 	mux.HandleFunc("GET /sources/import", s.handleSourceImportDialog)
 	mux.HandleFunc("GET /sources/feed/{id}", s.handleSourceSelect)
+	mux.HandleFunc("GET /sources/libfill", s.handleLibraryFill)
 	mux.HandleFunc("GET /sources/library", s.handleLibrary)
 	mux.HandleFunc("GET /sources/library/{group}", s.handleLibraryGroup)
 	mux.HandleFunc("POST /sources/library/plan", s.handleLibraryPlan)
@@ -228,6 +233,7 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /ingestion", s.handleIngestion)
 	mux.HandleFunc("GET /ingestion/live", s.handleIngestionLive)
 	mux.HandleFunc("GET /ingestion/runs/{id}", s.handleIngestionRun)
+	mux.HandleFunc("GET /ingestion/runs/{id}/log", s.handleIngestionRunLog)
 	mux.HandleFunc("GET /ingest", s.handleIngest)
 	mux.HandleFunc("GET /ingest/status", s.handleIngestStatus)
 	mux.HandleFunc("GET /ingest/chrome", s.handleIngestChrome)

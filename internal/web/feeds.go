@@ -110,6 +110,12 @@ type feedTick struct {
 	Title string
 }
 
+// isFailing is whether an enabled feed's history reads as failing: it was
+// fetched, the newest fetch failed, and the streak reached failingStreak.
+func isFailing(h store.FeedHealth) bool {
+	return !h.LastFetch.IsZero() && !h.OK() && h.FailStreak >= failingStreak
+}
+
 // toFeedRow shapes one resolved feed plus its health into a display row.
 func toFeedRow(f config.ResolvedFeed, h store.FeedHealth, now time.Time) feedRowData {
 	row := feedRowData{
@@ -151,7 +157,7 @@ func toFeedRow(f config.ResolvedFeed, h store.FeedHealth, now time.Time) feedRow
 		row.LastFetch = agoPhrase(h.LastFetch, now)
 	default:
 		row.State = feedStateFlaky
-		if h.FailStreak >= failingStreak {
+		if isFailing(h) {
 			row.State = feedStateError
 		}
 		row.Detail = h.Error

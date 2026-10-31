@@ -10,9 +10,12 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/httplog"
 	"github.com/DanielBlei/rabbithole/internal/library"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -56,6 +59,7 @@ type libraryPage struct {
 
 	Sections []libSection
 	Labels   []libLabel
+	Filters  []libFilter
 
 	// Plan replaces the list when set. Import is the banner above it.
 	Plan   *importPlan
@@ -105,6 +109,12 @@ type libLabel struct {
 	Count int
 }
 
+type libFilter struct {
+	Key   string
+	Label string
+	Count int
+}
+
 // libNav is the Library group of the section nav.
 type libNav struct {
 	// OOB sends the group out of band, for a reply that is not the whole page.
@@ -112,6 +122,10 @@ type libNav struct {
 	AllOn  bool
 	Total  int
 	Groups []libNavGroup // empty until the library has loaded
+
+	// Fill is the URL that repaints the group once the library has loaded, set
+	// while it has not; empty when the group is final.
+	Fill string
 }
 
 type libNavGroup struct {
@@ -225,6 +239,7 @@ func (s *Web) libraryPageFor(ctx context.Context, snap library.Snapshot, group s
 
 	icons := s.iconRefs(ctx)
 	counts := make(map[string]int)
+	stateCounts := make(map[string]int)
 	addable := 0
 	for _, f := range snap.Library.Files {
 		for _, g := range f.Groups {
@@ -251,6 +266,7 @@ func (s *Web) libraryPageFor(ctx context.Context, snap library.Snapshot, group s
 				e.Hay = strings.ToLower(strings.Join(
 					append([]string{src.Name, src.Description, src.URL, g.Title}, src.Labels...), " "))
 				p.Total++
+				stateCounts[e.State]++
 				switch e.State {
 				case libStateSubscribed:
 					p.Added++
@@ -264,14 +280,34 @@ func (s *Web) libraryPageFor(ctx context.Context, snap library.Snapshot, group s
 	}
 	p.Empty = p.Total == 0
 	p.AllAdded = p.Total > 0 && addable == 0
+	p.Filters = []libFilter{
+		{Key: "all", Label: "All", Count: p.Total},
+		{Key: libStateSubscribed, Label: "Subscribed", Count: stateCounts[libStateSubscribed]},
+		{Key: libStateRemoved, Label: "Removed", Count: stateCounts[libStateRemoved]},
+		{Key: libStateAdd, Label: "Add", Count: stateCounts[libStateAdd]},
+	}
+	for i := range p.Sections {
+		slices.SortFunc(p.Sections[i].Entries, func(a, b libEntry) int {
+			if c := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); c != 0 {
+				return c
+			}
+			return strings.Compare(a.Name, b.Name)
+		})
+	}
+	slices.SortFunc(p.Sections, func(a, b libSection) int {
+		if c := strings.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title)); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Title, b.Title)
+	})
 	for name, n := range counts {
 		p.Labels = append(p.Labels, libLabel{Name: name, Count: n})
 	}
 	slices.SortFunc(p.Labels, func(a, b libLabel) int {
-		if a.Count != b.Count {
-			return b.Count - a.Count
+		if c := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); c != 0 {
+			return c
 		}
-		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+		return strings.Compare(a.Name, b.Name)
 	})
 	return p, nil
 }
@@ -292,6 +328,9 @@ func libraryGroup(snap library.Snapshot, name string) (library.Group, bool) {
 func libNavFor(snap library.Snapshot, section, group string) libNav {
 	on := section == "library"
 	nav := libNav{AllOn: on && group == ""}
+	if libraryPending(snap) {
+		nav.Fill = libraryFillURL("nav", section, group, 1)
+	}
 	if !snap.Loaded || snap.Off {
 		return nav
 	}
@@ -303,6 +342,12 @@ func libNavFor(snap library.Snapshot, section, group string) libNav {
 			})
 		}
 	}
+	slices.SortFunc(nav.Groups, func(a, b libNavGroup) int {
+		if c := strings.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title)); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Title, b.Title)
+	})
 	return nav
 }
 
@@ -332,7 +377,9 @@ func (s *Web) handleLibraryGroup(w http.ResponseWriter, r *http.Request) {
 
 func (s *Web) renderLibraryPage(w http.ResponseWriter, r *http.Request, group string) {
 	ctx := r.Context()
-	snap := s.library.Get(ctx)
+	waitCtx, cancel := context.WithTimeout(ctx, s.libraryWait)
+	snap := s.library.Get(waitCtx)
+	cancel()
 	page, err := s.libraryPageFor(ctx, snap, group)
 	if errors.Is(err, errUnknownGroup) {
 		http.NotFound(w, r)
@@ -602,6 +649,88 @@ func (s *Web) handleLibraryRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nav := libNavFor(snap, "library", group)
-	nav.OOB = true
+	nav.OOB, nav.Fill = true, ""
 	s.renderFragment(w, "libraryRefresh", libraryRefresh{Page: page, Nav: nav})
+}
+
+const (
+	// libraryWaitDefault bounds how long the Library page waits for a library
+	// that has not loaded yet; the page then shows its retry state.
+	libraryWaitDefault = 1500 * time.Millisecond
+
+	// libraryFillTries bounds how often a placeholder asks for its content.
+	libraryFillTries = 6
+)
+
+// libraryPending is whether the Library parts of a page are still to come: the
+// library is on and nothing has loaded yet.
+func libraryPending(snap library.Snapshot) bool {
+	return !snap.Off && !snap.Inert && !snap.Loaded
+}
+
+// libraryFillURL is the repaint a placeholder asks for. try counts the asks,
+// this one included.
+func libraryFillURL(part, section, group string, try int) string {
+	q := url.Values{"part": {part}, "try": {strconv.Itoa(try)}}
+	if section != "" {
+		q.Set("section", section)
+	}
+	if group != "" {
+		q.Set("group", group)
+	}
+	return "/sources/libfill?" + q.Encode()
+}
+
+// libraryFill is the answer to a placeholder's repaint: the Overview's Library
+// sections once they can be built, or the placeholder again with the next try.
+type libraryFill struct {
+	Library *overviewLibrary
+	Fill    string
+}
+
+// handleLibraryFill repaints a Library part of the Sources page that was drawn
+// as a placeholder, from the cached library, never waiting for the network. A
+// part still missing after libraryFillTries asks is left as the plain page draws
+// it, so a library that never loads is not polled for.
+func (s *Web) handleLibraryFill(w http.ResponseWriter, r *http.Request) {
+	httplog.Quiet(r)
+	q := r.URL.Query()
+	try, _ := strconv.Atoi(q.Get("try"))
+	try = min(max(try, 1), libraryFillTries)
+	snap := s.library.Snapshot()
+	pending := libraryPending(snap) && try < libraryFillTries
+	switch q.Get("part") {
+	case "nav":
+		section := "other"
+		if q.Get("section") == "library" {
+			section = "library"
+		}
+		nav := libNavFor(snap, section, q.Get("group"))
+		nav.Fill = ""
+		if pending {
+			nav.Fill = libraryFillURL("nav", section, q.Get("group"), try+1)
+		}
+		s.renderFragment(w, "sourcesLibNav", nav)
+	case "overview":
+		data, err := s.sourcesData(r.Context(), "", false)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		var fill libraryFill
+		if data.Counts.Total > 0 {
+			if fill.Library = s.overviewLibrary(
+				r.Context(),
+				snap,
+				data.Rows,
+				s.iconRefs(r.Context()),
+			); fill.Library == nil &&
+				pending {
+				fill.Fill = libraryFillURL("overview", "", "", try+1)
+			}
+		}
+		s.renderFragment(w, "ovLibraryFill", fill)
+	default:
+		http.Error(w, "unknown part", http.StatusBadRequest)
+	}
 }

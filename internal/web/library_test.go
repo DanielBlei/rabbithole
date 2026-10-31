@@ -45,11 +45,14 @@ func libraryLoader(srv *httptest.Server) *library.Loader {
 }
 
 // libraryTestWeb is a Web over a store seeded with doc and a loader reading
-// the real library files.
+// the real library files, already loaded the way the boot preload leaves it.
 func libraryTestWeb(t *testing.T, doc config.FeedsDoc) (*Web, *store.Store) {
 	t.Helper()
 	w, db := sourcesTestWeb(t, doc)
 	w.SetLibrary(libraryLoader(libraryServer(t)))
+	if snap := w.library.Get(t.Context()); !snap.Loaded {
+		t.Fatalf("test library did not load: %+v", snap)
+	}
 	return w, db
 }
 
@@ -98,13 +101,69 @@ func TestLibraryPageListsEveryGroup(t *testing.T) {
 	for _, want := range []string{
 		"<title>Library</title>", `<h1 class="li-title">Library</h1>`, "All sources in the Library",
 		"Blogs", "Releases", "Community", "arXiv categories", "LLM systems", "Agents, RAG and evals", "Journals",
-		`placeholder="Filter, or try @subscribed"`, `aria-label="Filter the Library"`,
-		`data-lib-token="@subscribed"`, `data-lib-token="@removed"`, `data-lib-token="@add"`,
-		"Filter shortcuts", "Filter by label", `id="libBody"`, "data-lib-bar",
+		`placeholder="Search name, address or tag"`, `aria-label="Filter the Library"`,
+		`data-lib-state="all"`, `data-lib-state="subscribed"`, `data-lib-state="removed"`, `data-lib-state="add"`,
+		"Filter Library by status", `data-lib-tags-toggle`, `aria-expanded="false"`, `id="libTagFilters"`,
+		"Filter by tag", `id="libBody"`, "data-lib-bar",
 		`aria-label="Select ` + libK8sName + `"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(out, "@subscribed") || strings.Contains(out, "@removed") || strings.Contains(out, "@add") {
+		t.Error("Library page still exposes @status filters")
+	}
+	for _, want := range []string{
+		`class="li-sec__t"><h3>Agents, RAG and evals</h3>`,
+		`class="li-sec__t"><h3>arXiv categories</h3>`,
+		`class="li-sec__t"><h3>Blogs</h3>`,
+		`class="li-sec__t"><h3>Community</h3>`,
+		`class="li-sec__t"><h3>Journals</h3>`,
+		`class="li-sec__t"><h3>LLM systems</h3>`,
+		`class="li-sec__t"><h3>Releases</h3>`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing sorted group heading %q", want)
+		}
+	}
+	order := []string{
+		`class="li-sec__t"><h3>Agents, RAG and evals</h3>`,
+		`class="li-sec__t"><h3>arXiv categories</h3>`,
+		`class="li-sec__t"><h3>Blogs</h3>`,
+		`class="li-sec__t"><h3>Community</h3>`,
+		`class="li-sec__t"><h3>Journals</h3>`,
+		`class="li-sec__t"><h3>LLM systems</h3>`,
+		`class="li-sec__t"><h3>Releases</h3>`,
+	}
+	last := -1
+	for _, marker := range order {
+		at := strings.Index(out, marker)
+		if at <= last {
+			t.Errorf("group headings are not alphabetized at %q", marker)
+		}
+		last = at
+	}
+	blogAt := strings.Index(out, `data-title="Blogs"`)
+	if blogAt < 0 {
+		t.Fatal("Blogs section not found")
+	}
+	blog, _, _ := strings.Cut(out[blogAt:], `</section>`)
+	var blogNames []string
+	for rest := blog; ; {
+		_, rowRest, ok := strings.Cut(rest, `<li class="li-row"`)
+		if !ok {
+			break
+		}
+		row, tail, _ := strings.Cut(rowRest, `</li>`)
+		_, nameRest, _ := strings.Cut(row, `class="li-row__nm">`)
+		name, _, _ := strings.Cut(nameRest, `</span>`)
+		blogNames = append(blogNames, name)
+		rest = tail
+	}
+	for i := 1; i < len(blogNames); i++ {
+		if strings.ToLower(blogNames[i-1]) > strings.ToLower(blogNames[i]) {
+			t.Errorf("source names are not alphabetized: %q before %q", blogNames[i-1], blogNames[i])
 		}
 	}
 	if n := strings.Count(out, `<li class="li-row"`); n != total {
@@ -186,6 +245,15 @@ func TestLibraryRowStates(t *testing.T) {
 		t.Fatalf("SoftDeleteFeed: %v", err)
 	}
 	out := get(t, w, "/sources/library")
+	for _, want := range []string{
+		`value="all" data-lib-state="all" checked><span>All <i class="mg-n" data-lib-state-count="all">`,
+		`data-lib-state="subscribed"><span>Subscribed <i class="mg-n" data-lib-state-count="subscribed">1</i></span>`,
+		`data-lib-state="removed"><span>Removed <i class="mg-n" data-lib-state-count="removed">1</i></span>`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing status filter/count %q", want)
+		}
+	}
 
 	subscribed := libRow(t, out, libK8sURL)
 	if !strings.Contains(subscribed, `data-state="subscribed"`) || !strings.Contains(subscribed, "Subscribed") ||
@@ -486,8 +554,7 @@ func TestLibraryDefaultLoaderIsOffline(t *testing.T) {
 	}
 }
 
-// The nav lists the Library groups on every section; the first visit waits
-// for the library to load.
+// The nav lists the Library groups on every section once the library is loaded.
 func TestSourcesNavListsLibraryGroupsOnceLoaded(t *testing.T) {
 	w, _ := libraryTestWeb(t, config.FeedsDoc{Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}}})
 	after := get(t, w, "/sources/manage")

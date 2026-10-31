@@ -46,7 +46,7 @@ lists every setting with its default, to copy lines from.
 |---|---|---|
 | Run settings: model, scoring, your name | The store | The Settings page, `config import`, or `serve --config` |
 | Feeds (sources) | The store | The Sources page, `sources import` |
-| The source library | GitHub, fetched on a Sources visit | `RABBITHOLE_LIBRARY_URL`, see [The source library](#the-source-library) |
+| The source library | GitHub, loaded in the background at start | `RABBITHOLE_LIBRARY_URL`, see [The source library](#the-source-library) |
 | Interest profiles | The store | Settings → Profiles |
 | Where the store is, the listen address, TLS | Flags and the environment | `--db` or `RABBITHOLE_DB`, `--addr`, the `--tls-*` flags |
 | Secrets (API keys, the Postgres password) | The environment or `./.env` | Your shell profile, or editing `.env` |
@@ -330,9 +330,10 @@ An old config whose `ingest.feeds` names a feeds file is honoured only when you 
 
 The **Library** in the Sources side menu lists ready-made feeds grouped by topic, and the Overview
 suggests some that match the tags of your sources. The lists are fetched from the project's GitHub
-`main` branch the first time you open Sources, never at startup, and cached for an hour. A fix to
-the library reaches every install within that hour. If GitHub is unreachable, the Library page says
-so and offers **Try again**; nothing else on the page waits for it.
+`main` branch in the background when the server starts, and refreshed hourly: a fix to the library
+reaches every install within that hour. Pages show the last good copy and never wait for GitHub; the
+Library parts of Sources fill in as soon as the first load lands. If GitHub is unreachable, the
+Library page says so and offers **Try again**.
 
 - `RABBITHOLE_LIBRARY_URL` loads the library from another directory URL (a mirror or a fork that holds
   `rss.yaml` and `academic.yaml`), on any port. `off` turns the Library off.

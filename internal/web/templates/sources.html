@@ -18,3 +18,8 @@
   </div>
 </div>
 {{end}}
+
+{{/* sources.js serves every section; library.js only the Library. */}}
+{{define "pagescripts"}}<script src="/static/js/sources.js" defer></script>
+{{if eq .Section "library"}}<script src="/static/js/library.js" defer></script>
+{{end}}{{end}}

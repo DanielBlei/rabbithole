@@ -55,13 +55,12 @@
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__frame" role="dialog" aria-modal="true" aria-label="Import sources">
     <div class="modal__bar">
-      <span class="modal__title">Import sources</span>
+      <span class="modal__title">Import sources{{with tip "src-import"}}{{template "stpHint" .}}{{end}}</span>
       <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
     </div>
     <div class="stp-dlg mg-imp">
       {{with .Plan}}{{template "sourcePlan" .}}
       {{else}}
-      <p class="mg-imp__p">Choose a sources.yaml file, or drop one anywhere on this page. You see what changes before anything is added.</p>
       <div class="mg-imp__a">
         <button class="clk-btn" type="button" data-imp-pick>Choose a file</button>
         <input type="file" accept=".yaml,.yml,.txt" hidden data-src-file aria-label="Import feeds file">

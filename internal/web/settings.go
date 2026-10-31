@@ -89,8 +89,9 @@ type optView struct {
 }
 
 // fieldView is one editable field as the template draws it.
-// tipView is one "?" bubble: its element id and its text.
-type tipView struct{ ID, Text string }
+// tipView is one "?" bubble: its element id, its text and the accessible name
+// of its button.
+type tipView struct{ ID, Text, Label string }
 
 type fieldView struct {
 	Key, Name, Help, Kind string

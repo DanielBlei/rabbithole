@@ -74,6 +74,9 @@ type overviewData struct {
 	// Library holds the suggestions and the coverage. It is nil when they are
 	// hidden: first run, or no library loaded.
 	Library *overviewLibrary
+	// LibFill is the URL that fills the Library sections in once the library
+	// has loaded, set while it has not.
+	LibFill string
 }
 
 // overviewLibrary is the two Library sections of the Overview.
@@ -296,7 +299,11 @@ func plural(n int, one, many string) string {
 func (s *Web) overview(ctx context.Context, data sourcesData) overviewData {
 	ov := overviewFrom(data)
 	if !ov.FirstRun {
-		ov.Library = s.overviewLibrary(ctx, s.library.Snapshot(), data.Rows, data.icons)
+		snap := s.library.Snapshot()
+		ov.Library = s.overviewLibrary(ctx, snap, data.Rows, data.icons)
+		if ov.Library == nil && libraryPending(snap) {
+			ov.LibFill = libraryFillURL("overview", "", "", 1)
+		}
 	}
 	return ov
 }

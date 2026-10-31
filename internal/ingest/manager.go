@@ -63,6 +63,14 @@ const (
 	RunKindRescore RunKind = "rescore"
 )
 
+// noun words the run for its first and last log lines.
+func (k RunKind) noun() string {
+	if k == RunKindRescore {
+		return "rescore"
+	}
+	return "ingestion"
+}
+
 // Manager owns ingest and explicit rescore runs inside the serve process. It
 // enforces one shared single-flight slot, runs work on a server-owned context
 // so it survives the triggering request, records every run in ingest_history,
@@ -100,6 +108,7 @@ type activeRun struct {
 	cancel  context.CancelFunc
 	done    chan struct{}
 	kind    RunKind
+	trigger string
 	profile string
 	window  time.Duration
 }
@@ -110,10 +119,25 @@ type activeRun struct {
 // the store.
 type Status struct {
 	Running   bool
+	RunID     int64     // history row of the live run; zero unless running
 	StartedAt time.Time // zero unless running
 	Lines     []string  // raw zerolog JSON, one event per line
-	Kind      RunKind
-	Profile   string
+	// Seq numbers the last line in Lines, counting from 1 across the whole
+	// run; the lines before the first one in Lines fell off the ring.
+	Seq     int64
+	Kind    RunKind
+	Profile string
+}
+
+// LogChunk is the part of a live run's log newer than a cursor.
+type LogChunk struct {
+	Lines []string // raw zerolog JSON, oldest first
+	// Last is the sequence number of the newest line the run has logged. A
+	// caller passes it back as the next cursor.
+	Last int64
+	// Dropped counts lines between the cursor and the first of Lines that fell
+	// off the ring before they were read.
+	Dropped int64
 }
 
 // NewManager returns a Manager for db that reads its run config from src. logLevel decides whether a run's own
@@ -177,7 +201,7 @@ func (m *Manager) start(
 	runCtx, cancel := context.WithCancel(context.Background())
 	run := &activeRun{
 		id: id, started: time.Now(), cancel: cancel, done: make(chan struct{}),
-		kind: kind, profile: activeProfile.Name, window: window,
+		kind: kind, trigger: triggeredBy, profile: activeProfile.Name, window: window,
 	}
 	m.active = run
 	m.buf = newLogBuffer(maxLogLines)
@@ -283,6 +307,7 @@ func (m *Manager) Status() Status {
 	st := Status{}
 	if m.active != nil {
 		st.Running = true
+		st.RunID = m.active.id
 		st.StartedAt = m.active.started
 		st.Kind = m.active.kind
 		st.Profile = m.active.profile
@@ -290,9 +315,23 @@ func (m *Manager) Status() Status {
 	buf := m.buf
 	m.mu.Unlock()
 	if buf != nil {
-		st.Lines = buf.snapshot()
+		st.Lines, st.Seq = buf.snapshotSeq()
 	}
 	return st
+}
+
+// LogSince returns the lines of run id's log after sequence number after (zero
+// for all of them). It reports false unless id is the run in flight; a caller
+// then reads the run's stored log instead.
+func (m *Manager) LogSince(id, after int64) (LogChunk, bool) {
+	m.mu.Lock()
+	buf := m.buf
+	live := m.active != nil && m.active.id == id
+	m.mu.Unlock()
+	if !live || buf == nil {
+		return LogChunk{}, false
+	}
+	return buf.since(after), true
 }
 
 // execute runs one cycle to completion and finalizes its history row.
@@ -310,6 +349,11 @@ func (m *Manager) execute(
 		counts store.IngestCounts
 		sites  []IconSite
 	)
+	startLog := runLogger.Info().Str("trigger", run.trigger).Str("profile", activeProfile.Name)
+	if run.kind == RunKindRescore {
+		startLog = startLog.Str("window", run.window.String())
+	}
+	startLog.Msg("starting " + run.kind.noun())
 	// One snapshot for the whole run: a config change lands on the next run.
 	cfg, _, err := m.src.Active(ctx)
 	if err != nil {
@@ -365,6 +409,12 @@ func (m *Manager) execute(
 		runLogger.Error().Str("kind", string(run.kind)).Str("error", msg).
 			Msg(string(run.kind) + " failed")
 	}
+	// Every run closes with the same line, after any failure or cancel line
+	// that says why.
+	runLogger.Info().
+		Str("status", string(status)).
+		Str("elapsed", time.Since(run.started).Round(100*time.Millisecond).String()).
+		Msg(run.kind.noun() + " finished")
 
 	// The run's ctx may be cancelled (that's how Cancel works); the history
 	// write must still land, so it gets its own short-lived context.
@@ -447,6 +497,7 @@ func newRunLogger(buf *logBuffer, logLevel zerolog.Level) zerolog.Logger {
 type logBuffer struct {
 	mu    sync.Mutex
 	lines []string
+	total int64 // lines ever written; the newest line's sequence number
 	max   int
 }
 
@@ -458,6 +509,7 @@ func (b *logBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.lines = append(b.lines, strings.TrimRight(string(p), "\n"))
+	b.total++
 	if len(b.lines) > b.max {
 		b.lines = b.lines[len(b.lines)-b.max:]
 	}
@@ -465,9 +517,35 @@ func (b *logBuffer) Write(p []byte) (int, error) {
 }
 
 func (b *logBuffer) snapshot() []string {
+	lines, _ := b.snapshotSeq()
+	return lines
+}
+
+// snapshotSeq returns the buffered lines and the sequence number of the last.
+func (b *logBuffer) snapshotSeq() ([]string, int64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	out := make([]string, len(b.lines))
 	copy(out, b.lines)
-	return out
+	return out, b.total
+}
+
+// since returns the lines numbered above after. Sequence numbers start at 1 and
+// never reset, so a cursor older than the ring's oldest line gets the oldest
+// onward with the count it missed in Dropped.
+func (b *logBuffer) since(after int64) LogChunk {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	oldest := b.total - int64(len(b.lines)) + 1
+	after = min(max(after, 0), b.total)
+	chunk := LogChunk{Last: b.total}
+	first := after + 1
+	if first < oldest {
+		chunk.Dropped = oldest - first
+		first = oldest
+	}
+	if first <= b.total {
+		chunk.Lines = append([]string(nil), b.lines[first-oldest:]...)
+	}
+	return chunk
 }

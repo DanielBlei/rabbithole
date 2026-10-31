@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/rabbithole/internal/httplog"
+	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -46,6 +48,12 @@ type ingestionRun struct {
 	// Started is "5m ago"; StartedISO and StartedTitle feed the <time> element.
 	Started, StartedISO, StartedTitle string
 	NewCell, Duration, TriggerLabel   string
+	// ElapsedMS is a live run's age in milliseconds; Duration words it until
+	// the page's clock takes over.
+	ElapsedMS int64
+	// Toggle gives the row its expand button. A running row with no manager run
+	// behind it has nothing to expand.
+	Toggle bool
 	// Err is the run's error text; empty for a cancelled run, whose text is
 	// only the word again.
 	Err    string
@@ -56,11 +64,33 @@ type ingestionRun struct {
 // ingestionDetail is the expanded row of one run: its counts, the per-feed
 // results and the captured log.
 type ingestionDetail struct {
+	ID       int64
 	Counts   store.IngestCounts
 	Rescore  bool
 	Feeds    []ingestionFeed
 	HasFeeds bool
-	Logs     []ingestLogLine
+	// Logs are the lines shown: info and above, plus debug and trace once the
+	// reader asked for them (Debug). HasLog tells a run with a captured log from
+	// one with none, whatever the filter left.
+	Logs   []ingestLogLine
+	HasLog bool
+	// NoInfo is set when no info line is shown, so the log says why it is empty.
+	NoInfo bool
+	Debug  bool
+	// Live marks the run in flight: its counts are not recorded yet and its log
+	// is the manager's buffer. Seq is the number of the last line in Logs, the
+	// cursor the log's poll continues from.
+	Live bool
+	Seq  int64
+}
+
+// ingestionLogAppend is the answer to a live log poll: the lines after the
+// poll's cursor and the cursor for the next poll.
+type ingestionLogAppend struct {
+	ID    int64
+	Seq   int64
+	Debug bool
+	Logs  []ingestLogLine
 }
 
 // ingestionFeed is one feed's result within a run.
@@ -82,7 +112,8 @@ func (s *Web) handleIngestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data.Title = "Ingestion"
-	data.Ingestion, err = s.ingestionView(ctx, ingestionPageFromQuery(r))
+	bar := s.ingestBarKnown(data.Counts.Enabled, data.last, false, false)
+	data.Ingestion, err = s.ingestionPageFor(ctx, bar, ingestionPageFromQuery(r), nil, false)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -92,10 +123,14 @@ func (s *Web) handleIngestion(w http.ResponseWriter, r *http.Request) {
 
 // handleIngestionLive answers the refresh the page makes when a run starts or
 // ends: the bar and the runs, back on the page they were on, and the Manage
-// badge, all out of band.
+// badge, all out of band. The run in flight is open, and so is each finished row
+// ?open names.
 func (s *Web) handleIngestionLive(w http.ResponseWriter, r *http.Request) {
 	httplog.Quiet(r)
-	page, err := s.ingestionView(r.Context(), ingestionPageFromQuery(r))
+	q := r.URL.Query()
+	page, err := s.ingestionView(
+		r.Context(), ingestionPageFromQuery(r), openRunsFromQuery(r), q.Get("debug") == "1",
+	)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -113,18 +148,34 @@ func (s *Web) handleIngestionLive(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleIngestionRun swaps one run's <tbody>: expanded with its detail, or
-// the summary row alone with collapse=1. A run still in progress has no
-// detail yet, so it always answers with the summary.
+// the summary row alone with collapse=1. The run in flight expands to its live
+// log, which then polls for newer lines; a finished run expands to its stored
+// detail. Its log holds info lines and above unless debug=1.
 func (s *Web) handleIngestionRun(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		http.Error(w, "bad run id", http.StatusBadRequest)
 		return
 	}
+	q := r.URL.Query()
+	s.writeRunRow(w, r, id, q.Get("collapse") == "1", q.Get("debug") == "1", false)
+}
+
+// writeRunRow renders one run's <tbody>. retarget sends it to the run's row
+// whatever element asked, for a log poll that finds its run over; a run that
+// is gone then answers 200 with no body, which swaps the poller away.
+func (s *Web) writeRunRow(w http.ResponseWriter, r *http.Request, id int64, collapse, debug, retarget bool) {
 	ctx := r.Context()
+	// The manager is read before the store: a run ends in the store first and
+	// leaves the manager second, so this order never sees it gone from both.
+	st := s.ing.Status()
 	run, lines, err := s.db.GetIngestRunWithLog(ctx, id)
 	if err != nil {
 		if errors.Is(err, store.ErrIngestRunNotFound) {
+			if retarget {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
 			http.Error(w, "run not found", http.StatusNotFound)
 			return
 		}
@@ -132,15 +183,16 @@ func (s *Web) handleIngestionRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	live := run.Status == store.IngestStatusRunning && st.Running && st.RunID == id
 	row := toIngestionRun(*run, s.clock())
-	if r.URL.Query().Get("collapse") != "1" && !row.Running {
-		results, err := s.db.RunFeedResults(ctx, id)
-		if err != nil {
+	if live {
+		liveRun(&row, st)
+	}
+	if !collapse && (live || !row.Running) {
+		if err := s.openRun(ctx, &row, *run, lines, st, live, debug); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		row.Open = true
-		row.Detail = toIngestionDetail(*run, results, lines)
 	}
 
 	var buf bytes.Buffer
@@ -150,16 +202,101 @@ func (s *Web) handleIngestionRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if retarget {
+		w.Header().Set("HX-Retarget", fmt.Sprintf("#run-%d", id))
+		w.Header().Set("HX-Reswap", "outerHTML")
+	}
+	_, _ = w.Write(buf.Bytes())
+}
+
+// handleIngestionRunLog serves one run's log in parts, for the log element:
+//   - after=N polls the live run: the lines numbered above N (a marker first if
+//     some fell off the ring), then the cursor for the next poll. Nothing new
+//     answers 204. Once the run is over it answers with the run's finished row
+//     in place of the log.
+//   - full=1 answers the whole log element, for a reader who picks debug after
+//     the log opened with info lines only.
+//
+// debug=1 keeps debug and trace lines in either answer.
+func (s *Web) handleIngestionRunLog(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad run id", http.StatusBadRequest)
+		return
+	}
+	httplog.Quiet(r)
+	q := r.URL.Query()
+	debug := q.Get("debug") == "1"
+
+	if q.Get("full") == "1" {
+		s.writeRunLog(w, r, id, debug)
+		return
+	}
+	after, _ := strconv.ParseInt(q.Get("after"), 10, 64)
+	chunk, live := s.ing.LogSince(id, after)
+	if !live {
+		s.writeRunRow(w, r, id, false, debug, true)
+		return
+	}
+	if chunk.Last == after && chunk.Dropped == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	s.writeIngestionTmpl(w, "ingestionLogAppend", ingestionLogAppend{
+		ID: id, Seq: chunk.Last, Debug: debug, Logs: displayLogLines(chunk.Lines, chunk.Dropped, debug),
+	})
+}
+
+// writeRunLog renders one run's whole log element.
+func (s *Web) writeRunLog(w http.ResponseWriter, r *http.Request, id int64, debug bool) {
+	st := s.ing.Status()
+	run, stored, err := s.db.GetIngestRunWithLog(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrIngestRunNotFound) {
+			http.Error(w, "run not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	live := run.Status == store.IngestStatusRunning && st.Running && st.RunID == id
+	d := &ingestionDetail{ID: id, Live: live, Debug: debug}
+	d.setLog(runLog(*run, stored, st, live), debug)
+	s.writeIngestionTmpl(w, "ingestionLog", d)
+}
+
+// writeIngestionTmpl executes one sources template to the response.
+func (s *Web) writeIngestionTmpl(w http.ResponseWriter, name string, data any) {
+	var buf bytes.Buffer
+	if err := sourcesTmpl.ExecuteTemplate(&buf, name, data); err != nil {
+		log.Error().Err(err).Str("template", name).Msg("render ingestion")
+		http.Error(w, "could not render ingestion", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(buf.Bytes())
 }
 
 // ingestionView builds the model for one page of runs (one-based). A page past
-// the last one shows the last.
-func (s *Web) ingestionView(ctx context.Context, page int) (ingestionPage, error) {
+// the last one shows the last. The run in flight is always open; a finished
+// run is open when its id is in open. Open logs hold debug lines when debug is
+// set.
+func (s *Web) ingestionView(
+	ctx context.Context, page int, open map[int64]bool, debug bool,
+) (ingestionPage, error) {
 	bar, err := s.ingestBarView(ctx, false, false)
 	if err != nil {
 		return ingestionPage{}, err
 	}
+	return s.ingestionPageFor(ctx, bar, page, open, debug)
+}
+
+// ingestionPageFor is ingestionView for a caller that already built the bar.
+func (s *Web) ingestionPageFor(
+	ctx context.Context, bar ingestBarData, page int, open map[int64]bool, debug bool,
+) (ingestionPage, error) {
+	st := s.ing.Status()
+	var err error
 	runs, more, err := s.db.ListIngestRuns(ctx, ingestHistoryLimit, (page-1)*ingestHistoryLimit)
 	if err != nil {
 		return ingestionPage{}, err
@@ -181,9 +318,99 @@ func (s *Web) ingestionView(ctx context.Context, page int) (ingestionPage, error
 	}
 	now := s.clock()
 	for _, run := range runs {
-		out.Runs = append(out.Runs, toIngestionRun(run, now))
+		row := toIngestionRun(run, now)
+		live := row.Running && st.Running && st.RunID == run.ID
+		if live {
+			liveRun(&row, st)
+		}
+		if live || open[run.ID] {
+			_, lines, err := s.db.GetIngestRunWithLog(ctx, run.ID)
+			if err != nil {
+				return ingestionPage{}, err
+			}
+			if err := s.openRun(ctx, &row, run, lines, st, live, debug); err != nil {
+				return ingestionPage{}, err
+			}
+		}
+		out.Runs = append(out.Runs, row)
 	}
 	return out, nil
+}
+
+// openRun expands a row with its detail: the manager's log for the live run,
+// the stored one (lines) otherwise. A run whose row is final but whose log is
+// not stored yet still reads from the manager.
+func (s *Web) openRun(
+	ctx context.Context, row *ingestionRun, run store.IngestRun, lines []string, st ingest.Status,
+	live, debug bool,
+) error {
+	results, err := s.db.RunFeedResults(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	row.Open = true
+	row.Detail = toIngestionDetail(run, results)
+	row.Detail.Live = live
+	row.Detail.Debug = debug
+	row.Detail.setLog(runLog(run, lines, st, live), debug)
+	return nil
+}
+
+// runLogSrc is the raw log of one run, as much of it as a reader can have.
+type runLogSrc struct {
+	Lines []string
+	// Seq numbers the last of Lines when they come from the manager's buffer;
+	// Dropped counts the lines before them that fell off its ring.
+	Seq, Dropped int64
+}
+
+// runLog picks a run's log: the manager's buffer while it is live, or while the
+// run has ended but its log is not stored yet; the stored log otherwise.
+func runLog(run store.IngestRun, stored []string, st ingest.Status, live bool) runLogSrc {
+	if live || (len(stored) == 0 && st.Running && st.RunID == run.ID) {
+		return runLogSrc{Lines: st.Lines, Seq: st.Seq, Dropped: st.Seq - int64(len(st.Lines))}
+	}
+	return runLogSrc{Lines: stored}
+}
+
+// setLog fills the detail's log from src. Debug and trace lines are left out
+// unless debug is set, so a log opens light and the rest is fetched on request.
+func (d *ingestionDetail) setLog(src runLogSrc, debug bool) {
+	d.HasLog = len(src.Lines) > 0
+	d.Logs = displayLogLines(src.Lines, src.Dropped, debug)
+	d.NoInfo = true
+	for _, l := range d.Logs {
+		if !l.Debug {
+			d.NoInfo = false
+			break
+		}
+	}
+	if d.Live {
+		d.Seq = src.Seq
+	}
+}
+
+// liveRun marks a row as the run in flight: it has a toggle, and its clock
+// counts from the manager's start, the same as the bar's.
+func liveRun(row *ingestionRun, st ingest.Status) {
+	row.Toggle = true
+	row.ElapsedMS, row.Duration = runClock(st.StartedAt, time.Now())
+}
+
+// openRunsFromQuery reads the ids of the rows the page shows open from
+// ?open=1,5. Anything that is not a positive id is ignored, and the list is cut
+// at one page of runs.
+func openRunsFromQuery(r *http.Request) map[int64]bool {
+	open := map[int64]bool{}
+	for _, f := range strings.Split(r.URL.Query().Get("open"), ",") {
+		if len(open) == ingestHistoryLimit {
+			break
+		}
+		if id, err := strconv.ParseInt(f, 10, 64); err == nil && id > 0 {
+			open[id] = true
+		}
+	}
+	return open
 }
 
 // ingestionPageFromQuery reads the one-based page from ?page=N, clamping
@@ -201,6 +428,7 @@ func toIngestionRun(r store.IngestRun, now time.Time) ingestionRun {
 	run := ingestionRun{
 		ID:           r.ID,
 		Running:      r.Status == store.IngestStatusRunning,
+		Toggle:       r.Status != store.IngestStatusRunning,
 		Started:      agoPhrase(r.StartedAt, now),
 		StartedISO:   r.StartedAt.UTC().Format(time.RFC3339),
 		StartedTitle: r.StartedAt.Local().Format("2 Jan 2006, 15:04:05"),
@@ -223,7 +451,8 @@ func toIngestionRun(r store.IngestRun, now time.Time) ingestionRun {
 	}
 	switch {
 	case run.Running:
-		run.NewCell, run.Duration = "-", "in progress"
+		run.NewCell = "-"
+		run.ElapsedMS, run.Duration = runClock(r.StartedAt, now)
 	case r.TriggeredBy == store.IngestTriggerProfileRescore:
 		run.NewCell = fmt.Sprintf("%d of %d rescored", r.Counts.Scored, r.Counts.Fetched)
 	default:
@@ -250,8 +479,9 @@ func ingestionTrigger(t string) string {
 }
 
 // toIngestionDetail shapes the expanded part of a run.
-func toIngestionDetail(r store.IngestRun, results []store.RunFeedResult, lines []string) *ingestionDetail {
+func toIngestionDetail(r store.IngestRun, results []store.RunFeedResult) *ingestionDetail {
 	d := &ingestionDetail{
+		ID:       r.ID,
 		Counts:   r.Counts,
 		Rescore:  r.TriggeredBy == store.IngestTriggerProfileRescore,
 		HasFeeds: len(results) > 0,
@@ -264,9 +494,6 @@ func toIngestionDetail(r store.IngestRun, results []store.RunFeedResult, lines [
 			feed.Result, feed.Raw, feed.Why = "Failed", f.Error, explainFeedError(f.Error)
 		}
 		d.Feeds = append(d.Feeds, feed)
-	}
-	for _, raw := range lines {
-		d.Logs = append(d.Logs, parseIngestLogLine(raw))
 	}
 	return d
 }

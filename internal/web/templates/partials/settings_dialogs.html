@@ -4,7 +4,7 @@
 {{/* Dialogs the settings page opens into #modal. */}}
 
 {{/* A "?" button and its bubble: opens on hover or focus, a tap toggles it. */}}
-{{define "stpHint"}}<button type="button" class="hint" aria-describedby="{{.ID}}" aria-label="More about this setting" data-hint>?</button><span class="hint__tip" id="{{.ID}}" role="tooltip">{{.Text}}</span>{{end}}
+{{define "stpHint"}}<button type="button" class="hint" aria-describedby="{{.ID}}" aria-label="{{.Label}}" data-hint>?</button><span class="hint__tip" id="{{.ID}}" role="tooltip">{{.Text}}</span>{{end}}
 
 {{define "stpDiff"}}
 <pre class="stp-diff" aria-label="Changes to the configuration file">{{range .}}{{if eq .Op "..."}}<span class="stp-diff__gap">...</span>{{else}}<span class="stp-diff__l stp-diff__l--{{if eq .Op "+"}}add{{else if eq .Op "-"}}del{{else}}ctx{{end}}"><i>{{if ne .Op " "}}{{.Op}}{{end}}</i>{{.Text}}</span>{{end}}{{end}}</pre>

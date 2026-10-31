@@ -3,4 +3,4 @@
 
 {{/* A source's favicon: its stored icon, or a letter tile when it has none.
      Takes a favData, e.g. {{template "favicon" (fav .Icon .Name .URL 20)}}. */}}
-{{define "favicon"}}{{if .HasIcon}}<span class="fav{{if .Icon.Dark}} fav--dark{{end}}" style="--fs:{{.Size}}px" aria-hidden="true"><img class="fav__i" src="{{.Icon.Src}}" alt="" width="{{.ImgSize}}" height="{{.ImgSize}}" decoding="async"></span>{{else}}<span class="fav fav--mono fav--c{{.Mono.Color}}" style="--fs:{{.Size}}px" aria-hidden="true"><span class="fav__m">{{.Mono.Letter}}</span></span>{{end}}{{end}}
+{{define "favicon"}}{{if .HasIcon}}<span class="fav{{if .Icon.Dark}} fav--dark{{end}}" style="--fs:{{.Size}}px" aria-hidden="true"><img class="fav__i" src="{{.Icon.Src}}" alt="" width="{{.ImgSize}}" height="{{.ImgSize}}" decoding="async" loading="lazy"></span>{{else}}<span class="fav fav--mono fav--c{{.Mono.Color}}" style="--fs:{{.Size}}px" aria-hidden="true"><span class="fav__m">{{.Mono.Letter}}</span></span>{{end}}{{end}}

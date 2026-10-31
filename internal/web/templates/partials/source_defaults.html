@@ -5,16 +5,11 @@
   <div class="modal__backdrop" data-modal-close></div>
   <div class="modal__frame" role="dialog" aria-modal="true" aria-label="Feed defaults">
     <div class="modal__bar">
-      <span class="modal__title">feed defaults</span>
+      <span class="modal__title">feed defaults{{with tip "src-defaults"}}{{template "stpHint" .}}{{end}}</span>
       <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
     </div>
 
     <form class="sdet sdet--defaults" hx-post="/sources/defaults" hx-target="#srcBody" hx-swap="outerHTML">
-      <p class="sdef__intro">
-        What every feed uses unless it sets the value itself. Leave a field blank and it
-        falls through to the built-in.
-      </p>
-
       {{if .Err}}<div class="sdet__err" role="alert">{{.Err}}</div>{{end}}
 
       <div class="sdet__f">

@@ -19,9 +19,9 @@
 {{end}}
 
 {{/* The Library group of the nav. Until the library has loaded it is the one
-     link; after, a group with a link per Library group. The wrapper takes no
-     box of its own. */}}
-{{define "sourcesLibNav"}}<div id="srcLibNav"{{if .OOB}} hx-swap-oob="true"{{end}}>
+     link, which asks to be filled in while the library loads; after, a group with a
+     link per Library group. The wrapper takes no box of its own. */}}
+{{define "sourcesLibNav"}}<div id="srcLibNav"{{if .OOB}} hx-swap-oob="true"{{end}}{{if .Fill}} hx-get="{{.Fill}}" hx-trigger="load delay:1500ms" hx-swap="outerHTML"{{end}}>
 {{- if .Groups}}
 <details class="sh-nav__grp" open>
   <summary class="sh-nav__h">Library</summary>

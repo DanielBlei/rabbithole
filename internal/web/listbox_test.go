@@ -118,12 +118,22 @@ func TestLayoutLoadsListboxBeforeSources(t *testing.T) {
 	w, _ := configTestWeb(t)
 	body := get(t, w, "/settings/general")
 	lb := strings.Index(body, `/static/js/listbox.js`)
-	src := strings.Index(body, `/static/js/sources.js`)
 	st := strings.Index(body, `/static/js/settings.js`)
-	if lb < 0 || src < 0 || st < 0 {
-		t.Fatalf("scripts missing: listbox=%d sources=%d settings=%d", lb, src, st)
+	if lb < 0 || st < 0 {
+		t.Fatalf("scripts missing: listbox=%d settings=%d", lb, st)
 	}
-	if lb > src || lb > st {
-		t.Errorf("listbox.js must load before sources.js and settings.js (%d, %d, %d)", lb, src, st)
+	if lb > st {
+		t.Errorf("listbox.js must load before settings.js (%d, %d)", lb, st)
+	}
+
+	body = get(t, newTestWeb(t), "/sources")
+	lb = strings.Index(body, `/static/js/listbox.js`)
+	src := strings.Index(body, `/static/js/sources.js`)
+	modal := strings.Index(body, `/static/js/modal.js`)
+	if lb < 0 || src < 0 || modal < 0 {
+		t.Fatalf("scripts missing: listbox=%d sources=%d modal=%d", lb, src, modal)
+	}
+	if lb > src || src > modal {
+		t.Errorf("sources.js must sit between listbox.js and modal.js (%d, %d, %d)", lb, src, modal)
 	}
 }

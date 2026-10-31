@@ -3,7 +3,7 @@
 //
 // Client-side because the whole Library is already on the page, a few hundred
 // rows at most, the same call the Manage search makes. The filter box, the
-// @tokens and the label pills sit outside #libBody, so an action that repaints
+// status and tag filters sit outside #libBody, so an action that repaints
 // the list leaves them alone; this file re-applies the filter and the ticks
 // after every swap. The ticked keys are kept here, not in the rows, so they
 // survive those swaps; the bar carries them to the server as hidden fields,
@@ -15,9 +15,9 @@
 // Loaded on every page by the layout. Every lookup is guarded, so it costs
 // nothing on a page where none of this markup exists.
 (function () {
-  var TOKENS = { '@subscribed': 'subscribed', '@removed': 'removed', '@add': 'add' };
   var sel = {}; // key -> true, the entries ticked for Add N
-  var label = null; // the one label filter
+  var labels = Object.create(null); // selected tag names
+  var state = 'all';
 
   function page() { return document.querySelector('[data-lib]'); }
   function input() { return document.querySelector('[data-lib-filter]'); }
@@ -28,16 +28,9 @@
   function rows() { return Array.prototype.slice.call(document.querySelectorAll('#libBody .li-row')); }
   function planOpen() { return !!document.querySelector('#libBody [data-plan]'); }
 
-  // Words narrow the list; @tokens widen among the states. Words keep their
-  // case so a token toggled off leaves the rest of the text as typed.
+  // Search words narrow the selected status and tags.
   function parse() {
-    var toks = [], words = [];
-    query().split(/\s+/).forEach(function (w) {
-      if (!w) return;
-      var l = w.toLowerCase();
-      if (TOKENS[l]) { if (toks.indexOf(l) < 0) toks.push(l); } else words.push(w);
-    });
-    return { toks: toks, words: words };
+    return query().split(/\s+/).filter(function (w) { return !!w; });
   }
 
   function labelsOf(row) {
@@ -45,18 +38,19 @@
   }
 
   function matches(row, pq) {
-    if (label && labelsOf(row).indexOf(label) < 0) return false;
-    if (pq.toks.length && !pq.toks.some(function (t) { return TOKENS[t] === row.dataset.state; })) return false;
+    if (state !== 'all' && row.dataset.state !== state) return false;
+    var selected = Object.keys(labels);
+    if (selected.length && !selected.some(function (name) { return labelsOf(row).indexOf(name) !== -1; })) return false;
     var hay = row.dataset.hay || '';
-    return pq.words.every(function (w) { return hay.indexOf(w.toLowerCase()) !== -1; });
+    return pq.every(function (w) { return hay.indexOf(w.toLowerCase()) !== -1; });
   }
 
   // What a filter that shows nothing says, worded for what was asked.
   function emptyText(pq, addableAll, scope) {
-    var only = pq.toks.length === 1 && !pq.words.length && !label ? pq.toks[0] : null;
-    if (only === '@add' && !addableAll) return 'You have everything in ' + scope + '.';
-    if (only === '@removed') return 'You have not removed anything from ' + scope + '.';
-    if (only === '@subscribed') return 'You have not added anything from ' + scope + ' yet.';
+    var noTags = Object.keys(labels).length === 0;
+    if (!pq.length && noTags && state === 'add' && !addableAll) return 'You have everything in ' + scope + '.';
+    if (!pq.length && noTags && state === 'removed') return 'You have not removed anything from ' + scope + '.';
+    if (!pq.length && noTags && state === 'subscribed') return 'You have not added anything from ' + scope + ' yet.';
     return 'Nothing in ' + scope + ' matches that.';
   }
 
@@ -64,13 +58,7 @@
     var root = page();
     if (!root) return;
     var pq = parse();
-    var q = query().trim();
     var all = rows();
-
-    if (label) {
-      var known = Array.prototype.some.call(root.querySelectorAll('[data-lib-label]'), function (b) { return b.dataset.libLabel === label; });
-      if (!known) label = null;
-    }
 
     // A tick lives while its row can still be added.
     var present = {};
@@ -78,10 +66,12 @@
     Object.keys(sel).forEach(function (key) { if (!present[key]) delete sel[key]; });
 
     var shown = 0, addableAll = 0;
+    var stateCounts = { all: all.length, subscribed: 0, removed: 0, add: 0 };
     all.forEach(function (row) {
       var hit = matches(row, pq);
       row.hidden = !hit;
       if (hit) shown++;
+      if (Object.prototype.hasOwnProperty.call(stateCounts, row.dataset.state)) stateCounts[row.dataset.state]++;
       if (row.dataset.state === 'add') {
         addableAll++;
         var box = row.querySelector('[data-lib-pick]');
@@ -107,16 +97,22 @@
         : 'Select the ' + addable.length + ' new entries in ' + title);
     });
 
-    document.querySelectorAll('[data-lib-token]').forEach(function (b) {
-      var on = pq.toks.indexOf(b.dataset.libToken) !== -1;
-      b.classList.toggle('is-on', on);
-      b.setAttribute('aria-pressed', on ? 'true' : 'false');
-    });
     document.querySelectorAll('[data-lib-label],[data-lib-chip]').forEach(function (b) {
-      var on = label !== null && (b.dataset.libLabel || b.dataset.libChip) === label;
+      var name = b.dataset.libLabel || b.dataset.libChip;
+      var on = !!labels[name];
       b.classList.toggle('is-on', on);
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
+    document.querySelectorAll('[data-lib-state]').forEach(function (b) { b.checked = b.dataset.libState === state; });
+    document.querySelectorAll('[data-lib-state-count]').forEach(function (el) {
+      el.textContent = String(stateCounts[el.dataset.libStateCount] || 0);
+    });
+    var selectedCount = document.querySelector('[data-lib-tags-selected-count]');
+    if (selectedCount) {
+      var nSelected = Object.keys(labels).length;
+      selectedCount.textContent = nSelected ? nSelected + ' selected' : '';
+      selectedCount.hidden = !nSelected;
+    }
 
     var x = document.querySelector('[data-lib-filter-clear]');
     if (x) x.hidden = !query();
@@ -125,7 +121,7 @@
 
     var scope = root.dataset.scope || 'the Library';
     var done = document.querySelector('[data-lib-done]');
-    if (done) done.hidden = !(all.length && !addableAll && !pq.toks.length && !pq.words.length && !label && !q);
+    if (done) done.hidden = !(all.length && !addableAll && state === 'all' && !pq.length && !Object.keys(labels).length);
     var empty = document.querySelector('[data-lib-empty]');
     if (empty) {
       empty.hidden = !(all.length && !shown);
@@ -185,25 +181,14 @@
     if (el) el.value = value;
   }
 
-  function toggleToken(tok) {
-    var pq = parse();
-    var next = pq.words.join(' ');
-    if (pq.toks.indexOf(tok) === -1) next = (next ? next + ' ' : '') + tok;
-    // The tokens already typed stay, in the order they were.
-    else next = query().split(/\s+/).filter(function (w) { return w && w.toLowerCase() !== tok; }).join(' ');
-    setText(next);
-    render();
-    var el = input();
-    if (el) el.focus();
-  }
-
   function toggleLabel(name) {
-    label = label === name ? null : name;
+    if (labels[name]) delete labels[name]; else labels[name] = true;
     render();
   }
 
   function clearFilters() {
-    label = null;
+    labels = Object.create(null);
+    state = 'all';
     setText('');
     render();
   }
@@ -214,6 +199,11 @@
 
   document.addEventListener('change', function (e) {
     var t = e.target;
+    if (t.matches && t.matches('[data-lib-state]')) {
+      state = t.dataset.libState || 'all';
+      render();
+      return;
+    }
     if (!t.matches || !t.matches('[data-lib-pick]')) return;
     if (t.checked) sel[t.value] = true; else delete sel[t.value];
     render();
@@ -224,10 +214,15 @@
     var t = e.target;
     if (!t.closest || !t.closest('[data-lib]')) return;
     var el;
-    if ((el = t.closest('[data-lib-token]'))) {
-      toggleToken(el.dataset.libToken);
-    } else if ((el = t.closest('[data-lib-label],[data-lib-chip]'))) {
+    if ((el = t.closest('[data-lib-label],[data-lib-chip]'))) {
       toggleLabel(el.dataset.libLabel || el.dataset.libChip);
+    } else if ((el = t.closest('[data-lib-tags-toggle]'))) {
+      var box = document.querySelector('[data-lib-tags-box]');
+      var expanded = el.getAttribute('aria-expanded') !== 'true';
+      el.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      if (box) box.hidden = !expanded;
+      var label = el.querySelector('[data-lib-tags-state]');
+      if (label) label.textContent = expanded ? 'Hide' : 'Show';
     } else if (t.closest('[data-lib-filter-clear]')) {
       setText('');
       render();
@@ -252,18 +247,18 @@
     }
   });
 
-  // Esc in the filter box clears every filter: the text (which holds the
-  // @tokens) and the label pill, like "Clear filters". An open modal keeps the
+  // Esc in the filter box clears every filter, like "Clear filters". An open modal keeps the
   // key. Bound ahead of modal.js, like sources.js, so the key is spent here first.
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape' || e.defaultPrevented) return;
     if (document.documentElement.classList.contains('modal-open')) return;
     var field = e.target.closest && e.target.closest('[data-lib-filter]');
-    if (!field || !(field.value || label)) return;
+    if (!field || !(field.value || Object.keys(labels).length || state !== 'all')) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     field.value = '';
-    label = null;
+    labels = Object.create(null);
+    state = 'all';
     render();
   });
 

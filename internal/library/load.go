@@ -62,6 +62,7 @@ type Snapshot struct {
 	Notice  string // set when a file needs a newer version of the app
 	Loaded  bool   // at least one file was accepted
 	Off     bool   // the library is turned off
+	Inert   bool   // the loader has nothing to fetch from, so it never loads
 	// Icons are the baked site icons by source id, empty when the library ships none. Not modified.
 	Icons map[string]Icon
 }
@@ -130,7 +131,7 @@ func NewLoader(o Options) *Loader {
 	if l.now == nil {
 		l.now = time.Now
 	}
-	l.snap = Snapshot{Library: &Library{}, Off: l.off}
+	l.snap = Snapshot{Library: &Library{}, Off: l.off, Inert: !l.off && o.Client == nil && o.Dir == nil}
 	return l
 }
 

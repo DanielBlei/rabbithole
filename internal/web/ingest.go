@@ -54,6 +54,8 @@ type ingestLogLine struct {
 	Debug bool   // hidden by the default INFO filter
 	Msg   string
 	Kvs   []ingestKV
+	// Marker is a note in the log, not an event: lines were left out here.
+	Marker bool
 }
 
 // ingestRunView is one ingest_history row shaped for the template.
@@ -81,8 +83,11 @@ type ingestHistRowData struct {
 // ingestBodyData models the runner modal's swappable body: the live state, the
 // parsed log tail, the newest finished run, and the history table.
 type ingestBodyData struct {
-	Running    bool
-	StartedAgo string
+	Running bool
+	// ElapsedMS is the live run's age in milliseconds, Clock the same worded by
+	// fmtRunDur; the page's clock advances it between polls.
+	ElapsedMS  int64
+	Clock      string
 	Lines      []ingestLogLine
 	Last       *ingestRunView // newest finished run; nil if never ran
 	ShowBanner bool           // fresh successful finish — offer the feed refresh
@@ -111,15 +116,18 @@ type ingestModalData struct {
 type ingestBarData struct {
 	Status  string
 	Running bool
-	// When is the start while running and the end after, as "5m ago". A run the
-	// store has no end time for reads as its start.
-	When    string
-	Took    string // run duration of a finished run
-	Err     string // error text of a failed run
-	Counts  store.IngestCounts
-	Enabled int  // enabled feeds, the scope of a rerun
-	Rerun   bool // label the run button as a full rerun
-	Compact bool
+	// When is the end of a finished run as "5m ago". A run the store has no end
+	// time for reads as its start. While running it is empty: Elapsed and Clock
+	// show the run's age instead.
+	When      string
+	ElapsedMS int64  // milliseconds since a live run started
+	Clock     string // ElapsedMS worded like fmtRunDur
+	Took      string // run duration of a finished run
+	Err       string // error text of a failed run
+	Counts    store.IngestCounts
+	Enabled   int  // enabled feeds, the scope of a rerun
+	Rerun     bool // label the run button as a full rerun
+	Compact   bool
 	// Note makes a bar response carry the running note out of band. Set by the
 	// bar of a page that has the note; a page without it has no target.
 	Note bool
@@ -163,7 +171,11 @@ type chromeData struct {
 
 // chrome assembles the layout's shared state for a full page render.
 func (s *Web) chrome(ctx context.Context) chromeData {
-	c := s.ingestChrome(ctx)
+	return s.chromeWith(ctx, s.ingestChrome(ctx))
+}
+
+// chromeWith is chrome for a caller that has already built the ingest half.
+func (s *Web) chromeWith(ctx context.Context, c chromeData) chromeData {
 	c.Account = accountView(authFrom(ctx), "")
 	if c.IngNever {
 		c.FirstRun, c.Welcome = s.welcome(ctx)
@@ -217,6 +229,19 @@ func (s *Web) handleWelcomeStep(w http.ResponseWriter, r *http.Request) {
 // degrades it (renders as never-ran); it never blocks the page.
 func (s *Web) ingestChrome(ctx context.Context) chromeData {
 	st := s.ing.Status()
+	var last *store.IngestRun
+	if !st.Running {
+		var err error
+		if last, err = s.db.LastIngestRun(ctx); err != nil {
+			log.Warn().Err(err).Msg("reading last ingest run for page chrome")
+		}
+	}
+	return s.ingestChromeFor(st, last)
+}
+
+// ingestChromeFor is the ingest half of the chrome for a caller that already
+// read the manager status and the newest finished run (nil when there is none).
+func (s *Web) ingestChromeFor(st ingest.Status, last *store.IngestRun) chromeData {
 	if st.Running {
 		// A live run pulses the topbar chip, the side menu's dot and the edge tab.
 		activity := "ingest"
@@ -229,10 +254,6 @@ func (s *Web) ingestChrome(ctx context.Context) chromeData {
 			Chip:   ingestChipData{State: "running", Activity: activity},
 			IngDot: "run", IngSub: sub, Running: true,
 		}
-	}
-	last, err := s.db.LastIngestRun(ctx)
-	if err != nil {
-		log.Warn().Err(err).Msg("reading last ingest run for page chrome")
 	}
 	now := time.Now()
 	switch {
@@ -403,13 +424,23 @@ func (s *Web) ingestBarView(ctx context.Context, rerun, compact bool) (ingestBar
 	return s.ingestBarWith(enabled, last, rerun, compact), nil
 }
 
-// ingestBarWith is ingestBarView for a caller that already has the enabled
+// ingestBarKnown is ingestBarView for a caller that already read the enabled
 // count and the newest finished run (nil when there is none).
+func (s *Web) ingestBarKnown(enabled int, last *store.IngestRun, rerun, compact bool) ingestBarData {
+	if s.ing.Status().Running {
+		return s.ingestBarWith(0, nil, rerun, compact)
+	}
+	return s.ingestBarWith(enabled, last, rerun, compact)
+}
+
+// ingestBarWith builds the bar from the enabled count and the newest finished
+// run (nil when there is none).
 func (s *Web) ingestBarWith(enabled int, last *store.IngestRun, rerun, compact bool) ingestBarData {
 	data := ingestBarData{Status: "none", Enabled: enabled, Rerun: rerun, Compact: compact}
 	now := time.Now()
 	if st := s.ing.Status(); st.Running {
-		data.Status, data.Running, data.When = "running", true, agoPhrase(st.StartedAt, now)
+		data.Status, data.Running = "running", true
+		data.ElapsedMS, data.Clock = runClock(st.StartedAt, now)
 		return data
 	}
 	if last == nil {
@@ -568,7 +599,7 @@ func (s *Web) ingestBody(ctx context.Context, page int, fresh bool) (ingestBodyD
 		HistHasNext:  hasMore,
 	}
 	if st.Running {
-		data.StartedAgo = agoPhrase(st.StartedAt, now)
+		data.ElapsedMS, data.Clock = runClock(st.StartedAt, now)
 	}
 	if st.Running || !fresh {
 		for _, raw := range st.Lines {
@@ -681,6 +712,13 @@ func agoPhrase(t, now time.Time) string {
 	return "on " + v
 }
 
+// runClock is the age of a run that started at start: milliseconds (never
+// negative) and the same age worded as fmtRunDur words it.
+func runClock(start, now time.Time) (int64, string) {
+	d := max(now.Sub(start), 0)
+	return d.Milliseconds(), fmtRunDur(d)
+}
+
 // fmtRunDur renders a run duration compactly: "42s", "3m 05s", "1h 12m".
 func fmtRunDur(d time.Duration) string {
 	switch {
@@ -729,6 +767,28 @@ func parseIngestLogLine(raw string) ingestLogLine {
 		ll.Kvs = append(ll.Kvs, ingestKV{K: k, V: fmt.Sprint(m[k])})
 	}
 	return ll
+}
+
+// displayLogLines parses raw zerolog events for display. Debug and trace lines
+// are left out unless debug is set. A positive dropped puts a marker first for
+// the lines that fell off the log's ring before these.
+func displayLogLines(raw []string, dropped int64, debug bool) []ingestLogLine {
+	var out []ingestLogLine
+	if dropped > 0 {
+		msg := fmt.Sprintf("%d earlier lines dropped", dropped)
+		if dropped == 1 {
+			msg = "1 earlier line dropped"
+		}
+		out = append(out, ingestLogLine{Marker: true, Class: "gap", Msg: msg})
+	}
+	for _, line := range raw {
+		ll := parseIngestLogLine(line)
+		if ll.Debug && !debug {
+			continue
+		}
+		out = append(out, ll)
+	}
+	return out
 }
 
 // levelTag maps a zerolog level name onto its display tag, colour class, and

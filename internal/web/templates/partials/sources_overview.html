@@ -26,8 +26,7 @@
 
   <section class="stp-group" aria-labelledby="ovSync">
     <header class="stp-group__h">
-      <div><h3 id="ovSync"><span class="stp-group__t">Sync and health</span></h3></div>
-      <p>Ingestion fetches every enabled feed, then scores new items against your profile.</p>
+      <div><h3><span class="stp-group__t" id="ovSync">Sync and health</span>{{with tip "src-ingest"}}{{template "stpHint" .}}{{end}}</h3></div>
     </header>
     <div class="ov-body">
       {{template "ingestBar" .Overview.Ingest}}
@@ -56,7 +55,7 @@
 
   <section class="stp-group" aria-labelledby="ovAttn">
     <header class="stp-group__h">
-      <div><h3 id="ovAttn"><span class="stp-group__t">Needs attention</span></h3></div>
+      <div><h3><span class="stp-group__t" id="ovAttn">Needs attention</span></h3></div>
     </header>
     <div class="ov-body">
       {{- if .Overview.AllClear}}
@@ -109,8 +108,7 @@
 
   <section class="stp-group" aria-labelledby="ovVol">
     <header class="stp-group__h">
-      <div><h3 id="ovVol"><span class="stp-group__t">Volume</span></h3></div>
-      <p>Stored items per week, last 8 weeks. Retention and the since window cut older history.</p>
+      <div><h3><span class="stp-group__t" id="ovVol">Volume</span>{{with tip "src-volume"}}{{template "stpHint" .}}{{end}}</h3></div>
     </header>
     <div class="ov-body">
       {{- if .Overview.Volume}}
@@ -138,8 +136,8 @@
 
   <section class="stp-group" aria-labelledby="ovSig">
     <header class="stp-group__h">
-      <div><h3 id="ovSig"><span class="stp-group__t">Signal</span></h3></div>
-      <p>How many scored items are {{tier "atleast"}}, per source.</p>
+      <div><h3><span class="stp-group__t" id="ovSig">Signal</span>{{with tip "src-signal"}}{{template "stpHint" .}}{{end}}</h3>
+      <p>How many scored items are {{tier "atleast"}}, per source.</p></div>
     </header>
     <div class="ov-body">
       {{- if .Overview.Signal.Scored}}
@@ -184,7 +182,6 @@
           </li>
           {{- end}}
         </ul>
-        <p class="sh-hint ov-more">Last 30 days. Signal is the score from your profile, not read or thumbs counts.</p>
       </div>
       {{- else}}
       <p class="ov-none">Nothing scored yet. Signal appears after the first run.</p>
@@ -192,29 +189,11 @@
     </div>
   </section>
 
-  {{- with .Overview.Library}}
-  <section class="stp-group" aria-labelledby="ovSug">
-    <header class="stp-group__h">
-      <div><h3 id="ovSug"><span class="stp-group__t">Library suggestions</span></h3></div>
-      <p>Based on the tags of your sources.</p>
-    </header>
-    <div class="ov-body">
-      {{- if .Suggestions}}
-      <ul class="ov-list">
-        {{- range .Suggestions}}{{template "ovSuggestion" .}}{{end}}
-      </ul>
-      {{- else}}
-      <p class="ov-none">No suggestions right now. Tag your sources and the Library can match them.</p>
-      {{- end}}
-      <a class="ov-link" href="/sources/library">Browse the Library</a>
-    </div>
-  </section>
-  {{template "ovCoverage" .Coverage}}
-  {{- end}}
+  {{- if .Overview.Library}}{{template "ovLibrary" .Overview.Library}}{{else if .Overview.LibFill}}{{template "ovLibPending" .Overview.LibFill}}{{end}}
 
   <section class="stp-group" aria-labelledby="ovSlow">
     <header class="stp-group__h">
-      <div><h3 id="ovSlow"><span class="stp-group__t">Slowest feeds</span></h3></div>
+      <div><h3><span class="stp-group__t" id="ovSlow">Slowest feeds</span></h3></div>
       <p>Average fetch time. Slow feeds stretch every run.</p>
     </header>
     <div class="ov-body">
@@ -237,6 +216,38 @@
 {{- end}}
 </div>
 {{end}}
+
+{{/* The Library suggestions and coverage sections. */}}
+{{define "ovLibrary"}}
+  <section class="stp-group" aria-labelledby="ovSug">
+    <header class="stp-group__h">
+      <div><h3><span class="stp-group__t" id="ovSug">Library suggestions</span></h3></div>
+      <p>Based on the tags of your sources.</p>
+    </header>
+    <div class="ov-body">
+      {{- if .Suggestions}}
+      <ul class="ov-list">
+        {{- range .Suggestions}}{{template "ovSuggestion" .}}{{end}}
+      </ul>
+      {{- else}}
+      <p class="ov-none">No suggestions right now. Tag your sources and the Library can match them.</p>
+      {{- end}}
+      <a class="ov-link" href="/sources/library">Browse the Library</a>
+    </div>
+  </section>
+  {{template "ovCoverage" .Coverage}}
+{{end}}
+
+{{/* Stands in for the Library sections until the library has loaded, then
+     replaces itself with them. The ask is bounded server side. */}}
+{{define "ovLibPending"}}
+<section class="stp-group" id="ovLibPending" aria-live="polite" hx-get="{{.}}" hx-trigger="load delay:1500ms" hx-swap="outerHTML">
+  <div class="ov-body"><p class="ov-none">Loading suggestions from the Library.</p></div>
+</section>
+{{end}}
+
+{{/* The answer to a placeholder: the sections, or the placeholder again. */}}
+{{define "ovLibraryFill"}}{{if .Library}}{{template "ovLibrary" .Library}}{{else if .Fill}}{{template "ovLibPending" .Fill}}{{end}}{{end}}
 
 {{/* One suggested Library source. Add posts the key to the Library apply, whose
      reply is this row again: Subscribed once added, or why it was not. */}}
@@ -264,7 +275,7 @@
 {{define "ovCoverage"}}
 <section class="stp-group" id="ovCoverage" aria-labelledby="ovCov"{{if .OOB}} hx-swap-oob="true"{{end}}>
   <header class="stp-group__h">
-    <div><h3 id="ovCov"><span class="stp-group__t">Library coverage</span></h3></div>
+    <div><h3><span class="stp-group__t" id="ovCov">Library coverage</span></h3></div>
     <p>How much of each Library group you have added.</p>
   </header>
   <div class="ov-body">

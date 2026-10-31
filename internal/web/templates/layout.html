@@ -177,8 +177,8 @@
             <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></button></li>
         </ul>
       </div>
-      <div class="modal__foot welcome__foot">
-        <button class="prof-form__save" type="button" data-modal-close>got it</button>
+      <div class="modal__foot stp-dlg__foot">
+        <button class="clk-btn clk-btn--go" type="button" data-modal-close>got it</button>
       </div>
     </div>
   </div>
@@ -189,14 +189,16 @@
        is parsed. Each file says at the top what it owns. -->
   <script src="/static/js/net.js" defer></script>
   <script src="/static/js/chrome.js" defer></script>
+  <script src="/static/js/hint.js" defer></script>
   {{/* Ahead of modal.js on purpose: both bind Escape on document, and the
        sources search box has to swallow the key before modal.js acts on it. */}}
   <script src="/static/js/tagput.js" defer></script>
   {{/* Ahead of sources.js and settings.js, which use the rhListbox global it
        defines. Escape is handled on the menu element itself. */}}
   <script src="/static/js/listbox.js" defer></script>
-  <script src="/static/js/sources.js" defer></script>
-  <script src="/static/js/library.js" defer></script>
+  {{/* The Sources page fills this in: sources.js and library.js bind Escape
+       ahead of modal.js, so they load here and not in the scripts block. */}}
+  {{block "pagescripts" .}}{{end}}
   <script src="/static/js/modal.js" defer></script>
   <script src="/static/js/profiles.js" defer></script>
   <script src="/static/js/welcome.js" defer></script>
