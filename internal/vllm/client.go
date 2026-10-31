@@ -118,7 +118,7 @@ func (c *Client) probeModelWithRetry(ctx context.Context, effort string) error {
 		}
 		return last
 	}, func(attempt int, err error, delay time.Duration) {
-		zerolog.Ctx(ctx).Debug().Str("backend", c.flavor.String()).Int("attempt", attempt).Err(err).
+		zerolog.Ctx(ctx).Info().Str("backend", c.flavor.String()).Int("attempt", attempt).Err(err).
 			Str("retry_in", delay.String()).Msg(c.flavor.String() + ": chat probe failed, retrying")
 	})
 	return last

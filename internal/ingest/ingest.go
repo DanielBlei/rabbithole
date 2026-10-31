@@ -128,6 +128,9 @@ func Run(
 		if resolved {
 			return scorer, nil
 		}
+		if cfg.Inference.Provider != config.ProviderHeuristic {
+			logger.Info().Str("backend", cfg.Inference.Provider).Msg("connecting to model")
+		}
 		s, err := resolveConfiguredScorer(ctx, cfg, opts.Think)
 		if err != nil {
 			return nil, err
@@ -190,8 +193,15 @@ func Run(
 			return outcome, err
 		}
 
+		// Batches run in parallel, so progress reports a completion count.
+		scoreStart := time.Now()
 		scores := rank.ScoreAll(
 			ctx, s, activeProfile.Content, unseen, cfg.Inference.BatchSize, cfg.Inference.MaxParallel,
+			rank.OnBatch(func(done, total, _ int) {
+				logger.Info().Str("feed", f.Name).Int("done", done).Int("of", total).
+					Str("elapsed", time.Since(scoreStart).Round(100*time.Millisecond).String()).
+					Msg("scoring progress")
+			}),
 		)
 		failed := len(unseen) - len(scores)
 		outcome.Failed += failed
