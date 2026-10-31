@@ -257,7 +257,7 @@ groups:
         labels: [Community]
 
   - name: arxiv-categories
-    title: arXiv categories
+    title: Papers
     description: Every new arXiv paper in a category. High volume, so each is capped per run.
     sources:
       - name: arXiv cs.LG (Machine Learning)

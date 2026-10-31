@@ -156,35 +156,22 @@ func (r feedRowData) KindNote() string {
 	return " · " + r.Type
 }
 
-// FirstTag is the tag the row shows; the rest collapse into a count.
-func (r feedRowData) FirstTag() string {
-	if len(r.Tags) == 0 {
-		return ""
-	}
-	return r.Tags[0]
+// tagChip is one of a row's tags with its palette index.
+type tagChip struct {
+	Name  string
+	Color int
 }
 
-// FirstTagColor is the palette index of the first tag by the tag input's own
-// hash, so the chip is already right when the page paints. The script then
-// recolours it if the reader has picked another colour for that tag.
-func (r feedRowData) FirstTagColor() int {
-	return tagColor(r.FirstTag())
-}
-
-// MoreTags is how many tags sit behind the first.
-func (r feedRowData) MoreTags() int {
-	if len(r.Tags) < 2 {
-		return 0
+// TagChips lists every tag of the row. The palette index is the tag input's
+// own hash, so the chips are already right when the page paints; the script
+// recolours them if the reader has picked another colour for a tag. The page
+// script decides how many of them fit the column.
+func (r feedRowData) TagChips() []tagChip {
+	out := make([]tagChip, len(r.Tags))
+	for i, t := range r.Tags {
+		out[i] = tagChip{Name: t, Color: tagColor(t)}
 	}
-	return len(r.Tags) - 1
-}
-
-// MoreTagsTitle names the tags behind the first, for the count's tooltip.
-func (r feedRowData) MoreTagsTitle() string {
-	if len(r.Tags) < 2 {
-		return ""
-	}
-	return strings.Join(r.Tags[1:], ", ")
+	return out
 }
 
 // StateText is the short status under the fetch history. Never-fetched rows

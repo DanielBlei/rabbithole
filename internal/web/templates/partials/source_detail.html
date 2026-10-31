@@ -138,7 +138,7 @@
     <h3 class="mg-ed__h">Last 30 days</h3>
     <dl class="mg-facts">
       <dt>Status</dt><dd>{{.Status}}</dd>
-      <dt>Stored items</dt><dd>{{template "spark" .Stats}}<span class="mg-facts__txt">{{.ItemsText}}</span></dd>
+      <dt>Stored items</dt><dd><span class="mg-facts__txt">{{.ItemsText}}</span></dd>
       <dt>Signal</dt><dd>{{if .Never}}{{.SignalText}}{{else}}{{template "tierBar" .Stats.Sig.Bar}}<span class="mg-facts__txt">{{.SignalText}}</span>{{end}}</dd>
       <dt>Reader activity</dt><dd>{{.ActivityText}}</dd>
       <dt>Fetch time</dt><dd>{{.FetchText}}</dd>

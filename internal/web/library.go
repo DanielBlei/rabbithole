@@ -107,6 +107,7 @@ type libEntry struct {
 type libLabel struct {
 	Name  string
 	Count int
+	Color int
 }
 
 type libFilter struct {
@@ -301,7 +302,7 @@ func (s *Web) libraryPageFor(ctx context.Context, snap library.Snapshot, group s
 		return strings.Compare(a.Title, b.Title)
 	})
 	for name, n := range counts {
-		p.Labels = append(p.Labels, libLabel{Name: name, Count: n})
+		p.Labels = append(p.Labels, libLabel{Name: name, Count: n, Color: tagColor(name)})
 	}
 	slices.SortFunc(p.Labels, func(a, b libLabel) int {
 		if c := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); c != 0 {

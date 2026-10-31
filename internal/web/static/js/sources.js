@@ -50,6 +50,7 @@
   var tagOpen = false; // the bulk bar's Add tag input is showing
   var rmKey = null; // the tags the Remove tag menu was built from
   var focusSel = false; // a bulk Remove or Restore is in flight: refocus when the selection empties
+  var ovFoldPrefix = 'rh.sources.overview.fold.';
 
   function input() { return document.querySelector('[data-src-query]'); }
   function query() {
@@ -128,6 +129,37 @@
     sorted.forEach(function (row) { list.appendChild(row); });
   }
 
+  // Tags: each row shows the chips its column has room for and counts the rest
+  // in a "+N" chip whose title names them. Chips do not shrink, so the fit is
+  // measured on their natural widths. A lone chip still too wide is cut with an
+  // ellipsis. A hidden row has no width, so it is fitted when a filter shows it.
+  function fitTagRow(row) {
+    var chips = [].slice.call(row.querySelectorAll('.tag[data-tag]'));
+    var more = row.querySelector('[data-tag-more]');
+    if (!more || !chips.length || !row.clientWidth) return;
+    var gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+    var over = function () { return row.scrollWidth > row.clientWidth + 1; };
+    var show = function (k) {
+      chips.forEach(function (c, i) { c.hidden = i >= k; c.style.maxWidth = ''; });
+      more.hidden = k === chips.length;
+      more.textContent = '+' + (chips.length - k);
+      more.title = chips.slice(k).map(function (c) { return c.dataset.tag; }).join(', ');
+    };
+    var k = chips.length;
+    show(k);
+    while (k > 1 && over()) { k--; show(k); }
+    if (over()) {
+      var room = row.clientWidth - (more.hidden ? 0 : more.offsetWidth + gap);
+      chips[0].style.maxWidth = Math.max(0, room) + 'px';
+    }
+  }
+
+  function fitTags() {
+    document.querySelectorAll('[data-tag-fit]').forEach(fitTagRow);
+    document.querySelectorAll('.mg-listwrap').forEach(function (el) { tagResize.observe(el); });
+  }
+  var tagResize = window.ResizeObserver ? new ResizeObserver(fitTags) : { observe: function () {} };
+
   function apply() {
     sortRows();
     var q = query();
@@ -143,6 +175,7 @@
       if (hit) shown++;
     });
     syncSel();
+    fitTags();
 
     var toolbar = document.querySelector('[data-src-toolbar]');
     if (toolbar) toolbar.hidden = rows.length === 0;
@@ -698,6 +731,14 @@
   // replayed on Discard.
   document.addEventListener('click', function (e) {
     var t = e.target;
+
+    var openEditor = document.querySelector('#srcBody .mg-item:not(.mg-item--add) > .mg-ed');
+    if (openEditor && !openEditor.contains(t) && !t.closest('.mg-row') && !t.closest('.mg-guard')) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      guardThen(function () { closeEditor(openEditor); }, null);
+      return;
+    }
     if (!t.closest) return;
 
     // Add tag with nothing typed makes no request.
@@ -1346,7 +1387,33 @@
     el.scrollIntoView({block: 'nearest', inline: 'nearest'});
   }
 
-  function refresh() { syncPills(); syncMenus(); apply(); syncAttn(); initEditors(); }
+  function refreshOverviewFolds() {
+    document.querySelectorAll('[data-ov-fold]').forEach(function (button) {
+      var key = ovFoldPrefix + button.dataset.ovFold;
+      var saved = null;
+      try { saved = localStorage.getItem(key); } catch (e) {}
+      var open = saved === 'open' ? true : saved === 'closed' ? false : button.dataset.ovDefaultOpen === 'true';
+      var body = document.getElementById(button.getAttribute('aria-controls'));
+      if (!body) return;
+      body.hidden = !open;
+      button.setAttribute('aria-expanded', open ? 'true' : 'false');
+      button.setAttribute('aria-label', (open ? 'Collapse ' : 'Expand ') + button.closest('.stp-group').querySelector('.stp-group__t').textContent.trim());
+    });
+  }
+
+  function refresh() { syncPills(); syncMenus(); apply(); syncAttn(); initEditors(); refreshOverviewFolds(); }
+
+  document.addEventListener('click', function (e) {
+    var button = e.target.closest && e.target.closest('[data-ov-fold]');
+    if (!button) return;
+    var open = button.getAttribute('aria-expanded') !== 'true';
+    var body = document.getElementById(button.getAttribute('aria-controls'));
+    if (!body) return;
+    body.hidden = !open;
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+    button.setAttribute('aria-label', (open ? 'Collapse ' : 'Expand ') + button.closest('.stp-group').querySelector('.stp-group__t').textContent.trim());
+    try { localStorage.setItem(ovFoldPrefix + button.dataset.ovFold, open ? 'open' : 'closed'); } catch (err) {}
+  });
 
   document.addEventListener('DOMContentLoaded', function () {
     var params = new URLSearchParams(window.location.search);

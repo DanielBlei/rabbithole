@@ -112,6 +112,13 @@
       var nSelected = Object.keys(labels).length;
       selectedCount.textContent = nSelected ? nSelected + ' selected' : '';
       selectedCount.hidden = !nSelected;
+      var toggle = document.querySelector('[data-lib-tags-toggle]');
+      if (toggle) {
+        toggle.classList.toggle('is-on', nSelected > 0);
+        toggle.setAttribute('aria-label', nSelected
+          ? 'Filter by tags, ' + nSelected + ' selected'
+          : 'Filter by tags');
+      }
     }
 
     var x = document.querySelector('[data-lib-filter-clear]');
@@ -176,6 +183,16 @@
     refresh();
   }
 
+  // Keep the tag picker open while working in the combined search control;
+  // dismiss it as soon as the user moves elsewhere on the page.
+  document.addEventListener('click', function (e) {
+    var box = document.querySelector('[data-lib-tags-box]');
+    if (!box || box.hidden || (e.target.closest && e.target.closest('.li-search-wrap'))) return;
+    box.hidden = true;
+    var toggle = document.querySelector('[data-lib-tags-toggle]');
+    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+  });
+
   function setText(value) {
     var el = input();
     if (el) el.value = value;
@@ -221,8 +238,6 @@
       var expanded = el.getAttribute('aria-expanded') !== 'true';
       el.setAttribute('aria-expanded', expanded ? 'true' : 'false');
       if (box) box.hidden = !expanded;
-      var label = el.querySelector('[data-lib-tags-state]');
-      if (label) label.textContent = expanded ? 'Hide' : 'Show';
     } else if (t.closest('[data-lib-filter-clear]')) {
       setText('');
       render();

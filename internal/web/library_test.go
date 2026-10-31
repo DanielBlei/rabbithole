@@ -100,7 +100,7 @@ func TestLibraryPageListsEveryGroup(t *testing.T) {
 
 	for _, want := range []string{
 		"<title>Library</title>", `<h1 class="li-title">Library</h1>`, "All sources in the Library",
-		"Blogs", "Releases", "Community", "arXiv categories", "LLM systems", "Agents, RAG and evals", "Journals",
+		"Blogs", "Releases", "Community", "Papers", "LLM systems", "Agents, RAG and evals", "Journals",
 		`placeholder="Search name, address or tag"`, `aria-label="Filter the Library"`,
 		`data-lib-state="all"`, `data-lib-state="subscribed"`, `data-lib-state="removed"`, `data-lib-state="add"`,
 		"Filter Library by status", `data-lib-tags-toggle`, `aria-expanded="false"`, `id="libTagFilters"`,
@@ -116,7 +116,7 @@ func TestLibraryPageListsEveryGroup(t *testing.T) {
 	}
 	for _, want := range []string{
 		`class="li-sec__t"><h3>Agents, RAG and evals</h3>`,
-		`class="li-sec__t"><h3>arXiv categories</h3>`,
+		`class="li-sec__t"><h3>Papers</h3>`,
 		`class="li-sec__t"><h3>Blogs</h3>`,
 		`class="li-sec__t"><h3>Community</h3>`,
 		`class="li-sec__t"><h3>Journals</h3>`,
@@ -129,11 +129,11 @@ func TestLibraryPageListsEveryGroup(t *testing.T) {
 	}
 	order := []string{
 		`class="li-sec__t"><h3>Agents, RAG and evals</h3>`,
-		`class="li-sec__t"><h3>arXiv categories</h3>`,
 		`class="li-sec__t"><h3>Blogs</h3>`,
 		`class="li-sec__t"><h3>Community</h3>`,
 		`class="li-sec__t"><h3>Journals</h3>`,
 		`class="li-sec__t"><h3>LLM systems</h3>`,
+		`class="li-sec__t"><h3>Papers</h3>`,
 		`class="li-sec__t"><h3>Releases</h3>`,
 	}
 	last := -1
@@ -212,11 +212,11 @@ func TestLibraryRowCarriesTheEntry(t *testing.T) {
 
 func TestLibraryGroupPage(t *testing.T) {
 	w, _ := libraryTestWeb(t, config.FeedsDoc{})
-	out := get(t, w, "/sources/library/journals")
+	out := get(t, w, "/sources/library/arxiv-categories")
 
 	for _, want := range []string{
-		"<title>Journals</title>", `<h1 class="li-title">Journals</h1>`, "Communications of the ACM", `data-scope="this group"`,
-		`href="/sources/library/journals" aria-current="page"`,
+		"<title>Papers</title>", `<h1 class="li-title">Papers</h1>`, "arXiv cs.AI (Artificial Intelligence)", `data-scope="this group"`,
+		`href="/sources/library/arxiv-categories" aria-current="page"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q", want)

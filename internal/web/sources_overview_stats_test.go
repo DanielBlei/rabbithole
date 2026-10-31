@@ -407,6 +407,11 @@ func TestOverviewRendersSections(t *testing.T) {
 func TestOverviewSectionsOrderWithLibrary(t *testing.T) {
 	w, _ := overviewLibraryWeb(t, config.FeedsDoc{Feeds: goFeeds()})
 	out := get(t, w, "/sources")
+	for _, fold := range []string{"attention", "volume", "signal", "suggestions", "coverage", "slowest"} {
+		if !strings.Contains(out, `data-ov-fold="`+fold+`"`) {
+			t.Errorf("Overview is missing the %q fold control", fold)
+		}
+	}
 	last := -1
 	for _, h := range []string{"Sync and health", "Needs attention", ">Volume<", ">Signal<", "Library suggestions", "Library coverage", "Slowest feeds"} {
 		i := strings.Index(out, h)

@@ -76,6 +76,11 @@ func TestOverviewAllHealthy(t *testing.T) {
 		`<p class="ov-brief">2 sources, all healthy.</p>`,
 		"Nothing failing.",
 		"100%",
+		`class="pane ov-shell"`,
+		`aria-labelledby="ovSync"`,
+		`data-ov-fold="attention" data-ov-default-open="false"`,
+		`aria-expanded="false" aria-controls="ovAttnBody"`,
+		`id="ovAttnBody" data-ov-content hidden`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q; body=%s", want, out)
@@ -99,6 +104,9 @@ func TestOverviewNeedsAttention(t *testing.T) {
 
 	for _, want := range []string{
 		`<p class="ov-brief">3 sources, 2 need attention.</p>`,
+		`data-ov-fold="attention" data-ov-default-open="true"`,
+		`aria-expanded="true" aria-controls="ovAttnBody"`,
+		`id="ovAttnBody" data-ov-content`,
 		"1 source failing",
 		"Broken</div>",
 		"1 source flaky",

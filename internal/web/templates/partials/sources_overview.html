@@ -24,6 +24,12 @@
     <p class="ov-brief">{{.Overview.Brief}}</p>
   </header>
 
+  <div class="pane ov-shell">
+  <div class="pane__bar ov-shell__bar">
+    <span class="pane__ps"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~/sources</span><span class="sh">$&nbsp;</span><span class="pane__cmd">overview</span></span>
+    <span class="blink">_</span>
+  </div>
+  <div class="pane__body ov-shell__body">
   <section class="stp-group" aria-labelledby="ovSync">
     <header class="stp-group__h">
       <div><h3><span class="stp-group__t" id="ovSync">Sync and health</span>{{with tip "src-ingest"}}{{template "stpHint" .}}{{end}}</h3></div>
@@ -53,11 +59,15 @@
     </div>
   </section>
 
-  <section class="stp-group" aria-labelledby="ovAttn">
+  <section class="stp-group ov-fold" aria-labelledby="ovAttn">
     <header class="stp-group__h">
       <div><h3><span class="stp-group__t" id="ovAttn">Needs attention</span></h3></div>
+      <button class="ov-fold__toggle" type="button" data-ov-fold="attention" data-ov-default-open="{{not .Overview.AllClear}}"
+              aria-expanded="{{not .Overview.AllClear}}" aria-controls="ovAttnBody" aria-label="{{if .Overview.AllClear}}Expand{{else}}Collapse{{end}} Needs attention">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
     </header>
-    <div class="ov-body">
+    <div class="ov-body" id="ovAttnBody" data-ov-content{{if .Overview.AllClear}} hidden{{end}}>
       {{- if .Overview.AllClear}}
       <p class="ov-clear"><span class="ov-att__dot ov-att__dot--ok" aria-hidden="true"></span>Nothing failing.{{if .Overview.LastRun}} Last run {{.Overview.LastRun}}.{{end}}</p>
       {{- else}}
@@ -106,21 +116,22 @@
     </div>
   </section>
 
-  <section class="stp-group" aria-labelledby="ovVol">
+  <section class="stp-group ov-fold" aria-labelledby="ovVol">
     <header class="stp-group__h">
-      <div><h3><span class="stp-group__t" id="ovVol">Volume</span>{{with tip "src-volume"}}{{template "stpHint" .}}{{end}}</h3></div>
+      <div><h3><span class="stp-group__t" id="ovVol">Volume</span>{{with tip "src-volume"}}{{template "stpHint" .}}{{end}}</h3>{{if .Overview.Volume}}<span class="ov-vol-note">8-week trend · items per week</span>{{end}}</div>
+      <button class="ov-fold__toggle" type="button" data-ov-fold="volume" data-ov-default-open="true" aria-expanded="true" aria-controls="ovVolBody" aria-label="Collapse Volume">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
     </header>
-    <div class="ov-body">
+    <div class="ov-body" id="ovVolBody" data-ov-content>
       {{- if .Overview.Volume}}
       <div>
-        <div class="ov-colh" aria-hidden="true"><span class="ov-cw-spark">Last 8 weeks</span><span class="ov-cw-num">Stored items</span></div>
-        <ul class="ov-list">
+        <ul class="ov-list ov-volume-list">
           {{- range .Overview.Volume}}
           <li class="ov-vrow">
             {{template "favicon" (fav .Icon .Name .URL 20)}}
             <div class="ov-who">{{template "ovName" .}}{{if .Hint}}<span class="sh-hint">{{.Hint}}</span>{{end}}</div>
-            {{template "spark" .}}
-            <span class="ov-num"><b>{{.PerWeekText}}</b><span class="sh-hint"> /wk</span></span>
+            <span class="ov-viz"><span class="ov-num"><b>{{.PerWeekText}}</b><span class="ov-num__unit">items/week</span></span>{{template "spark" .}}</span>
           </li>
           {{- end}}
         </ul>
@@ -134,12 +145,15 @@
     </div>
   </section>
 
-  <section class="stp-group" aria-labelledby="ovSig">
+  <section class="stp-group ov-fold" aria-labelledby="ovSig">
     <header class="stp-group__h">
       <div><h3><span class="stp-group__t" id="ovSig">Signal</span>{{with tip "src-signal"}}{{template "stpHint" .}}{{end}}</h3>
       <p>How many scored items are {{tier "atleast"}}, per source.</p></div>
+      <button class="ov-fold__toggle" type="button" data-ov-fold="signal" data-ov-default-open="true" aria-expanded="true" aria-controls="ovSigBody" aria-label="Collapse Signal">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
     </header>
-    <div class="ov-body">
+    <div class="ov-body" id="ovSigBody" data-ov-content>
       {{- if .Overview.Signal.Scored}}
       <div>
         {{- if or .Overview.Signal.Best .Overview.Signal.Noisy}}
@@ -191,12 +205,15 @@
 
   {{- if .Overview.Library}}{{template "ovLibrary" .Overview.Library}}{{else if .Overview.LibFill}}{{template "ovLibPending" .Overview.LibFill}}{{end}}
 
-  <section class="stp-group" aria-labelledby="ovSlow">
+  <section class="stp-group ov-fold" aria-labelledby="ovSlow">
     <header class="stp-group__h">
       <div><h3><span class="stp-group__t" id="ovSlow">Slowest feeds</span></h3></div>
       <p>Average fetch time. Slow feeds stretch every run.</p>
+      <button class="ov-fold__toggle" type="button" data-ov-fold="slowest" data-ov-default-open="true" aria-expanded="true" aria-controls="ovSlowBody" aria-label="Collapse Slowest feeds">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
     </header>
-    <div class="ov-body">
+    <div class="ov-body" id="ovSlowBody" data-ov-content>
       {{- if .Overview.Slowest}}
       <ul class="ov-list ov-bars">
         {{- range .Overview.Slowest}}
@@ -212,6 +229,8 @@
       {{- end}}
     </div>
   </section>
+  </div>
+  </div>
 </div>
 {{- end}}
 </div>
@@ -219,12 +238,15 @@
 
 {{/* The Library suggestions and coverage sections. */}}
 {{define "ovLibrary"}}
-  <section class="stp-group" aria-labelledby="ovSug">
+  <section class="stp-group ov-fold" aria-labelledby="ovSug">
     <header class="stp-group__h">
       <div><h3><span class="stp-group__t" id="ovSug">Library suggestions</span></h3></div>
       <p>Based on the tags of your sources.</p>
+      <button class="ov-fold__toggle" type="button" data-ov-fold="suggestions" data-ov-default-open="true" aria-expanded="true" aria-controls="ovSugBody" aria-label="Collapse Library suggestions">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
     </header>
-    <div class="ov-body">
+    <div class="ov-body" id="ovSugBody" data-ov-content>
       {{- if .Suggestions}}
       <ul class="ov-list">
         {{- range .Suggestions}}{{template "ovSuggestion" .}}{{end}}
@@ -241,8 +263,14 @@
 {{/* Stands in for the Library sections until the library has loaded, then
      replaces itself with them. The ask is bounded server side. */}}
 {{define "ovLibPending"}}
-<section class="stp-group" id="ovLibPending" aria-live="polite" hx-get="{{.}}" hx-trigger="load delay:1500ms" hx-swap="outerHTML">
-  <div class="ov-body"><p class="ov-none">Loading suggestions from the Library.</p></div>
+<section class="stp-group ov-fold" id="ovLibPending" aria-labelledby="ovSug" aria-live="polite" hx-get="{{.}}" hx-trigger="load delay:1500ms" hx-swap="outerHTML">
+  <header class="stp-group__h">
+    <div><h3><span class="stp-group__t" id="ovSug">Library suggestions</span></h3></div>
+    <button class="ov-fold__toggle" type="button" data-ov-fold="suggestions" data-ov-default-open="true" aria-expanded="true" aria-controls="ovSugPendingBody" aria-label="Collapse Library suggestions">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+  </header>
+  <div class="ov-body" id="ovSugPendingBody" data-ov-content><p class="ov-none">Loading suggestions from the Library.</p></div>
 </section>
 {{end}}
 
@@ -273,12 +301,15 @@
 
 {{/* How much of each Library group is added. */}}
 {{define "ovCoverage"}}
-<section class="stp-group" id="ovCoverage" aria-labelledby="ovCov"{{if .OOB}} hx-swap-oob="true"{{end}}>
+<section class="stp-group ov-fold" id="ovCoverage" aria-labelledby="ovCov"{{if .OOB}} hx-swap-oob="true"{{end}}>
   <header class="stp-group__h">
     <div><h3><span class="stp-group__t" id="ovCov">Library coverage</span></h3></div>
     <p>How much of each Library group you have added.</p>
+    <button class="ov-fold__toggle" type="button" data-ov-fold="coverage" data-ov-default-open="true" aria-expanded="true" aria-controls="ovCovBody" aria-label="Collapse Library coverage">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
   </header>
-  <div class="ov-body">
+  <div class="ov-body" id="ovCovBody" data-ov-content>
     <p class="ov-big"><b>{{.Added}}</b> of {{.Total}} library sources added</p>
     <ul class="ov-list">
       {{- range .Groups}}

@@ -16,9 +16,9 @@
 
     <div class="mg-c mg-c--src">
       {{template "favicon" (fav .Icon .Name .URL 20)}}
-      <div class="mg-name">
-        <span class="mg-nm"><span class="mg-nm__t" title="{{.Name}}">{{.Name}}</span></span>
-        <span class="mg-host" title="{{.URL}}">{{.ShortHost}}{{.KindNote}}</span>
+      <div class="mg-name" title="{{.Name}}&#10;{{.URL}}">
+        <span class="mg-nm"><span class="mg-nm__t">{{.Name}}</span></span>
+        <span class="mg-host">{{.ShortHost}}{{.KindNote}}</span>
       </div>
     </div>
 
@@ -35,17 +35,17 @@
       <div class="mg-c mg-c--tags">
         <span class="mg-k">Tags</span>
         {{if .Tags}}
-        <span class="mg-tagrow">
-          <span class="tag tag--clip tag--c{{.FirstTagColor}}" data-tag="{{.FirstTag}}" title="{{.FirstTag}}">{{.FirstTag}}</span>
-          {{if .MoreTags}}<span class="tag tag--more" title="{{.MoreTagsTitle}}">+{{.MoreTags}}</span>{{end}}
+        <span class="mg-tagrow" data-tag-fit>
+          {{range .TagChips}}<span class="tag tag--clip tag--c{{.Color}}" data-tag="{{.Name}}" title="{{.Name}}">{{.Name}}</span>{{end}}
+          <span class="tag tag--more" data-tag-more hidden></span>
         </span>
         {{else}}<span class="sh-hint">none</span>{{end}}
       </div>
 
       <div class="mg-c mg-c--vol">
         <span class="mg-k">Stored / week</span>
-        {{if eq .State "never"}}<span class="sh-hint">none yet</span>
-        {{else}}<span class="mg-vol"><b>{{.Stats.PerWeekText}}</b>{{with .Stats.LastPhrase}}<span class="mg-sub2" title="last item {{.}}">last item {{.}}</span>{{else}}<span class="mg-sub2">no items</span>{{end}}</span>{{end}}
+        {{if eq .State "never"}}<span class="mg-vol"><b>0</b></span>
+        {{else}}<span class="mg-vol"><b>{{.Stats.PerWeekText}}</b></span>{{end}}
       </div>
 
       <div class="mg-c mg-c--sig">

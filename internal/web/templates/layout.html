@@ -38,8 +38,8 @@
       <span class="breaker">/</span>
       <nav class="topbar__nav">
         <a class="{{if eq .Active "feed"}}active{{end}}" href="/feed">Feed</a>
-        <a class="{{if eq .Active "maze"}}active{{end}}" href="/maze">Maze</a>
         <a class="{{if eq .Active "sources"}}active{{end}}" href="/sources">Sources</a>
+        <a class="{{if eq .Active "maze"}}active{{end}}" href="/maze">Maze</a>
       </nav>
     </div>
     <div class="topbar__right">
@@ -106,6 +106,14 @@
         <span class="navrail__ds">the rabbit hole</span>
       </span>
     </a>
+    <a class="navrail__item navrail__item--page{{if eq .Active "sources"}} navrail__item--on{{end}}" href="/sources"
+       {{if eq .Active "sources"}}aria-current="page"{{end}}>
+      <span class="navrail__mk" aria-hidden="true">&#10095;</span>
+      <span class="navrail__txt">
+        <span class="navrail__nm">Sources<i class="navrail__cur" aria-hidden="true"></i></span>
+        <span class="navrail__ds">feeds &amp; health</span>
+      </span>
+    </a>
     <a class="navrail__item navrail__item--page{{if eq .Active "maze"}} navrail__item--on{{end}}" href="/maze"
        {{if eq .Active "maze"}}aria-current="page"{{end}}>
       <span class="navrail__mk" aria-hidden="true">&#10095;</span>
@@ -126,11 +134,6 @@
          all three a drawer's length away from the pages. */}}
     <div class="navrail__foot">
       <div class="navrail__sec"><span>config</span></div>
-      <a class="navrail__item navrail__item--cmd{{if eq .Active "sources"}} navrail__item--on{{end}}" href="/sources" aria-label="Sources"{{if eq .Active "sources"}} aria-current="page"{{end}}>
-        <span class="navrail__sig" aria-hidden="true">$</span>
-        <span class="navrail__cmd">sources</span>
-        <span class="navrail__note">feeds &amp; defaults</span>
-      </a>
       {{template "navIngest" .Chrome}}
       {{/* The gear goes to the same page; this is the route for anyone already
            in the menu. */}}
