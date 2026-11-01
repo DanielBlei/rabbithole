@@ -441,7 +441,7 @@ func TestSettingsAdvancedRepliesAreLockedAndShowTheBuiltInText(t *testing.T) {
 			t.Errorf("advanced lacks %q", want)
 		}
 	}
-	if strings.Index(body, "Model tuning") > strings.Index(body, "data-stp-replies") {
+	if strings.Index(body, `Model<span class="sp"> </span>tuning`) > strings.Index(body, "data-stp-replies") {
 		t.Error("Model tuning should come before Replies")
 	}
 }

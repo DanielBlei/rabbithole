@@ -1,7 +1,8 @@
 {{/* The Manage section of Sources: heading, status, toolbar and the source list
      with its editor. The heading, status and toolbar sit outside #srcBody, so a
      mutation repaints the list without wiping the search box; the summary line,
-     the attention block and the filter pills ride along as out-of-band updates. */}}
+     the attention block, the view menu and the tag box ride along as out-of-band
+     updates. */}}
 {{define "sourcesManage"}}
 <section class="mg" data-all-tags="{{.AllTags}}">
   <header class="mg-head">
@@ -28,16 +29,25 @@
 
   <div class="mg-toolbar" data-src-toolbar=""{{if not (or .Counts.Total .Counts.Deleted)}} hidden{{end}}>
     <div class="mg-toolbar__r1">
-      <div class="mg-search">
-        <span class="mg-search__i" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
-        <input class="stp-in mg-search__in" type="search" id="srcQuery" placeholder="Search name, address or tag"
-               aria-label="Search sources" autocomplete="off" spellcheck="false" data-src-query>
-        <button class="mg-search__x" type="button" aria-label="Clear search" hidden data-src-clear><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      <div class="li-search-wrap">
+        <div class="li-searchline">
+          <div class="mg-search li-search">
+            <span class="mg-search__i" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+            <input class="stp-in mg-search__in" type="search" id="srcQuery" placeholder="Search name, address or tag"
+                   aria-label="Search sources" autocomplete="off" spellcheck="false" data-src-query>
+            <button class="mg-search__x" type="button" aria-label="Clear search" hidden data-src-clear><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+          </div>
+          {{/* Hidden while there are no tags; the script shows it once a tag arrives. */}}
+          <button class="li-tags-toggle" type="button" aria-expanded="false" aria-controls="srcTagBox"{{if not .TagChoices}} hidden{{end}} data-src-tags-toggle>
+            <span>Tags</span><small data-src-tags-count>{{len .TagChoices}}</small><small data-src-tags-selected hidden></small>
+            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
+          </button>
+        </div>
       </div>
       <span class="mg-matches" data-src-matches aria-live="polite" hidden></span>
-      <div class="mg-toolbar__lb">{{template "sourceTagMenu" .}}{{template "listbox" .SortMenu}}</div>
+      <div class="mg-toolbar__lb">{{template "listbox" .Counts.ViewMenu}}{{template "listbox" .SortMenu}}</div>
     </div>
-    <div class="mg-filterwrap">{{template "sourceFilters" .Counts}}</div>
+    {{template "sourceTagBox" .}}
   </div>
 
   {{/* Acts on the ticked rows. static/js/sources.js shows it with a tick, picks
@@ -71,18 +81,15 @@
 {{/* The line under the heading, re-rendered out of band by every mutation. */}}
 {{define "sourceSummary"}}<p class="mg-sub" id="srcSummary"{{if .OOB}} hx-swap-oob="true"{{end}}>{{.Summary}}</p>{{end}}
 
-{{/* The filter pills. The counts are server-rendered and re-sent out of band
-     after a mutation, so the Failing pill and the nav badge read the same
-     number. static/js/sources.js restores the checked pill after that swap. */}}
-{{define "sourceFilters"}}
-<div class="stp-seg mg-filter" id="srcFilter" role="radiogroup" aria-label="Filter sources"{{if .OOB}} hx-swap-oob="true"{{end}}>
-  {{range .Filters}}<label class="stp-seg__o{{if .Zero}} is-zero{{end}}"><input type="radio" name="srcfilter" value="{{.Key}}" data-src-state=""{{if eq .Key "all"}} checked{{end}}><span>{{.Label}} <i class="mg-n">{{.Count}}</i></span></label>{{end}}
+{{/* The tag box: a chip per tag on a live source, with how many live sources
+     carry it. It is re-sent out of band after a mutation, so the counts stay
+     true; static/js/sources.js restores the picked chip and the open state
+     after that swap. Always rendered, so a swap can empty it. */}}
+{{define "sourceTagBox"}}
+<div class="li-tags-box" id="srcTagBox" role="group" aria-label="Filter by tag"{{if .Counts.OOB}} hx-swap-oob="true"{{end}} hidden data-src-tags-box>
+  <div class="li-labels">{{range .TagChoices}}<button class="li-lbl tag--c{{.Color}}" type="button" aria-pressed="false" data-tag-chip="{{.Name}}">{{.Name}}<small>{{.Count}}</small></button>{{end}}</div>
 </div>
 {{end}}
-
-{{/* The tag menu: live sources' tags with their counts. Re-sent out of band
-     after a mutation; static/js/sources.js restores the pick after that swap. */}}
-{{define "sourceTagMenu"}}{{template "listbox" .TagMenu}}{{end}}
 
 {{/* Failing sources with what to do about each, flaky ones as notes, and the
      rerun bar. Re-rendered out of band by every mutation, so it is always the
@@ -210,4 +217,4 @@
      all out of band so an editor in progress is never swapped. */}}
 {{define "sourceLiveManage"}}{{template "sourceOOB" .}}{{template "ingestNote" .LiveNote}}{{range .Rows}}{{if .OOB}}{{template "sourceItem" .}}{{end}}{{end}}{{end}}
 
-{{define "sourceOOB"}}{{if .Counts.OOB}}{{template "sourceSummary" .Counts}}{{template "sourcesAttention" .Attention}}{{template "sourceFilters" .Counts}}{{template "sourceTagMenu" .}}{{template "sourceNavBadge" .Counts}}{{end}}{{end}}
+{{define "sourceOOB"}}{{if .Counts.OOB}}{{template "sourceSummary" .Counts}}{{template "sourcesAttention" .Attention}}{{template "listbox" .Counts.ViewMenu}}{{template "sourceTagBox" .}}{{template "sourceNavBadge" .Counts}}{{end}}{{end}}

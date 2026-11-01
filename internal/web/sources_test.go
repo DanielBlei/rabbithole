@@ -330,7 +330,7 @@ func TestSourcesFailingNeedsAStreak(t *testing.T) {
 					t.Errorf("summary missing %q: %q", phrase, summary)
 				}
 			}
-			pill := fmt.Sprintf(`Failing <i class="mg-n">%d</i>`, c.failing)
+			pill := fmt.Sprintf(`<span class="stp-menu__n">Failing (%d)</span>`, c.failing)
 			if !strings.Contains(list, pill) {
 				t.Errorf("missing the Failing pill count %q; body=%s", pill, list)
 			}
@@ -534,7 +534,7 @@ func TestSourcesDeleteIsImmediateAndUndoable(t *testing.T) {
 	if strings.Contains(body, `id="srcBody"`) || strings.Contains(body, `class="mg-ed"`) {
 		t.Errorf("the delete repainted the list or kept an editor; body=%s", body)
 	}
-	if !strings.Contains(body, `Removed <i class="mg-n">1</i>`) {
+	if !strings.Contains(body, `<span class="stp-menu__n">Removed (1)</span>`) {
 		t.Errorf("the pill counts did not follow the delete; body=%s", body)
 	}
 	token := flashToken(t, body, "Removed Alpha")
@@ -705,7 +705,7 @@ func TestSourcesSummaryOmitsEmptyParts(t *testing.T) {
 	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/sources/feed/"+feedID(t, db, "Alpha"), nil))
 
 	out := get(t, w, "/sources/manage")
-	if !strings.Contains(out, `Removed <i class="mg-n">1</i>`) {
+	if !strings.Contains(out, `<span class="stp-menu__n">Removed (1)</span>`) {
 		t.Error("the Removed pill did not count the removal")
 	}
 	if got := summaryOf(t, out); got != "No sources yet" {
@@ -731,12 +731,12 @@ func TestSourcesDeleteShowsUpInTheSameResponse(t *testing.T) {
 	if !strings.Contains(body, "Restore") {
 		t.Errorf("the delete response offers no way back; body=%s", body)
 	}
-	if !strings.Contains(body, `Removed <i class="mg-n">1</i>`) {
+	if !strings.Contains(body, `<span class="stp-menu__n">Removed (1)</span>`) {
 		t.Errorf("the pill counts did not follow the delete; body=%s", body)
 	}
 }
 
-// The filter is a radio group of pills, and every filter it offers is one the
+// The filter is a view menu over radios, and every filter it offers is one the
 // client-side script can serve, including Removed, whose rows are in the list
 // like the rest.
 func TestSourcesFilterIsSelfContained(t *testing.T) {
@@ -745,8 +745,8 @@ func TestSourcesFilterIsSelfContained(t *testing.T) {
 	})
 	out := get(t, w, "/sources/manage")
 
-	if !strings.Contains(out, `role="radiogroup"`) {
-		t.Errorf("the filter is not a radio group; body=%s", out)
+	if !strings.Contains(out, `id="srcFilter" data-stp-menu data-default="all"`) {
+		t.Errorf("the filter is not the view menu; body=%s", out)
 	}
 	for _, want := range []string{
 		`value="all"`, `value="enabled"`, `value="disabled"`, `value="failing"`, `value="flaky"`, `value="removed"`,
@@ -758,14 +758,6 @@ func TestSourcesFilterIsSelfContained(t *testing.T) {
 	// A filter that navigated would drop whatever the search box was holding.
 	if strings.Contains(out, "?deleted=1") {
 		t.Errorf("a filter still navigates; body=%s", out)
-	}
-	// Zero pills are dimmed, All never.
-	zero := `<label class="stp-seg__o is-zero"><input type="radio" name="srcfilter" value="`
-	if !strings.Contains(out, zero+`failing"`) {
-		t.Errorf("an empty pill is not marked; body=%s", out)
-	}
-	if strings.Contains(out, zero+`all"`) {
-		t.Errorf("the All pill is dimmed; body=%s", out)
 	}
 	if !strings.Contains(out, "data-src-matches") {
 		t.Errorf("no place for the shown-of-total count; body=%s", out)
@@ -1328,21 +1320,17 @@ func TestSourceCountsFilters(t *testing.T) {
 	want := []struct {
 		key   string
 		count int
-		zero  bool
 	}{
-		{"all", 5, false}, {"enabled", 3, false}, {"disabled", 2, false},
-		{"failing", 1, false}, {"flaky", 0, true}, {"removed", 2, false},
+		{"all", 5}, {"enabled", 3}, {"disabled", 2},
+		{"failing", 1}, {"flaky", 0}, {"removed", 2},
 	}
 	if len(got) != len(want) {
-		t.Fatalf("%d pills, want %d", len(got), len(want))
+		t.Fatalf("%d options, want %d", len(got), len(want))
 	}
 	for i, w := range want {
-		if got[i].Key != w.key || got[i].Count != w.count || got[i].Zero() != w.zero {
-			t.Errorf("pill %d = %+v (zero %v), want %+v", i, got[i], got[i].Zero(), w)
+		if got[i].Key != w.key || got[i].Count != w.count {
+			t.Errorf("option %d = %+v, want %+v", i, got[i], w)
 		}
-	}
-	if (sourceCounts{}).Filters()[0].Zero() {
-		t.Error("the All pill is dimmed with no sources")
 	}
 }
 
@@ -1405,7 +1393,7 @@ func TestSourcesAttentionCardsFailingSources(t *testing.T) {
 		`>Disable</button>`,
 		`>Remove</button>`,
 		"Re-run ingestion for all 2 enabled feeds",
-		`Failing <i class="mg-n">1</i>`,
+		`<span class="stp-menu__n">Failing (1)</span>`,
 		`title="1 failing"`,
 	} {
 		if !strings.Contains(out, want) {
@@ -1441,7 +1429,7 @@ func TestSourcesAttentionFollowsAMutation(t *testing.T) {
 	if !strings.Contains(body, "Nothing failing.") || strings.Contains(body, "mg-attn__toggle") {
 		t.Errorf("the status block still shows the disabled source as failing; body=%s", body)
 	}
-	if !strings.Contains(body, `Failing <i class="mg-n">0</i>`) {
+	if !strings.Contains(body, `<span class="stp-menu__n">Failing (0)</span>`) {
 		t.Errorf("the Failing pill did not follow; body=%s", body)
 	}
 }

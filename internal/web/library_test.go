@@ -102,8 +102,8 @@ func TestLibraryPageListsEveryGroup(t *testing.T) {
 		"<title>Library</title>", `<h1 class="li-title">Library</h1>`, "All sources in the Library",
 		"Blogs", "Releases", "Community", "Papers", "LLM systems", "Agents, RAG and evals", "Journals",
 		`placeholder="Search name, address or tag"`, `aria-label="Filter the Library"`,
-		`data-lib-state="all"`, `data-lib-state="subscribed"`, `data-lib-state="removed"`, `data-lib-state="add"`,
-		"Filter Library by status", `data-lib-tags-toggle`, `aria-expanded="false"`, `id="libTagFilters"`,
+		`id="libViewMenu"`, `name="libfilter" value="all"`, `value="subscribed"`, `value="removed"`, `value="add"`,
+		`class="li-view"`, `data-lib-tags-toggle`, `aria-expanded="false"`, `id="libTagFilters"`,
 		"Filter by tag", `id="libBody"`, "data-lib-bar",
 		`aria-label="Select ` + libK8sName + `"`,
 	} {
@@ -246,9 +246,9 @@ func TestLibraryRowStates(t *testing.T) {
 	}
 	out := get(t, w, "/sources/library")
 	for _, want := range []string{
-		`value="all" data-lib-state="all" checked><span>All <i class="mg-n" data-lib-state-count="all">`,
-		`data-lib-state="subscribed"><span>Subscribed <i class="mg-n" data-lib-state-count="subscribed">1</i></span>`,
-		`data-lib-state="removed"><span>Removed <i class="mg-n" data-lib-state-count="removed">1</i></span>`,
+		`data-value="all" data-label="All"`,
+		`<span class="stp-menu__n">Subscribed (1)</span>`,
+		`<span class="stp-menu__n">Removed (1)</span>`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing status filter/count %q", want)

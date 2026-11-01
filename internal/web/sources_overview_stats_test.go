@@ -383,17 +383,17 @@ func TestOverviewRendersSections(t *testing.T) {
 	}
 
 	order := []string{
-		"Sync and health",
-		"Needs attention",
+		`Sync<span class="sp"> </span>and<span class="sp"> </span>health`,
+		`Needs<span class="sp"> </span>attention`,
 		">Volume<",
 		">Signal<",
-		"Library suggestions",
-		"Library coverage",
-		"Slowest feeds",
+		`Library<span class="sp"> </span>suggestions`,
+		`Library<span class="sp"> </span>coverage`,
+		`Slowest<span class="sp"> </span>feeds`,
 	}
 	last := -1
 	for _, h := range order {
-		if h == "Library suggestions" || h == "Library coverage" {
+		if strings.HasPrefix(h, "Library") {
 			continue // only with a loaded library
 		}
 		i := strings.Index(out, h)
@@ -413,7 +413,7 @@ func TestOverviewSectionsOrderWithLibrary(t *testing.T) {
 		}
 	}
 	last := -1
-	for _, h := range []string{"Sync and health", "Needs attention", ">Volume<", ">Signal<", "Library suggestions", "Library coverage", "Slowest feeds"} {
+	for _, h := range []string{`Sync<span class="sp"> </span>and<span class="sp"> </span>health`, `Needs<span class="sp"> </span>attention`, ">Volume<", ">Signal<", `Library<span class="sp"> </span>suggestions`, `Library<span class="sp"> </span>coverage`, `Slowest<span class="sp"> </span>feeds`} {
 		i := strings.Index(out, h)
 		if i < 0 || i < last {
 			t.Errorf("section %q out of order (at %d, previous %d)", h, i, last)

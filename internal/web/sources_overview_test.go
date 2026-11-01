@@ -250,6 +250,7 @@ groups:
 // overviewLibraryYAML.
 func overviewLibraryWeb(t *testing.T, doc config.FeedsDoc) (*Web, *store.Store) {
 	t.Helper()
+	keepOrder(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/rss.yaml" {
 			http.NotFound(rw, r)
@@ -264,6 +265,14 @@ func overviewLibraryWeb(t *testing.T, doc config.FeedsDoc) (*Web, *store.Store) 
 		t.Fatalf("test library did not load: %+v", snap)
 	}
 	return w, db
+}
+
+// keepOrder makes the suggestion shuffle a no-op for the test.
+func keepOrder(t *testing.T) {
+	t.Helper()
+	old := shuffle
+	shuffle = func(int, func(i, j int)) {}
+	t.Cleanup(func() { shuffle = old })
 }
 
 // goFeeds are live sources whose tags match the Go labels of the test library.
@@ -287,7 +296,8 @@ func TestOverviewSuggestionsRankByTagMatch(t *testing.T) {
 	w, _ := overviewLibraryWeb(t, config.FeedsDoc{Feeds: goFeeds()})
 	out := get(t, w, "/sources")
 
-	want := []string{"Alpha One", "Alpha Four", "Alpha Two", "Beta Two"}
+	// Matches alternate across the groups, then the other groups fill the last slots.
+	want := []string{"Alpha One", "Beta Two", "Alpha Two", "Alpha Three", "Beta One"}
 	if got := suggestionNames(out); !slices.Equal(got, want) {
 		t.Errorf("suggestions = %v, want %v", got, want)
 	}
@@ -316,9 +326,32 @@ func TestOverviewSuggestionsSkipUnavailableSources(t *testing.T) {
 	}
 	out := get(t, w, "/sources")
 
-	want := []string{"Beta Two", "Beta Three", "Beta Four"}
+	want := []string{"Beta Two", "Beta Three", "Beta Four", "Alpha Three", "Beta One"}
 	if got := suggestionNames(out); !slices.Equal(got, want) {
 		t.Errorf("suggestions = %v, want %v (not subscribed, removed or name-taken)", got, want)
+	}
+}
+
+func TestOverviewSuggestionsVaryAndStayWithinTheCap(t *testing.T) {
+	w, _ := overviewLibraryWeb(t, config.FeedsDoc{Feeds: goFeeds()})
+	shuffle = func(n int, swap func(i, j int)) {
+		for i := n - 1; i > 0; i-- {
+			swap(i, 0)
+		}
+	}
+	got := suggestionNames(get(t, w, "/sources"))
+	if len(got) != maxSuggestions {
+		t.Errorf("suggestions = %v, want %d of them", got, maxSuggestions)
+	}
+	if slices.Equal(got, []string{"Alpha One", "Beta Two", "Alpha Two", "Alpha Three", "Beta One"}) {
+		t.Errorf("suggestions ignore the shuffle: %v", got)
+	}
+	groups := map[string]bool{}
+	for _, n := range got {
+		groups[n[:strings.Index(n, " ")]] = true
+	}
+	if len(groups) < 2 {
+		t.Errorf("suggestions come from one group: %v", got)
 	}
 }
 

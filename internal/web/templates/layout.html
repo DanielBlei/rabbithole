@@ -36,10 +36,10 @@
     <div class="topbar__left">
       <span class="wordmark"><b>The Rabbit Hole</b></span>
       <span class="breaker">/</span>
-      <nav class="topbar__nav">
-        <a class="{{if eq .Active "feed"}}active{{end}}" href="/feed">Feed</a>
-        <a class="{{if eq .Active "sources"}}active{{end}}" href="/sources">Sources</a>
-        <a class="{{if eq .Active "maze"}}active{{end}}" href="/maze">Maze</a>
+      <nav class="topbar__nav" aria-label="Main">
+        <a class="{{if eq .Active "feed"}}active{{end}}" href="/feed"{{if eq .Active "feed"}} aria-current="page"{{end}}>Feed</a>
+        <a class="{{if eq .Active "sources"}}active{{end}}" href="/sources"{{if eq .Active "sources"}} aria-current="page"{{end}}>Sources</a>
+        <a class="{{if eq .Active "maze"}}active{{end}}" href="/maze"{{if eq .Active "maze"}} aria-current="page"{{end}}>Maze</a>
       </nav>
     </div>
     <div class="topbar__right">
@@ -48,7 +48,7 @@
       <div class="topbar__amb">
         {{template "ingestChip" .Chrome.Chip}}
         <span class="topbar__sep" aria-hidden="true"></span>
-        <div class="clock" id="clock" aria-label="Current date and time">
+        <div class="clock" id="clock" role="group" aria-label="Current date and time">
           <span class="clock__time"></span>
           <span class="clock__date"></span>
         </div>
@@ -239,7 +239,7 @@
      pulsing while a run is live. */}}
 {{define "navTab"}}
 <button id="navTab" class="navtab{{if eq .IngDot "err"}} navtab--err{{else if eq .IngDot "warn"}} navtab--warn{{else if eq .IngDot "run"}} navtab--run{{end}}"
-        {{if .OOB}}hx-swap-oob="true"{{end}} type="button" aria-label="Menu">
+        {{if .OOB}}hx-swap-oob="true"{{end}} type="button" aria-label="Menu" aria-controls="navRail" aria-expanded="false">
   <span></span><span></span><span></span>
 </button>
 {{end}}
@@ -251,5 +251,5 @@
      stopping itself. */}}
 {{define "ingWatch"}}
 <span id="ingWatch" hidden data-running="{{if .Running}}1{{else}}0{{end}}" {{if .OOB}}hx-swap-oob="true"{{end}}
-      {{if .Running}}hx-get="/ingest/chrome" hx-trigger="every 3s" hx-swap="none"{{end}}></span>
+      {{if .Running}}hx-get="/ingest/chrome" hx-trigger="every 3s [!document.hidden]" hx-swap="none"{{end}}></span>
 {{end}}

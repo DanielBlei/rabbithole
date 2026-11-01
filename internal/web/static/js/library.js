@@ -103,10 +103,22 @@
       b.classList.toggle('is-on', on);
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
-    document.querySelectorAll('[data-lib-state]').forEach(function (b) { b.checked = b.dataset.libState === state; });
-    document.querySelectorAll('[data-lib-state-count]').forEach(function (el) {
-      el.textContent = String(stateCounts[el.dataset.libStateCount] || 0);
+    // The status menu follows the state. Its option labels carry the counts and
+    // the button keeps the plain name (data-label).
+    var viewRadios = document.querySelectorAll('input[type="radio"][name="libfilter"]');
+    Array.prototype.forEach.call(viewRadios, function (r) {
+      if (r.value === state && !r.checked) {
+        r.checked = true;
+        r.dispatchEvent(new Event('change', {bubbles: true}));
+      }
     });
+    var view = document.getElementById('libViewMenu');
+    if (view) {
+      Array.prototype.forEach.call(view.querySelectorAll('[role="option"]'), function (o) {
+        var n = o.querySelector('.stp-menu__n');
+        if (n) n.textContent = o.dataset.label + ' (' + (stateCounts[o.dataset.value] || 0) + ')';
+      });
+    }
     var selectedCount = document.querySelector('[data-lib-tags-selected-count]');
     if (selectedCount) {
       var nSelected = Object.keys(labels).length;
@@ -187,7 +199,7 @@
   // dismiss it as soon as the user moves elsewhere on the page.
   document.addEventListener('click', function (e) {
     var box = document.querySelector('[data-lib-tags-box]');
-    if (!box || box.hidden || (e.target.closest && e.target.closest('.li-search-wrap'))) return;
+    if (!box || box.hidden || (e.target.closest && e.target.closest('.li-search-wrap, [data-lib-tags-box]'))) return;
     box.hidden = true;
     var toggle = document.querySelector('[data-lib-tags-toggle]');
     if (toggle) toggle.setAttribute('aria-expanded', 'false');
@@ -216,8 +228,8 @@
 
   document.addEventListener('change', function (e) {
     var t = e.target;
-    if (t.matches && t.matches('[data-lib-state]')) {
-      state = t.dataset.libState || 'all';
+    if (t.matches && t.matches('input[type="radio"][name="libfilter"]')) {
+      state = t.value || 'all';
       render();
       return;
     }

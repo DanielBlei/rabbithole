@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"slices"
 	"strings"
 
@@ -19,7 +20,7 @@ import (
 )
 
 // maxSuggestions is how many Library sources the Overview suggests.
-const maxSuggestions = 4
+const maxSuggestions = 5
 
 // Callout and slowest-list limits, and the narrowest a slowest bar is drawn.
 const (
@@ -331,33 +332,82 @@ func (s *Web) overviewLibrary(
 	}
 }
 
-// librarySuggestions picks the addable Library sources that share a label with
-// a live source's tags, case-insensitively. A source scores 100 per matching
-// label plus how many live sources carry each of them; ties keep library order.
+// librarySuggestions picks up to maxSuggestions addable Library sources. Those
+// that share a label with a live source's tags come first (case-insensitively),
+// spread across their Library groups so one group cannot fill the list; when
+// any matched, sources from the other groups take the last suggestSpread slots
+// (and any slot the matches leave free). Each call shuffles, so every visit
+// shows a different pick. With no match at all nothing is suggested.
 func librarySuggestions(snap library.Snapshot, states map[string]store.PlanRow, rows []feedRowData) []ovSuggestion {
 	freq := liveTagFrequency(rows)
-	type cand struct {
-		sug   ovSuggestion
-		score int
-	}
-	var cands []cand
+	matched := make(map[string][]ovSuggestion)
+	other := make(map[string][]ovSuggestion)
+	var matchedGroups, otherGroups []string
 	for _, e := range libraryEntries(snap) {
 		key := config.FeedURLKey(e.Source.URL)
 		if state, _ := libraryState(states[key]); state != libStateAdd {
 			continue
 		}
-		why, score := suggestionMatch(e.Source.Labels, freq)
-		if score == 0 {
+		sug := ovSuggestion{Key: key, ID: config.FeedID(e.Source.URL), Name: e.Source.Name, URL: e.Source.URL}
+		group := string(e.Type) + "/" + e.Group.Name
+		if why, score := suggestionMatch(e.Source.Labels, freq); score > 0 {
+			sug.Why = why
+			if matched[group] == nil {
+				matchedGroups = append(matchedGroups, group)
+			}
+			matched[group] = append(matched[group], sug)
 			continue
 		}
-		cands = append(cands, cand{score: score, sug: ovSuggestion{
-			Key: key, ID: config.FeedID(e.Source.URL), Name: e.Source.Name, URL: e.Source.URL, Why: why,
-		}})
+		sug.Why = "From " + e.Group.Title
+		if other[group] == nil {
+			otherGroups = append(otherGroups, group)
+		}
+		other[group] = append(other[group], sug)
 	}
-	slices.SortStableFunc(cands, func(a, b cand) int { return b.score - a.score })
-	out := make([]ovSuggestion, 0, maxSuggestions)
-	for _, c := range cands[:min(len(cands), maxSuggestions)] {
-		out = append(out, c.sug)
+	if len(matchedGroups) == 0 {
+		return []ovSuggestion{}
+	}
+	out := spread(matched, matchedGroups, maxSuggestions-suggestSpread)
+	out = append(out, spread(other, otherGroups, maxSuggestions-len(out))...)
+	return append(out, spread(matched, matchedGroups, maxSuggestions-len(out), out...)...)
+}
+
+// suggestSpread is how many suggestions are kept for groups that do not match.
+const suggestSpread = 2
+
+// shuffle randomises the order of n items; tests replace it.
+var shuffle = rand.Shuffle
+
+// spread takes up to n suggestions round-robin across the groups, in a random
+// group order and a random order within each group, skipping any in skip.
+func spread(by map[string][]ovSuggestion, groups []string, n int, skip ...ovSuggestion) []ovSuggestion {
+	if n <= 0 {
+		return nil
+	}
+	skipped := make(map[string]bool, len(skip))
+	for _, k := range skip {
+		skipped[k.Key] = true
+	}
+	order := slices.Clone(groups)
+	shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
+	lists := make([][]ovSuggestion, 0, len(order))
+	for _, g := range order {
+		list := slices.DeleteFunc(slices.Clone(by[g]), func(x ovSuggestion) bool { return skipped[x.Key] })
+		shuffle(len(list), func(i, j int) { list[i], list[j] = list[j], list[i] })
+		lists = append(lists, list)
+	}
+	var out []ovSuggestion
+	for round := 0; len(out) < n; round++ {
+		took := false
+		for _, l := range lists {
+			if round < len(l) && len(out) < n {
+				out = append(out, l[round])
+				took = true
+			}
+		}
+		if !took {
+			break
+		}
 	}
 	return out
 }

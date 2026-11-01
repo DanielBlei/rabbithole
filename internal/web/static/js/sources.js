@@ -9,9 +9,10 @@
 // filters make. The search box, filter pills and the tag and sort menus live
 // outside #srcBody, so an edit that repaints the list leaves the query intact;
 // this file re-applies it after every swap, including the one that first shows
-// the list. The pill counts, tag menu, summary line and attention block are
-// re-sent by the server after a mutation; their state (which pill or tag is
-// picked, whether the block is open) is kept here so it survives those swaps.
+// the list. The view menu's counts, the tag box, the summary line and the
+// attention block are re-sent by the server after a mutation; their state (which
+// view or tag is picked, whether the tag box is open, whether the block is open)
+// is kept here so it survives those swaps.
 // An editor lives in its source's unit (#src-{id}), which the server swaps
 // alone; closing one is done here by removing it, so no request is made.
 //
@@ -38,7 +39,8 @@
   };
   var SORTS = ['name', 'items', 'signal', 'last'];
   var filter = 'all';
-  var tag = ''; // '' is all tags; else the menu option's own spelling
+  var tag = ''; // '' is all tags; else the chip's own spelling
+  var tagsOpen = false; // the tag box is shown
   var sort = 'name';
   var attnOpen = null; // decided the first time the block is on screen
   var scrollOnOpen = false; // the next editor to arrive is one the user asked for
@@ -197,19 +199,7 @@
   }
 
   function syncPills() {
-    document.querySelectorAll('[data-src-state]').forEach(function (r) { r.checked = r.value === filter; });
-  }
-
-  // The menu option whose value is t, in any case, or '' when there is none.
-  function tagOption(t) {
-    var menu = document.getElementById('srcTagMenu');
-    if (!t || !menu) return '';
-    var opts = menu.querySelectorAll('[role="option"]');
-    for (var i = 0; i < opts.length; i++) {
-      var v = opts[i].dataset.value;
-      if (v && v.toLowerCase() === t.toLowerCase()) return v;
-    }
-    return '';
+    pick('srcfilter', filter);
   }
 
   // Checks the radio of a menu, which the listbox shows. The change it fires
@@ -224,12 +214,55 @@
     }
   }
 
-  // The menus follow the state after a swap: the server sends the tag menu
-  // with nothing picked, and a tag no live source has any more is dropped.
+  // The tag chip whose name is t, in any case, or null.
+  function tagChip(t) {
+    if (!t) return null;
+    var chips = document.querySelectorAll('[data-tag-chip]');
+    for (var i = 0; i < chips.length; i++) {
+      if (chips[i].dataset.tagChip.toLowerCase() === t.toLowerCase()) return chips[i];
+    }
+    return null;
+  }
+
+  // Shows the picked chip as pressed, and the toggle with the chip count, the
+  // picked tag's name and the on state. The box opens only while tagsOpen is set
+  // and there are tags to show.
+  function paintTags() {
+    var chips = document.querySelectorAll('[data-tag-chip]');
+    chips.forEach(function (c) {
+      var on = !!tag && c.dataset.tagChip.toLowerCase() === tag.toLowerCase();
+      c.classList.toggle('is-on', on);
+      c.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    var n = chips.length;
+    var box = document.querySelector('[data-src-tags-box]');
+    if (box) box.hidden = !(tagsOpen && n);
+    var toggle = document.querySelector('[data-src-tags-toggle]');
+    if (!toggle) return;
+    toggle.hidden = !n;
+    toggle.classList.toggle('is-on', !!tag);
+    toggle.setAttribute('aria-expanded', tagsOpen && n ? 'true' : 'false');
+    var count = toggle.querySelector('[data-src-tags-count]');
+    if (count) count.textContent = String(n);
+    var picked = toggle.querySelector('[data-src-tags-selected]');
+    if (picked) {
+      picked.textContent = tag;
+      picked.hidden = !tag;
+    }
+  }
+
+  // The tag box is re-sent after a swap with nothing picked, and a tag no live
+  // source has any more is dropped.
+  function syncTags() {
+    var chip = tagChip(tag);
+    tag = chip ? chip.dataset.tagChip : '';
+    paintTags();
+  }
+
+  // The menus follow the state after a swap.
   function syncMenus() {
     var was = tag;
-    tag = tagOption(tag);
-    pick('srctag', tag);
+    syncTags();
     pick('srcsort', sort);
     if (tag !== was) syncURL();
   }
@@ -254,10 +287,13 @@
     syncURL();
   }
 
+  // Picks the chip named t, or clears the pick when t is the one picked.
   function setTag(t) {
-    t = tagOption(t);
-    if (t === tag) return;
-    tag = t;
+    var chip = tagChip(t);
+    var next = chip && chip.dataset.tagChip.toLowerCase() !== tag.toLowerCase() ? chip.dataset.tagChip : '';
+    if (next === tag) return;
+    tag = next;
+    paintTags();
     apply();
     syncURL();
   }
@@ -274,7 +310,7 @@
     var el = input();
     if (el) { el.value = ''; el.focus(); }
     tag = '';
-    pick('srctag', '');
+    paintTags();
     apply();
     syncURL();
   }
@@ -473,7 +509,7 @@
     var field = input();
     if (field) field.value = '';
     tag = '';
-    pick('srctag', '');
+    paintTags();
     filter = 'all';
     syncPills();
     apply();
@@ -705,7 +741,7 @@
     var want = removed ? 'removed' : (inFilter(unit, filter) ? filter : 'all');
     var field = input();
     if (field && !matches(unit, query())) field.value = '';
-    if (!hasTag(unit, tag)) { tag = ''; pick('srctag', ''); syncURL(); }
+    if (!hasTag(unit, tag)) { tag = ''; paintTags(); syncURL(); }
     if (want !== filter) setFilter(want); else apply();
     // A removed source has no editor: it is only brought to the middle.
     if (removed) {
@@ -726,6 +762,14 @@
     focusField = which || null;
     btn.click();
   }
+
+  // The tag box stays open while the search line or the box is used; a click
+  // anywhere else closes it, as the Library's does.
+  document.addEventListener('click', function (e) {
+    if (!tagsOpen || (e.target.closest && e.target.closest('.li-search-wrap, [data-src-tags-box]'))) return;
+    tagsOpen = false;
+    paintTags();
+  });
 
   // Runs before htmx sees a click, so a guarded action can be held back and
   // replayed on Discard.
@@ -809,6 +853,13 @@
       return;
     }
     if (t.closest('[data-src-clearall]')) { clearAll(); return; }
+    if (t.closest('[data-src-tags-toggle]')) {
+      tagsOpen = !tagsOpen;
+      paintTags();
+      return;
+    }
+    var chip = t.closest('[data-tag-chip]');
+    if (chip) { setTag(chip.dataset.tagChip); return; }
     if (t.closest('[data-src-showall]')) { setFilter('all'); return; }
 
     // Anything that would replace or close a dirty editor asks first: opening
@@ -919,7 +970,6 @@
 
   document.addEventListener('change', function (e) {
     var t = e.target;
-    if (t.matches('input[name="srctag"]')) { setTag(t.value); return; }
     if (t.matches('input[name="srcsort"]')) { setSort(t.value); return; }
     if (t.matches('[data-src-pick]')) {
       if (t.checked) sel.add(t.value); else sel.delete(t.value);
@@ -948,9 +998,12 @@
 
   // A pill that would hide the source being edited asks first. Keep editing
   // puts the pill back.
+  // syncPills checks the radio back through pick, which fires this change with
+  // the view already in place, so a pick that matches the view does nothing.
   document.addEventListener('change', function (e) {
-    if (!e.target.matches('[data-src-state]')) return;
+    if (!e.target.matches('input[type="radio"][name="srcfilter"]')) return;
     var next = e.target.value;
+    if (next === filter) return;
     var form = dirtyEditor();
     var unit = form && unitOf(form);
     if (form && unit && !isAddForm(form) && !inFilter(unit, next)) {
@@ -1387,12 +1440,20 @@
     el.scrollIntoView({block: 'nearest', inline: 'nearest'});
   }
 
+  // Needs attention opens whenever something needs it and is not remembered
+  // between visits: a collapse from an earlier visit must not hide a new
+  // problem. A collapse made on this page survives its live refreshes.
+  var attnChoice = null;
+
   function refreshOverviewFolds() {
     document.querySelectorAll('[data-ov-fold]').forEach(function (button) {
       var key = ovFoldPrefix + button.dataset.ovFold;
       var saved = null;
-      try { saved = localStorage.getItem(key); } catch (e) {}
+      if (button.dataset.ovFold !== 'attention') {
+        try { saved = localStorage.getItem(key); } catch (e) {}
+      }
       var open = saved === 'open' ? true : saved === 'closed' ? false : button.dataset.ovDefaultOpen === 'true';
+      if (button.dataset.ovFold === 'attention' && attnChoice !== null) open = attnChoice;
       var body = document.getElementById(button.getAttribute('aria-controls'));
       if (!body) return;
       body.hidden = !open;
@@ -1412,6 +1473,7 @@
     body.hidden = !open;
     button.setAttribute('aria-expanded', open ? 'true' : 'false');
     button.setAttribute('aria-label', (open ? 'Collapse ' : 'Expand ') + button.closest('.stp-group').querySelector('.stp-group__t').textContent.trim());
+    if (button.dataset.ovFold === 'attention') { attnChoice = open; return; }
     try { localStorage.setItem(ovFoldPrefix + button.dataset.ovFold, open ? 'open' : 'closed'); } catch (err) {}
   });
 
@@ -1439,7 +1501,16 @@
       else if (params.get('add') === '1' && add) add.click();
     }, 0);
   });
+  // The status bar, the poll span and the menu tab are swapped every few
+  // seconds during a run and hold nothing the list reads, as does the whole
+  // Ingestion page, so none of them re-runs the list's filters and tag fit.
+  function ignorable(e) {
+    if (document.getElementById('ingPage')) return true;
+    var into = e.detail && e.detail.target;
+    return !!(into && into.matches && into.matches('.ingb, #ingWatch, #navTab'));
+  }
   document.body.addEventListener('htmx:afterSwap', function (e) {
+    if (ignorable(e)) return;
     refresh();
     syncPlan();
     // A swap that took the status line away leaves no search to time.
@@ -1449,5 +1520,5 @@
   });
   // A live refresh swaps rows in out of band; the filters and search apply to
   // them the same way.
-  document.body.addEventListener('htmx:oobAfterSwap', refresh);
+  document.body.addEventListener('htmx:oobAfterSwap', function (e) { if (!ignorable(e)) refresh(); });
 })();

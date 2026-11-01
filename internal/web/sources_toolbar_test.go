@@ -133,7 +133,7 @@ func TestManageHeaderAndEmptyCopy(t *testing.T) {
 	}
 }
 
-func TestManageTagMenu(t *testing.T) {
+func TestManageTagChoices(t *testing.T) {
 	row := func(name string, deleted bool, tags ...string) feedRowData {
 		return feedRowData{Name: name, Tags: tags, Deleted: deleted}
 	}
@@ -143,20 +143,20 @@ func TestManageTagMenu(t *testing.T) {
 		row("C", false, "NEWS"),
 		row("D", true, "gone", "go"),
 	}}
-	values, labels := optionValues(d.TagMenu())
-	if want := []string{"", "Go", "news", "Tech"}; !reflect.DeepEqual(values, want) {
-		t.Errorf("values = %q, want %q", values, want)
+	var names []string
+	var counts []int
+	for _, c := range d.TagChoices() {
+		names = append(names, c.Name)
+		counts = append(counts, c.Count)
+		if c.Color != tagColor(c.Name) {
+			t.Errorf("%s colour = %d, want tagColor's %d", c.Name, c.Color, tagColor(c.Name))
+		}
 	}
-	if want := []string{"All tags", "Go (2)", "news (2)", "Tech (1)"}; !reflect.DeepEqual(labels, want) {
-		t.Errorf("labels = %q, want %q", labels, want)
+	if want := []string{"Go", "news", "Tech"}; !reflect.DeepEqual(names, want) {
+		t.Errorf("names = %q, want %q", names, want)
 	}
-	menu := d.TagMenu()
-	if menu.ID != "srcTagMenu" || menu.Name != "srctag" || menu.OOB || menu.On() {
-		t.Errorf("menu = %+v", menu)
-	}
-	d.Counts.OOB = true
-	if !d.TagMenu().OOB {
-		t.Error("an out-of-band render does not mark the menu")
+	if want := []int{2, 2, 1}; !reflect.DeepEqual(counts, want) {
+		t.Errorf("counts = %v, want %v", counts, want)
 	}
 }
 
@@ -170,16 +170,29 @@ func TestManageSortMenu(t *testing.T) {
 	}
 }
 
-// The button shows the bare tag name; the list keeps the count.
-func TestManageTagMenuButtonText(t *testing.T) {
-	d := sourcesData{Rows: []feedRowData{{Tags: []string{"AI"}}}}
-	menu := d.TagMenu()
-	menu.Value = "AI"
-	if got := menu.Current(); got != "AI" {
-		t.Errorf("button text = %q, want AI", got)
+// The view menu reads "View All" on the button and keeps each count in its option.
+func TestManageViewMenu(t *testing.T) {
+	c := sourceCounts{Total: 5, Enabled: 3, Failing: 1, Deleted: 2}
+	menu := c.ViewMenu()
+	values, labels := optionValues(menu)
+	if want := []string{"all", "enabled", "disabled", "failing", "flaky", "removed"}; !reflect.DeepEqual(values, want) {
+		t.Errorf("values = %q, want %q", values, want)
 	}
-	if got := menu.Options[1].Label; got != "AI (1)" {
-		t.Errorf("option label = %q, want AI (1)", got)
+	if want := []string{"All (5)", "Enabled (3)", "Disabled (2)", "Failing (1)", "Flaky (0)", "Removed (2)"}; !reflect.DeepEqual(labels, want) {
+		t.Errorf("labels = %q, want %q", labels, want)
+	}
+	if menu.ID != "srcFilter" || menu.Name != "srcfilter" || menu.OOB || menu.On() {
+		t.Errorf("menu = %+v", menu)
+	}
+	if got := menu.Current(); got != "All" {
+		t.Errorf("button text = %q, want All", got)
+	}
+	if got := menu.Options[3].Text(); got != "Failing" {
+		t.Errorf("failing button text = %q, want Failing", got)
+	}
+	c.OOB = true
+	if !c.ViewMenu().OOB {
+		t.Error("an out-of-band render does not mark the menu")
 	}
 }
 
@@ -189,23 +202,26 @@ func TestManageMenusInPageAndMutation(t *testing.T) {
 		{Name: "Beta", URL: "https://beta.test/feed", Tags: []string{"go", "ai"}},
 	}})
 	page := get(t, w, "/sources/manage")
-	for _, id := range []string{"srcTagMenu", "srcSortMenu"} {
+	for _, id := range []string{"srcFilter", "srcTagBox", "srcSortMenu"} {
 		if n := strings.Count(page, `id="`+id+`"`); n != 1 {
 			t.Errorf("#%s appears %d times on the page, want 1", id, n)
 		}
 	}
-	lacksAttr(t, "page tag menu", tagWith(t, page, "id", "srcTagMenu"), "hx-swap-oob")
-	for _, want := range []string{`data-value="Go" data-label="Go"`, `data-value="ai" data-label="ai"`, `<span class="stp-menu__n">Go (2)</span>`} {
+	lacksAttr(t, "page tag box", tagWith(t, page, "id", "srcTagBox"), "hx-swap-oob")
+	for _, want := range []string{`data-tag-chip="Go">Go<small>2</small>`, `data-tag-chip="ai">ai<small>1</small>`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page missing %q", want)
 		}
 	}
 
 	body := postForm(t, w, "/sources/feed/"+feedID(t, db, "Beta")+"/enabled", url.Values{"enabled": {"off"}})
-	if n := strings.Count(body, `id="srcTagMenu"`); n != 1 {
-		t.Fatalf("a mutation carried the tag menu %d times, want 1; body=%s", n, body)
+	if n := strings.Count(body, `id="srcTagBox"`); n != 1 {
+		t.Fatalf("a mutation carried the tag box %d times, want 1; body=%s", n, body)
 	}
-	wantAttrs(t, "mutation tag menu", tagWith(t, body, "id", "srcTagMenu"), map[string]string{"hx-swap-oob": "true"})
+	wantAttrs(t, "mutation tag box", tagWith(t, body, "id", "srcTagBox"), map[string]string{"hx-swap-oob": "true"})
+	if !strings.Contains(body, `data-tag-chip="Go">Go<small>2</small>`) {
+		t.Errorf("the mutation did not resend the chip counts; body=%s", body)
+	}
 	if strings.Contains(body, `id="srcSortMenu"`) {
 		t.Errorf("a mutation resent the sort menu; body=%s", body)
 	}

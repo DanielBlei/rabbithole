@@ -98,7 +98,7 @@ func TestIngestionPageEmpty(t *testing.T) {
 		"A run fetches every enabled feed, then scores the new items. Each feed uses its own since and max items.",
 		"No runs yet.",
 		// The topbar keeps Sources lit.
-		`<a class="active" href="/sources">Sources</a>`,
+		`<a class="active" href="/sources" aria-current="page">Sources</a>`,
 	)
 	mustNotContain(t, "empty page", body, "Run pages", "Newer runs", "Older runs", "in-d")
 }
@@ -250,7 +250,7 @@ func TestIngestionRunDetail(t *testing.T) {
 		"<b>40</b> fetched, <b>12</b> new, <b>11</b> scored, <b>1</b> skipped, <b>3</b> failed",
 		"Feeds in this run", "Alpha Blog", "Beta Blog", "412ms", "20s",
 		"Run log", "fetch finished",
-		fmt.Sprintf(`<div class="in-log" id="run-%d-log" data-ing-lines>`, id),
+		fmt.Sprintf(`<div class="in-log" id="run-%d-log" role="log" aria-label="Run log" data-ing-lines>`, id),
 		`data-ing-lvl="info"`, `data-ing-lvl="dbg"`,
 	)
 	// A run opens with info lines and above; the debug ones wait for a request.
@@ -500,13 +500,13 @@ func TestIngestionLiveRunRow(t *testing.T) {
 	mustContain(t, "live row", row,
 		`aria-expanded="true"`, fmt.Sprintf(`hx-get="/ingestion/runs/%d?collapse=1"`, id),
 		`class="in-d"`, `ing__live`, first,
-		fmt.Sprintf(`<div class="in-log" id="run-%d-log" data-ing-lines data-live>`, id),
+		fmt.Sprintf(`<div class="in-log" id="run-%d-log" role="log" aria-label="Run log" data-ing-lines data-live>`, id),
 		`<span class="run-clock" data-elapsed-ms="`, `data-ing-lvl="info"`)
 	mustNotContain(t, "live row", row, "No log captured", "fetched,", "data-dbg")
 	cursor := regexp.MustCompile(`<span class="in-cur"[^>]*>`).FindString(row)
 	wantAttrs(t, "cursor", tagWith(t, cursor, "id", fmt.Sprintf("run-%d-cur", id)), map[string]string{
 		"hx-get":     fmt.Sprintf("/ingestion/runs/%d/log?after=%d", id, st.Seq),
-		"hx-trigger": "every 2s", "hx-target": "this", "hx-swap": "outerHTML",
+		"hx-trigger": "every 2s [!document.hidden]", "hx-target": "this", "hx-swap": "outerHTML",
 	})
 
 	// Opening the row again answers with the same live detail.
@@ -654,12 +654,12 @@ func TestIngestionLogDebugFetch(t *testing.T) {
 	logOf := fmt.Sprintf("/ingestion/runs/%d/log?full=1", id)
 
 	light := get(t, w, logOf)
-	mustContain(t, "info only", light, fmt.Sprintf(`<div class="in-log" id="run-%d-log" data-ing-lines>`, id),
+	mustContain(t, "info only", light, fmt.Sprintf(`<div class="in-log" id="run-%d-log" role="log" aria-label="Run log" data-ing-lines>`, id),
 		"kept info", "kept warn")
 	mustNotContain(t, "info only", light, "hidden debug", "hidden trace", "data-dbg", "<tbody")
 
 	full := get(t, w, logOf+"&debug=1")
-	mustContain(t, "debug", full, fmt.Sprintf(`id="run-%d-log" data-ing-lines data-dbg>`, id),
+	mustContain(t, "debug", full, fmt.Sprintf(`id="run-%d-log" role="log" aria-label="Run log" data-ing-lines data-dbg>`, id),
 		"kept info", "hidden debug", "hidden trace", "kept warn", "ing-ln--dbg")
 	// Order is kept: the debug lines sit between the lines around them.
 	if strings.Index(full, "kept info") > strings.Index(full, "hidden debug") ||

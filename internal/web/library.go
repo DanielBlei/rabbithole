@@ -77,6 +77,21 @@ func (p *libraryPage) Meta() string {
 	return fmt.Sprintf("%s, %d added", plural(p.Total, "source", "sources"), p.Added)
 }
 
+// ViewMenu is the status picker at the end of the filter row. Each option's
+// label carries its count; library.js keeps the counts current.
+func (p *libraryPage) ViewMenu() listboxData {
+	d := listboxData{
+		ID: "libViewMenu", Label: "View", Key: "View", Name: "libfilter",
+		Value: "all", Default: "all", Inline: true,
+	}
+	for _, f := range p.Filters {
+		d.Options = append(d.Options, listboxOpt{
+			Value: f.Key, Label: fmt.Sprintf("%s (%d)", f.Label, f.Count), Short: f.Label,
+		})
+	}
+	return d
+}
+
 type libSection struct {
 	Name    string
 	Title   string

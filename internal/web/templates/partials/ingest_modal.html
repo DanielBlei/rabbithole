@@ -24,7 +24,7 @@
      modal frame (delegated JS in static/js/ingest.js) — the frame sits outside this
      swap target, so the picked level survives every poll refresh. */}}
 {{define "ingestBody"}}
-<div class="ing" id="ingestBody" {{if .Running}}hx-get="/ingest/status?histPage={{.HistPage}}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML"{{end}}>
+<div class="ing" id="ingestBody" {{if .Running}}hx-get="/ingest/status?histPage={{.HistPage}}" hx-trigger="every 2s [!document.hidden]" hx-target="this" hx-swap="outerHTML"{{end}}>
   <div class="ing__runline">
     {{if .Running}}
       {{if eq .RunKind "rescore"}}<span class="ing__st ing__st--run">◌ rescoring recent items</span>
@@ -184,7 +184,7 @@
      (view=bar in the query), and Query carries the variant through each one. */}}
 {{define "ingestBar"}}
 <section class="ingb{{if .Compact}} ingb--compact{{end}}" aria-label="Ingestion" data-status="{{.Status}}"
-  {{if .Running}}hx-get="/ingest/status?{{.Query}}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML"{{end}}>
+  {{if .Running}}hx-get="/ingest/status?{{.Query}}" hx-trigger="every 2s [!document.hidden]" hx-target="this" hx-swap="outerHTML"{{end}}>
   <div class="ingb__main">
     <div class="ingb__stat" aria-live="polite">
       {{- if eq .Status "none"}}
@@ -223,5 +223,5 @@
      A bar response on the same page carries it out of band (OOB) so it follows
      the run; with no bar on the page it polls itself instead (Poll). */}}
 {{define "ingestNote"}}
-<p class="sdet__warn ingb__note" id="ingestNote" role="status"{{if .OOB}} hx-swap-oob="true"{{end}}{{if and .Running .Poll}} hx-get="/ingest/status?view=note" hx-trigger="every 2s" hx-swap="outerHTML"{{end}}{{if not .Running}} hidden{{end}}>Ingestion is running. Changes apply from the next run.</p>
+<p class="sdet__warn ingb__note" id="ingestNote" role="status"{{if .OOB}} hx-swap-oob="true"{{end}}{{if and .Running .Poll}} hx-get="/ingest/status?view=note" hx-trigger="every 2s [!document.hidden]" hx-swap="outerHTML"{{end}}{{if not .Running}} hidden{{end}}>Ingestion is running. Changes apply from the next run.</p>
 {{end}}

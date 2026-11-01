@@ -68,6 +68,17 @@
   // open log without them is fetched whole (from its own element, so the
   // requests do not share a slot). Row requests and refreshes carry the picked
   // level (see the configRequest hook below); a live log's cursor carries its own.
+  // The picked level lives on the host as data-inglvl (info when absent); the
+  // pills mirror it for assistive tech and are re-rendered by every swap.
+  function pressed(){
+    document.querySelectorAll('[data-ing-lvl]').forEach(function(b){
+      var host = b.closest('.modal__frame--ingest, #ingPage');
+      var lvl = (host && host.getAttribute('data-inglvl')) || 'info';
+      b.setAttribute('aria-pressed', b.getAttribute('data-ing-lvl') === lvl ? 'true' : 'false');
+    });
+  }
+  document.body.addEventListener('htmx:afterSwap', pressed);
+  document.body.addEventListener('htmx:oobAfterSwap', pressed);
   document.addEventListener('click', function(e){
     var btn = e.target.closest('[data-ing-lvl]');
     if (!btn) return;
@@ -76,6 +87,7 @@
     var lvl = btn.getAttribute('data-ing-lvl');
     var logs = Array.prototype.filter.call(host.querySelectorAll('[data-ing-lines]'), atBottom);
     host.setAttribute('data-inglvl', lvl);
+    pressed();
     logs.forEach(function(el){ el.scrollTop = el.scrollHeight; });
     if (lvl !== 'dbg' || !window.htmx) return;
     host.querySelectorAll('[data-ing-lines]:not([data-dbg]):not([data-dbg-req])').forEach(function(el){
@@ -102,9 +114,15 @@
     if (m < 60) return m + 'm ' + String(n % 60).padStart(2, '0') + 's';
     return h + 'h ' + String(m % 60).padStart(2, '0') + 'm';
   }
+  var timer = null;
   function tick(){
+    var els = document.querySelectorAll('[data-elapsed-ms]');
+    // The timer only lives while a clock is on the page, and sleeps in a hidden tab.
+    if (!els.length){ clearInterval(timer); timer = null; return; }
+    if (!timer) timer = setInterval(tick, 250);
+    if (document.hidden) return;
     var now = performance.now();
-    document.querySelectorAll('[data-elapsed-ms]').forEach(function(el){
+    els.forEach(function(el){
       var base = parseInt(el.getAttribute('data-elapsed-ms'), 10);
       if (isNaN(base)) return;
       var s = seen.get(el);
@@ -116,9 +134,9 @@
       if (el.textContent !== text) el.textContent = text;
     });
   }
-  setInterval(tick, 250);
   document.body.addEventListener('htmx:afterSwap', tick);
   document.body.addEventListener('htmx:oobAfterSwap', tick);
+  document.addEventListener('visibilitychange', tick);
   tick();
 })();
 

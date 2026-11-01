@@ -32,7 +32,7 @@
   <div class="pane__body ov-shell__body">
   <section class="stp-group" aria-labelledby="ovSync">
     <header class="stp-group__h">
-      <div><h3><span class="stp-group__t" id="ovSync">Sync and health</span>{{with tip "src-ingest"}}{{template "stpHint" .}}{{end}}</h3></div>
+      <div><h3><span class="stp-group__t" id="ovSync">{{ttl "Sync and health"}}</span>{{with tip "src-ingest"}}{{template "stpHint" .}}{{end}}</h3></div>
     </header>
     <div class="ov-body">
       {{template "ingestBar" .Overview.Ingest}}
@@ -61,7 +61,7 @@
 
   <section class="stp-group ov-fold" aria-labelledby="ovAttn">
     <header class="stp-group__h">
-      <div><h3><span class="stp-group__t" id="ovAttn">Needs attention</span></h3></div>
+      <div><h3><span class="stp-group__t" id="ovAttn">{{ttl "Needs attention"}}</span></h3></div>
       <button class="ov-fold__toggle" type="button" data-ov-fold="attention" data-ov-default-open="{{not .Overview.AllClear}}"
               aria-expanded="{{not .Overview.AllClear}}" aria-controls="ovAttnBody" aria-label="{{if .Overview.AllClear}}Expand{{else}}Collapse{{end}} Needs attention">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
@@ -207,8 +207,8 @@
 
   <section class="stp-group ov-fold" aria-labelledby="ovSlow">
     <header class="stp-group__h">
-      <div><h3><span class="stp-group__t" id="ovSlow">Slowest feeds</span></h3></div>
-      <p>Average fetch time. Slow feeds stretch every run.</p>
+      <div><h3><span class="stp-group__t" id="ovSlow">{{ttl "Slowest feeds"}}</span></h3>
+      <p>Average fetch time. Slow feeds stretch every run.</p></div>
       <button class="ov-fold__toggle" type="button" data-ov-fold="slowest" data-ov-default-open="true" aria-expanded="true" aria-controls="ovSlowBody" aria-label="Collapse Slowest feeds">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
       </button>
@@ -240,8 +240,8 @@
 {{define "ovLibrary"}}
   <section class="stp-group ov-fold" aria-labelledby="ovSug">
     <header class="stp-group__h">
-      <div><h3><span class="stp-group__t" id="ovSug">Library suggestions</span></h3></div>
-      <p>Based on the tags of your sources.</p>
+      <div><h3><span class="stp-group__t" id="ovSug">{{ttl "Library suggestions"}}</span></h3>
+      <p>Based on the tags of your sources.</p></div>
       <button class="ov-fold__toggle" type="button" data-ov-fold="suggestions" data-ov-default-open="true" aria-expanded="true" aria-controls="ovSugBody" aria-label="Collapse Library suggestions">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
       </button>
@@ -265,7 +265,7 @@
 {{define "ovLibPending"}}
 <section class="stp-group ov-fold" id="ovLibPending" aria-labelledby="ovSug" aria-live="polite" hx-get="{{.}}" hx-trigger="load delay:1500ms" hx-swap="outerHTML">
   <header class="stp-group__h">
-    <div><h3><span class="stp-group__t" id="ovSug">Library suggestions</span></h3></div>
+    <div><h3><span class="stp-group__t" id="ovSug">{{ttl "Library suggestions"}}</span></h3></div>
     <button class="ov-fold__toggle" type="button" data-ov-fold="suggestions" data-ov-default-open="true" aria-expanded="true" aria-controls="ovSugPendingBody" aria-label="Collapse Library suggestions">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
     </button>
@@ -303,8 +303,8 @@
 {{define "ovCoverage"}}
 <section class="stp-group ov-fold" id="ovCoverage" aria-labelledby="ovCov"{{if .OOB}} hx-swap-oob="true"{{end}}>
   <header class="stp-group__h">
-    <div><h3><span class="stp-group__t" id="ovCov">Library coverage</span></h3></div>
-    <p>How much of each Library group you have added.</p>
+    <div><h3><span class="stp-group__t" id="ovCov">{{ttl "Library coverage"}}</span></h3>
+    <p>How much of each Library group you have added.</p></div>
     <button class="ov-fold__toggle" type="button" data-ov-fold="coverage" data-ov-default-open="true" aria-expanded="true" aria-controls="ovCovBody" aria-label="Collapse Library coverage">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
     </button>

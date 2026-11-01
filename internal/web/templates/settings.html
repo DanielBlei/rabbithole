@@ -175,7 +175,7 @@
         </div>
       </section>
       <section class="stp-group" data-tone="slate">
-        <header class="stp-group__h"><h3><span class="stp-group__t">Reset to defaults</span></h3><p>Start over, one part at a time.</p></header>
+        <header class="stp-group__h"><h3><span class="stp-group__t">{{ttl "Reset to defaults"}}</span></h3><p>Start over, one part at a time.</p></header>
         <div class="stp-box">
           <div class="stp-row">
             <div class="stp-row__l"><div class="stp-row__nl"><span class="stp-row__n">Choose what to reset</span>{{with tip "reset-all"}}{{template "stpHint" .}}{{end}}</div>
@@ -233,7 +233,7 @@
       {{template "stpManaged" .}}
       {{template "stpConfigError" .}}
       <section class="stp-group" data-tone="blue">
-        <header class="stp-group__h stp-group__h--act"><div><h3><span class="stp-group__t">Model tuning</span>{{with tip "tuning"}}{{template "stpHint" .}}{{end}}</h3></div>{{template "stpReset"}}</header>
+        <header class="stp-group__h stp-group__h--act"><div><h3><span class="stp-group__t">{{ttl "Model tuning"}}</span>{{with tip "tuning"}}{{template "stpHint" .}}{{end}}</h3></div>{{template "stpReset"}}</header>
         <div class="stp-box">
           {{template "stpField" index .F "inference.model_tuning.num_ctx"}}
           {{template "stpField" index .F "inference.model_tuning.max_tokens"}}
@@ -256,7 +256,7 @@
         </div>
       </section>
       <section class="stp-group" data-tone="teal">
-        <header class="stp-group__h"><h3><span class="stp-group__t">Saved versions</span>{{with tip "versions"}}{{template "stpHint" .}}{{end}}</h3><p>Every save is kept, newest first.</p></header>
+        <header class="stp-group__h"><h3><span class="stp-group__t">{{ttl "Saved versions"}}</span>{{with tip "versions"}}{{template "stpHint" .}}{{end}}</h3><p>Every save is kept, newest first.</p></header>
         {{if .History}}
         <ol class="stp-box stp-hist">
           {{range .History}}

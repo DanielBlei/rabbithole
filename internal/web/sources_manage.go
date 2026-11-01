@@ -12,7 +12,7 @@ import (
 	"unicode/utf16"
 )
 
-// Filter keys of the Manage pills. The same words are the ?state= deep link.
+// Filter keys of the Manage view menu. The same words are the ?state= deep link.
 const (
 	srcFilterAll      = "all"
 	srcFilterEnabled  = "enabled"
@@ -22,19 +22,15 @@ const (
 	srcFilterRemoved  = "removed"
 )
 
-// srcFilter is one pill of the Manage filter group.
+// srcFilter is one option of the Manage view menu.
 type srcFilter struct {
 	Key   string
 	Label string
 	Count int
 }
 
-// Zero reports whether the pill has nothing behind it and should be dimmed.
-// All is never dimmed.
-func (f srcFilter) Zero() bool { return f.Count == 0 && f.Key != srcFilterAll }
-
-// Filters is the pill group, counts included. Failing and flaky count enabled
-// sources only, and every pill but Removed leaves removed sources out.
+// Filters is the view menu's options, counts included. Failing and flaky count
+// enabled sources only, and every option but Removed leaves removed sources out.
 func (c sourceCounts) Filters() []srcFilter {
 	return []srcFilter{
 		{srcFilterAll, "All", c.Total},
@@ -43,6 +39,20 @@ func (c sourceCounts) Filters() []srcFilter {
 		{srcFilterFailing, "Failing", c.Failing},
 		{srcFilterFlaky, "Flaky", c.Flaky},
 		{srcFilterRemoved, "Removed", c.Deleted},
+	}
+}
+
+// ViewMenu is the Manage view menu: the Filters options, each labelled with its
+// count, and the bare name on the button. It travels out of band after a
+// mutation, so the counts stay true.
+func (c sourceCounts) ViewMenu() listboxData {
+	var opts []listboxOpt
+	for _, f := range c.Filters() {
+		opts = append(opts, listboxOpt{Value: f.Key, Label: fmt.Sprintf("%s (%d)", f.Label, f.Count), Short: f.Label})
+	}
+	return listboxData{
+		ID: "srcFilter", Label: "View", Key: "View", Name: "srcfilter",
+		Value: srcFilterAll, Default: srcFilterAll, Inline: true, OOB: c.OOB, Options: opts,
 	}
 }
 
@@ -262,11 +272,18 @@ func (d sourcesData) SortMenu() listboxData {
 	}
 }
 
-// TagMenu is the Manage tag menu: every tag in use by a live source, with how
-// many live sources carry it. Tags match without regard to case and the first
-// spelling seen is the one shown. It travels out of band after a mutation, so
-// the counts stay true; the script restores the pick afterwards.
-func (d sourcesData) TagMenu() listboxData {
+// manageTag is one chip of the Manage tag box.
+type manageTag struct {
+	Name  string
+	Count int // live sources carrying the tag
+	Color int // tag palette index, as tagColor gives it
+}
+
+// TagChoices is every tag in use by a live source, with how many live sources
+// carry it. Tags match without regard to case and the first spelling seen is
+// the one shown. The box travels out of band after a mutation, so the counts
+// stay true; the script restores the picked chip afterwards.
+func (d sourcesData) TagChoices() []manageTag {
 	type tagCount struct {
 		name string
 		n    int
@@ -296,14 +313,11 @@ func (d sourcesData) TagMenu() listboxData {
 	slices.SortFunc(tags, func(a, b tagCount) int {
 		return cmp.Compare(strings.ToLower(a.name), strings.ToLower(b.name))
 	})
-	opts := []listboxOpt{{Value: "", Label: "All tags"}}
-	for _, t := range tags {
-		opts = append(opts, listboxOpt{Value: t.name, Label: fmt.Sprintf("%s (%d)", t.name, t.n), Short: t.name})
+	out := make([]manageTag, len(tags))
+	for i, t := range tags {
+		out[i] = manageTag{Name: t.name, Count: t.n, Color: tagColor(t.name)}
 	}
-	return listboxData{
-		ID: "srcTagMenu", Label: "Filter by tag", Key: "Tag", Name: "srctag",
-		Options: opts, Inline: true, OOB: d.Counts.OOB,
-	}
+	return out
 }
 
 // PerWeekAttr is the row's data-perweek: the stored items per week, unrounded.

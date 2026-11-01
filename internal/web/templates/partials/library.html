@@ -38,17 +38,15 @@
           </button>
           {{- end}}
         </div>
+      </div>
+      <span class="li-count" aria-live="polite" data-lib-count></span>
+      <div class="li-view">{{template "listbox" .ViewMenu}}</div>
+    </div>
         {{- if .Labels}}
         <div class="li-tags-box" id="libTagFilters" role="group" aria-label="Filter by tag" hidden data-lib-tags-box>
           <div class="li-labels">{{- range .Labels}}<button class="li-lbl tag--c{{.Color}}" type="button" aria-pressed="false" data-lib-label="{{.Name}}">{{.Name}}<small>{{.Count}}</small></button>{{end}}</div>
         </div>
         {{- end}}
-      </div>
-      <span class="li-count" aria-live="polite" data-lib-count></span>
-    </div>
-    <div class="stp-seg mg-filter li-filter" role="radiogroup" aria-label="Filter Library by status">
-      {{- range .Filters}}<label class="stp-seg__o"><input type="radio" name="libfilter" value="{{.Key}}" data-lib-state="{{.Key}}"{{if eq .Key "all"}} checked{{end}}><span>{{.Label}} <i class="mg-n" data-lib-state-count="{{.Key}}">{{.Count}}</i></span></label>{{end}}
-    </div>
   </div>
   {{template "libraryBody" .}}
   {{/* The picked keys ride in hidden fields the script keeps in step. */}}

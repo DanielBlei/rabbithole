@@ -121,7 +121,7 @@
   <h4 class="in-h">Run log</h4>
   {{- if .Live}}<span class="ing__live">● live</span>{{end}}
   <span class="ing__lvl-pills">
-    <button type="button" data-ing-lvl="info">info</button><button type="button" data-ing-lvl="dbg">debug</button>
+    <button type="button" data-ing-lvl="info" aria-pressed="true">info</button><button type="button" data-ing-lvl="dbg" aria-pressed="false">debug</button>
   </span>
 </div>
 {{- if or .HasLog .Live}}
@@ -136,14 +136,14 @@
      the first time the reader picks debug. A live log ends in the cursor that
      polls for newer lines. */}}
 {{define "ingestionLog"}}
-<div class="in-log" id="run-{{.ID}}-log" data-ing-lines{{if .Debug}} data-dbg{{end}}{{if .Live}} data-live{{end}}>{{if .NoInfo}}<p class="in-empty{{if not .HasLog}} in-empty--wait{{end}}">{{if .HasLog}}No info lines. Pick debug for the rest.{{else if .Live}}Waiting for the first log line.{{else}}No log captured for this run.{{end}}</p>{{end}}{{template "ingestLogLines" .Logs}}{{if .Live}}{{template "ingestionCursor" .}}{{end}}</div>
+<div class="in-log" id="run-{{.ID}}-log" role="log" aria-label="Run log" data-ing-lines{{if .Debug}} data-dbg{{end}}{{if .Live}} data-live{{end}}>{{if .NoInfo}}<p class="in-empty{{if not .HasLog}} in-empty--wait{{end}}">{{if .HasLog}}No info lines. Pick debug for the rest.{{else if .Live}}Waiting for the first log line.{{else}}No log captured for this run.{{end}}</p>{{end}}{{template "ingestLogLines" .Logs}}{{if .Live}}{{template "ingestionCursor" .}}{{end}}</div>
 {{end}}
 
 {{/* The live log's poll. Its answer replaces it with the newer lines and the
      next cursor, so the lines already shown, the scroll and a selection are
      never touched. The cursor carries its log's level: a log that holds debug
      lines keeps getting them. */}}
-{{define "ingestionCursor"}}<span class="in-cur" id="run-{{.ID}}-cur" hidden hx-get="/ingestion/runs/{{.ID}}/log?after={{.Seq}}{{if .Debug}}&amp;debug=1{{end}}" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML"></span>{{end}}
+{{define "ingestionCursor"}}<span class="in-cur" id="run-{{.ID}}-cur" hidden hx-get="/ingestion/runs/{{.ID}}/log?after={{.Seq}}{{if .Debug}}&amp;debug=1{{end}}" hx-trigger="every 2s [!document.hidden]" hx-target="this" hx-swap="outerHTML"></span>{{end}}
 
 {{/* A live log poll's answer: the newer lines, then the next cursor. */}}
 {{define "ingestionLogAppend"}}{{template "ingestLogLines" .Logs}}{{template "ingestionCursor" .}}{{end}}

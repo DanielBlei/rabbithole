@@ -42,6 +42,7 @@ func bakedLibraryFS(t *testing.T) fstest.MapFS {
 // bakedWeb is a Web over doc whose library ships bakedLibraryFS.
 func bakedWeb(t *testing.T, doc config.FeedsDoc) (*Web, *store.Store) {
 	t.Helper()
+	keepOrder(t)
 	w, db := sourcesTestWeb(t, doc)
 	w.SetLibrary(library.NewLoader(library.Options{Dir: bakedLibraryFS(t)}))
 	if snap := w.library.Get(t.Context()); !snap.Loaded || len(snap.Icons) != 2 {

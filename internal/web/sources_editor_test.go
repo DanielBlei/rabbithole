@@ -372,7 +372,7 @@ func TestSourcesRemoveAndRestoreAnswerWithTheUnit(t *testing.T) {
 		`aria-label="Restore Alpha"`,
 		`id="srcSummary" hx-swap-oob="true"`,
 		`id="srcAttn" hx-swap-oob="true"`,
-		`id="srcFilter" role="radiogroup" aria-label="Filter sources" hx-swap-oob="true"`,
+		`id="srcFilter" data-stp-menu data-default="all" hx-swap-oob="true"`,
 		`id="srcNavBadge" hx-swap-oob="true"`,
 	} {
 		if !strings.Contains(removed, want) {
@@ -460,9 +460,9 @@ func TestIngestNotePollsOnlyWhileRunning(t *testing.T) {
 		}
 		return b.String()
 	}
-	const poll = `hx-get="/ingest/status?view=note" hx-trigger="every 2s" hx-swap="outerHTML"`
+	const poll = `hx-get="/ingest/status?view=note" hx-trigger="every 2s [!document.hidden]" hx-swap="outerHTML"`
 	if out := render(ingestBarData{Running: true, Poll: true}); !strings.Contains(out, poll) ||
-		strings.Contains(out, "hidden") {
+		strings.Contains(out, " hidden") {
 		t.Errorf("a live run's note does not poll or is hidden: %s", out)
 	}
 	if out := render(ingestBarData{Running: true}); strings.Contains(out, "hx-get") ||

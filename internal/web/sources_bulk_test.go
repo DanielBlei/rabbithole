@@ -183,7 +183,7 @@ func TestBulkReplyShape(t *testing.T) {
 		`id="src-` + alpha + `"`, `hx-swap-oob="true"`,
 		`id="srcSummary" hx-swap-oob="true"`,
 		`id="srcAttn" hx-swap-oob="true"`,
-		`id="srcFilter" role="radiogroup" aria-label="Filter sources" hx-swap-oob="true"`,
+		`id="srcFilter" data-stp-menu data-default="all" hx-swap-oob="true"`,
 		`id="srcNavBadge" hx-swap-oob="true"`,
 		`data-msg="Disabled 1 source"`, `data-undo="`,
 	} {
@@ -219,7 +219,7 @@ func TestBulkRemoveRestoreAndStaleIDs(t *testing.T) {
 	if live := mustFeeds(t, db); len(live) != 1 || live[0].ID != beta {
 		t.Fatalf("live after remove = %v, want only Beta", live)
 	}
-	if !strings.Contains(body, `data-removed="1"`) || !strings.Contains(body, `Removed <i class="mg-n">2</i>`) {
+	if !strings.Contains(body, `data-removed="1"`) || !strings.Contains(body, `<span class="stp-menu__n">Removed (2)</span>`) {
 		t.Errorf("the removed row or the pill count is missing; body=%s", body)
 	}
 

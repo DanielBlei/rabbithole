@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"html"
 	"html/template"
 	"io/fs"
 	"net/http"
@@ -49,7 +50,7 @@ func pageTmpl(page string) *template.Template {
 	return template.Must(
 		template.New(page).
 			Funcs(template.FuncMap{
-				"tip": tipFor, "monogram": monogram, "fav": fav, "clip": clipText, "tier": tierWords,
+				"tip": tipFor, "ttl": ttl, "monogram": monogram, "fav": fav, "clip": clipText, "tier": tierWords,
 				"findFailed": func() string { return findErrorFallback },
 			}).
 			ParseFS(
@@ -59,6 +60,13 @@ func pageTmpl(page string) *template.Template {
 				"templates/"+page,
 			),
 	)
+}
+
+// ttl renders a section title with each space wrapped in a span.sp, so the
+// Default theme can draw the space as a hyphen (a space is invisible in CSS
+// once wrapped). The words are escaped first, so the result is safe HTML.
+func ttl(s string) template.HTML {
+	return template.HTML(strings.ReplaceAll(html.EscapeString(s), " ", `<span class="sp"> </span>`))
 }
 
 // listLimit bounds how many rows the digest page pulls per render. The current
