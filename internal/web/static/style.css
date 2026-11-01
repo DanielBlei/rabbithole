@@ -2147,6 +2147,8 @@ summary.sh-nav__h:focus-visible{outline:1px solid var(--accent);outline-offset:1
 
 /* --- Sources: Manage ------------------------------------------------------ */
 .mg{display:flex;flex-direction:column;gap:16px;min-width:0;}
+.mg .ov-shell{margin-top:0;min-width:0;}
+.mg .ov-shell__body{display:flex;flex-direction:column;gap:16px;min-width:0;}
 .mg>*{min-width:0;}
 .mg :is(h1,h2,p){margin:0;}
 

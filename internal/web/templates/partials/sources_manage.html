@@ -22,6 +22,14 @@
     </div>
   </header>
 
+  {{/* Default draws the list inside the terminal pane the Overview uses;
+       Minimal drops the pane's bar and card (see .pane in the stylesheet). */}}
+  <div class="pane ov-shell">
+  <div class="pane__bar ov-shell__bar">
+    <span class="pane__ps"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~/sources</span><span class="sh">$&nbsp;</span><span class="pane__cmd">manage</span></span>
+    <span class="blink">_</span>
+  </div>
+  <div class="pane__body ov-shell__body">
   {{if .Error}}<div class="src__note">{{.Error}}</div>{{end}}
 
   {{template "ingestNote" .Attention.NoteBar}}
@@ -74,6 +82,8 @@
   </div>
 
   {{template "sourcesBody" .}}
+  </div>
+  </div>
 </section>
 <div class="src-page__foot">defaults: {{.Defaults}}</div>
 {{end}}

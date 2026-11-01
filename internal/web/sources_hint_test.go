@@ -68,7 +68,7 @@ func TestIngestionPageBubbles(t *testing.T) {
 		"ingestion",
 		body,
 		`<h1><span>Ingestion</span><button type="button" class="hint"`,
-		`id="inRuns">Recent runs</span>`,
+		`id="inRuns">Recent<span class="sp"> </span>runs</span>`,
 	)
 }
 

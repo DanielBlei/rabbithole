@@ -94,7 +94,7 @@ func TestIngestionPageEmpty(t *testing.T) {
 		`class="ingb"`, `data-status="none"`, "No ingestion run yet",
 		`data-testid="ingest-history"`,
 		`<caption class="stp-sr">Recent ingestion runs</caption>`,
-		"Recent runs",
+		`Recent<span class="sp"> </span>runs`,
 		"A run fetches every enabled feed, then scores the new items. Each feed uses its own since and max items.",
 		"No runs yet.",
 		// The topbar keeps Sources lit.

@@ -34,7 +34,7 @@
 {{define "ingestionRuns"}}
 <section class="stp-group" aria-labelledby="inRuns" id="ingRuns">
   <header class="stp-group__h">
-    <div><h3><span class="stp-group__t" id="inRuns">Recent runs</span>{{with tip "src-runs"}}{{template "stpHint" .}}{{end}}</h3></div>
+    <div><h3><span class="stp-group__t" id="inRuns">{{ttl "Recent runs"}}</span>{{with tip "src-runs"}}{{template "stpHint" .}}{{end}}</h3></div>
   </header>
   <div class="ov-body">
     <table class="in-table" data-testid="ingest-history">
