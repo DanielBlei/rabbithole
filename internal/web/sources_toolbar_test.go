@@ -76,14 +76,15 @@ func TestManageColumnCells(t *testing.T) {
 	never.applyStats(store.SourceStat{}, store.FeedHealth{}, time.Now())
 	body := renderItem(t, never)
 	for _, want := range []string{
-		`<span class="mg-k">Stored / week</span>`, `none yet`, `<span class="mg-k">Signal</span>`, `No data yet`,
+		`<span class="mg-k">Stored / week</span>`, `<span class="mg-vol"><b>0</b></span>`,
+		`<span class="mg-k">Signal</span>`, `No data yet`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("never: missing %q; body=%s", want, body)
 		}
 	}
-	if strings.Contains(body, `class="mg-sig"`) || strings.Contains(body, `class="mg-vol"`) {
-		t.Errorf("never: shows figures; body=%s", body)
+	if strings.Contains(body, `class="mg-sig"`) {
+		t.Errorf("never: shows a signal share; body=%s", body)
 	}
 
 	thin := scoredStat(6, 3)
@@ -91,7 +92,7 @@ func TestManageColumnCells(t *testing.T) {
 	thin.Weeks = [8]int{0, 0, 0, 0, 0, 0, 0, 8}
 	body = renderItem(t, statRow("Thin", thin))
 	for _, want := range []string{
-		`Not enough data`, `title="Only 6 scored so far (needs 10), 2 unscored"`, `no items`,
+		`Not enough data`, `title="Only 6 scored so far (needs 10), 2 unscored"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("not enough: missing %q; body=%s", want, body)
@@ -106,10 +107,8 @@ func TestManageColumnCells(t *testing.T) {
 	rich.Mid = 5
 	rich.Low = 10
 	rich.Weeks = [8]int{0, 0, 0, 0, 0, 0, 8, 16}
-	rich.Last = time.Now().Add(-3 * time.Hour)
 	body = renderItem(t, statRow("Rich", rich))
 	for _, want := range []string{
-		`<b>3</b><span class="mg-sub2" title="last item 3h ago">last item 3h ago</span>`,
 		`<span class="mg-sig" title="5 of 20 scored are 7&#43;, 4 unscored"><b>25%</b><span class="tier"`,
 	} {
 		if !strings.Contains(body, want) {
@@ -178,7 +177,17 @@ func TestManageViewMenu(t *testing.T) {
 	if want := []string{"all", "enabled", "disabled", "failing", "flaky", "removed"}; !reflect.DeepEqual(values, want) {
 		t.Errorf("values = %q, want %q", values, want)
 	}
-	if want := []string{"All (5)", "Enabled (3)", "Disabled (2)", "Failing (1)", "Flaky (0)", "Removed (2)"}; !reflect.DeepEqual(labels, want) {
+	if want := []string{
+		"All (5)",
+		"Enabled (3)",
+		"Disabled (2)",
+		"Failing (1)",
+		"Flaky (0)",
+		"Removed (2)",
+	}; !reflect.DeepEqual(
+		labels,
+		want,
+	) {
 		t.Errorf("labels = %q, want %q", labels, want)
 	}
 	if menu.ID != "srcFilter" || menu.Name != "srcfilter" || menu.OOB || menu.On() {

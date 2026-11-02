@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -26,9 +25,10 @@ const (
 	noisyShare     = 0.15 // a high-signal share at or under this is noisy
 )
 
-// statsTTL bounds how stale the cached stats get. The aggregate costs about
-// 200ms at 50k items, and mutation responses and live refreshes each ask for it.
-const statsTTL = 60 * time.Second
+// liveStatsTTL bounds how long the stats are reused while an ingest run is
+// live. Every batch a run writes moves the counts, so a page refresh during a
+// run would otherwise recompute on each request.
+const liveStatsTTL = 30 * time.Second
 
 // Spark geometry: an 8-bar chart, 64 by 20, with a 2px gap.
 const (
@@ -37,21 +37,18 @@ const (
 	sparkGap = 2
 )
 
-// statsCache holds the last SourceStats result. It is replaced when it is older
-// than statsTTL, when invalidate was called since it was computed, or when an
-// ingest run started or finished since (the run key changed).
+// statsCache holds the last SourceStats result and the state it was read under.
+// The result depends only on the feeds and items, so it is reused until that
+// state changes (see statsKey). The mutex is held across a recompute, so
+// concurrent callers share one.
 type statsCache struct {
-	gen atomic.Uint64 // bumped by invalidate
-
-	mu     sync.Mutex // held across a recompute, so concurrent callers share it
+	mu     sync.Mutex
 	ok     bool
-	m      map[string]store.SourceStat
-	at     time.Time
-	genAt  uint64
+	key    string
 	runKey string
+	at     time.Time
+	m      map[string]store.SourceStat
 }
-
-func (c *statsCache) invalidate() { c.gen.Add(1) }
 
 // clock is the time the Sources page measures from.
 func (s *Web) clock() time.Time {
@@ -75,6 +72,19 @@ func (s *Web) runKey(last *store.IngestRun) string {
 	return key
 }
 
+// statsKey names the state the stats are read from: the store version, which
+// counts every committed feed and item write from any process, the ingest run,
+// and the day, since the windows move with the clock. It returns "" when the
+// version cannot be read, which means the result must not be reused.
+func (s *Web) statsKey(ctx context.Context, last *store.IngestRun, now time.Time) string {
+	v, err := s.db.Version(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("read store version")
+		return ""
+	}
+	return fmt.Sprintf("%d/%s/%s", v, s.runKey(last), now.UTC().Format("2006-01-02"))
+}
+
 // sourceStats returns the per-source stats keyed by source name. The map is
 // shared: callers must not modify it.
 func (s *Web) sourceStats(
@@ -82,12 +92,15 @@ func (s *Web) sourceStats(
 	last *store.IngestRun,
 	now time.Time,
 ) (map[string]store.SourceStat, error) {
-	key := s.runKey(last)
+	key := s.statsKey(ctx, last, now)
+	run := s.runKey(last)
 	c := &s.srcStats
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	gen := c.gen.Load()
-	if c.ok && c.genAt == gen && c.runKey == key && now.Sub(c.at) < statsTTL {
+	if c.ok && key != "" && c.key == key {
+		return c.m, nil
+	}
+	if c.ok && s.ing.Status().Running && c.runKey == run && now.Sub(c.at) < liveStatsTTL {
 		return c.m, nil
 	}
 	m, err := s.db.SourceStats(ctx, now, store.SourceStatsOpts{
@@ -96,7 +109,7 @@ func (s *Web) sourceStats(
 	if err != nil {
 		return nil, err
 	}
-	c.m, c.at, c.genAt, c.runKey, c.ok = m, now, gen, key, true
+	c.m, c.key, c.runKey, c.at, c.ok = m, key, run, now, true
 	return m, nil
 }
 

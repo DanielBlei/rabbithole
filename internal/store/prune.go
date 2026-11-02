@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -140,13 +141,19 @@ func (s *Store) PruneItems(ctx context.Context, filter PruneFilter) (PruneResult
 	}
 
 	where, args := filter.whereClause()
-	res, err := s.exec(ctx, "DELETE FROM items WHERE "+where, args...)
+	var n int64
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		res, err := s.txExec(ctx, tx, "DELETE FROM items WHERE "+where, args...)
+		if err != nil {
+			return fmt.Errorf("prune items: %w", err)
+		}
+		if n, err = res.RowsAffected(); err != nil {
+			return fmt.Errorf("prune items: %w", err)
+		}
+		return s.bumpVersion(ctx, tx)
+	})
 	if err != nil {
-		return PruneResult{}, fmt.Errorf("prune items: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return PruneResult{}, fmt.Errorf("prune items: %w", err)
+		return PruneResult{}, err
 	}
 	return PruneResult{Deleted: int(n), Kept: kept}, nil
 }

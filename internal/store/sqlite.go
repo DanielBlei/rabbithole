@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS items (
 );
 CREATE INDEX IF NOT EXISTS idx_items_digested ON items(digested_on);
 CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
+CREATE INDEX IF NOT EXISTS idx_items_source_created ON items(source, created_at);
 -- matches the itemDate expression the date filter and date sorts use.
 CREATE INDEX IF NOT EXISTS idx_items_date ON items(COALESCE(published_at, created_at));
 CREATE INDEX IF NOT EXISTS idx_items_bookmarked ON items(bookmarked);
@@ -79,6 +80,7 @@ CREATE TABLE IF NOT EXISTS items (
 );
 CREATE INDEX IF NOT EXISTS idx_items_digested ON items(digested_on);
 CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
+CREATE INDEX IF NOT EXISTS idx_items_source_created ON items(source, created_at);
 -- matches the itemDate expression the date filter and date sorts use.
 CREATE INDEX IF NOT EXISTS idx_items_date ON items ((COALESCE(published_at, created_at)));
 CREATE INDEX IF NOT EXISTS idx_items_bookmarked ON items(bookmarked);
@@ -467,7 +469,7 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEnt
 			return fmt.Errorf("insert item %s: %w", it.ID, err)
 		}
 	}
-	return tx.Commit()
+	return s.commitWrite(ctx, tx)
 }
 
 // UserPatch carries optional updates to an item's user-owned fields — as
@@ -535,18 +537,20 @@ func (s *Store) UpdateUserState(ctx context.Context, identifier string, patch Us
 	args = append(args, identifier, identifier)
 
 	q := fmt.Sprintf("UPDATE items SET %s WHERE link = ? OR id = ?", strings.Join(sets, ", "))
-	res, err := s.exec(ctx, q, args...)
-	if err != nil {
-		return fmt.Errorf("update item %s: %w", identifier, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("rows affected: %w", err)
-	}
-	if n == 0 {
-		return fmt.Errorf("%w: %s", ErrItemNotFound, identifier)
-	}
-	return nil
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		res, err := s.txExec(ctx, tx, q, args...)
+		if err != nil {
+			return fmt.Errorf("update item %s: %w", identifier, err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("rows affected: %w", err)
+		}
+		if n == 0 {
+			return fmt.Errorf("%w: %s", ErrItemNotFound, identifier)
+		}
+		return s.bumpVersion(ctx, tx)
+	})
 }
 
 // ItemRow is a compact, read-only view of an item for display (e.g. the

@@ -715,8 +715,8 @@ func TestSourcesEditorSidePanelFacts(t *testing.T) {
 			t.Errorf("%s = %q, want %q", label, got, want)
 		}
 	}
-	if !strings.Contains(panel, `class="spark"`) || !strings.Contains(panel, `class="tier"`) {
-		t.Errorf("the panel has no spark or tier bar; panel=%s", panel)
+	if !strings.Contains(panel, `class="tier"`) {
+		t.Errorf("the panel has no signal tier bar; panel=%s", panel)
 	}
 
 	// Beta sets nothing itself: the origins come from the defaults and the built-in.

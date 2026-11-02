@@ -1457,7 +1457,7 @@ pre.yml code{font-family:inherit;}
    the topbar and sits under the modal, tab + hot zone just beneath it.
    Inside, two tiers that never read as one list: the pages sit at the top as
    prompt lines, the config pair at the very floor as typed commands. */
-:root{ --topbar-h:58px; --nav-w:232px; }
+:root{ --topbar-h:52px; --nav-w:232px; }
 header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
 /* The strip that summons the menu. 12px was the width of the border it sits on
    — reachable only by aiming at it. It takes the gutter instead: the empty

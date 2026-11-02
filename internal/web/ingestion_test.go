@@ -497,11 +497,22 @@ func TestIngestionLiveRunRow(t *testing.T) {
 			t.Errorf("live tbody has %s: the row does not poll", attr)
 		}
 	}
-	mustContain(t, "live row", row,
-		`aria-expanded="true"`, fmt.Sprintf(`hx-get="/ingestion/runs/%d?collapse=1"`, id),
-		`class="in-d"`, `ing__live`, first,
-		fmt.Sprintf(`<div class="in-log" id="run-%d-log" role="log" aria-label="Run log" data-ing-lines data-live>`, id),
-		`<span class="run-clock" data-elapsed-ms="`, `data-ing-lvl="info"`)
+	mustContain(
+		t,
+		"live row",
+		row,
+		`aria-expanded="true"`,
+		fmt.Sprintf(`hx-get="/ingestion/runs/%d?collapse=1"`, id),
+		`class="in-d"`,
+		`ing__live`,
+		first,
+		fmt.Sprintf(
+			`<div class="in-log" id="run-%d-log" role="log" aria-label="Run log" data-ing-lines data-live>`,
+			id,
+		),
+		`<span class="run-clock" data-elapsed-ms="`,
+		`data-ing-lvl="info"`,
+	)
 	mustNotContain(t, "live row", row, "No log captured", "fetched,", "data-dbg")
 	cursor := regexp.MustCompile(`<span class="in-cur"[^>]*>`).FindString(row)
 	wantAttrs(t, "cursor", tagWith(t, cursor, "id", fmt.Sprintf("run-%d-cur", id)), map[string]string{
@@ -654,13 +665,28 @@ func TestIngestionLogDebugFetch(t *testing.T) {
 	logOf := fmt.Sprintf("/ingestion/runs/%d/log?full=1", id)
 
 	light := get(t, w, logOf)
-	mustContain(t, "info only", light, fmt.Sprintf(`<div class="in-log" id="run-%d-log" role="log" aria-label="Run log" data-ing-lines>`, id),
-		"kept info", "kept warn")
+	mustContain(
+		t,
+		"info only",
+		light,
+		fmt.Sprintf(`<div class="in-log" id="run-%d-log" role="log" aria-label="Run log" data-ing-lines>`, id),
+		"kept info",
+		"kept warn",
+	)
 	mustNotContain(t, "info only", light, "hidden debug", "hidden trace", "data-dbg", "<tbody")
 
 	full := get(t, w, logOf+"&debug=1")
-	mustContain(t, "debug", full, fmt.Sprintf(`id="run-%d-log" role="log" aria-label="Run log" data-ing-lines data-dbg>`, id),
-		"kept info", "hidden debug", "hidden trace", "kept warn", "ing-ln--dbg")
+	mustContain(
+		t,
+		"debug",
+		full,
+		fmt.Sprintf(`id="run-%d-log" role="log" aria-label="Run log" data-ing-lines data-dbg>`, id),
+		"kept info",
+		"hidden debug",
+		"hidden trace",
+		"kept warn",
+		"ing-ln--dbg",
+	)
 	// Order is kept: the debug lines sit between the lines around them.
 	if strings.Index(full, "kept info") > strings.Index(full, "hidden debug") ||
 		strings.Index(full, "hidden trace") > strings.Index(full, "kept warn") {

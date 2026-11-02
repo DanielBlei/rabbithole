@@ -260,6 +260,11 @@ func (s *Store) runTx(ctx context.Context, opts *sql.TxOptions, fn func(tx *sql.
 	if err := fn(tx); err != nil {
 		return err
 	}
+	if opts == nil || !opts.ReadOnly {
+		if err := s.bumpVersion(ctx, tx); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
@@ -528,7 +533,7 @@ func (s *Store) SeedFeeds(ctx context.Context, doc config.FeedsDoc) (SeedResult,
 			return result, fmt.Errorf("seed feed defaults: %w", err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commitWrite(ctx, tx); err != nil {
 		return result, err
 	}
 	return result, nil

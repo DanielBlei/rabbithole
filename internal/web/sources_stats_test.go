@@ -349,42 +349,58 @@ func itemsOf(t *testing.T, w *Web, source string) int {
 	return n
 }
 
-func TestSourceStatsCacheTTL(t *testing.T) {
+// pinNoon fixes the test clock at noon, so a day-sized move in a test cannot
+// cross midnight by accident.
+func pinNoon(clock *time.Time) {
+	*clock = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+}
+
+// With nothing written, time passing does not recompute the stats; a write does.
+func TestSourceStatsHeldUntilAWrite(t *testing.T) {
 	w, clock := statsTestWeb(t)
+	pinNoon(clock)
 	add := itemAdder(t, w.db)
 	add("Alpha")
 	if got := itemsOf(t, w, "Alpha"); got != 1 {
 		t.Fatalf("first read = %d, want 1", got)
 	}
 
-	add("Alpha")
-	*clock = clock.Add(statsTTL - time.Second)
+	*clock = clock.Add(2 * time.Hour)
 	if got := itemsOf(t, w, "Alpha"); got != 1 {
-		t.Errorf("within the TTL = %d, want the cached 1", got)
-	}
-
-	*clock = clock.Add(time.Second)
-	if got := itemsOf(t, w, "Alpha"); got != 2 {
-		t.Errorf("at the TTL = %d, want a fresh 2", got)
+		t.Errorf("two hours on with nothing written = %d, want the cached 1", got)
 	}
 
 	add("Alpha")
 	*clock = clock.Add(time.Second)
 	if got := itemsOf(t, w, "Alpha"); got != 2 {
-		t.Errorf("after the refresh = %d, want the cached 2", got)
+		t.Errorf("after a write = %d, want a fresh 2", got)
+	}
+}
+
+// The cache also moves to a new day, because the windows slide with the clock.
+func TestSourceStatsKeyChangesDaily(t *testing.T) {
+	w, clock := statsTestWeb(t)
+	pinNoon(clock)
+	itemsOf(t, w, "Alpha")
+	before := w.srcStats.key
+	*clock = clock.Add(24 * time.Hour)
+	itemsOf(t, w, "Alpha")
+	if w.srcStats.key == before {
+		t.Errorf("key unchanged across a day: %q", before)
 	}
 }
 
 func TestSourceStatsCacheInvalidatedByRename(t *testing.T) {
-	w, _ := statsTestWeb(t)
+	w, clock := statsTestWeb(t)
+	pinNoon(clock)
 	add := itemAdder(t, w.db)
 	add("Alpha")
 	if got := itemsOf(t, w, "Alpha"); got != 1 {
 		t.Fatalf("first read = %d, want 1", got)
 	}
 	add("Alpha")
-	if got := itemsOf(t, w, "Alpha"); got != 1 {
-		t.Fatalf("cached read = %d, want 1", got)
+	if got := itemsOf(t, w, "Alpha"); got != 2 {
+		t.Fatalf("read after a write = %d, want 2", got)
 	}
 
 	id := feedID(t, w.db, "Alpha")
@@ -397,40 +413,30 @@ func TestSourceStatsCacheInvalidatedByRename(t *testing.T) {
 	}
 }
 
-// Edits that cannot move the per-source aggregate keep the cache.
-func TestSourceStatsCacheKeptByToggle(t *testing.T) {
-	w, _ := statsTestWeb(t)
-	add := itemAdder(t, w.db)
-	add("Beta")
-	if got := itemsOf(t, w, "Beta"); got != 1 {
-		t.Fatalf("first read = %d, want 1", got)
-	}
-	add("Beta")
+// A Manage edit that does not change the per-source counts still refreshes the
+// cache: the Overview reads the feed rows as well, so the key has to move.
+func TestSourceStatsKeyMovesOnManageEdits(t *testing.T) {
+	w, clock := statsTestWeb(t)
+	pinNoon(clock)
+	itemsOf(t, w, "Beta")
 
+	before := w.srcStats.key
 	id := feedID(t, w.db, "Beta")
 	postForm(t, w, "/sources/feed/"+id+"/enabled", url.Values{"enabled": {"off"}})
-	if got := itemsOf(t, w, "Beta"); got != 1 {
-		t.Errorf("after a toggle = %d, want the cached 1", got)
+	itemsOf(t, w, "Beta")
+	if w.srcStats.key == before {
+		t.Errorf("toggle left the stats key unchanged")
 	}
-}
 
-// A new source has no items, so the cached map stays valid.
-func TestSourceStatsCacheKeptByAdd(t *testing.T) {
-	w, _ := statsTestWeb(t)
-	add := itemAdder(t, w.db)
-	add("Alpha")
-	itemsOf(t, w, "Alpha")
-	add("Alpha")
+	before = w.srcStats.key
 	postForm(t, w, "/sources", url.Values{"name": {"Gamma"}, "url": {"https://gamma.test/feed"}})
-	if got := itemsOf(t, w, "Alpha"); got != 1 {
-		t.Errorf("after an add = %d, want the cached 1", got)
-	}
-	if got := itemsOf(t, w, "Gamma"); got != 0 {
-		t.Errorf("new source = %d items, want 0", got)
+	itemsOf(t, w, "Beta")
+	if w.srcStats.key == before {
+		t.Errorf("add left the stats key unchanged")
 	}
 }
 
-// An ingest run starting or finishing drops the cache without any call from
+// An ingest run starting or finishing refreshes the stats without any call from
 // the web layer.
 func TestSourceStatsCacheInvalidatedByIngestRun(t *testing.T) {
 	w := newIngestWeb(t)
@@ -440,10 +446,6 @@ func TestSourceStatsCacheInvalidatedByIngestRun(t *testing.T) {
 	add("Alpha")
 	if got := itemsOf(t, w, "Alpha"); got != 1 {
 		t.Fatalf("first read = %d, want 1", got)
-	}
-	add("Alpha")
-	if got := itemsOf(t, w, "Alpha"); got != 1 {
-		t.Fatalf("cached read = %d, want 1", got)
 	}
 
 	post(t, w, "/ingest/run")
@@ -461,12 +463,8 @@ func TestSourceStatsCacheInvalidatedByIngestRun(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if got := itemsOf(t, w, "Alpha"); got != 2 {
-		t.Errorf("after a run = %d, want a fresh 2", got)
-	}
-	add("Alpha")
-	if got := itemsOf(t, w, "Alpha"); got != 2 {
-		t.Errorf("run key stable = %d, want the cached 2", got)
+	if got := itemsOf(t, w, "Alpha"); got != 1 {
+		t.Errorf("after a run with no new items = %d, want 1", got)
 	}
 }
 

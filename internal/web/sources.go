@@ -391,9 +391,6 @@ func (s *Web) handleSourceSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	notice := "Saved"
-	if renamed {
-		s.srcStats.invalidate()
-	}
 	if moved > 0 {
 		notice += fmt.Sprintf(": renamed · re-filed %s", itemsPhrase(int(moved)))
 	}

@@ -130,48 +130,47 @@ const (
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`
 
 	// The latest attempt per feed, plus the last successful attempt's time and
-	// the number of failures since it. One windowed query rather than a query
-	// per feed, so the viewer costs a single round trip however many feeds are
-	// configured.
+	// the number of failures since it. One query however many feeds are
+	// configured; each feed is reached through the (feed_id, id) index instead of
+	// sorting the whole history.
 	//
 	// Two details worth keeping:
 	//   * Recency is ordered by the autoincrement id, not fetched_at. id is
-	//     insertion order — exactly "which attempt came later" — and an integer
-	//     compare, so it can't be tripped up by timestamps stored as text
-	//     (where a UTC-offset change breaks lexicographic ordering).
-	//   * last_ok selects the row via ROW_NUMBER rather than MAX(fetched_at):
-	//     an aggregate loses the column's declared type and comes back to the
-	//     driver as a string, which won't scan into a time.
+	//     insertion order, exactly "which attempt came later", and an integer
+	//     compare, so timestamps stored as text can't trip it up (a UTC-offset
+	//     change breaks lexicographic ordering).
+	//   * ok_at is read back from the row holding the id, not from an aggregate
+	//     over fetched_at: an aggregate loses the column's declared type and comes
+	//     back to the driver as a string, which won't scan into a time.
 	sqlFeedHealth = `
-		WITH latest AS (
-			SELECT *, ROW_NUMBER() OVER (PARTITION BY feed_id ORDER BY id DESC) AS rn
-			FROM feed_fetches
+		WITH newest AS (
+			SELECT feed_id, MAX(id) AS id FROM feed_fetches GROUP BY feed_id
 		),
 		last_ok AS (
-			SELECT feed_id, id AS ok_id, fetched_at AS ok_at FROM (
-				SELECT feed_id, id, fetched_at,
-				       ROW_NUMBER() OVER (PARTITION BY feed_id ORDER BY id DESC) AS rn
-				FROM feed_fetches WHERE status = '` + FeedStatusOK + `'
-			) ranked_ok WHERE rn = 1
+			SELECT n.feed_id,
+			       (SELECT MAX(y.id) FROM feed_fetches y
+			         WHERE y.feed_id = n.feed_id AND y.status = '` + FeedStatusOK + `') AS ok_id
+			FROM newest n
 		)
-		SELECT l.feed_id, l.feed_name, l.url, l.status, l.error, l.items, l.elapsed_ms, l.fetched_at,
-		       o.ok_at,
-		       (SELECT COUNT(*) FROM feed_fetches f
-		         WHERE f.feed_id = l.feed_id AND f.status <> '` + FeedStatusOK + `'
-		           AND (o.ok_id IS NULL OR f.id > o.ok_id)) AS fail_streak
-		FROM latest l LEFT JOIN last_ok o ON o.feed_id = l.feed_id
-		WHERE l.rn = 1`
+		SELECT f.feed_id, f.feed_name, f.url, f.status, f.error, f.items, f.elapsed_ms, f.fetched_at,
+		       (SELECT k.fetched_at FROM feed_fetches k WHERE k.id = o.ok_id) AS ok_at,
+		       (SELECT COUNT(*) FROM feed_fetches x
+		         WHERE x.feed_id = f.feed_id AND x.status <> '` + FeedStatusOK + `'
+		           AND x.id > COALESCE(o.ok_id, 0)) AS fail_streak
+		FROM newest n
+		JOIN feed_fetches f ON f.id = n.id
+		JOIN last_ok o ON o.feed_id = n.feed_id`
 
-	// The newest `limit` attempts for every feed in one pass, for the history
-	// strips. Ordered so callers get each feed's attempts newest-first.
+	// The newest `limit` attempts per feed, for the history strips. Each feed is
+	// read through the index for just its own newest rows, so the cost follows
+	// the rows returned rather than the size of the history. Newest first within
+	// each feed.
 	sqlRecentFeedAttempts = `
-		WITH ranked AS (
-			SELECT feed_id, status, items, error, elapsed_ms, fetched_at,
-			       ROW_NUMBER() OVER (PARTITION BY feed_id ORDER BY id DESC) AS rn
-			FROM feed_fetches
-		)
-		SELECT feed_id, status, items, error, elapsed_ms, fetched_at FROM ranked
-		WHERE rn <= ? ORDER BY feed_id, rn`
+		SELECT f.feed_id, f.status, f.items, f.error, f.elapsed_ms, f.fetched_at
+		FROM (SELECT DISTINCT feed_id FROM feed_fetches) d
+		JOIN feed_fetches f ON f.id IN (
+			SELECT r.id FROM feed_fetches r WHERE r.feed_id = d.feed_id ORDER BY r.id DESC LIMIT ?)
+		ORDER BY f.feed_id, f.id DESC`
 
 	// Retention: keep the newest `keep` rows per feed, drop the rest. Rows for
 	// feeds no longer configured are left alone — they're bounded by the same
@@ -220,7 +219,7 @@ func (s *Store) SyncSourceTags(ctx context.Context, tags map[string][]string) er
 			return fmt.Errorf("sync tags for %q: %w", source, err)
 		}
 	}
-	return tx.Commit()
+	return s.commitWrite(ctx, tx)
 }
 
 // RecordFeedFetches appends one history row per fetch outcome, in a single

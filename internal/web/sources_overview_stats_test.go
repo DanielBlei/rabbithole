@@ -344,10 +344,10 @@ func TestOverviewRendersSections(t *testing.T) {
 		`<p class="ov-brief">4 sources, all healthy. Alpha brings the most items and has the best signal.</p>`,
 		// Volume.
 		`Stored items per week, last 8 weeks. Retention and the since window cut older history.`,
-		`<span class="ov-cw-spark">Last 8 weeks</span><span class="ov-cw-num">Stored items</span>`,
+		`<span class="ov-vol-note">8-week trend · items per week</span>`,
 		`aria-label="Stored items per week, oldest to newest: 0, 0, 0, 0, 0, 0, 0, 27"`,
 		`<rect class="spark__b is-last"`,
-		`<b>3.4</b><span class="sh-hint"> /wk</span>`,
+		`<b>3.4</b><span class="ov-num__unit">items/week</span>`,
 		`1 source not shown: off or waiting for the first run.`,
 		`href="/sources/manage#src-` + feedID(t, db, "Alpha") + `"`,
 		// Signal.
