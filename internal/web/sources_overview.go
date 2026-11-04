@@ -322,13 +322,18 @@ func (s *Web) overviewLibrary(
 		log.Error().Err(err).Msg("plan the library for the overview")
 		return nil
 	}
-	sugg := librarySuggestions(snap, states, rows)
+	hidden, err := s.libraryHidden(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("read hidden library entries for the overview")
+		return nil
+	}
+	sugg := librarySuggestions(snap, states, rows, hidden)
 	for i := range sugg {
 		sugg[i].Icon = icons[sugg[i].ID]
 	}
 	return &overviewLibrary{
 		Suggestions: sugg,
-		Coverage:    libraryCoverage(snap, states),
+		Coverage:    libraryCoverage(snap, states, hidden),
 	}
 }
 
@@ -338,14 +343,16 @@ func (s *Web) overviewLibrary(
 // any matched, sources from the other groups take the last suggestSpread slots
 // (and any slot the matches leave free). Each call shuffles, so every visit
 // shows a different pick. With no match at all nothing is suggested.
-func librarySuggestions(snap library.Snapshot, states map[string]store.PlanRow, rows []feedRowData) []ovSuggestion {
+func librarySuggestions(
+	snap library.Snapshot, states map[string]store.PlanRow, rows []feedRowData, hidden map[string]bool,
+) []ovSuggestion {
 	freq := liveTagFrequency(rows)
 	matched := make(map[string][]ovSuggestion)
 	other := make(map[string][]ovSuggestion)
 	var matchedGroups, otherGroups []string
 	for _, e := range libraryEntries(snap) {
 		key := config.FeedURLKey(e.Source.URL)
-		if state, _ := libraryState(states[key]); state != libStateAdd {
+		if state, _ := libraryState(states[key]); state != libStateAdd || hidden[key] {
 			continue
 		}
 		sug := ovSuggestion{Key: key, ID: config.FeedID(e.Source.URL), Name: e.Source.Name, URL: e.Source.URL}
@@ -462,14 +469,20 @@ func (s *Web) suggestionWhy(ctx context.Context, snap library.Snapshot, pick map
 	return ""
 }
 
-// libraryCoverage counts the added sources of each group.
-func libraryCoverage(snap library.Snapshot, states map[string]store.PlanRow) ovCoverage {
+// libraryCoverage counts the added sources of each group. Hidden entries are
+// left out, as they are out of view.
+func libraryCoverage(snap library.Snapshot, states map[string]store.PlanRow, hidden map[string]bool) ovCoverage {
 	var cov ovCoverage
 	for _, f := range snap.Library.Files {
 		for _, g := range f.Groups {
-			cg := ovCovGroup{Name: g.Name, Title: g.Title, Total: len(g.Sources)}
+			cg := ovCovGroup{Name: g.Name, Title: g.Title}
 			for _, src := range g.Sources {
-				if state, _ := libraryState(states[config.FeedURLKey(src.URL)]); state == libStateSubscribed {
+				key := config.FeedURLKey(src.URL)
+				if hidden[key] {
+					continue
+				}
+				cg.Total++
+				if state, _ := libraryState(states[key]); state == libStateSubscribed {
 					cg.Added++
 				}
 			}

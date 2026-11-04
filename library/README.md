@@ -5,6 +5,10 @@ Sources fetches these files from `main`, so a merged change reaches every
 install within an hour. Changes are additive only, and a file with a newer
 `schema_version` than the app understands shows an update notice instead.
 
+The sources are public feeds and pages, listed so people can find them. None of the sites,
+blogs, journals or organisations named here are involved in this project. The descriptions are
+written for the library, not copied from the sites.
+
 ## Files
 
 - `rss.yaml`: RSS and Atom feeds.
@@ -77,6 +81,8 @@ with an uppercase letter or a digit (`AI`, `Open Source`). Its slug is the
 canonical tag form (`open-source`), and one slug has one spelling across the
 library. No repeats within a source. Reuse an existing label before adding one
 (`grep -h labels: library/*.yaml`).
+
+Some labels were assigned with AI assistance from each feed's content, so a label can be wrong. If one looks off, say so in an issue.
 
 ## Adding a source
 

@@ -27,6 +27,9 @@ const (
 	libStateSubscribed = "subscribed"
 	libStateRemoved    = "removed"
 	libStateConflict   = "conflict"
+
+	// libFilterHidden is the View that shows the entries the user hid.
+	libFilterHidden = "hidden"
 )
 
 const (
@@ -53,7 +56,9 @@ type libraryPage struct {
 	// Scope words the filter's empty states: "the Library" or "this group".
 	Scope string
 
+	// Total and Added count the entries in view; Hidden counts those the user hid.
 	Total, Added int
+	Hidden       int
 	Empty        bool // the library holds no entries
 	AllAdded     bool // nothing left to add in the scope
 
@@ -93,11 +98,14 @@ func (p *libraryPage) ViewMenu() listboxData {
 }
 
 type libSection struct {
-	Name    string
-	Title   string
-	Desc    string
-	Single  bool // the page shows only this group, so it needs no heading
-	Entries []libEntry
+	Name   string
+	Title  string
+	Desc   string
+	Single bool // the page shows only this group, so it needs no heading
+	Hidden int  // entries the user hid
+	// AllHidden sections sit at the bottom, dimmed, until their entries are shown.
+	AllHidden bool
+	Entries   []libEntry
 }
 
 // libEntry is one library source and the store's verdict on it.
@@ -113,6 +121,7 @@ type libEntry struct {
 	State    string
 	Chip     string
 	Reason   string
+	Hidden   bool
 	// Hay is what the filter's words are matched against, lower case.
 	Hay string
 	// Icon is the icon of the subscribed source with this id, zero otherwise.
@@ -214,6 +223,11 @@ func (s *Web) libraryStates(ctx context.Context, snap library.Snapshot) (map[str
 	return states, nil
 }
 
+// libraryHidden returns the URL keys of the entries the user hid.
+func (s *Web) libraryHidden(ctx context.Context) (map[string]bool, error) {
+	return s.db.HiddenLibrary(ctx)
+}
+
 // libraryState is the row's state word and the chip text it wears.
 func libraryState(row store.PlanRow) (state, chip string) {
 	switch row.Status {
@@ -252,6 +266,10 @@ func (s *Web) libraryPageFor(ctx context.Context, snap library.Snapshot, group s
 	if err != nil {
 		return nil, err
 	}
+	hidden, err := s.libraryHidden(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	icons := s.iconRefs(ctx)
 	counts := make(map[string]int)
@@ -275,32 +293,40 @@ func (s *Web) libraryPageFor(ctx context.Context, snap library.Snapshot, group s
 				e.Icon = icons[e.ID]
 				e.State, e.Chip = libraryState(states[key])
 				e.Reason = states[key].Reason
+				e.Hidden = hidden[key]
 				for _, l := range src.Labels {
 					e.Labels = append(e.Labels, planTag{Name: l, Color: tagColor(l)})
 					counts[l]++
 				}
 				e.Hay = strings.ToLower(strings.Join(
 					append([]string{src.Name, src.Description, src.URL, g.Title}, src.Labels...), " "))
-				p.Total++
-				stateCounts[e.State]++
-				switch e.State {
-				case libStateSubscribed:
-					p.Added++
-				case libStateAdd:
-					addable++
+				if e.Hidden {
+					sec.Hidden++
+					p.Hidden++
+				} else {
+					p.Total++
+					stateCounts[e.State]++
+					switch e.State {
+					case libStateSubscribed:
+						p.Added++
+					case libStateAdd:
+						addable++
+					}
 				}
 				sec.Entries = append(sec.Entries, e)
 			}
+			sec.AllHidden = len(sec.Entries) > 0 && sec.Hidden == len(sec.Entries)
 			p.Sections = append(p.Sections, sec)
 		}
 	}
-	p.Empty = p.Total == 0
+	p.Empty = p.Total+p.Hidden == 0
 	p.AllAdded = p.Total > 0 && addable == 0
 	p.Filters = []libFilter{
 		{Key: "all", Label: "All", Count: p.Total},
 		{Key: libStateSubscribed, Label: "Subscribed", Count: stateCounts[libStateSubscribed]},
 		{Key: libStateRemoved, Label: "Removed", Count: stateCounts[libStateRemoved]},
 		{Key: libStateAdd, Label: "Add", Count: stateCounts[libStateAdd]},
+		{Key: libFilterHidden, Label: "Hidden", Count: p.Hidden},
 	}
 	for i := range p.Sections {
 		slices.SortFunc(p.Sections[i].Entries, func(a, b libEntry) int {
@@ -311,6 +337,12 @@ func (s *Web) libraryPageFor(ctx context.Context, snap library.Snapshot, group s
 		})
 	}
 	slices.SortFunc(p.Sections, func(a, b libSection) int {
+		if a.AllHidden != b.AllHidden {
+			if a.AllHidden {
+				return 1
+			}
+			return -1
+		}
 		if c := strings.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title)); c != 0 {
 			return c
 		}
@@ -601,7 +633,12 @@ func (s *Web) writeSuggestion(
 		httpFeedError(w, err)
 		return
 	}
-	cov := libraryCoverage(snap, states)
+	hidden, err := s.libraryHidden(ctx)
+	if err != nil {
+		httpFeedError(w, err)
+		return
+	}
+	cov := libraryCoverage(snap, states, hidden)
 	cov.OOB = true
 	s.renderFragment(w, "ovSuggestionReply", suggestionReply{Row: row, Coverage: cov})
 }
@@ -641,6 +678,59 @@ func (s *Web) handleLibraryRestore(w http.ResponseWriter, r *http.Request) {
 		name = f.Name
 	}
 	s.writeLibraryBody(w, r, snap, nil, &importStatus{Msg: "Restored " + name})
+}
+
+// libraryPicks returns the picked keys that name a Library entry, sorted. Any
+// other key is dropped, so a stale or forged one changes nothing.
+func libraryPicks(snap library.Snapshot, r *http.Request) []string {
+	known := make(map[string]bool)
+	for _, e := range libraryEntries(snap) {
+		known[config.FeedURLKey(e.Source.URL)] = true
+	}
+	var keys []string
+	for key := range pickedKeys(r) {
+		if known[key] {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+// handleLibraryHide hides the picked entries from the Library view and the
+// Overview suggestions. The remote library keeps them, so an unhide brings them back.
+func (s *Web) handleLibraryHide(w http.ResponseWriter, r *http.Request) {
+	s.changeLibraryHidden(w, r, true)
+}
+
+// handleLibraryUnhide shows the picked hidden entries again.
+func (s *Web) handleLibraryUnhide(w http.ResponseWriter, r *http.Request) {
+	s.changeLibraryHidden(w, r, false)
+}
+
+func (s *Web) changeLibraryHidden(w http.ResponseWriter, r *http.Request, hide bool) {
+	if !libraryForm(w, r) {
+		return
+	}
+	ctx := r.Context()
+	snap := s.library.Get(ctx)
+	keys := libraryPicks(snap, r)
+	if len(keys) == 0 {
+		s.writeLibraryBody(w, r, snap, nil, &importStatus{Err: "Pick at least one source first."})
+		return
+	}
+	var verb string
+	var err error
+	if hide {
+		verb, err = "Hid ", s.db.HideLibrary(ctx, keys)
+	} else {
+		verb, err = "Unhid ", s.db.UnhideLibrary(ctx, keys)
+	}
+	if err != nil {
+		httpFeedError(w, err)
+		return
+	}
+	s.writeLibraryBody(w, r, snap, nil, &importStatus{Msg: verb + plural(len(keys), "source", "sources")})
 }
 
 // libraryRefresh is the Try again reply: the section, and the nav group that

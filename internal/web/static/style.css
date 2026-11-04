@@ -2431,6 +2431,10 @@ summary.sh-nav__h:focus-visible{outline:1px solid var(--accent);outline-offset:1
 .li-sec__d{margin:2px 0 0;font-size:1.2rem;color:var(--text-dim);}
 .li-sec__sel{flex:none;height:24px;padding:0 10px;border:0;border-radius:var(--r-full);background:none;color:var(--accent);font:inherit;font-size:1.15rem;cursor:pointer;}
 .li-sec__sel:hover{background:var(--tint);}
+.li-sec__gone{flex:none;height:28px;padding:0 12px;border:1px solid var(--accent);border-radius:var(--r-full);background:var(--tint);color:var(--accent);font:inherit;font-size:1.25rem;font-weight:500;cursor:pointer;}
+.li-sec__gone:hover{background:var(--accent);color:var(--card);}
+.li-sec--gone .li-sec__t,.li-sec--gone .li-sec__d,.li-sec--gone .li-list{opacity:.55;}
+.li-select-shown{white-space:nowrap;}
 .li-list{list-style:none;margin:10px 0 0;padding:0;border-top:1px solid var(--hairline);}
 .li-sec--single .li-list{margin-top:6px;}
 .li-row{display:grid;grid-template-columns:22px 28px minmax(0,1fr) auto;gap:4px 12px;align-items:start;padding:14px 10px;
@@ -2472,11 +2476,13 @@ summary.sh-nav__h:focus-visible{outline:1px solid var(--accent);outline-offset:1
   background:none;color:var(--accent);font:inherit;font-size:1.25rem;cursor:pointer;}
 .li-back:hover{background:var(--tint);}
 
-/* the Add bar sticks to the bottom of the screen while entries are ticked */
-.li-bar{position:sticky;bottom:16px;z-index:6;display:flex;align-items:center;gap:10px;margin-top:18px;padding:8px 8px 8px 18px;
-  border:1px solid var(--e2-line);border-radius:var(--r-full);background:var(--e2-fill);
-  -webkit-backdrop-filter:var(--e2-blur);backdrop-filter:var(--e2-blur);box-shadow:var(--e2-shadow);}
+/* the selection bar sticks under the top bar while entries are ticked, as the Manage bulk bar does */
+.li-bar{position:sticky;top:calc(var(--topbar-h) + 8px);z-index:12;display:flex;flex-wrap:wrap;align-items:center;gap:10px;
+  margin:0 0 12px;padding:8px 12px;border-radius:var(--r-md);background:var(--card);
+  border:1px solid var(--hairline-strong);box-shadow:var(--card-shadow),0 10px 24px rgba(0,0,0,.28);}
+.li-bar[hidden],.li-bar [hidden]{display:none;}
 .li-bar__t{margin-right:auto;min-width:0;color:var(--title);font-size:1.3rem;font-variant-numeric:tabular-nums;}
+.li-bar__f{display:contents;}
 
 @media (max-width:560px){
   .li-title{font-size:2.1rem;}

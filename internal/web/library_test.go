@@ -255,9 +255,12 @@ func TestLibraryRowStates(t *testing.T) {
 		}
 	}
 
+	// Every row can be ticked for Hide; only Add needs an entry that is not added yet.
 	subscribed := libRow(t, out, libK8sURL)
-	if !strings.Contains(subscribed, `data-state="subscribed"`) || !strings.Contains(subscribed, "Subscribed") ||
-		strings.Contains(subscribed, `type="checkbox"`) {
+	if !strings.Contains(subscribed, `data-state="subscribed"`) ||
+		!strings.Contains(subscribed, "Subscribed") ||
+		!strings.Contains(subscribed, `type="checkbox"`) ||
+		strings.Contains(subscribed, `hx-post="/sources/library/apply"`) {
 		t.Errorf("subscribed row = %s", subscribed)
 	}
 	removed := libRow(t, out, libGoURL)
@@ -269,8 +272,8 @@ func TestLibraryRowStates(t *testing.T) {
 			t.Errorf("removed row missing %q; row=%s", want, removed)
 		}
 	}
-	if strings.Contains(removed, `type="checkbox"`) {
-		t.Errorf("removed row can be ticked; row=%s", removed)
+	if strings.Contains(removed, `hx-post="/sources/library/apply"`) {
+		t.Errorf("removed row offers Add; row=%s", removed)
 	}
 	conflict := libRow(t, out, libCNCFURL)
 	for _, want := range []string{

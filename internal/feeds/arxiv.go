@@ -81,7 +81,7 @@ func (f *AcademicFetcher) fetchArXiv(
 	}
 	req.Header.Set("User-Agent", "rabbithole/academic-reader")
 
-	resp, err := f.client().Do(req)
+	resp, err := doWithBackoff(ctx, f.client(), req)
 	if err != nil {
 		return nil, err
 	}

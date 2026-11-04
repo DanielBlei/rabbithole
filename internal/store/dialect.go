@@ -131,6 +131,7 @@ func (sqliteDialect) additiveTables() []additive {
 		{table: "config_versions", ddl: configSchema},
 		{table: "config_imports", ddl: configImportSchema},
 		{table: "feed_icons", ddl: feedIconSchema},
+		{table: "library_hidden", ddl: libraryHiddenSchema},
 		{table: "ingest_run_fetches", ddl: ingestRunFetchSchema},
 		{table: "store_version", ddl: storeVersionSchema},
 	}
@@ -279,6 +280,7 @@ func (postgresDialect) additiveTables() []additive {
 		{table: "config_versions", ddl: configSchema},
 		{table: "config_imports", ddl: configImportSchema},
 		{table: "feed_icons", ddl: feedIconSchemaPG},
+		{table: "library_hidden", ddl: libraryHiddenSchemaPG},
 		{table: "ingest_run_fetches", ddl: ingestRunFetchSchemaPG},
 		{table: "store_version", ddl: storeVersionSchemaPG},
 	}

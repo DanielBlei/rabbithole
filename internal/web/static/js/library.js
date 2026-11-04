@@ -1,5 +1,6 @@
 // The Sources Library page: instant client-side filtering of the list, the
-// ticks on entries that can be added, and the Add bar that previews them.
+// ticks on entries, and the bar that acts on them: Add previews the picked
+// entries, Hide and Unhide change what the Library shows.
 //
 // Client-side because the whole Library is already on the page, a few hundred
 // rows at most, the same call the Manage search makes. The filter box, the
@@ -12,10 +13,14 @@
 // Cancel and "Back to the Library" bring it back without a request. The plan's
 // own ticks and label are sources.js's.
 //
+// Hidden entries stay in the page, flagged data-hidden, and show only in the
+// Hidden view. A section whose entries are all hidden drops to the bottom,
+// dimmed, until its count is opened.
+//
 // Loaded on every page by the layout. Every lookup is guarded, so it costs
 // nothing on a page where none of this markup exists.
 (function () {
-  var sel = {}; // key -> true, the entries ticked for Add N
+  var sel = {}; // key -> true, the entries ticked for the bar
   var labels = Object.create(null); // selected tag names
   var state = 'all';
 
@@ -27,6 +32,10 @@
   }
   function rows() { return Array.prototype.slice.call(document.querySelectorAll('#libBody .li-row')); }
   function planOpen() { return !!document.querySelector('#libBody [data-plan]'); }
+  function isHidden(row) { return row.dataset.hidden === '1'; }
+
+  // The Hidden view shows only hidden rows; every other view leaves them out.
+  function inView(row) { return state === 'hidden' ? isHidden(row) : !isHidden(row); }
 
   // Search words narrow the selected status and tags.
   function parse() {
@@ -38,16 +47,25 @@
   }
 
   function matches(row, pq) {
-    if (state !== 'all' && row.dataset.state !== state) return false;
+    if (!inView(row)) return false;
+    if (state !== 'all' && state !== 'hidden' && row.dataset.state !== state) return false;
     var selected = Object.keys(labels);
     if (selected.length && !selected.some(function (name) { return labelsOf(row).indexOf(name) !== -1; })) return false;
     var hay = row.dataset.hay || '';
     return pq.every(function (w) { return hay.indexOf(w.toLowerCase()) !== -1; });
   }
 
+  // A section whose entries are all hidden stays in the page as a dimmed line
+  // while nothing narrows the list.
+  function goneSection(sec, pq) {
+    return sec.hasAttribute('data-lib-sec-gone') && state === 'all' && !pq.length && !Object.keys(labels).length;
+  }
+
   // What a filter that shows nothing says, worded for what was asked.
-  function emptyText(pq, addableAll, scope) {
+  function emptyText(pq, addableAll, scope, inScope) {
     var noTags = Object.keys(labels).length === 0;
+    if (!inScope && state === 'hidden') return 'Nothing is hidden in ' + scope + '.';
+    if (!inScope && state === 'all' && !pq.length && noTags) return 'Everything in ' + scope + ' is hidden.';
     if (!pq.length && noTags && state === 'add' && !addableAll) return 'You have everything in ' + scope + '.';
     if (!pq.length && noTags && state === 'removed') return 'You have not removed anything from ' + scope + '.';
     if (!pq.length && noTags && state === 'subscribed') return 'You have not added anything from ' + scope + ' yet.';
@@ -60,34 +78,45 @@
     var pq = parse();
     var all = rows();
 
-    // A tick lives while its row can still be added.
+    // A tick lives while its row is on the page.
     var present = {};
-    all.forEach(function (row) { if (row.dataset.state === 'add') present[row.dataset.key] = true; });
+    all.forEach(function (row) { present[row.dataset.key] = true; });
     Object.keys(sel).forEach(function (key) { if (!present[key]) delete sel[key]; });
 
-    var shown = 0, addableAll = 0;
-    var stateCounts = { all: all.length, subscribed: 0, removed: 0, add: 0 };
+    var shown = 0, addableAll = 0, inScope = 0;
+    var stateCounts = { all: 0, subscribed: 0, removed: 0, add: 0, hidden: 0 };
     all.forEach(function (row) {
+      if (isHidden(row)) {
+        stateCounts.hidden++;
+      } else {
+        stateCounts.all++;
+        if (Object.prototype.hasOwnProperty.call(stateCounts, row.dataset.state)) stateCounts[row.dataset.state]++;
+      }
       var hit = matches(row, pq);
       row.hidden = !hit;
       if (hit) shown++;
-      if (Object.prototype.hasOwnProperty.call(stateCounts, row.dataset.state)) stateCounts[row.dataset.state]++;
-      if (row.dataset.state === 'add') {
-        addableAll++;
-        var box = row.querySelector('[data-lib-pick]');
-        if (box) box.checked = !!sel[row.dataset.key];
-      }
+      if (inView(row)) inScope++;
+      if (inView(row) && row.dataset.state === 'add') addableAll++;
+      var box = row.querySelector('[data-lib-pick]');
+      if (box) box.checked = !!sel[row.dataset.key];
     });
 
     document.querySelectorAll('#libBody [data-lib-sec]').forEach(function (sec) {
       var visible = Array.prototype.filter.call(sec.querySelectorAll('.li-row'), function (r) { return !r.hidden; });
-      sec.hidden = visible.length === 0;
+      var gone = goneSection(sec, pq);
+      sec.classList.toggle('li-sec--gone', gone);
+      sec.hidden = visible.length === 0 && !gone;
       var n = sec.querySelector('[data-lib-sec-count]');
-      if (n) n.textContent = String(visible.length);
+      if (n) {
+        n.textContent = String(visible.length);
+        n.hidden = gone;
+      }
+      var note = sec.querySelector('[data-lib-show-hidden]');
+      if (note) note.hidden = !gone;
       var btn = sec.querySelector('[data-lib-sec-select]');
       if (!btn) return;
       var addable = visible.filter(function (r) { return r.dataset.state === 'add'; });
-      btn.hidden = addable.length < 2;
+      btn.hidden = state === 'hidden' || addable.length < 2;
       if (btn.hidden) return;
       var every = addable.every(function (r) { return sel[r.dataset.key]; });
       var title = sec.dataset.title;
@@ -96,6 +125,18 @@
         ? 'Clear the ' + addable.length + ' selected in ' + title
         : 'Select the ' + addable.length + ' new entries in ' + title);
     });
+
+    // Select shown ticks every row the view lets through, add or hide alike.
+    var selectAll = document.querySelector('[data-lib-select-shown]');
+    if (selectAll) {
+      var shownRows = all.filter(function (r) { return !r.hidden; });
+      selectAll.hidden = shownRows.length === 0;
+      var allTicked = shownRows.length > 0 && shownRows.every(function (r) { return sel[r.dataset.key]; });
+      selectAll.textContent = allTicked ? 'Clear ' + shownRows.length : 'Select all ' + shownRows.length;
+      selectAll.setAttribute('aria-label', allTicked
+        ? 'Clear the ' + shownRows.length + ' shown entries'
+        : 'Select the ' + shownRows.length + ' shown entries');
+    }
 
     document.querySelectorAll('[data-lib-label],[data-lib-chip]').forEach(function (b) {
       var name = b.dataset.libLabel || b.dataset.libChip;
@@ -136,39 +177,68 @@
     var x = document.querySelector('[data-lib-filter-clear]');
     if (x) x.hidden = !query();
     var count = document.querySelector('[data-lib-count]');
-    if (count) count.textContent = shown === all.length ? '' : shown + ' of ' + all.length;
+    if (count) count.textContent = shown === inScope ? '' : shown + ' of ' + inScope;
 
     var scope = root.dataset.scope || 'the Library';
     var done = document.querySelector('[data-lib-done]');
-    if (done) done.hidden = !(all.length && !addableAll && state === 'all' && !pq.length && !Object.keys(labels).length);
+    if (done) done.hidden = !(inScope && !addableAll && state === 'all' && !pq.length && !Object.keys(labels).length);
     var empty = document.querySelector('[data-lib-empty]');
     if (empty) {
       empty.hidden = !(all.length && !shown);
       var t = empty.querySelector('[data-lib-empty-text]');
-      if (t && !empty.hidden) t.textContent = emptyText(pq, addableAll, scope);
+      if (t && !empty.hidden) t.textContent = emptyText(pq, addableAll, scope, inScope > 0);
     }
   }
 
-  // The bar names the ticked entries and carries their keys to the server.
+  // The bar names the ticked entries. Each action form carries the picks it
+  // acts on: Add the new ones, Hide the shown ones, Unhide the hidden ones.
   function renderBar() {
     var bar = document.querySelector('[data-lib-bar]');
     if (!bar) return;
     var keys = Object.keys(sel);
+    var byKey = {};
+    rows().forEach(function (r) { byKey[r.dataset.key] = r; });
+    var addKeys = [], hideKeys = [], unhideKeys = [];
+    keys.forEach(function (key) {
+      var row = byKey[key];
+      if (!row) return;
+      if (isHidden(row)) {
+        unhideKeys.push(key);
+      } else {
+        hideKeys.push(key);
+        if (row.dataset.state === 'add') addKeys.push(key);
+      }
+    });
     bar.hidden = planOpen() || keys.length === 0;
     var text = bar.querySelector('[data-lib-bar-text]');
     if (text) text.textContent = keys.length + ' selected';
-    var add = bar.querySelector('[data-lib-bar-add]');
-    if (add) {
-      add.textContent = 'Add ' + keys.length;
-      add.setAttribute('aria-label', 'Add ' + keys.length + ' selected ' + (keys.length === 1 ? 'entry' : 'entries'));
+
+    function action(sel, picks, label, aria) {
+      var form = bar.querySelector(sel);
+      if (!form) return;
+      form.hidden = picks.length === 0;
+      form.querySelectorAll('input[name="pick"]').forEach(function (i) { i.remove(); });
+      picks.forEach(function (key) {
+        var i = document.createElement('input');
+        i.type = 'hidden';
+        i.name = 'pick';
+        i.value = key;
+        form.appendChild(i);
+      });
+      var b = form.querySelector('button');
+      if (b) {
+        b.textContent = label + ' ' + picks.length;
+        b.setAttribute('aria-label', aria(picks.length));
+      }
     }
-    bar.querySelectorAll('input[name="pick"]').forEach(function (i) { i.remove(); });
-    keys.forEach(function (key) {
-      var i = document.createElement('input');
-      i.type = 'hidden';
-      i.name = 'pick';
-      i.value = key;
-      bar.appendChild(i);
+    action('[data-lib-bar-add-form]', addKeys, 'Add', function (n) {
+      return 'Add ' + n + ' selected ' + (n === 1 ? 'entry' : 'entries');
+    });
+    action('[data-lib-bar-hide-form]', hideKeys, 'Hide', function (n) {
+      return 'Hide ' + n + ' selected ' + (n === 1 ? 'entry' : 'entries') + ' from the Library';
+    });
+    action('[data-lib-bar-unhide-form]', unhideKeys, 'Unhide', function (n) {
+      return 'Unhide ' + n + ' selected ' + (n === 1 ? 'entry' : 'entries');
     });
   }
 
@@ -257,12 +327,22 @@
       if (f) f.focus();
     } else if (t.closest('[data-lib-reset]')) {
       clearFilters();
+    } else if (t.closest('[data-lib-show-hidden]')) {
+      state = 'hidden';
+      render();
+      renderBar();
+    } else if ((el = t.closest('[data-lib-select-shown]'))) {
+      var shownRows = rows().filter(function (r) { return !r.hidden; });
+      var every = shownRows.every(function (r) { return sel[r.dataset.key]; });
+      shownRows.forEach(function (r) { if (every) delete sel[r.dataset.key]; else sel[r.dataset.key] = true; });
+      render();
+      renderBar();
     } else if ((el = t.closest('[data-lib-sec-select]'))) {
       var rowsOf = Array.prototype.filter.call(el.closest('[data-lib-sec]').querySelectorAll('.li-row'), function (r) {
         return !r.hidden && r.dataset.state === 'add';
       });
-      var every = rowsOf.every(function (r) { return sel[r.dataset.key]; });
-      rowsOf.forEach(function (r) { if (every) delete sel[r.dataset.key]; else sel[r.dataset.key] = true; });
+      var all = rowsOf.every(function (r) { return sel[r.dataset.key]; });
+      rowsOf.forEach(function (r) { if (all) delete sel[r.dataset.key]; else sel[r.dataset.key] = true; });
       render();
       renderBar();
     } else if (t.closest('[data-lib-bar-clear]')) {
@@ -290,6 +370,12 @@
   });
 
   document.addEventListener('DOMContentLoaded', refresh);
+  // A request that changes the Library starts from a clean set of ticks: the
+  // entries it acted on are no longer where the ticks were.
+  document.body.addEventListener('htmx:beforeRequest', function (e) {
+    var path = e.detail && e.detail.requestConfig && e.detail.requestConfig.path;
+    if (path && /\/sources\/library\/(apply|hide|unhide|restore)$/.test(path)) sel = {};
+  });
   document.body.addEventListener('htmx:afterSwap', function () {
     var root = page();
     if (!root) return;

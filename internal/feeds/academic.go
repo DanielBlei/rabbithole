@@ -7,7 +7,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // AcademicQuery describes a saved scholarly search without expanding the
@@ -79,6 +81,46 @@ func (f *AcademicFetcher) Fetch(
 			"unsupported academic provider %q",
 			query.Provider,
 		)
+	}
+}
+
+// Academic APIs answer 429 (rate limited) or 503 when they are busy. A request
+// gets academicAttempts tries in all, waiting academicBackoff, then double that,
+// capped at academicMaxWait. A Retry-After header in seconds replaces the wait.
+const (
+	academicAttempts = 3
+	academicBackoff  = time.Second
+	academicMaxWait  = 30 * time.Second
+)
+
+// doWithBackoff sends a GET that carries no body and retries it while the
+// provider is busy. The last response is returned as is, for the caller to report.
+func doWithBackoff(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error) {
+	wait := academicBackoff
+	for attempt := 1; ; attempt++ {
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		busy := resp.StatusCode == http.StatusTooManyRequests ||
+			resp.StatusCode == http.StatusServiceUnavailable
+		if !busy || attempt == academicAttempts {
+			return resp, nil
+		}
+
+		delay := wait
+		if seconds, perr := strconv.Atoi(resp.Header.Get("Retry-After")); perr == nil && seconds >= 0 {
+			delay = time.Duration(seconds) * time.Second
+		}
+		delay = min(delay, academicMaxWait)
+		_ = resp.Body.Close()
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+		wait *= 2
 	}
 }
 

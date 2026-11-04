@@ -335,6 +335,11 @@ reaches every install within that hour. Pages show the last good copy and never 
 Library parts of Sources fill in as soon as the first load lands. If GitHub is unreachable, the
 Library page says so and offers **Try again**.
 
+To trim the Library to what you want, **Hide** a source, or tick several (use **Select all** after a
+tag filter) and hide them together. Hidden sources leave the list and the Overview suggestions; the
+**Hidden** view shows them again with **Unhide**. Hiding never removes a source you already added,
+and new entries that the project adds later still appear.
+
 - `RABBITHOLE_LIBRARY_URL` loads the library from another directory URL (a mirror or a fork that holds
   `rss.yaml` and `academic.yaml`), on any port. `off` turns the Library off.
 - From a checkout, `make serve DEV=1` reads the Library from `./library` instead (unless

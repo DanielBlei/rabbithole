@@ -40,6 +40,7 @@
         </div>
       </div>
       <span class="li-count" aria-live="polite" data-lib-count></span>
+      <button class="clk-btn clk-btn--link li-select-shown" type="button" hidden data-lib-select-shown></button>
       <div class="li-view">{{template "listbox" .ViewMenu}}</div>
     </div>
         {{- if .Labels}}
@@ -48,14 +49,24 @@
         </div>
         {{- end}}
   </div>
-  {{template "libraryBody" .}}
-  {{/* The picked keys ride in hidden fields the script keeps in step. */}}
-  <form class="li-bar" role="region" aria-label="Selected entries" hidden data-lib-bar
-        hx-post="/sources/library/plan" hx-target="#libBody" hx-swap="outerHTML">
+  {{/* The picked keys ride in hidden fields the script keeps in step: each form
+       carries the picks it acts on. The bar sits above the list and sticks under
+       the top bar, as the Manage bulk bar does, so it stays in view while the
+       list scrolls. */}}
+  <div class="li-bar" role="region" aria-label="Selected entries" hidden data-lib-bar>
     <span class="li-bar__t" data-lib-bar-text></span>
     <button class="clk-btn clk-btn--link" type="button" data-lib-bar-clear>Clear</button>
-    <button class="clk-btn clk-btn--go" type="submit" data-lib-bar-add></button>
-  </form>
+    <form class="li-bar__f" hx-post="/sources/library/plan" hx-target="#libBody" hx-swap="outerHTML" data-lib-bar-add-form>
+      <button class="clk-btn clk-btn--go" type="submit" data-lib-bar-add></button>
+    </form>
+    <form class="li-bar__f" hx-post="/sources/library/hide" hx-target="#libBody" hx-swap="outerHTML" data-lib-bar-hide-form>
+      <button class="clk-btn" type="submit" data-lib-bar-hide></button>
+    </form>
+    <form class="li-bar__f" hx-post="/sources/library/unhide" hx-target="#libBody" hx-swap="outerHTML" data-lib-bar-unhide-form>
+      <button class="clk-btn" type="submit" data-lib-bar-unhide></button>
+    </form>
+  </div>
+  {{template "libraryBody" .}}
   {{- end}}
 </section>
 {{end}}
@@ -93,10 +104,11 @@
 {{end}}
 
 {{define "librarySection"}}
-<section class="li-sec{{if .Single}} li-sec--single{{end}}" data-lib-sec data-title="{{.Title}}">
+<section class="li-sec{{if .Single}} li-sec--single{{end}}{{if .AllHidden}} li-sec--gone{{end}}" data-lib-sec data-title="{{.Title}}"{{if .AllHidden}} data-lib-sec-gone{{end}}>
   <header class="li-sec__h">
     {{- if .Single}}<span></span>
     {{- else}}<div class="li-sec__t"><h3>{{.Title}}</h3><span class="li-sec__n" data-lib-sec-count>{{len .Entries}}</span></div>{{end}}
+    {{- if .AllHidden}}<button class="li-sec__gone" type="button" data-lib-show-hidden>{{.Hidden}} hidden</button>{{end}}
     <button class="li-sec__sel" type="button" hidden data-lib-sec-select></button>
   </header>
   {{- if not .Single}}<p class="li-sec__d">{{.Desc}}</p>{{end}}
@@ -107,10 +119,9 @@
 {{end}}
 
 {{define "libraryRow"}}
-<li class="li-row" id="lib-{{.ID}}" data-state="{{.State}}" data-key="{{.Key}}" data-hay="{{.Hay}}">
+<li class="li-row" id="lib-{{.ID}}" data-state="{{.State}}" data-key="{{.Key}}" data-hay="{{.Hay}}" data-hidden="{{if .Hidden}}1{{else}}0{{end}}">
   <div class="li-row__sel">
-    {{- if eq .State "add"}}<label class="stp-check"><input type="checkbox" value="{{.Key}}" aria-label="Select {{.Name}}" data-lib-pick><span class="stp-check__box"></span></label>
-    {{- else}}<span aria-hidden="true"></span>{{end}}
+    <label class="stp-check"><input type="checkbox" value="{{.Key}}" aria-label="Select {{.Name}}" data-lib-pick><span class="stp-check__box"></span></label>
   </div>
   <div class="li-row__ico">{{template "favicon" (fav .Icon .Name .URL 28)}}</div>
   <div class="li-row__main">
@@ -129,8 +140,17 @@
 
 {{/* What a row offers: Add posts its key straight to the apply, Restore posts
      it to be matched to the removed source. */}}
+{{/* Hide and Unhide post the key to their own action, which keeps the list
+     scope; a hidden row offers only Unhide. */}}
 {{define "libraryAction"}}
 <span class="libact">
+  {{- if .Hidden}}
+  <span class="stp-chip">Hidden</span>
+  <form class="libact__f" hx-post="/sources/library/unhide" hx-target="#libBody" hx-swap="outerHTML">
+    <input type="hidden" name="pick" value="{{.Key}}">
+    <button class="clk-btn" type="submit" aria-label="Unhide {{.Name}}">Unhide</button>
+  </form>
+  {{- else}}
   {{- if eq .State "add"}}
   <form class="libact__f" hx-post="/sources/library/apply" hx-target="#libBody" hx-swap="outerHTML">
     <input type="hidden" name="pick" value="{{.Key}}">
@@ -147,6 +167,11 @@
   {{- else}}
   <span class="stp-chip stchip--conflict">{{.Chip}}</span>
   <span class="libact__why" title="{{.Reason}}">{{.Reason}}</span>
+  {{- end}}
+  <form class="libact__f" hx-post="/sources/library/hide" hx-target="#libBody" hx-swap="outerHTML">
+    <input type="hidden" name="pick" value="{{.Key}}">
+    <button class="clk-btn clk-btn--link" type="submit" aria-label="Hide {{.Name}}">Hide</button>
+  </form>
   {{- end}}
 </span>
 {{end}}

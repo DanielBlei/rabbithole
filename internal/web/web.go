@@ -224,6 +224,8 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /sources/library/plan", s.handleLibraryPlan)
 	mux.HandleFunc("POST /sources/library/apply", s.handleLibraryApply)
 	mux.HandleFunc("POST /sources/library/restore", s.handleLibraryRestore)
+	mux.HandleFunc("POST /sources/library/hide", s.handleLibraryHide)
+	mux.HandleFunc("POST /sources/library/unhide", s.handleLibraryUnhide)
 	mux.HandleFunc("POST /sources/library/refresh", s.handleLibraryRefresh)
 	mux.HandleFunc("POST /sources", s.handleSourceAdd)
 	mux.HandleFunc("POST /sources/bulk", s.handleSourcesBulk)
