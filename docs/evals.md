@@ -24,10 +24,13 @@ point: two runs either side of an edit are directly comparable, so you can tell 
 edit did anything. Nothing is written to the store and your profile is never rewritten.
 
 The benchmark is read-only. It scores with your stored config and your active profile, or with
-the built-in Default if the store has none. It never writes to the store. To try other settings
-without saving them, pass `--config <file>`: for `eval benchmark` the file is read as is and never
-imported (a `profile:` key in it names the profile Markdown to use). With no store yet, it
-runs on the defaults.
+the built-in Default if the store has none. It never writes to the store. To compare a file
+without importing it, the deprecated `--config <file>` flag still reads it as is (a `profile:` key
+in it names the profile Markdown to use). For the supported workflow, import the file
+(`rabbithole config import <file>`) and then run the benchmark without the flag. If the file has a
+`store:` block, give both commands the same `--db` or `RABBITHOLE_DB` (and set
+`RABBITHOLE_DB_PASSWORD` for Postgres); the block locates the store for the import and is not
+saved. With no store yet, it runs on the defaults.
 
 ## The set of articles
 

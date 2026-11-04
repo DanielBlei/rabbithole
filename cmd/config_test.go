@@ -58,6 +58,11 @@ func (e *cliEnv) write(name, body string) string {
 func (e *cliEnv) run(args ...string) (string, string, error) {
 	e.t.Helper()
 	configPath, dbFlag, dbMaxConns, dbLifetime = "", "", 0, ""
+	// rootCmd is reused across invocations in tests. Cobra keeps a flag's
+	// Changed bit, so clear it to model a fresh process for each run.
+	if f := rootCmd.PersistentFlags().Lookup("config"); f != nil {
+		f.Changed = false
+	}
 	envFile = e.path(".env")
 	configExportOut, configExportFormat, configExportDefaults = "", "", false
 	configHistoryMax, sourcesExportOut = 20, ""
@@ -239,6 +244,114 @@ func TestConfigFlagOnSubcommandsOnlyLocates(t *testing.T) {
 		t.Errorf("import with a different --config = %v", err)
 	}
 	e.mustRun("config", "import", e.path("a.yaml"), "--config", e.path("a.yaml"))
+}
+
+func TestConfigFlagDeprecationNotice(t *testing.T) {
+	const notice = "Warning: --config is deprecated. Use 'rabbithole config import FILE' instead."
+
+	e := newCLIEnv(t)
+	cfg := e.write("a.yaml", goodConfig)
+
+	t.Run("explicit flag prints once to stderr", func(t *testing.T) {
+		stdout, stderr, err := e.run("config", "history", "--config", cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Count(stderr, notice); got != 1 {
+			t.Fatalf("stderr has %d notices, want 1:\n%s", got, stderr)
+		}
+		if strings.Contains(stdout, notice) {
+			t.Errorf("the notice reached stdout: %q", stdout)
+		}
+	})
+
+	t.Run("no flag prints no notice", func(t *testing.T) {
+		_, stderr, err := e.run("config", "history")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(stderr, notice) {
+			t.Errorf("stderr = %q, want no deprecation notice", stderr)
+		}
+	})
+
+	t.Run("config import still works without a notice", func(t *testing.T) {
+		stdout, stderr, err := e.run("config", "import", e.write("import.yaml", goodConfig))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(stderr, notice) {
+			t.Errorf("config import printed the notice: %q", stderr)
+		}
+		if !strings.Contains(stdout, "saved from") {
+			t.Errorf("config import output = %q, want a saved version", stdout)
+		}
+	})
+}
+
+func TestConfigFlagDeprecationNoticeOnSubcommands(t *testing.T) {
+	const notice = "Warning: --config is deprecated. Use 'rabbithole config import FILE' instead."
+
+	e := newCLIEnv(t)
+	cfg := e.write("a.yaml", goodConfig)
+
+	for _, args := range [][]string{
+		{"items", "list"},
+		{"sources", "export"},
+		{"config", "history"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			_, stderr, err := e.run(append(args, "--config", cfg)...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Count(stderr, notice); got != 1 {
+				t.Fatalf("stderr has %d notices, want 1:\n%s", got, stderr)
+			}
+		})
+	}
+}
+
+func TestConfigFlagDeprecationNoticeOnBenchmark(t *testing.T) {
+	const notice = "Warning: --config is deprecated. Use 'rabbithole config import FILE' instead."
+	const golden = `metadata:
+  name: deprecation-test
+  version: 1
+tags:
+  on-target: relevant
+samples:
+  - id: one
+    source: Source
+    title: A relevant article
+    summary: Enough text to score.
+    expected_llm_score: 8
+    tags: [on-target]
+`
+
+	resetBenchmarkFlags()
+	t.Cleanup(resetBenchmarkFlags)
+
+	e := newCLIEnv(t)
+	cfg := e.write("a.yaml", goodConfig)
+	report := e.path("report.json")
+
+	_, stderr, err := e.run(
+		"eval", "benchmark", e.write("golden.yaml", golden),
+		"--provider", heuristicProvider,
+		"--repeats", "1",
+		"--format", "json",
+		"--output-path", report,
+		"--config", cfg,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(stderr, notice); got != 1 {
+		t.Fatalf("stderr has %d notices, want 1:\n%s", got, stderr)
+	}
+	if !fileExists(report) {
+		t.Error("benchmark did not write its report")
+	}
 }
 
 func TestConfigNeverPrintsASecret(t *testing.T) {

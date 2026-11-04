@@ -40,6 +40,18 @@ rabbithole serve
 
 (From a source checkout, `make serve` does the same and keeps its data in `./data`.)
 
+For a container or headless install, import settings explicitly before starting. The import is
+idempotent: an unchanged file reports `config unchanged` and saves nothing.
+
+```sh
+rabbithole config import config.yaml
+rabbithole serve
+```
+
+If the file has a `store:` block, set `RABBITHOLE_DB` (and `RABBITHOLE_DB_PASSWORD` for Postgres),
+or pass the same `--db` to both commands. The block locates the store for the import only and is
+never saved.
+
 The first start finds no store and asks:
 
 ```

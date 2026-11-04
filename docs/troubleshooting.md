@@ -97,7 +97,8 @@ itself (`RABBITHOLE_*` keys only, and a variable already in the environment wins
 
 ## `an api_key must be a reference to a RABBITHOLE_*_API_KEY environment variable`
 
-**What you see.** `config import` (or `serve --config`) refuses a file and saves nothing.
+**What you see.** `config import` (or the deprecated `serve --config`) refuses a file and saves
+nothing.
 
 **Why.** The store holds only references to variables named `RABBITHOLE_*_API_KEY`. A reference
 to any other variable, such as `$OPENAI_API_KEY`, is refused so a config cannot read arbitrary

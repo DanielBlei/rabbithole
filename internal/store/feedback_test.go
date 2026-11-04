@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -100,7 +101,8 @@ func TestRecentFeedbackIsBoundedFilteredAndOrdered(t *testing.T) {
 		byID[example.ItemID] = example
 	}
 	newest := byID["p-newest"]
-	if newest.Title != "Title p-newest" || newest.Source != "Source p-newest" || newest.Summary != "" {
+	if newest.Title != "Title p-newest" || newest.Source != "Source p-newest" ||
+		newest.Link != "https://example.test/p-newest" || newest.Summary != "" {
 		t.Errorf("stored item fields = %+v", newest)
 	}
 	if newest.UserNote == nil || *newest.UserNote != note {
@@ -111,6 +113,115 @@ func TestRecentFeedbackIsBoundedFilteredAndOrdered(t *testing.T) {
 	}
 	if byID["p-second"].UserNote != nil {
 		t.Errorf("missing note should remain nil; got %v", byID["p-second"].UserNote)
+	}
+}
+
+func TestRecentFeedbackExcludingSkipsNewestBeforeLimit(t *testing.T) {
+	db := openTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.October, 22, 12, 0, 0, 0, time.UTC)
+	ids := []string{"r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8"}
+	items := make([]feeds.Item, 0, len(ids))
+	for i, id := range ids {
+		items = append(items, feeds.Item{
+			ID: id, Source: "Source", Title: "Title " + id, Link: "https://example.test/" + id,
+			Published: now.Add(-time.Duration(len(ids)-i-1) * 24 * time.Hour),
+		})
+	}
+	if err := db.Record(ctx, items, nil, now); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	for _, item := range items {
+		rating := 10
+		if err := db.UpdateUserState(ctx, item.ID, UserPatch{UserScore: &rating}); err != nil {
+			t.Fatalf("rate %s: %v", item.ID, err)
+		}
+	}
+
+	// Exclude the five newest ratings, which the old query would have fetched
+	// and then discarded, leaving no feedback at all.
+	var excluded []string
+	for _, item := range items[3:] {
+		excluded = append(excluded, item.Link)
+	}
+	got, err := db.RecentFeedbackExcluding(ctx, excluded)
+	if err != nil {
+		t.Fatalf("RecentFeedbackExcluding: %v", err)
+	}
+	selected := feedback.Select(got)
+	if gotIDs := feedbackIDs(selected.Positive); !reflect.DeepEqual(gotIDs, []string{"r3", "r2", "r1"}) {
+		t.Errorf("positive IDs = %v, want the three older ratings r3, r2, r1", gotIDs)
+	}
+	if !selected.Active() {
+		t.Errorf("selection = %+v, want active after backfilling older ratings", selected)
+	}
+}
+
+func TestRecentFeedbackExcludingBackfillsBeyondExclusionCap(t *testing.T) {
+	db := openTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, time.October, 22, 12, 0, 0, 0, time.UTC)
+	items := make([]feeds.Item, 0, 8)
+	for i := 1; i <= 8; i++ {
+		id := "r" + strconv.Itoa(i)
+		items = append(items, feeds.Item{
+			ID: id, Source: "Source", Title: "Title " + id, Link: "https://example.test/" + id,
+			Published: now.Add(-time.Duration(8-i) * time.Hour),
+		})
+	}
+	if err := db.Record(ctx, items, nil, now); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	for _, item := range items {
+		rating := 10
+		if err := db.UpdateUserState(ctx, item.ID, UserPatch{UserScore: &rating}); err != nil {
+			t.Fatalf("rate %s: %v", item.ID, err)
+		}
+	}
+
+	// Fill the bounded SQL exclusion list so the five newest ratings fall past
+	// it. They are still candidates, so the fallback scan must skip them and
+	// backfill the three older ratings.
+	excluded := make([]string, 0, maxFeedbackExclusionLinks+6)
+	for i := 0; i < maxFeedbackExclusionLinks; i++ {
+		excluded = append(excluded, "https://filler.test/"+strconv.Itoa(i))
+	}
+	for i := 4; i <= 8; i++ {
+		excluded = append(excluded, "https://example.test/r"+strconv.Itoa(i))
+	}
+	excluded = append(excluded, "", excluded[0])
+
+	got, err := db.RecentFeedbackExcluding(ctx, excluded)
+	if err != nil {
+		t.Fatalf("RecentFeedbackExcluding: %v", err)
+	}
+	selected := feedback.Select(got)
+	if gotIDs := feedbackIDs(selected.Positive); !reflect.DeepEqual(gotIDs, []string{"r3", "r2", "r1"}) {
+		t.Errorf("positive IDs = %v, want older ratings r3, r2, r1", gotIDs)
+	}
+	if !selected.Active() {
+		t.Errorf("selection = %+v, want active after backfilling older ratings", selected)
+	}
+}
+
+func TestUniqueLinks(t *testing.T) {
+	links := []string{"", "https://example.test/first", "https://example.test/first"}
+	for i := 0; i < maxFeedbackExclusionLinks+20; i++ {
+		links = append(links, "https://example.test/"+strconv.Itoa(i))
+	}
+	got := uniqueLinks(links)
+	if want := maxFeedbackExclusionLinks + 21; len(got) != want {
+		t.Fatalf("uniqueLinks returned %d links, want %d", len(got), want)
+	}
+	if got[0] != "https://example.test/first" {
+		t.Errorf("first link = %q, want the first non-empty unique link", got[0])
+	}
+	seen := make(map[string]bool, len(got))
+	for _, link := range got {
+		if link == "" || seen[link] {
+			t.Errorf("bounded links contain empty or duplicate %q", link)
+		}
+		seen[link] = true
 	}
 }
 

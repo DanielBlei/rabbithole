@@ -166,6 +166,15 @@ func (e envelope) mainModel() string {
 
 // Score runs one subprocess for the batch and parses the verdicts.
 func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) ([]rank.ItemScore, error) {
+	return c.ScoreContext(ctx, rank.ProfileContext(profile), items)
+}
+
+// ScoreContext runs one subprocess with the profile and any explicit feedback.
+func (c *Client) ScoreContext(
+	ctx context.Context,
+	scoringContext rank.ScoringContext,
+	items []feeds.Item,
+) ([]rank.ItemScore, error) {
 	logger := zerolog.Ctx(ctx)
 	ctx, cancel := context.WithTimeout(ctx, scoreTimeout)
 	defer cancel()
@@ -174,7 +183,7 @@ func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) 
 	if err != nil {
 		return nil, err
 	}
-	prompt := rank.BuildUserPrompt(profile, items)
+	prompt := rank.BuildUserPromptContext(scoringContext, items)
 
 	logger.Debug().Str("model", c.model).Int("items", len(items)).Msg("claude: sending scoring request")
 	logger.Trace().Str("prompt", prompt).Msg("claude: prompt sent")

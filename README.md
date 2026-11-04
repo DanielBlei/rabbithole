@@ -69,6 +69,18 @@ It verifies the download and installs the latest release binary to `~/.local/bin
 config: you configure it in the UI (the gear, Settings), and a bare `rabbithole serve` runs on the
 defaults. Archives are also on the [Releases page](https://github.com/DanielBlei/rabbithole/releases).
 
+For a container, systemd unit or other headless install that keeps its settings in a file, import
+that file explicitly before starting:
+
+```bash
+rabbithole config import config.yaml
+rabbithole serve
+```
+
+If `config.yaml` has a `store:` block, it locates the store only for the import; it is not saved.
+Set `RABBITHOLE_DB` (and `RABBITHOLE_DB_PASSWORD` for Postgres), or pass the same `--db` to both
+commands. The deprecated `--config` flag still works for existing setups.
+
 ### From source
 
 ```bash

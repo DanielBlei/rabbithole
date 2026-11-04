@@ -7,6 +7,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -60,14 +61,27 @@ var rootCmd = &cobra.Command{
 		invoked = cmd.CommandPath()
 		log = logger.New(debug, trace)
 		zerolog.DefaultContextLogger = &log
+		warnDeprecatedConfigFlag(cmd)
 		logLegacyConfigFile()
 		return nil
 	},
 }
 
+const deprecatedConfigNotice = "Warning: --config is deprecated. Use 'rabbithole config import FILE' instead."
+
+// warnDeprecatedConfigFlag prints the --config deprecation notice to stderr.
+// The root persistent pre-run runs once per command invocation, so the notice
+// is not repeated when subcommands share initialization.
+func warnDeprecatedConfigFlag(cmd *cobra.Command) {
+	if !cmd.Flags().Changed("config") {
+		return
+	}
+	_, _ = fmt.Fprintln(cmd.ErrOrStderr(), deprecatedConfigNotice)
+}
+
 func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "",
-		"config YAML applied to the store when it changes since it was last applied; edits made elsewhere are kept until then (optional)")
+		"deprecated: use 'rabbithole config import FILE' instead; otherwise, config YAML applied to the store when it changes since it was last applied (optional)")
 	rootCmd.PersistentFlags().StringVar(&envFile, "env-file", defaultEnvFile,
 		"env file read for RABBITHOLE_* variables the environment does not set")
 	rootCmd.PersistentFlags().StringVar(&dbFlag, "db", "",
