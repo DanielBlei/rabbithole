@@ -427,7 +427,7 @@ func (p *parser) parseSource(fc fileCtx, group string, si int, n *yaml.Node) (in
 	if nm, ok := vals["name"]; ok && isStr(nm) {
 		path = group + "/" + nm.Value
 	}
-	p.reportUnknown(fc, path, n, "name", "url", "description", "labels", "max_items")
+	p.reportUnknown(fc, path, n, "name", "url", "description", "labels", "max_items", "ignore_checks")
 	src, issues := readSource(n, vals)
 	issues = append(problems, issues...)
 	if len(issues) > 0 {
@@ -468,6 +468,11 @@ func readSource(n *yaml.Node, vals map[string]*yaml.Node) (Source, []issue) {
 			out = append(out, issue{"max_items must be a positive integer", mi.Line})
 		}
 	}
+	if ic, ok := vals["ignore_checks"]; ok {
+		if _, isBool := boolValue(ic); !isBool {
+			out = append(out, issue{"ignore_checks must be a boolean", ic.Line})
+		}
+	}
 	if len(out) > 0 {
 		return Source{}, out
 	}
@@ -479,6 +484,9 @@ func readSource(n *yaml.Node, vals map[string]*yaml.Node) (Source, []issue) {
 	}
 	if mi, ok := vals["max_items"]; ok {
 		src.MaxItems, _ = intValue(mi)
+	}
+	if ic, ok := vals["ignore_checks"]; ok {
+		src.IgnoreChecks, _ = boolValue(ic)
 	}
 	return src, nil
 }
@@ -607,6 +615,15 @@ func intValue(n *yaml.Node) (int, bool) {
 		return 0, false
 	}
 	v, err := strconv.Atoi(n.Value)
+	return v, err == nil
+}
+
+// boolValue returns the value of a !!bool scalar.
+func boolValue(n *yaml.Node) (bool, bool) {
+	if n.Kind != yaml.ScalarNode || n.Tag != "!!bool" {
+		return false, false
+	}
+	v, err := strconv.ParseBool(n.Value)
 	return v, err == nil
 }
 

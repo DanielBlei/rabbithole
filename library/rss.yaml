@@ -408,6 +408,8 @@ groups:
         url: https://importai.substack.com/feed
         description: Weekly digest of AI research and policy.
         labels: [AI, Research, Newsletter]
+        # Substack blocks the GitHub Actions runner IP (HTTP 403); fetches fine for real users.
+        ignore_checks: true
 
       - name: Interconnects
         url: https://www.interconnects.ai/feed
@@ -489,9 +491,9 @@ groups:
         description: Infrastructure and systems posts from Meta's engineers.
         labels: [Infra, Distributed Systems, AI]
 
-  - name: linux-gaming
-    title: Linux and gaming
-    description: Linux desktop news and gaming, with a focus on playing on Linux.
+  - name: linux
+    title: Linux
+    description: Linux desktop, distro and kernel news.
     sources:
       - name: 9to5Linux
         url: https://9to5linux.com/feed
@@ -518,6 +520,10 @@ groups:
         description: Plasma and KDE application announcements.
         labels: [Linux, Open Source, Releases]
 
+  - name: gaming
+    title: Gaming
+    description: Gaming news, including playing on Linux.
+    sources:
       - name: Phoronix
         url: https://www.phoronix.com/rss.php
         description: Linux kernel, graphics driver and gaming benchmark news.

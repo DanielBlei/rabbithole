@@ -303,7 +303,7 @@ func (s *Web) overview(ctx context.Context, data sourcesData) overviewData {
 		snap := s.library.Snapshot()
 		ov.Library = s.overviewLibrary(ctx, snap, data.Rows, data.icons)
 		if ov.Library == nil && libraryPending(snap) {
-			ov.LibFill = libraryFillURL("overview", "", "", 1)
+			ov.LibFill = libraryFillURL("overview", "", 1)
 		}
 	}
 	return ov

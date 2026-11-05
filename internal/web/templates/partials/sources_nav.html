@@ -27,7 +27,7 @@
   <summary class="sh-nav__h">Library</summary>
   <a class="sh-ni{{if .AllOn}} is-on{{end}}" href="/sources/library"{{if .AllOn}} aria-current="page"{{end}}><span class="sh-ni__t">All</span><span class="sh-ni__n">{{.Total}}</span></a>
   {{- range .Groups}}
-  <a class="sh-ni{{if .On}} is-on{{end}}" href="/sources/library/{{.Name}}"{{if .On}} aria-current="page"{{end}}><span class="sh-ni__t">{{.Title}}</span><span class="sh-ni__n">{{.Count}}</span></a>
+  <a class="sh-ni" href="/sources/library#{{.Anchor}}" data-lib-nav-anchor="{{.Anchor}}"><span class="sh-ni__t">{{.Title}}</span><span class="sh-ni__n">{{.Count}}</span></a>
   {{- end}}
 </details>
 {{- else}}

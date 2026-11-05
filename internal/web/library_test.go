@@ -115,26 +115,26 @@ func TestLibraryPageListsEveryGroup(t *testing.T) {
 		t.Error("Library page still exposes @status filters")
 	}
 	for _, want := range []string{
-		`class="li-sec__t"><h3>Agents, RAG and evals</h3>`,
-		`class="li-sec__t"><h3>Papers</h3>`,
-		`class="li-sec__t"><h3>Blogs</h3>`,
-		`class="li-sec__t"><h3>Community</h3>`,
-		`class="li-sec__t"><h3>Journals</h3>`,
-		`class="li-sec__t"><h3>LLM systems</h3>`,
-		`class="li-sec__t"><h3>Releases</h3>`,
+		`class="li-sec__t"><h3 tabindex="-1">Agents, RAG and evals</h3>`,
+		`class="li-sec__t"><h3 tabindex="-1">Papers</h3>`,
+		`class="li-sec__t"><h3 tabindex="-1">Blogs</h3>`,
+		`class="li-sec__t"><h3 tabindex="-1">Community</h3>`,
+		`class="li-sec__t"><h3 tabindex="-1">Journals</h3>`,
+		`class="li-sec__t"><h3 tabindex="-1">LLM systems</h3>`,
+		`class="li-sec__t"><h3 tabindex="-1">Releases</h3>`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing sorted group heading %q", want)
 		}
 	}
 	order := []string{
-		`class="li-sec__t"><h3>Agents, RAG and evals</h3>`,
-		`class="li-sec__t"><h3>Blogs</h3>`,
-		`class="li-sec__t"><h3>Community</h3>`,
-		`class="li-sec__t"><h3>Journals</h3>`,
-		`class="li-sec__t"><h3>LLM systems</h3>`,
-		`class="li-sec__t"><h3>Papers</h3>`,
-		`class="li-sec__t"><h3>Releases</h3>`,
+		`class="li-sec__t"><h3 tabindex="-1">Agents, RAG and evals</h3>`,
+		`class="li-sec__t"><h3 tabindex="-1">Blogs</h3>`,
+		`class="li-sec__t"><h3 tabindex="-1">Community</h3>`,
+		`class="li-sec__t"><h3 tabindex="-1">Journals</h3>`,
+		`class="li-sec__t"><h3 tabindex="-1">LLM systems</h3>`,
+		`class="li-sec__t"><h3 tabindex="-1">Papers</h3>`,
+		`class="li-sec__t"><h3 tabindex="-1">Releases</h3>`,
 	}
 	last := -1
 	for _, marker := range order {
@@ -178,9 +178,11 @@ func TestLibraryPageListsEveryGroup(t *testing.T) {
 	if strings.Contains(out, "/sources/live") {
 		t.Error("the library page polls the live route")
 	}
-	// The nav lists the groups once the library has loaded.
+	// The nav lists the groups once the library has loaded, behind a details
+	// toggle closed by default (All stays always visible), scrolling to the
+	// section on this same page rather than linking to one of its own.
 	for _, want := range []string{
-		`<details class="sh-nav__grp" open>`, `href="/sources/library/journals"`,
+		`<details class="sh-nav__grp" open>`, `href="/sources/library#lib-sec-journals"`,
 		`href="/sources/library" aria-current="page"`,
 	} {
 		if !strings.Contains(out, want) {
@@ -210,25 +212,22 @@ func TestLibraryRowCarriesTheEntry(t *testing.T) {
 	}
 }
 
+// TestLibraryGroupPage covers an old per-group link: it redirects to the
+// combined Library page, scrolled to that group's section, rather than
+// rendering a page scoped to just that group.
 func TestLibraryGroupPage(t *testing.T) {
 	w, _ := libraryTestWeb(t, config.FeedsDoc{})
-	out := get(t, w, "/sources/library/arxiv-categories")
-
-	for _, want := range []string{
-		"<title>Papers</title>", `<h1 class="li-title">Papers</h1>`, "arXiv cs.AI (Artificial Intelligence)", `data-scope="this group"`,
-		`href="/sources/library/arxiv-categories" aria-current="page"`,
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q", want)
-		}
-	}
-	for _, not := range []string{libK8sName, "<h3>Releases</h3>", `<h3>Journals</h3>`} {
-		if strings.Contains(out, not) {
-			t.Errorf("group page holds %q", not)
-		}
-	}
 
 	rec := httptest.NewRecorder()
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/sources/library/arxiv-categories", nil))
+	if rec.Code != http.StatusMovedPermanently {
+		t.Fatalf("status = %d, want 301", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/sources/library#lib-sec-arxiv-categories" {
+		t.Errorf("Location = %q", loc)
+	}
+
+	rec = httptest.NewRecorder()
 	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/sources/library/nope", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unknown group status = %d, want 404", rec.Code)
@@ -411,16 +410,17 @@ func TestLibraryApplyStalePick(t *testing.T) {
 	}
 }
 
-// A reply repaints the group the request came from.
-func TestLibraryReplyKeepsTheGroup(t *testing.T) {
+// A reply always repaints the whole Library: there is no more per-group page
+// for it to stay scoped to.
+func TestLibraryReplyShowsEveryGroup(t *testing.T) {
 	w, _ := libraryTestWeb(t, config.FeedsDoc{})
-	hdr := map[string]string{"HX-Current-URL": "http://localhost/sources/library/journals"}
+	hdr := map[string]string{"HX-Current-URL": "http://localhost/sources/library"}
 	out := postLibrary(t, w, "/sources/library/apply", url.Values{"pick": {libKey(libK8sURL)}}, hdr)
-	if !strings.Contains(out, "Added 1 source") || !strings.Contains(out, "Communications of the ACM") {
-		t.Errorf("reply lost the group; body=%s", out)
+	if !strings.Contains(out, "Added 1 source") {
+		t.Errorf("reply missing the added source; body=%s", out)
 	}
-	if strings.Contains(out, `id="lib-`+config.FeedID(libK8sURL)+`"`) {
-		t.Errorf("reply holds a row of another group")
+	if !strings.Contains(out, `id="lib-`+config.FeedID(libKVURL)+`"`) {
+		t.Errorf("reply dropped a row from another group; body=%s", out)
 	}
 }
 
@@ -563,7 +563,7 @@ func TestSourcesNavListsLibraryGroupsOnceLoaded(t *testing.T) {
 	after := get(t, w, "/sources/manage")
 	for _, want := range []string{
 		`<details class="sh-nav__grp" open>`, `<summary class="sh-nav__h">Library</summary>`,
-		`href="/sources/library/blogs"`, `<span class="sh-ni__t">All</span>`,
+		`href="/sources/library#lib-sec-blogs"`, `<span class="sh-ni__t">All</span>`,
 	} {
 		if !strings.Contains(after, want) {
 			t.Errorf("nav missing %q", want)
@@ -642,17 +642,5 @@ func TestLibraryPlanCannotSelectRemoved(t *testing.T) {
 	}
 	if n := strings.Count(out, "data-plan-pick"); n != 1 {
 		t.Errorf("selectable rows = %d, want only the new one", n)
-	}
-}
-
-func TestLibraryRefreshUnknownGroupIsNotFound(t *testing.T) {
-	w, _ := libraryTestWeb(t, config.FeedsDoc{})
-	req := httptest.NewRequest(http.MethodPost, "/sources/library/refresh", strings.NewReader(""))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("HX-Current-URL", "http://localhost/sources/library/nope")
-	rec := httptest.NewRecorder()
-	w.Routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rec.Code)
 	}
 }

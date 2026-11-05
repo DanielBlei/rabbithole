@@ -263,7 +263,7 @@ func (s *Web) sourcesPageData(ctx context.Context, selected, section string) (so
 	data.Active = "sources"
 	data.Chrome = s.chromeWith(ctx, s.ingestChromeFor(s.ing.Status(), data.last))
 	data.Section = section
-	data.LibNav = libNavFor(s.library.Snapshot(), section, "")
+	data.LibNav = libNavFor(s.library.Snapshot(), section)
 	if section == "overview" {
 		data.Overview = s.overview(ctx, data)
 	}

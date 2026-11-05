@@ -116,8 +116,8 @@ func TestLibraryFillRoute(t *testing.T) {
 
 	close(gate)
 	waitFor(t, func() bool { return w.library.Snapshot().Loaded })
-	nav = get(t, w, "/sources/libfill?part=nav&section=library&group=blogs&try=2")
-	for _, want := range []string{navGroupMarker, `id="srcLibNav"`, `href="/sources/library/blogs"`} {
+	nav = get(t, w, "/sources/libfill?part=nav&section=library&try=2")
+	for _, want := range []string{navGroupMarker, `id="srcLibNav"`, `href="/sources/library#lib-sec-blogs"`} {
 		if !strings.Contains(nav, want) {
 			t.Errorf("loaded library: nav missing %q", want)
 		}

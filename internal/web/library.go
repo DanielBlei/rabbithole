@@ -5,7 +5,6 @@ package web
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -41,8 +40,6 @@ const (
 	libraryOfflineCopy = "Could not load the Library. Check your connection and try again."
 )
 
-var errUnknownGroup = errors.New("unknown library group")
-
 // libraryPage is the Library section: the header, filter tools and every
 // group's entries, or the reason there is nothing to show.
 type libraryPage struct {
@@ -50,10 +47,9 @@ type libraryPage struct {
 	Offline bool // nothing has been fetched yet
 	Notice  string
 
-	Group string // the group shown, empty for all
 	Title string
 	Desc  string
-	// Scope words the filter's empty states: "the Library" or "this group".
+	// Scope words the filter's empty states.
 	Scope string
 
 	// Total and Added count the entries in view; Hidden counts those the user hid.
@@ -101,8 +97,7 @@ type libSection struct {
 	Name   string
 	Title  string
 	Desc   string
-	Single bool // the page shows only this group, so it needs no heading
-	Hidden int  // entries the user hid
+	Hidden int // entries the user hid
 	// AllHidden sections sit at the bottom, dimmed, until their entries are shown.
 	AllHidden bool
 	Entries   []libEntry
@@ -154,10 +149,10 @@ type libNav struct {
 }
 
 type libNavGroup struct {
-	Name  string
-	Title string
-	Count int
-	On    bool
+	Name   string
+	Title  string
+	Count  int
+	Anchor string
 }
 
 // libraryEntry is a library source with the file type and group it sits in.
@@ -242,10 +237,9 @@ func libraryState(row store.PlanRow) (state, chip string) {
 	}
 }
 
-// libraryPageFor builds the page for one group, or for all of them when group
-// is empty. An unknown group is errUnknownGroup.
-func (s *Web) libraryPageFor(ctx context.Context, snap library.Snapshot, group string) (*libraryPage, error) {
-	p := &libraryPage{Title: "Library", Group: group, Scope: "the Library", Notice: snap.Notice}
+// libraryPageFor builds the page for every library group.
+func (s *Web) libraryPageFor(ctx context.Context, snap library.Snapshot) (*libraryPage, error) {
+	p := &libraryPage{Title: "Library", Scope: "the Library", Notice: snap.Notice}
 	switch {
 	case snap.Off:
 		p.Off, p.Desc = true, libraryOffCopy
@@ -255,13 +249,6 @@ func (s *Web) libraryPageFor(ctx context.Context, snap library.Snapshot, group s
 		return p, nil
 	}
 	p.Desc = "All sources in the Library"
-	if group != "" {
-		g, ok := libraryGroup(snap, group)
-		if !ok {
-			return nil, errUnknownGroup
-		}
-		p.Title, p.Desc, p.Scope = g.Title, g.Description, "this group"
-	}
 	states, err := s.libraryStates(ctx, snap)
 	if err != nil {
 		return nil, err
@@ -277,10 +264,7 @@ func (s *Web) libraryPageFor(ctx context.Context, snap library.Snapshot, group s
 	addable := 0
 	for _, f := range snap.Library.Files {
 		for _, g := range f.Groups {
-			if group != "" && g.Name != group {
-				continue
-			}
-			sec := libSection{Name: g.Name, Title: g.Title, Desc: g.Description, Single: group != ""}
+			sec := libSection{Name: g.Name, Title: g.Title, Desc: g.Description}
 			for _, src := range g.Sources {
 				key := config.FeedURLKey(src.URL)
 				e := libEntry{
@@ -371,13 +355,13 @@ func libraryGroup(snap library.Snapshot, name string) (library.Group, bool) {
 	return library.Group{}, false
 }
 
-// libNavFor is the nav's Library group. section and group say which item is
-// current; the groups appear once the library has loaded.
-func libNavFor(snap library.Snapshot, section, group string) libNav {
+// libNavFor is the nav's Library group. section says whether the Library is
+// the current page; the groups appear once the library has loaded.
+func libNavFor(snap library.Snapshot, section string) libNav {
 	on := section == "library"
-	nav := libNav{AllOn: on && group == ""}
+	nav := libNav{AllOn: on}
 	if libraryPending(snap) {
-		nav.Fill = libraryFillURL("nav", section, group, 1)
+		nav.Fill = libraryFillURL("nav", section, 1)
 	}
 	if !snap.Loaded || snap.Off {
 		return nav
@@ -386,7 +370,7 @@ func libNavFor(snap library.Snapshot, section, group string) libNav {
 		for _, g := range f.Groups {
 			nav.Total += len(g.Sources)
 			nav.Groups = append(nav.Groups, libNavGroup{
-				Name: g.Name, Title: g.Title, Count: len(g.Sources), On: on && g.Name == group,
+				Name: g.Name, Title: g.Title, Count: len(g.Sources), Anchor: "lib-sec-" + g.Name,
 			})
 		}
 	}
@@ -399,40 +383,12 @@ func libNavFor(snap library.Snapshot, section, group string) libNav {
 	return nav
 }
 
-// libraryGroupOf is the group the page that sent a request is showing, as the
-// URL names it; libraryPageFor says whether it exists. An htmx request names
-// that page in HX-Current-URL, which lets a reply repaint the same scope
-// without the plan form carrying it.
-func libraryGroupOf(r *http.Request) string {
-	u, err := url.Parse(r.Header.Get("HX-Current-URL"))
-	if err != nil {
-		return ""
-	}
-	name, _ := strings.CutPrefix(u.Path, "/sources/library/")
-	if name == u.Path {
-		return ""
-	}
-	return name
-}
-
 func (s *Web) handleLibrary(w http.ResponseWriter, r *http.Request) {
-	s.renderLibraryPage(w, r, "")
-}
-
-func (s *Web) handleLibraryGroup(w http.ResponseWriter, r *http.Request) {
-	s.renderLibraryPage(w, r, r.PathValue("group"))
-}
-
-func (s *Web) renderLibraryPage(w http.ResponseWriter, r *http.Request, group string) {
 	ctx := r.Context()
 	waitCtx, cancel := context.WithTimeout(ctx, s.libraryWait)
 	snap := s.library.Get(waitCtx)
 	cancel()
-	page, err := s.libraryPageFor(ctx, snap, group)
-	if errors.Is(err, errUnknownGroup) {
-		http.NotFound(w, r)
-		return
-	}
+	page, err := s.libraryPageFor(ctx, snap)
 	if err != nil {
 		httpFeedError(w, err)
 		return
@@ -444,8 +400,25 @@ func (s *Web) renderLibraryPage(w http.ResponseWriter, r *http.Request, group st
 	}
 	data.Title = page.Title
 	data.Library = page
-	data.LibNav = libNavFor(snap, "library", group)
+	data.LibNav = libNavFor(snap, "library")
 	s.writeSourcesPage(w, data)
+}
+
+// handleLibraryGroup sends an old per-group link to the combined Library page,
+// scrolled to that group's section.
+func (s *Web) handleLibraryGroup(w http.ResponseWriter, r *http.Request) {
+	group := r.PathValue("group")
+	ctx := r.Context()
+	waitCtx, cancel := context.WithTimeout(ctx, s.libraryWait)
+	snap := s.library.Get(waitCtx)
+	cancel()
+	if snap.Loaded && !snap.Off {
+		if _, ok := libraryGroup(snap, group); !ok {
+			http.NotFound(w, r)
+			return
+		}
+	}
+	http.Redirect(w, r, "/sources/library#lib-sec-"+group, http.StatusMovedPermanently)
 }
 
 // libraryForm reads the posted form, a multipart one when the plan form sent it.
@@ -477,11 +450,7 @@ func pickedKeys(r *http.Request) map[string]bool {
 func (s *Web) writeLibraryBody(
 	w http.ResponseWriter, r *http.Request, snap library.Snapshot, plan *importPlan, status *importStatus,
 ) {
-	page, err := s.libraryPageFor(r.Context(), snap, libraryGroupOf(r))
-	if errors.Is(err, errUnknownGroup) {
-		// The group left the library since the page loaded: show everything.
-		page, err = s.libraryPageFor(r.Context(), snap, "")
-	}
+	page, err := s.libraryPageFor(r.Context(), snap)
 	if err != nil {
 		httpFeedError(w, err)
 		return
@@ -744,17 +713,12 @@ type libraryRefresh struct {
 func (s *Web) handleLibraryRefresh(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	snap := s.library.Refresh(ctx)
-	group := libraryGroupOf(r)
-	page, err := s.libraryPageFor(ctx, snap, group)
-	if errors.Is(err, errUnknownGroup) {
-		http.NotFound(w, r)
-		return
-	}
+	page, err := s.libraryPageFor(ctx, snap)
 	if err != nil {
 		httpFeedError(w, err)
 		return
 	}
-	nav := libNavFor(snap, "library", group)
+	nav := libNavFor(snap, "library")
 	nav.OOB, nav.Fill = true, ""
 	s.renderFragment(w, "libraryRefresh", libraryRefresh{Page: page, Nav: nav})
 }
@@ -776,13 +740,10 @@ func libraryPending(snap library.Snapshot) bool {
 
 // libraryFillURL is the repaint a placeholder asks for. try counts the asks,
 // this one included.
-func libraryFillURL(part, section, group string, try int) string {
+func libraryFillURL(part, section string, try int) string {
 	q := url.Values{"part": {part}, "try": {strconv.Itoa(try)}}
 	if section != "" {
 		q.Set("section", section)
-	}
-	if group != "" {
-		q.Set("group", group)
 	}
 	return "/sources/libfill?" + q.Encode()
 }
@@ -811,10 +772,10 @@ func (s *Web) handleLibraryFill(w http.ResponseWriter, r *http.Request) {
 		if q.Get("section") == "library" {
 			section = "library"
 		}
-		nav := libNavFor(snap, section, q.Get("group"))
+		nav := libNavFor(snap, section)
 		nav.Fill = ""
 		if pending {
-			nav.Fill = libraryFillURL("nav", section, q.Get("group"), try+1)
+			nav.Fill = libraryFillURL("nav", section, try+1)
 		}
 		s.renderFragment(w, "sourcesLibNav", nav)
 	case "overview":
@@ -832,7 +793,7 @@ func (s *Web) handleLibraryFill(w http.ResponseWriter, r *http.Request) {
 				s.iconRefs(r.Context()),
 			); fill.Library == nil &&
 				pending {
-				fill.Fill = libraryFillURL("overview", "", "", try+1)
+				fill.Fill = libraryFillURL("overview", "", try+1)
 			}
 		}
 		s.renderFragment(w, "ovLibraryFill", fill)

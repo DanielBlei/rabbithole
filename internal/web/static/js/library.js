@@ -23,6 +23,7 @@
   var sel = {}; // key -> true, the entries ticked for the bar
   var labels = Object.create(null); // selected tag names
   var state = 'all';
+  var libFoldPrefix = 'rh.sources.library.fold.';
 
   function page() { return document.querySelector('[data-lib]'); }
   function input() { return document.querySelector('[data-lib-filter]'); }
@@ -242,6 +243,49 @@
     });
   }
 
+  // Per-section fold state, mirroring sources.js's Overview folds but under
+  // their own data attributes and localStorage key so the two scripts never
+  // fight over the same section.
+  function refreshLibraryFolds() {
+    document.querySelectorAll('[data-lib-fold]').forEach(function (button) {
+      var key = libFoldPrefix + button.dataset.libFold;
+      var saved = null;
+      try { saved = localStorage.getItem(key); } catch (e) {}
+      var open = saved === 'open' ? true : saved === 'closed' ? false : button.dataset.libFoldDefaultOpen === 'true';
+      var body = document.getElementById(button.getAttribute('aria-controls'));
+      if (!body) return;
+      body.hidden = !open;
+      button.setAttribute('aria-expanded', open ? 'true' : 'false');
+      var title = button.closest('.li-sec__h').querySelector('.li-sec__t h3').textContent.trim();
+      button.setAttribute('aria-label', (open ? 'Collapse ' : 'Expand ') + title);
+    });
+  }
+
+  // Opens a section's fold (if closed) and persists that choice, used when
+  // jumping to it from the sidebar or a #lib-sec-* link.
+  function openLibraryFold(name) {
+    var button = document.querySelector('[data-lib-fold="' + name + '"]');
+    if (!button) return;
+    var body = document.getElementById(button.getAttribute('aria-controls'));
+    if (!body) return;
+    body.hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+    try { localStorage.setItem(libFoldPrefix + name, 'open'); } catch (e) {}
+  }
+
+  // Scrolls to and focuses the section a #lib-sec-<name> hash names, opening
+  // its fold first so the jump always lands somewhere visible.
+  function jumpToHash(hash) {
+    if (!hash || hash.indexOf('#lib-sec-') !== 0) return;
+    var name = hash.slice('#lib-sec-'.length);
+    var section = document.getElementById('lib-sec-' + name);
+    if (!section) return;
+    openLibraryFold(name);
+    section.scrollIntoView({ block: 'start' });
+    var heading = section.querySelector('.li-sec__t h3');
+    if (heading) heading.focus({ preventScroll: true });
+  }
+
   // While the plan is up the header and the tools step aside.
   function syncMode() {
     var plan = planOpen();
@@ -255,6 +299,7 @@
     render();
     syncMode();
     renderBar();
+    refreshLibraryFolds();
   }
 
   function closePlan() {
@@ -351,8 +396,26 @@
       renderBar();
     } else if (t.closest('[data-plan-cancel]')) {
       closePlan();
+    } else if ((el = t.closest('[data-lib-fold]'))) {
+      var open = el.getAttribute('aria-expanded') !== 'true';
+      var body = document.getElementById(el.getAttribute('aria-controls'));
+      if (!body) return;
+      body.hidden = !open;
+      el.setAttribute('aria-expanded', open ? 'true' : 'false');
+      var title = el.closest('.li-sec__h').querySelector('.li-sec__t h3').textContent.trim();
+      el.setAttribute('aria-label', (open ? 'Collapse ' : 'Expand ') + title);
+      try { localStorage.setItem(libFoldPrefix + el.dataset.libFold, open ? 'open' : 'closed'); } catch (err) {}
+    } else if ((el = t.closest('[data-lib-nav-anchor]')) && page()) {
+      // Already on the Library page: scroll in place instead of a full reload.
+      e.preventDefault();
+      var hash = '#' + el.dataset.libNavAnchor;
+      history.pushState(null, '', hash);
+      jumpToHash(hash);
     }
   });
+
+  window.addEventListener('hashchange', function () { jumpToHash(location.hash); });
+  document.addEventListener('DOMContentLoaded', function () { jumpToHash(location.hash); });
 
   // Esc in the filter box clears every filter, like "Clear filters". An open modal keeps the
   // key. Bound ahead of modal.js, like sources.js, so the key is spent here first.

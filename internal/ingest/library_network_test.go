@@ -42,6 +42,7 @@ const (
 type liveJob struct {
 	file, group, name, url string
 	typ                    library.Type
+	ignoreChecks           bool
 }
 
 // liveOutcome is one attempt at a job. reason is empty when the job passed.
@@ -112,6 +113,9 @@ func TestLibrarySourcesLive(t *testing.T) {
 
 	for i, job := range jobs {
 		t.Run(job.file+"/"+job.name, func(t *testing.T) {
+			if job.ignoreChecks {
+				t.Skip("ignore_checks set in the library")
+			}
 			if reason := reasons[i]; reason != "" {
 				t.Errorf("LIBRARY-FAIL %s %s %q %s: %q%s",
 					job.file, job.group, job.name, job.url, reason, liveHint(reason))
@@ -129,7 +133,9 @@ func liveJobs(lib *library.Library) ([]liveJob, map[string][]int) {
 			for _, s := range g.Sources {
 				domain := registrableDomain(s.URL)
 				byDomain[domain] = append(byDomain[domain], len(jobs))
-				jobs = append(jobs, liveJob{file: f.Name, group: g.Name, name: s.Name, url: s.URL, typ: f.Type})
+				jobs = append(jobs, liveJob{
+					file: f.Name, group: g.Name, name: s.Name, url: s.URL, typ: f.Type, ignoreChecks: s.IgnoreChecks,
+				})
 			}
 		}
 	}

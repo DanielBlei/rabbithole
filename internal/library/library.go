@@ -42,11 +42,12 @@ type Group struct {
 
 // Source is one curated source. URL is its identity.
 type Source struct {
-	Name        string
-	URL         string
-	Description string
-	Labels      []string // display form; each label's slug is tags.Normalize(label)
-	MaxItems    int      // 0 when unset
+	Name         string
+	URL          string
+	Description  string
+	Labels       []string // display form; each label's slug is tags.Normalize(label)
+	MaxItems     int      // 0 when unset
+	IgnoreChecks bool     // skip the live-network health check (e.g. a host that blocks CI runners)
 }
 
 // knownTypes lists the types in Library.Files order.

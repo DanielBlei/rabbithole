@@ -104,15 +104,20 @@
 {{end}}
 
 {{define "librarySection"}}
-<section class="li-sec{{if .Single}} li-sec--single{{end}}{{if .AllHidden}} li-sec--gone{{end}}" data-lib-sec data-title="{{.Title}}"{{if .AllHidden}} data-lib-sec-gone{{end}}>
+<section class="li-sec{{if .AllHidden}} li-sec--gone{{end}}" id="lib-sec-{{.Name}}" data-lib-sec data-title="{{.Title}}"{{if .AllHidden}} data-lib-sec-gone{{end}}>
   <header class="li-sec__h">
-    {{- if .Single}}<span></span>
-    {{- else}}<div class="li-sec__t"><h3>{{.Title}}</h3><span class="li-sec__n" data-lib-sec-count>{{len .Entries}}</span></div>{{end}}
+    <div class="li-sec__t"><h3 tabindex="-1">{{.Title}}</h3><span class="li-sec__n" data-lib-sec-count>{{len .Entries}}</span></div>
     {{- if .AllHidden}}<button class="li-sec__gone" type="button" data-lib-show-hidden>{{.Hidden}} hidden</button>{{end}}
     <button class="li-sec__sel" type="button" hidden data-lib-sec-select></button>
+    {{- if not .AllHidden}}
+    <button class="ov-fold__toggle" type="button" data-lib-fold="{{.Name}}" data-lib-fold-default-open="true"
+            aria-expanded="true" aria-controls="lib-sec-list-{{.Name}}" aria-label="Collapse {{.Title}}">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    {{- end}}
   </header>
-  {{- if not .Single}}<p class="li-sec__d">{{.Desc}}</p>{{end}}
-  <ul class="li-list">
+  <p class="li-sec__d">{{.Desc}}</p>
+  <ul class="li-list" id="lib-sec-list-{{.Name}}">
     {{- range .Entries}}{{template "libraryRow" .}}{{end}}
   </ul>
 </section>
