@@ -21,6 +21,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/DanielBlei/rabbithole/internal/briefing"
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/httplog"
@@ -39,9 +40,10 @@ import (
 // is harmless (a page just ignores the ones it doesn't use). Parsed once at
 // startup; a parse failure is a build-time mistake, so fail fast.
 var (
-	feedTmpl    = pageTmpl("feed.html")
-	mazeTmpl    = pageTmpl("maze.html")
-	sourcesTmpl = pageTmpl("sources.html")
+	feedTmpl     = pageTmpl("feed.html")
+	mazeTmpl     = pageTmpl("maze.html")
+	sourcesTmpl  = pageTmpl("sources.html")
+	briefingTmpl = pageTmpl("briefing.html")
 )
 
 // pageTmpl builds the template set for one page: the shared layout and partials
@@ -134,6 +136,8 @@ type Web struct {
 	noEnvWrite bool            // --no-env-write: pasting a key is refused
 	// scorerCheck builds the scorer for "Test connection"; nil uses the real one.
 	scorerCheck func(context.Context, config.Config) error
+	// briefingGen builds the briefing generator; nil uses the configured provider.
+	briefingGen func(context.Context, config.Config) (briefing.Generator, error)
 }
 
 // New returns a Web backed by db, reading the run config from src once per request. ing owns the
@@ -179,6 +183,10 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.handleFeed)
 	mux.HandleFunc("GET /feed", s.handleFeed)
 	mux.HandleFunc("GET /maze", s.handleMaze)
+	mux.HandleFunc("GET /briefing", s.handleBriefing)
+	mux.HandleFunc("POST /briefing/generate", s.handleBriefingGenerate)
+	mux.HandleFunc("GET /briefing/status", s.handleBriefingStatus)
+	mux.HandleFunc("GET /briefing/export", s.handleBriefingExport)
 	mux.HandleFunc("GET /settings", s.handleSettingsIndex)
 	mux.HandleFunc("GET /settings/{tab}", s.handleSettings)
 	mux.HandleFunc("POST /settings/review", s.handleSettingsReview)

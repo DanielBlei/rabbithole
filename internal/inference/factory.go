@@ -10,6 +10,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/DanielBlei/rabbithole/internal/briefing"
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/ollama"
 	"github.com/DanielBlei/rabbithole/internal/rank"
@@ -33,6 +34,37 @@ func Resolve(ctx context.Context, cfg config.InferenceConfig, think bool, system
 		return nil, err
 	}
 	return s, nil
+}
+
+// ResolveBriefing constructs the briefing generator for the configured
+// provider. The heuristic scorer cannot synthesize text, so it returns
+// briefing.ErrBriefingUnavailable for the UI to render as a product state.
+// No probe request is made: a generation is exactly one synthesis call.
+func ResolveBriefing(
+	ctx context.Context,
+	cfg config.InferenceConfig,
+	think bool,
+) (briefing.Generator, error) {
+	key, err := cfg.ResolvedAPIKey()
+	if err != nil {
+		return nil, err
+	}
+	main := cfg
+	main.APIKey = key
+	switch main.Provider {
+	case "ollama":
+		return ollama.New(main.Host, main.Model, main.APIKey, think, main.ModelTuning, "")
+	case "openai":
+		return vllm.New(vllm.OpenAI, main.Host, main.Model, main.APIKey,
+			think, main.Effort, main.ModelTuning, "")
+	case "vllm":
+		return vllm.New(vllm.VLLM, main.Host, main.Model, main.APIKey,
+			think, main.Effort, main.ModelTuning, "")
+	case "heuristic":
+		return nil, briefing.ErrBriefingUnavailable
+	default:
+		return nil, fmt.Errorf("unknown provider %q, must be ollama, openai, vllm or heuristic", main.Provider)
+	}
 }
 
 // build constructs and validates the Scorer described by cfg, whose APIKey is already resolved.

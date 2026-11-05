@@ -5,11 +5,13 @@ package inference
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/DanielBlei/rabbithole/internal/briefing"
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
@@ -142,6 +144,33 @@ func TestResolveExpandsAPIKeyReferences(t *testing.T) {
 		_, err := Resolve(t.Context(), cfg, false, "")
 		if err == nil || !strings.Contains(err.Error(), "inference.api_key") {
 			t.Fatalf("Resolve() error = %v, want it to name inference.api_key", err)
+		}
+	})
+}
+
+func TestResolveBriefing(t *testing.T) {
+	for _, tt := range []struct{ provider, model string }{{"ollama", "m:latest"}, {"openai", "m"}, {"vllm", "m"}} {
+		provider := tt.provider
+		t.Run(provider+" builds a generator without a probe", func(t *testing.T) {
+			cfg := config.InferenceConfig{Provider: provider, Host: "http://127.0.0.1:1", Model: tt.model}
+			gen, err := ResolveBriefing(t.Context(), cfg, false)
+			if err != nil {
+				t.Fatalf("ResolveBriefing: %v", err)
+			}
+			if gen == nil {
+				t.Fatal("generator is nil")
+			}
+		})
+	}
+	t.Run("heuristic is unavailable", func(t *testing.T) {
+		gen, err := ResolveBriefing(t.Context(), config.InferenceConfig{Provider: "heuristic"}, false)
+		if gen != nil || !errors.Is(err, briefing.ErrBriefingUnavailable) {
+			t.Fatalf("gen = %v, err = %v; want ErrBriefingUnavailable", gen, err)
+		}
+	})
+	t.Run("unknown provider", func(t *testing.T) {
+		if _, err := ResolveBriefing(t.Context(), config.InferenceConfig{Provider: "nope"}, false); err == nil {
+			t.Fatal("unknown provider accepted")
 		}
 	})
 }

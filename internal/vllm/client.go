@@ -337,6 +337,95 @@ type jsonSchema struct {
 	Schema json.RawMessage `json:"schema"`
 }
 
+// ChatJSON sends one JSON-mode completion with the caller's schema and output
+// cap. It is the briefing's single synthesis call: timeouts, think handling,
+// auth and schema enforcement stay on the same client path as scoring.
+func (c *Client) ChatJSON(
+	ctx context.Context,
+	system, user string,
+	schema json.RawMessage,
+	maxTokens int,
+) (string, error) {
+	logger := zerolog.Ctx(ctx)
+	ctx, cancel := context.WithTimeout(ctx, chatTimeout)
+	defer cancel()
+
+	var messages []chatMessage
+	if system != "" {
+		messages = append(messages, chatMessage{Role: "system", Content: system})
+	}
+	messages = append(messages, chatMessage{Role: "user", Content: user})
+	reqBody := chatRequest{
+		Model:    c.model,
+		Stream:   false,
+		tokenCap: c.tokenCap(maxTokens),
+		Messages: messages,
+		ResponseFormat: &responseFormat{
+			Type: "json_schema",
+			JSONSchema: &jsonSchema{
+				Name:   "briefing",
+				Strict: true,
+				Schema: schema,
+			},
+		},
+	}
+	switch {
+	case c.flavor == OpenAI:
+		reqBody.ReasoningEffort = c.sendEffort
+	case !c.think:
+		reqBody.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal briefing request: %w", err)
+	}
+
+	start := time.Now()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.host+"/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("build briefing request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("%s chat: %w", c.flavor, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", fmt.Errorf("%s chat returned %d: %s", c.flavor, resp.StatusCode, bytes.TrimSpace(msg))
+	}
+
+	var completion struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+		Usage struct {
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&completion); err != nil {
+		return "", fmt.Errorf("decode briefing response: %w", err)
+	}
+	if len(completion.Choices) == 0 {
+		return "", fmt.Errorf("%s returned no choices", c.flavor)
+	}
+	content := completion.Choices[0].Message.Content
+	logger.Debug().
+		Str("elapsed", time.Since(start).Round(time.Millisecond).String()).
+		Int("response_bytes", len(content)).
+		Str("finish_reason", completion.Choices[0].FinishReason).
+		Int("completion_tokens", completion.Usage.CompletionTokens).
+		Int("max_tokens", maxTokens).
+		Msg(c.flavor.String() + ": briefing synthesis response received")
+	logger.Trace().Str("response", content).Msg(c.flavor.String() + ": raw briefing response")
+	return content, nil
+}
+
 // Score sends one JSON-mode completion for the batch and parses the verdicts.
 func (c *Client) Score(ctx context.Context, profile string, items []feeds.Item) ([]rank.ItemScore, error) {
 	return c.ScoreContext(ctx, rank.ProfileContext(profile), items)

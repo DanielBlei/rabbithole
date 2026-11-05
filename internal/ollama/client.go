@@ -194,16 +194,7 @@ func (c *Client) ScoreContext(
 		req.Format = json.RawMessage(c.tuning.Schema())
 	}
 
-	// Set the model's reasoning mode explicitly. Ignored by models without a
-	// think mode.
-	think := &api.ThinkValue{}
-	thinkJSON := "false"
-	if c.think {
-		thinkJSON = "true"
-	}
-	if err := think.UnmarshalJSON([]byte(thinkJSON)); err == nil {
-		req.Think = think
-	}
+	c.setThink(req)
 
 	logger.Debug().
 		Str("model", c.model).
@@ -261,6 +252,71 @@ func (c *Client) ScoreContext(
 		return nil, fmt.Errorf("%w (done_reason=%q, completion_tokens=%d)", err, doneReason, evalCount)
 	}
 	return scores, nil
+}
+
+// ChatJSON sends one JSON-mode chat request with the caller's schema and output
+// cap. It is the briefing's single synthesis call: timeouts, think handling,
+// auth and schema enforcement stay on the same client path as scoring.
+func (c *Client) ChatJSON(
+	ctx context.Context,
+	system, user string,
+	schema json.RawMessage,
+	maxTokens int,
+) (string, error) {
+	logger := zerolog.Ctx(ctx)
+	ctx, cancel := context.WithTimeout(ctx, chatTimeout)
+	defer cancel()
+
+	stream := false
+	opts := map[string]any{"num_predict": maxTokens}
+	if c.tuning.NumCtx > 0 {
+		opts["num_ctx"] = c.tuning.NumCtx
+	}
+	var messages []api.Message
+	if system != "" {
+		messages = append(messages, api.Message{Role: "system", Content: system})
+	}
+	messages = append(messages, api.Message{Role: "user", Content: user})
+	req := &api.ChatRequest{
+		Model:    c.model,
+		Stream:   &stream,
+		Options:  opts,
+		Messages: messages,
+	}
+	if len(schema) > 0 {
+		req.Format = schema
+	}
+	c.setThink(req)
+
+	start := time.Now()
+	var sb strings.Builder
+	err := c.api.Chat(ctx, req, func(resp api.ChatResponse) error {
+		sb.WriteString(resp.Message.Content)
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("ollama chat: %w", err)
+	}
+	logger.Debug().
+		Str("elapsed", time.Since(start).Round(time.Millisecond).String()).
+		Int("response_bytes", sb.Len()).
+		Int("max_tokens", maxTokens).
+		Msg("ollama: briefing synthesis response received")
+	logger.Trace().Str("response", sb.String()).Msg("ollama: raw briefing response")
+	return sb.String(), nil
+}
+
+// setThink applies the client's reasoning mode to a request. Ignored by models
+// without a think mode.
+func (c *Client) setThink(req *api.ChatRequest) {
+	think := &api.ThinkValue{}
+	thinkJSON := "false"
+	if c.think {
+		thinkJSON = "true"
+	}
+	if err := think.UnmarshalJSON([]byte(thinkJSON)); err == nil {
+		req.Think = think
+	}
 }
 
 func normalize(m string) string {

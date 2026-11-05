@@ -576,3 +576,50 @@ func TestScoreOmitsSystemMessageWhenPromptEmpty(t *testing.T) {
 		})
 	}
 }
+
+func TestChatJSONSendsBriefingSchema(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(
+			[]byte(
+				`{"choices":[{"message":{"content":"{\"ok\":true}"},"finish_reason":"stop"}],"usage":{"completion_tokens":3}}`,
+			),
+		)
+	}))
+	defer srv.Close()
+
+	c, err := New(VLLM, srv.URL, "model", "", false, "", rank.ModelTuning{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := c.ChatJSON(t.Context(), "system", "user",
+		json.RawMessage(`{"type":"object"}`), 900)
+	if err != nil {
+		t.Fatalf("ChatJSON: %v", err)
+	}
+	if content != `{"ok":true}` {
+		t.Errorf("content = %q", content)
+	}
+	if got["max_tokens"] != float64(900) {
+		t.Errorf("max_tokens = %v", got["max_tokens"])
+	}
+	format, _ := got["response_format"].(map[string]any)
+	if format["type"] != "json_schema" {
+		t.Fatalf("response_format = %v", got["response_format"])
+	}
+	schema := format["json_schema"].(map[string]any)
+	if schema["name"] != "briefing" || schema["strict"] != true {
+		t.Errorf("json_schema = %v", schema)
+	}
+	msgs := got["messages"].([]any)
+	if len(msgs) != 2 {
+		t.Errorf("messages = %v", msgs)
+	}
+}

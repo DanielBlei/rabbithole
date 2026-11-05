@@ -1,0 +1,58 @@
+{{define "content"}}
+<div class="briefing-page">
+  <div class="briefing-head">
+    <form class="briefing-kinds" method="get" action="/briefing">
+      <input type="hidden" name="period" value="{{.PeriodStart}}">
+      <button class="clk-btn{{if .Daily}} is-on{{end}}" type="submit" name="kind" value="daily"
+              {{if .Daily}}aria-current="page"{{end}}>Daily</button>
+      <button class="clk-btn{{if .Weekly}} is-on{{end}}" type="submit" name="kind" value="weekly"
+              {{if .Weekly}}aria-current="page"{{end}}>Weekly</button>
+    </form>
+    <div class="briefing-nav">
+      <a class="clk-btn" href="/briefing?kind={{.Kind}}&period={{.PrevStart}}">&larr; Previous</a>
+      <span class="briefing-nav__label">{{.PeriodLabel}}</span>
+      {{if .HasNext}}<a class="clk-btn" href="/briefing?kind={{.Kind}}&period={{.NextStart}}">Next &rarr;</a>{{else}}<span class="clk-btn is-disabled" aria-disabled="true">Next &rarr;</span>{{end}}
+    </div>
+  </div>
+  {{template "briefingPanel" .Panel}}
+</div>
+{{end}}
+
+{{/* The panel is its own template so generate and status responses swap exactly
+     the product state without re-rendering the page chrome. While generating it
+     polls itself every three seconds, and the poll pauses while the tab is
+     hidden; the next status response that is no longer generating drops the
+     poll attributes, stopping it. */}}
+{{define "briefingPanel"}}
+<section class="briefing" id="briefingPanel"
+         {{if .Generating}}hx-get="/briefing/status?kind={{.Kind}}&period={{.PeriodStart}}"
+         hx-trigger="every 3s [!document.hidden]" hx-swap="outerHTML"{{end}}>
+  <div class="briefing__bar">
+    <span class="pane__ps"><span class="pane__prompt">briefing</span><span class="sh">:</span><span class="pane__path">~/{{.Kind}}</span><span class="sh">$&nbsp;</span><span class="pane__cmd">{{.Status}}</span></span>
+    {{if .Ready}}<a class="clk-btn" href="{{.ExportURL}}">Download markdown</a>{{end}}
+  </div>
+  {{if .Ready}}
+    <article class="briefing__body">{{.BodyHTML}}</article>
+    <p class="briefing__prov">
+      {{if .ProfileName}}Profile: {{.ProfileName}}{{if .ProfileHash}} ({{.ProfileHash}}){{end}} · {{end}}
+      {{if .Provider}}{{.Provider}}{{if .Model}}/{{.Model}}{{end}} · {{end}}
+      {{.ItemCount}} article(s) supplied
+    </p>
+  {{else if .Generating}}
+    <p class="briefing__state">Generating this briefing… <span class="blink">_</span></p>
+    <p class="briefing__hint">This makes one model call and can take a minute. You can leave this page; the result is stored.</p>
+  {{else if .Failed}}
+    <p class="briefing__state briefing__state--err">This briefing could not be generated.</p>
+    <p class="briefing__error">{{.Error}}</p>
+  {{else}}
+    <p class="briefing__state">No briefing is stored for this period yet.</p>
+    <p class="briefing__hint">Generate one from the articles already scored in this period.</p>
+  {{end}}
+  <form class="briefing__actions"
+        hx-post="/briefing/generate" hx-target="#briefingPanel" hx-swap="outerHTML">
+    <input type="hidden" name="kind" value="{{.Kind}}">
+    <input type="hidden" name="period" value="{{.PeriodStart}}">
+    <button class="prof-form__save" type="submit"{{if .Generating}} disabled{{end}}>{{.ActionLabel}}</button>
+  </form>
+</section>
+{{end}}

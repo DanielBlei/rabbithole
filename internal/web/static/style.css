@@ -5426,3 +5426,24 @@ a.welcome__step{text-decoration:none;}
   .stp-group__h--act{flex-wrap:wrap;}
   :root[data-theme="minimal"] .stp-group__t::after{bottom:-4px;}
 }
+
+/* Briefing page: one stored product state per period, with daily/weekly and
+   previous/next navigation above it. The panel polls itself while generating. */
+.briefing-page{max-width:78rem;margin:0 auto;padding:24px 18px 48px;}
+.briefing-head{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:18px;}
+.briefing-kinds{display:flex;gap:6px;}
+.briefing-nav{display:flex;gap:10px;align-items:center;font-size:1.25rem;}
+.briefing-nav__label{font-weight:600;}
+.clk-btn.is-disabled{opacity:.45;pointer-events:none;}
+.briefing{background:var(--pane-bg,transparent);border:1px solid var(--line,#3333);border-radius:8px;padding:18px;}
+.briefing__bar{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.briefing__body{font-size:1.35rem;line-height:1.6;}
+.briefing__body h1{font-size:1.9rem;margin:.2em 0 .6em;}
+.briefing__body h2{font-size:1.5rem;margin:1.2em 0 .4em;}
+.briefing__body h3{font-size:1.3rem;margin:1em 0 .3em;}
+.briefing__state{font-size:1.35rem;margin:12px 0 6px;}
+.briefing__state--err{color:var(--red,#c44);}
+.briefing__error{font-family:var(--mono,monospace);font-size:1.15rem;white-space:pre-wrap;}
+.briefing__hint{font-size:1.15rem;opacity:.75;}
+.briefing__prov{font-size:1.1rem;opacity:.7;margin-top:16px;}
+.briefing__actions{margin-top:16px;}
