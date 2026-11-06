@@ -15,6 +15,7 @@ func TestAppliesMatrix(t *testing.T) {
 	want := map[string]map[string]bool{
 		"host":                          {o: true, v: true, a: true},
 		"model":                         {o: true, v: true, a: true},
+		"embedding_model":               {o: true, v: true, a: true},
 		"api_key":                       {o: true, v: true, a: true},
 		"think":                         {o: true, v: true, a: true},
 		"effort":                        {a: true},

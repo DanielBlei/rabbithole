@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DanielBlei/rabbithole/internal/cluster"
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/httpclient"
@@ -505,4 +507,91 @@ func clipText(s string) string {
 		return s
 	}
 	return string(r[:maxErrorText]) + "…"
+}
+
+type feedGroup struct {
+	Representative rowData
+	Members        []rowData
+	MemberCount    int
+}
+
+func rowIDs(rows []rowData) []string {
+	ids := make([]string, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
+	}
+	return ids
+}
+
+func toFeedGroups(rows []rowData, clusters []store.StoryCluster) []feedGroup {
+	clusterOf := make(map[string]int, len(rows))
+	for i, cluster := range clusters {
+		for _, item := range cluster.Items {
+			clusterOf[item.ItemID] = i
+		}
+	}
+	seen := make(map[int]struct{}, len(clusters))
+	groups := make([]feedGroup, 0, len(rows))
+	for _, row := range rows {
+		idx, ok := clusterOf[row.ID]
+		if !ok {
+			groups = append(groups, feedGroup{Representative: row})
+			continue
+		}
+		if _, done := seen[idx]; done {
+			continue
+		}
+		seen[idx] = struct{}{}
+		group := feedGroup{Representative: row}
+		for _, other := range rows {
+			if other.ID == row.ID {
+				continue
+			}
+			if member, ok := clusterOf[other.ID]; ok && member == idx {
+				group.Members = append(group.Members, other)
+			}
+		}
+		group.MemberCount = len(group.Members)
+		groups = append(groups, group)
+	}
+	return groups
+}
+
+func feedGroupToggleURL(q url.Values, grouped bool) string {
+	v := make(url.Values, len(q))
+	for key, values := range q {
+		v[key] = append([]string(nil), values...)
+	}
+	if grouped {
+		v.Del("grouped")
+	} else {
+		v.Set("grouped", "1")
+	}
+	if encoded := v.Encode(); encoded != "" {
+		return "/feed?" + encoded
+	}
+	return "/feed"
+}
+
+func exactStoryClusters(rows []rowData) []store.StoryCluster {
+	items := make([]cluster.Item, len(rows))
+	for i, row := range rows {
+		items[i] = cluster.Item{ID: row.ID, Source: row.Source, Title: row.Title, Link: row.Link}
+	}
+	found, _, err := cluster.Build(context.Background(), items, cluster.Options{MaxItems: len(items)})
+	if err != nil {
+		return nil
+	}
+	out := make([]store.StoryCluster, len(found))
+	for i, c := range found {
+		members := make([]store.StoryClusterItem, len(c.Items))
+		for j, item := range c.Items {
+			members[j] = store.StoryClusterItem{ItemID: item.ItemID, Position: item.Position}
+		}
+		out[i] = store.StoryCluster{
+			ID: c.ID, RepresentativeItemID: c.RepresentativeItemID,
+			Method: c.Method, Confidence: c.Confidence, Items: members,
+		}
+	}
+	return out
 }

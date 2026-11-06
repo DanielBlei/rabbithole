@@ -412,8 +412,8 @@ func TestManagerGuardBlocksAStartUntilReleased(t *testing.T) {
 	started := make(chan error, 1)
 	go func() { started <- m.Start(context.Background(), store.IngestTriggerManual) }()
 	select {
-	case <-started:
-		t.Fatal("Start proceeded while Guard still held the lock")
+	case err := <-started:
+		t.Fatalf("Start proceeded while Guard still held the lock: %v", err)
 	case <-time.After(50 * time.Millisecond):
 	}
 

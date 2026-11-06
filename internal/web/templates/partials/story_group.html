@@ -1,0 +1,15 @@
+{{define "storyGroup"}}
+<div class="story-group{{if not .Members}} story-group--single{{end}}">
+  {{template "row" .Representative}}
+  {{if .Members}}
+  <details class="story-group__more">
+    <summary>{{.MemberCount}} related {{if eq .MemberCount 1}}item{{else}}items{{end}} on this story</summary>
+    <ul class="story-group__list">
+      {{range .Members}}
+      <li><a href="{{.Link}}" target="_blank" rel="noopener noreferrer">{{.Title}}</a><span>{{.Source}} &middot; {{.Date}}</span></li>
+      {{end}}
+    </ul>
+  </details>
+  {{end}}
+</div>
+{{end}}

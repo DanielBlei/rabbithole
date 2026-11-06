@@ -420,10 +420,13 @@ type pageData struct {
 	// Args is the same narrowing as the arguments of the line the pane's title
 	// bar reads, each carrying the URL that drops it. Built from the fields
 	// above, so the bar and the zero-state can't say different things.
-	Args      []cmdArg
-	ListLimit int // listLimit, so the pager can say when the set below is truncated
-	Rows      []rowData
-	Empty     emptyData // the zero-state, filled only when Rows is empty
+	Args           []cmdArg
+	ListLimit      int // listLimit, so the pager can say when the set below is truncated
+	Rows           []rowData
+	Groups         []feedGroup
+	Grouped        bool
+	GroupToggleURL string
+	Empty          emptyData // the zero-state, filled only when Rows is empty
 }
 
 // pickChip is one option in a multi-select filter menu.
@@ -609,6 +612,20 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := toRows(rows)
+	grouped := q.Get("grouped") == "1"
+	groups := []feedGroup(nil)
+	if grouped {
+		clusters, cerr := s.db.StoryClustersForItems(r.Context(), rowIDs(items))
+		if cerr != nil {
+			log.Warn().Err(cerr).Msg("loading story clusters for the feed")
+			grouped = false
+		} else {
+			if len(clusters) == 0 && len(items) > 1 {
+				clusters = exactStoryClusters(items)
+			}
+			groups = toFeedGroups(items, clusters)
+		}
+	}
 	chrome := s.chrome(r.Context())
 	data := pageData{
 		Title:      "The Rabbit Hole",
@@ -653,6 +670,9 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		TagsPick:           worn(pickedTags, "All"),
 		ListLimit:          listLimit,
 		Rows:               items,
+		Groups:             groups,
+		Grouped:            grouped,
+		GroupToggleURL:     feedGroupToggleURL(q, grouped),
 	}
 	data.ViewPick = wornView(showUnread, showSeen, showHidden, onlyBookmark)
 	// Sort always has exactly one value, so it wears it plainly, spelled the way

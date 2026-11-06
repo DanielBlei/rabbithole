@@ -14,6 +14,7 @@
     <span class="pane__ps"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~/feed</span><span class="sh">$&nbsp;</span><span class="pane__cmd">feed</span></span>
     {{range .Args}}{{if .Drop}}<a class="cmd__arg" href="{{.Drop}}" title="Show this feed without {{.Flag}}{{if .Value}} {{.Value}}{{end}}"><i>{{.Flag}}</i>{{if .Value}}<span{{if .Quote}} data-q{{end}}>{{.Value}}</span>{{end}}</a>{{else}}<span class="cmd__arg cmd__arg--note"><i>{{.Flag}}</i>{{if .Value}}<span>{{.Value}}</span>{{end}}</span>{{end}}{{end}}
     <span class="blink">_</span>
+    {{if .Rows}}<a class="feed-view" href="{{.GroupToggleURL}}" title="{{if .Grouped}}Show every item separately{{else}}Group items that cover the same story{{end}}">{{if .Grouped}}individual{{else}}grouped{{end}}</a>{{end}}
     {{if .Narrowed}}{{template "filterReset" .}}{{end}}
   </div>
 
@@ -237,7 +238,7 @@
   {{end}}
 
   <div class="pane__body">
-    {{range .Rows}}{{template "row" .}}{{end}}
+    {{if .Grouped}}{{range .Groups}}{{template "storyGroup" .}}{{end}}{{else}}{{range .Rows}}{{template "row" .}}{{end}}{{end}}
     {{if not .Rows}}{{template "feedEmpty" .Empty}}{{end}}
     {{/* The client-side filters (source, tags, the search field) can hide every
          row the server sent, and the zero-state above only covers a render that
