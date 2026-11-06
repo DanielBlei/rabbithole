@@ -92,8 +92,9 @@ which is not set`.
 started rabbithole.
 
 **What to do.** Export it in your shell profile, or put it in `./.env`. The binary reads `.env`
-itself (`RABBITHOLE_*` keys only, and a variable already in the environment wins). A running
-`serve` keeps the environment it started with, so restart it after changing a key.
+itself (`RABBITHOLE_*` keys only, and a variable already in the environment wins). A key saved from
+Settings → Scoring is live at once. A key added to `.env` by hand or exported in a shell needs a
+restart of `serve`, which keeps the environment it started with.
 
 ## `an api_key must be a reference to a RABBITHOLE_*_API_KEY environment variable`
 
@@ -107,6 +108,12 @@ environment variables.
 **What to do.** Export the key under the allowed name and refer to that:
 `export RABBITHOLE_INFERENCE_API_KEY=$OPENAI_API_KEY`, then `api_key: $RABBITHOLE_INFERENCE_API_KEY`.
 Or write the literal key in the file once: it is moved to `./.env` and only the reference is kept.
+
+The name cannot be widened. In Settings → Scoring, the same case is one click: the chip reads
+`Not a RABBITHOLE_*_API_KEY reference`, and **Copy $MY_KEY into .env** takes the value from the
+server's own environment and stores it under the allowed name. The copy is one-shot: later changes
+to `$MY_KEY` do not reach `.env`, so put `export RABBITHOLE_INFERENCE_API_KEY=$MY_KEY` in your shell
+profile instead if the value rotates. See [Secrets](configuration.md#secrets).
 
 ## `ignored for provider ...`
 
@@ -126,6 +133,36 @@ Or write the literal key in the file once: it is moved to `./.env` and only the 
 widgets are kept in the browser, not in the saved settings.
 
 **What to do.** Run `rabbithole config export --defaults` to see every setting with its value.
+
+## `serve` prints nothing and never listens
+
+**What you see.** `rabbithole serve` against Postgres prints the env-file line and then stops. No
+listener on `:8080`, no error, and Ctrl-C is the only way out.
+
+**Why.** Two things used to happen without a word. A `store.url` with no user and no database
+(`postgres://project-ref.supabase.co/`) was accepted, and the driver quietly fell back to the
+operating system's user name and a database of that name; and the connect itself had no deadline,
+so a port that is filtered rather than closed waited out the operating system's TCP retries, which
+is minutes per resolved address.
+
+**What to do.** Use a URL that names all three parts:
+
+```sh
+RABBITHOLE_DB=postgres://user:password@db.example.com:5432/rabbithole
+```
+
+A URL that leaves out the user or the database now fails at once with `store.url names no user and
+no database name`, `store.url names no user`, or `store.url names no database name`, and no
+connection is attempted. `rabbithole store path` answers the same question without opening
+anything.
+
+A host that does answer but is too slow or unreachable now fails in ten seconds with
+`connect to postgres at db.example.com/rabbithole: gave up after 10s`. Read it as one of three
+things: the host or port is wrong, a firewall drops the traffic instead of refusing it, or the
+server is slow to accept. `serve` logs `connecting to postgres` before it dials, so the last line
+in the log tells you which stage you are in. Raise the budget for a serverless database that wakes
+from zero with `?connect_timeout=30` in the URL, then check the sslmode and the password: those are
+what a later `authentication failed` is about.
 
 ## The store is not where I expect
 

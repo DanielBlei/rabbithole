@@ -114,6 +114,8 @@ type fieldView struct {
 	Chip, Tone            string // the key's status
 	Pasteable             bool
 	EnvPath               string // where a pasted key is written
+	CanonicalName         string // the variable a pasted key is written under
+	KeyNote               string // a quiet line under the row: where a key already is
 }
 
 type settingsData struct {
@@ -326,32 +328,48 @@ func providerLabelOr(key, value string) string {
 	return value
 }
 
-// fillKey sets the key reference and its status chip. Only the variable name is
-// ever read; the value is not looked at.
+// fillKey sets the key's reference and status chip. Only the variable name is
+// ever read; the value is not looked at. A key that is already where rabbithole
+// reads it is reported quietly: whether to save the reference is the person's
+// decision, not a mistake to warn about.
 func (s *Web) fillKey(v *fieldView, ref string) {
 	v.Pasteable = s.canPasteKey()
-	if v.Pasteable {
+	if s.envFile != nil {
 		v.EnvPath = s.envFile.Path
 	}
+	v.CanonicalName = config.RefFor(keyAPIKey)
 	if ref == "" {
 		// A key pasted before the reference was saved is already in .env.
 		switch s.keySource(config.RefFor(keyAPIKey)) {
 		case config.SourceEnvFile:
-			v.Chip, v.Tone = "In .env, not saved yet", "warn"
+			v.Chip, v.Tone = "In .env", "dim"
+			v.KeyNote = "Found in " + v.EnvPath + "."
 		case config.SourceEnvironment:
-			v.Chip, v.Tone = "In environment, not saved yet", "warn"
+			v.Chip, v.Tone = "In environment", "dim"
+			v.KeyNote = "Found in this machine's environment."
 		default:
 			v.Chip, v.Tone = "No key set", "dim"
 		}
 		return
 	}
-	name, ok := config.RefName(ref)
-	if !ok {
-		v.Chip, v.Tone = "Not a variable name", "warn"
+	// The name rule comes first: a refused name is certain to fail at save time,
+	// so it must not be reported as a variable that is set.
+	if err := config.ValidRef(ref); err != nil {
+		v.Chip, v.Tone = "Not a RABBITHOLE_*_API_KEY reference", "warn"
+		if name, ok := config.RefName(ref); ok {
+			v.KeyName = name
+		}
 		return
 	}
+	name, _ := config.RefName(ref)
 	v.KeyName = name
 	v.Chip, v.Tone = s.keyChip(name)
+	if v.Tone == "ok" {
+		v.KeyNote = "Using " + v.KeyName + "."
+		if s.keySource(name) == config.SourceEnvFile {
+			v.KeyNote = "Using " + v.EnvPath + "."
+		}
+	}
 }
 
 // keyChip names where the variable's value comes from, by name only.

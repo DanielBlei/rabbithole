@@ -6,10 +6,12 @@ package store
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -107,6 +109,54 @@ func TestAdditiveTablesNameTheirOwnTable(t *testing.T) {
 				t.Errorf("%s: additive entry for %q creates %q", d.name(), a.table, got[1])
 			}
 		}
+	}
+}
+
+// TestOpenPostgresGivesUpOnASilentServer pins the half of the rule that no DSN
+// check can cover: a host that takes the TCP connection and then never answers.
+// Without a deadline the ping waits on the handshake until the operating system
+// gives up on it, which reads as a hang. No database is needed; the listener
+// says nothing on purpose.
+func TestOpenPostgresGivesUpOnASilentServer(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	// Accept and hold: the address is right and the connection is made, so the
+	// only way out of here is the deadline.
+	hold := make(chan struct{})
+	defer close(hold)
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				<-hold
+				_ = conn.Close()
+			}()
+		}
+	}()
+
+	const budget = 250 * time.Millisecond
+	dsn := "postgres://rabbit@127.0.0.1:" +
+		strconv.Itoa(ln.Addr().(*net.TCPAddr).Port) + "/rabbithole?sslmode=disable"
+
+	started := time.Now()
+	_, err = openPostgres(t.Context(), dsn, "test", pgOptions{connectTimeout: budget})
+	elapsed := time.Since(started)
+
+	if err == nil {
+		t.Fatal("openPostgres succeeded against a server that never answered")
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("openPostgres took %s, want about %s", elapsed, budget)
+	}
+	if !strings.Contains(err.Error(), "gave up after") {
+		t.Errorf("error = %v, want it to name the budget", err)
 	}
 }
 

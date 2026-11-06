@@ -12,6 +12,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -402,12 +404,20 @@ func plainError(err error, cfg config.Config) string {
 	return msg
 }
 
-// handleSettingsKey writes a pasted key to .env under its canonical variable.
-// The value is never echoed, logged or stored anywhere else.
+// envNameRE is the shape of a variable name the alias copy accepts: something a
+// shell can export. It is wider than what a config may reference, which is the
+// point — the person's own variable name is the input, the canonical name is the
+// output.
+var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// handleSettingsKey writes a key to .env under its canonical variable. The value
+// arrives either pasted ("value") or as the name of a variable the server's own
+// environment already holds ("from"); either way it is never echoed, logged or
+// stored anywhere else, and the config keeps only the reference.
 func (s *Web) handleSettingsKey(w http.ResponseWriter, r *http.Request) {
 	if !s.canPasteKey() {
 		refuse(w, http.StatusForbidden,
-			"Pasting a key is turned off. Set "+config.RefFor(keyAPIKey)+" where the server starts.")
+			"Writing a key from here is turned off. Set "+config.RefFor(keyAPIKey)+" where the server starts.")
 		return
 	}
 	form, ok := readForm(w, r)
@@ -423,14 +433,14 @@ func (s *Web) handleSettingsKey(w http.ResponseWriter, r *http.Request) {
 		stale(w)
 		return
 	}
-	value := strings.TrimSpace(form.Get("value"))
-	if value == "" {
-		refuse(w, http.StatusUnprocessableEntity, "Paste the key first.")
+	value, ok := pastedOrCopied(w, form)
+	if !ok {
 		return
 	}
 	name := config.RefFor(keyAPIKey)
 	if s.envFile.Source(name) == config.SourceEnvironment {
-		refuse(w, http.StatusConflict, name+" is set in the environment. Change it where it is set.")
+		refuse(w, http.StatusConflict, name+" is set in the process environment, not in "+
+			s.envFile.Path+". Change it there and restart rabbithole.")
 		return
 	}
 	if err := s.envFile.Set(name, value); err != nil {
@@ -440,6 +450,31 @@ func (s *Web) handleSettingsKey(w http.ResponseWriter, r *http.Request) {
 	chip, tone := s.keyChip(name)
 	writeReply(w, http.StatusOK, editReply{OK: true, Ref: "$" + name, Chip: chip, Tone: tone,
 		Message: "Saved to " + s.envFile.Path + "."})
+}
+
+// pastedOrCopied reads the key out of the request, answering the request itself
+// and returning false when it cannot. The copied case takes the name of a
+// variable from the server's own environment and never returns its value.
+func pastedOrCopied(w http.ResponseWriter, form url.Values) (string, bool) {
+	if from := strings.TrimSpace(form.Get("from")); from != "" {
+		if !envNameRE.MatchString(from) {
+			refuse(w, http.StatusUnprocessableEntity, "That is not a variable name.")
+			return "", false
+		}
+		value, set := os.LookupEnv(from)
+		if !set || value == "" {
+			refuse(w, http.StatusUnprocessableEntity, "$"+from+" is not set in this server's"+
+				" environment. Export it where the server starts, or paste the value instead.")
+			return "", false
+		}
+		return value, true
+	}
+	value := strings.TrimSpace(form.Get("value"))
+	if value == "" {
+		refuse(w, http.StatusUnprocessableEntity, "Paste the key first.")
+		return "", false
+	}
+	return value, true
 }
 
 func (s *Web) handleSettingsRollback(w http.ResponseWriter, r *http.Request) {

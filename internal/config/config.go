@@ -220,6 +220,16 @@ const (
 	sslVerifyCA   = "verify-ca"
 )
 
+// PostgresConnectTimeout bounds the startup connect, and is written into the
+// DSN as connect_timeout when the URL names none. A filtered port would
+// otherwise wait out the whole TCP retry budget per resolved address before
+// anything is said, which reads as a hang. Raise it with
+// ?connect_timeout=<seconds> in the URL.
+const PostgresConnectTimeout = 10 * time.Second
+
+// connectTimeoutParam is the driver's name for that budget, in whole seconds.
+const connectTimeoutParam = "connect_timeout"
+
 // IsPostgres reports whether the store is configured for Postgres.
 func (s StoreConfig) IsPostgres() bool { return s.URL != "" }
 
@@ -250,6 +260,11 @@ type Postgres struct {
 	// more than the rows. Over loopback nobody but this machine can intercept it.
 	SSLMode  string
 	Loopback bool
+
+	// ConnectTimeout is how long one connect attempt may take, after the default
+	// is applied and after any ?connect_timeout= in the URL. Callers pass it on so
+	// the wait and the message about the wait agree on the same number.
+	ConnectTimeout time.Duration
 }
 
 // TLSVerified reports whether the server's certificate gets checked. False is
@@ -302,17 +317,38 @@ func (s StoreConfig) ResolvePostgres() (Postgres, error) {
 		return Postgres{}, fmt.Errorf("store.url scheme is %q, want postgres", u.Scheme)
 	}
 
+	// The drivers also take every part of the target as a query parameter, so
+	// the check below has to read the same two places they do.
+	q := u.Query()
+	if err := checkPostgresTarget(u, q); err != nil {
+		return Postgres{}, err
+	}
+
 	user := u.User.Username()
+	if user == "" {
+		// The driver takes the user as a query parameter too. Lift it into the
+		// userinfo, as the password is lifted below, so the label keeps saying
+		// who connects and one form reaches the DSN. Any password already in
+		// the userinfo (e.g. postgres://:pw@host/db?user=rabbit) has to survive
+		// the lift, or it is gone before the read on the next line sees it.
+		if param := q.Get("user"); param != "" {
+			user = param
+			q.Del("user")
+			if pw, ok := u.User.Password(); ok {
+				u.User = url.UserPassword(param, pw)
+			} else {
+				u.User = url.User(param)
+			}
+		}
+	}
 	inURL, hasInURL := u.User.Password()
 
-	// The drivers also take the password as a query parameter. Lift it into
-	// the userinfo so there is one path from here on, and so it cannot slip
-	// past the warning below by arriving in the other form.
-	q := u.Query()
+	// Lift the password out of the query parameters into the userinfo so there
+	// is one path from here on, and so it cannot slip past the warning below by
+	// arriving in the other form.
 	if param := q.Get("password"); param != "" {
 		inURL, hasInURL = param, true
 		q.Del("password")
-		u.RawQuery = q.Encode()
 	}
 
 	// The file's secret is worth reporting whatever happens to it next, so this
@@ -339,8 +375,19 @@ func (s StoreConfig) ResolvePostgres() (Postgres, error) {
 
 	if q.Get("sslmode") == "" {
 		q.Set("sslmode", defaultSSLMode)
-		u.RawQuery = q.Encode()
 	}
+	connectTimeout := PostgresConnectTimeout
+	if param := q.Get(connectTimeoutParam); param != "" {
+		seconds, err := strconv.Atoi(param)
+		if err != nil || seconds < 1 {
+			return Postgres{}, fmt.Errorf("store.url %s is %q, want a whole number of seconds,"+
+				" at least 1", connectTimeoutParam, param)
+		}
+		connectTimeout = time.Duration(seconds) * time.Second
+	} else {
+		q.Set(connectTimeoutParam, strconv.Itoa(int(connectTimeout.Seconds())))
+	}
+	u.RawQuery = q.Encode()
 	sslMode := q.Get("sslmode")
 	loopback := loopbackHost(u.Hostname())
 
@@ -357,7 +404,51 @@ func (s StoreConfig) ResolvePostgres() (Postgres, error) {
 		HasPassword:          password != "",
 		SSLMode:              sslMode,
 		Loopback:             loopback,
+		ConnectTimeout:       connectTimeout,
 	}, nil
+}
+
+// checkPostgresTarget rejects a URL that leaves the driver to guess where it is
+// connecting and as whom. Every part it can guess, it does: the operating
+// system's user name, a database named after that user, port 5432, the local
+// socket directory. A URL and a query parameter are both accepted for each part,
+// because the driver reads either.
+func checkPostgresTarget(u *url.URL, q url.Values) error {
+	if firstOf(u.Hostname(), q.Get("host")) == "" {
+		return errors.New("store.url names no host; write postgres://user@host/database" +
+			" (a ?host= parameter holding a socket directory also works)")
+	}
+	var missing []string
+	if firstOf(u.User.Username(), q.Get("user")) == "" {
+		missing = append(missing, "user")
+	}
+	if firstOf(strings.TrimPrefix(u.Path, "/"), q.Get("dbname"), q.Get("database")) == "" {
+		missing = append(missing, "database name")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("store.url names no %s; write postgres://user@host/database"+
+			" (without them the driver connects as the operating system's user, to a"+
+			" database of the same name)", strings.Join(missing, " and no "))
+	}
+	if port := firstOf(u.Port(), q.Get("port")); port != "" {
+		// pgx accepts a comma-separated port per comma-separated host for
+		// multi-host targets, so each entry is validated on its own.
+		for _, one := range strings.Split(port, ",") {
+			if n, err := strconv.Atoi(one); err != nil || n < 1 || n > 65535 {
+				return fmt.Errorf("store.url port is %q, want a number from 1 to 65535", port)
+			}
+		}
+	}
+	return nil
+}
+
+func firstOf(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // loopbackHost reports whether the database is reached over the machine's own
