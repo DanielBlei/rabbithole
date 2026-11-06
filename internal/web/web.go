@@ -138,12 +138,14 @@ type Web struct {
 	scorerCheck func(context.Context, config.Config) error
 	// briefingGen builds the briefing generator; nil uses the configured provider.
 	briefingGen func(context.Context, config.Config) (briefing.Generator, error)
+	// briefingSvc is shared across requests so single-flight spans them.
+	briefingSvc *briefing.Service
 }
 
 // New returns a Web backed by db, reading the run config from src once per request. ing owns the
 // in-process ingest runs the UI triggers and watches.
 func New(db *store.Store, src config.Source, ing *ingest.Manager) *Web {
-	return &Web{
+	w := &Web{
 		db: db, src: src, ing: ing,
 		profiles:    profilemgr.New(db),
 		library:     library.NewLoader(library.Options{}),
@@ -151,6 +153,8 @@ func New(db *store.Store, src config.Source, ing *ingest.Manager) *Web {
 		sessions:    newSessionStore(), limiter: newLoginLimiter(),
 		hashing: make(chan struct{}, hashSlots), trusted: DefaultTrustedProxies,
 	}
+	w.briefingSvc = w.newBriefingService()
+	return w
 }
 
 // pagePromptUser is the shell-prompt name the pages wear. A stored config that

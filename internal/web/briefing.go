@@ -93,7 +93,7 @@ func (s *Web) handleBriefing(w http.ResponseWriter, r *http.Request) {
 		PeriodLabel: briefingPeriodLabel(period),
 		PrevStart:   period.Previous().Start.Format("2006-01-02"),
 		NextStart:   next.Start.Format("2006-01-02"),
-		HasNext:     next.Start.Before(last.Start),
+		HasNext:     !next.Start.After(last.Start),
 		Panel:       briefingPanelFor(period, stored),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -191,22 +191,29 @@ func briefingPeriod(r *http.Request) (briefing.Period, error) {
 	return briefing.PeriodAt(kind, start)
 }
 
+// newBriefingService builds the one Service the Web shares across requests, so
+// its single-flight map spans concurrent generates. The generator resolves the
+// active inference config per run, so settings changes still take effect.
+func (s *Web) newBriefingService() *briefing.Service {
+	gen := func(ctx context.Context) (briefing.Generator, error) {
+		cfg, _, err := s.src.Active(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if s.briefingGen != nil {
+			return s.briefingGen(ctx, cfg)
+		}
+		return inference.ResolveBriefing(ctx, cfg.Inference, cfg.Inference.ThinkEnabled())
+	}
+	return briefing.New(s.db, s.profiles, gen)
+}
+
 func (s *Web) briefingService(ctx context.Context) (*briefing.Service, config.Config, error) {
 	cfg, _, err := s.src.Active(ctx)
 	if err != nil {
 		return nil, config.Config{}, err
 	}
-	if s.briefingGen != nil {
-		gen := func(gctx context.Context) (briefing.Generator, error) {
-			return s.briefingGen(gctx, cfg)
-		}
-		return briefing.New(s.db, s.profiles, gen), cfg, nil
-	}
-	think := cfg.Inference.ThinkEnabled()
-	gen := func(gctx context.Context) (briefing.Generator, error) {
-		return inference.ResolveBriefing(gctx, cfg.Inference, think)
-	}
-	return briefing.New(s.db, s.profiles, gen), cfg, nil
+	return s.briefingSvc, cfg, nil
 }
 
 func briefingOptions(cfg config.Config) briefing.Options {

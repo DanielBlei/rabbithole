@@ -22,6 +22,7 @@ import (
 type blockingGenerator struct {
 	mu      sync.Mutex
 	calls   int
+	started chan struct{}
 	entered chan struct{}
 	release chan struct{}
 	reply   string
@@ -32,6 +33,9 @@ func (g *blockingGenerator) ChatJSON(context.Context, string, string, json.RawMe
 	g.mu.Lock()
 	g.calls++
 	g.mu.Unlock()
+	if g.started != nil {
+		g.started <- struct{}{}
+	}
 	if g.entered != nil {
 		select {
 		case <-g.entered:
@@ -43,6 +47,12 @@ func (g *blockingGenerator) ChatJSON(context.Context, string, string, json.RawMe
 		<-g.release
 	}
 	return g.reply, g.err
+}
+
+func (g *blockingGenerator) callCount() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.calls
 }
 
 func briefingToday() string { return time.Now().UTC().Format("2006-01-02") }
@@ -260,6 +270,109 @@ func TestBriefingGenerateWithHeuristicIsAProductState(t *testing.T) {
 	w.Routes().ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/briefing?kind=daily&period="+briefingToday(), nil))
 	if !strings.Contains(page.Body.String(), "needs a model provider") {
 		t.Errorf("failure state missing from page:\n%s", page.Body.String())
+	}
+}
+
+func TestBriefingNextNavigationStopsAtLastCompletedPeriod(t *testing.T) {
+	w := newTestWeb(t)
+	for _, kind := range []string{"daily", "weekly"} {
+		last, err := briefing.PeriodFor(kind, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			name     string
+			period   briefing.Period
+			wantNext bool
+		}{
+			{"next lands on the last completed period", last.Previous(), true},
+			{"next would pass the last completed period", last, false},
+		} {
+			t.Run(kind+"/"+tc.name, func(t *testing.T) {
+				rec := httptest.NewRecorder()
+				path := "/briefing?kind=" + kind + "&period=" + tc.period.Start.Format("2006-01-02")
+				w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+				body := rec.Body.String()
+
+				nextHref := `href="/briefing?kind=` + kind + `&period=` +
+					tc.period.Next().Start.Format("2006-01-02") + `">Next &rarr;</a>`
+				disabled := `aria-disabled="true">Next &rarr;</span>`
+				if tc.wantNext {
+					if !strings.Contains(body, nextHref) {
+						t.Errorf("Next link %q missing:\n%s", nextHref, body)
+					}
+					if strings.Contains(body, disabled) {
+						t.Errorf("Next is disabled on a reachable period:\n%s", body)
+					}
+					return
+				}
+				if !strings.Contains(body, disabled) {
+					t.Errorf("Next is not disabled past the last completed period:\n%s", body)
+				}
+				if strings.Contains(body, nextHref) {
+					t.Errorf("Next link reaches a future period:\n%s", body)
+				}
+			})
+		}
+	}
+}
+
+func TestBriefingGenerateSingleFlightAcrossRequests(t *testing.T) {
+	gen := &blockingGenerator{
+		started: make(chan struct{}), entered: make(chan struct{}),
+		release: make(chan struct{}), reply: webBriefingJSON,
+	}
+	w := newBriefingWeb(t, gen)
+
+	form := url.Values{"kind": {"daily"}, "period": {briefingToday()}}
+	newRequest := func() *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/briefing/generate", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return req
+	}
+
+	first := httptest.NewRecorder()
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		w.Routes().ServeHTTP(first, newRequest())
+	}()
+	select {
+	case <-gen.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first request never reached the model")
+	}
+	<-firstDone
+
+	second := httptest.NewRecorder()
+	w.Routes().ServeHTTP(second, newRequest())
+	if second.Code != http.StatusOK {
+		t.Fatalf("second generate status = %d; body=%s", second.Code, second.Body)
+	}
+	if !strings.Contains(second.Body.String(), "Generating this briefing") {
+		t.Errorf("second request did not receive the generating state:\n%s", second.Body.String())
+	}
+	select {
+	case <-gen.started:
+		t.Error("second request started a duplicate model call")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if got := gen.callCount(); got != 1 {
+		t.Errorf("model calls = %d, want 1 across concurrent requests", got)
+	}
+
+	close(gen.release)
+	start, _ := time.ParseInLocation("2006-01-02", briefingToday(), time.UTC)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		b, err := w.db.BriefingForPeriod(context.Background(), "daily", start)
+		if err == nil && b.Status == store.BriefingReady {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("briefing never became ready: %+v %v", b, err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
