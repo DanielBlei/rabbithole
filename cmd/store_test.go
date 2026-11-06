@@ -625,6 +625,27 @@ func TestStorePathCommand(t *testing.T) {
 	}
 }
 
+// TestStorePathRefusesAGuessedPostgresTarget is the same refusal from the one
+// command that only looks: a DSN naming no user and no database fails at once,
+// and no location is printed.
+func TestStorePathRefusesAGuessedPostgresTarget(t *testing.T) {
+	t.Chdir(t.TempDir())
+	isolatedHome(t)
+	bootFlags(t, "", "postgres://example.supabase.co/")
+
+	out := &bytes.Buffer{}
+	c := &cobra.Command{}
+	c.SetOut(out)
+	c.SetContext(t.Context())
+	err := runStorePath(c, nil)
+	if err == nil || !strings.Contains(err.Error(), "names no user and no database name") {
+		t.Fatalf("store path error = %v, want the missing user and database named", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("store path printed %q, want nothing before the error", out.String())
+	}
+}
+
 func assertMode(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
 	fi, err := os.Stat(path)

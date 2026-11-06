@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -580,6 +581,187 @@ func TestResolvePostgres(t *testing.T) {
 			t.Errorf("DSN = %q, want the explicit sslmode kept", pg.DSN)
 		}
 	})
+}
+
+// A URL that names no host, no user or no database is refused before anything is
+// dialled. The driver fills each of them in silently, from the operating system's
+// user name and a database named after it, and the original mistake then surfaces
+// later as "authentication failed" or not at all.
+func TestResolvePostgresRefusesAGuessedTarget(t *testing.T) {
+	t.Setenv(DBPasswordEnv, "")
+
+	cases := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{"no user", "postgres://db.host/rabbithole", "names no user"},
+		{"no database", "postgres://rabbit@db.host/", "names no database name"},
+		{"neither", "postgres://db.host/", "names no user and no database name"},
+		{"nothing at all", "postgres://db.host", "names no user and no database name"},
+		{"no host", "postgres:///rabbithole", "names no host"},
+		{"a port above the range", "postgres://rabbit@db.host:99999/rabbithole",
+			"want a number from 1 to 65535"},
+		{"a port of zero", "postgres://rabbit@db.host/rabbithole?port=0",
+			"want a number from 1 to 65535"},
+		{"a port that is not a number", "postgres://rabbit@db.host:notaport/rabbithole",
+			"not a valid url"},
+		{"a connect_timeout that is not a number",
+			"postgres://rabbit@db.host/rabbithole?connect_timeout=soon",
+			"want a whole number of seconds"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := StoreConfig{URL: tc.url}.ResolvePostgres()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ResolvePostgres(%q) error = %v, want %q in it", tc.url, err, tc.want)
+			}
+		})
+	}
+}
+
+// The driver takes every part of the target as a query parameter as well as in
+// the URL, so a DSN that works today must not start failing.
+func TestResolvePostgresAcceptsAQueryParameterTarget(t *testing.T) {
+	t.Setenv(DBPasswordEnv, "")
+
+	for _, raw := range []string{
+		"postgres://?host=db.host&user=rabbit&dbname=rabbithole",
+		"postgres://db.host/rabbithole?user=rabbit",
+		"postgres://rabbit@db.host/?dbname=rabbithole",
+		"postgres://rabbit@db.host/?database=rabbithole",
+		"postgres://rabbit@/rabbithole?host=/var/run/postgresql",
+		"postgres://rabbit@db.host:5432/rabbithole?port=5432",
+	} {
+		if _, err := (StoreConfig{URL: raw}).ResolvePostgres(); err != nil {
+			t.Errorf("%s: ResolvePostgres: %v", raw, err)
+		}
+	}
+}
+
+// A unix socket directory is at least as local as loopback TCP, and the
+// logged "loopback" field should say so.
+func TestResolvePostgresTreatsASocketDirectoryAsLoopback(t *testing.T) {
+	t.Setenv(DBPasswordEnv, "")
+
+	pg, err := StoreConfig{URL: "postgres://rabbit@/rabbithole?host=/var/run/postgresql"}.ResolvePostgres()
+	if err != nil {
+		t.Fatalf("ResolvePostgres: %v", err)
+	}
+	if !pg.Loopback {
+		t.Error("Loopback = false, want true for a unix socket directory")
+	}
+}
+
+// Lifting the ?user= parameter into the userinfo must not drop a password
+// that was already there.
+func TestResolvePostgresKeepsThePasswordWhenLiftingTheUserParameter(t *testing.T) {
+	t.Setenv(DBPasswordEnv, "")
+
+	pg, err := StoreConfig{URL: "postgres://:from-url@db.host/rabbithole?user=rabbit"}.ResolvePostgres()
+	if err != nil {
+		t.Fatalf("ResolvePostgres: %v", err)
+	}
+	if !pg.HasPassword {
+		t.Fatalf("HasPassword = false, want true")
+	}
+	u, err := url.Parse(pg.DSN)
+	if err != nil {
+		t.Fatalf("parse DSN: %v", err)
+	}
+	if pw, ok := u.User.Password(); !ok || pw != "from-url" {
+		t.Errorf("DSN password = %q, %v, want %q, true", pw, ok, "from-url")
+	}
+	if u.User.Username() != "rabbit" {
+		t.Errorf("DSN user = %q, want %q", u.User.Username(), "rabbit")
+	}
+}
+
+// A ?user= left behind alongside a userinfo user would ride along into the
+// DSN and silently win over the one the label reports.
+func TestResolvePostgresDropsAStrayUserParameter(t *testing.T) {
+	t.Setenv(DBPasswordEnv, "")
+
+	pg, err := StoreConfig{URL: "postgres://explicituser@db.host/rabbithole?user=other"}.ResolvePostgres()
+	if err != nil {
+		t.Fatalf("ResolvePostgres: %v", err)
+	}
+	u, err := url.Parse(pg.DSN)
+	if err != nil {
+		t.Fatalf("parse DSN: %v", err)
+	}
+	if got := u.Query().Get("user"); got != "" {
+		t.Errorf("DSN keeps a ?user=%q query parameter alongside the userinfo user", got)
+	}
+	if u.User.Username() != "explicituser" {
+		t.Errorf("DSN user = %q, want %q", u.User.Username(), "explicituser")
+	}
+}
+
+// A path database and a ?dbname=/?database= that disagree must not both
+// reach the DSN, or the query form silently wins over what the label shows.
+func TestResolvePostgresDropsAStrayDatabaseParameter(t *testing.T) {
+	t.Setenv(DBPasswordEnv, "")
+
+	pg, err := StoreConfig{URL: "postgres://rabbit@db.host/realdb?dbname=otherdb"}.ResolvePostgres()
+	if err != nil {
+		t.Fatalf("ResolvePostgres: %v", err)
+	}
+	u, err := url.Parse(pg.DSN)
+	if err != nil {
+		t.Fatalf("parse DSN: %v", err)
+	}
+	if got := u.Query().Get("dbname"); got != "" {
+		t.Errorf("DSN keeps a ?dbname=%q query parameter alongside the path database", got)
+	}
+	if got := strings.TrimPrefix(u.Path, "/"); got != "realdb" {
+		t.Errorf("DSN path database = %q, want %q", got, "realdb")
+	}
+}
+
+// pgx accepts a comma-separated port per comma-separated host for multi-host
+// targets; each one is validated on its own instead of as a single number.
+func TestResolvePostgresAcceptsCommaSeparatedPorts(t *testing.T) {
+	t.Setenv(DBPasswordEnv, "")
+
+	if _, err := (StoreConfig{URL: "postgres://rabbit@db.host/rabbithole?host=h1,h2&port=5432,5433"}).ResolvePostgres(); err != nil {
+		t.Errorf("ResolvePostgres: %v", err)
+	}
+	if _, err := (StoreConfig{URL: "postgres://rabbit@db.host/rabbithole?port=5432,999999"}).ResolvePostgres(); err == nil {
+		t.Error("ResolvePostgres: want error for an out-of-range port in the list")
+	}
+}
+
+// The connect is bounded, so a filtered port ends in a message. An explicit
+// parameter wins, which is how an operator raises it for a slow host.
+func TestResolvePostgresBoundsTheConnect(t *testing.T) {
+	t.Setenv(DBPasswordEnv, "")
+
+	defaulted := strconv.Itoa(int(PostgresConnectTimeout.Seconds()))
+	cases := []struct {
+		url  string
+		want string
+		dur  time.Duration
+	}{
+		{"postgres://rabbit@db.host/rabbithole", defaulted, PostgresConnectTimeout},
+		{"postgres://rabbit@db.host/rabbithole?connect_timeout=3", "3", 3 * time.Second},
+	}
+	for _, tc := range cases {
+		pg, err := StoreConfig{URL: tc.url}.ResolvePostgres()
+		if err != nil {
+			t.Fatalf("%s: ResolvePostgres: %v", tc.url, err)
+		}
+		if pg.ConnectTimeout != tc.dur {
+			t.Errorf("%s: ConnectTimeout = %s, want %s", tc.url, pg.ConnectTimeout, tc.dur)
+		}
+		u, err := url.Parse(pg.DSN)
+		if err != nil {
+			t.Fatalf("%s: parse DSN: %v", tc.url, err)
+		}
+		if got := u.Query().Get("connect_timeout"); got != tc.want {
+			t.Errorf("%s: connect_timeout = %q, want %q", tc.url, got, tc.want)
+		}
+	}
 }
 
 // The default leaves the server unverified, so the caller has to be able to say

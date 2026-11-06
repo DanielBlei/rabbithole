@@ -238,6 +238,7 @@ func openFrom(ctx context.Context, cfg config.StoreConfig, exclusive bool) (*Sto
 	opts := pgOptions{
 		maxConns:        cfg.MaxConns,
 		connMaxLifetime: cfg.ConnMaxLifetime.Std(),
+		connectTimeout:  pg.ConnectTimeout,
 		exclusive:       exclusive,
 	}
 	return openPostgres(ctx, pg.DSN, pg.Label, opts)

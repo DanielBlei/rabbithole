@@ -349,6 +349,7 @@ func openStore(ctx context.Context, b boot, o sessionOpts) (*store.Store, error)
 			log.Warn().Msgf("the store URL carries a password; set %s instead so it stays out of"+
 				" the process list and any config file", config.DBPasswordEnv)
 		}
+		logPostgresConnecting(o, pg)
 	} else {
 		existed = fileExists(sc.DBPath)
 	}
@@ -375,6 +376,20 @@ func openStore(ctx context.Context, b boot, o sessionOpts) (*store.Store, error)
 	}
 	logStoreConnected(b, label, !existed, o, pg)
 	return db, nil
+}
+
+// logPostgresConnecting says which database this process is about to dial and
+// how long it will wait, at the same level logStoreConnected uses: info where an
+// operator is watching a boot, debug for the quiet one-shot commands.
+func logPostgresConnecting(o sessionOpts, pg config.Postgres) {
+	level := zerolog.InfoLevel
+	if o.quiet {
+		level = zerolog.DebugLevel
+	}
+	log.WithLevel(level).
+		Str("store", pg.Label).
+		Str("timeout", pg.ConnectTimeout.String()).
+		Msg("connecting to postgres")
 }
 
 // logStoreConnected says which store this process opened and on what terms: the

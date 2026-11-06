@@ -136,6 +136,21 @@ func TestResolveStoreConfig(t *testing.T) {
 			wantErr: "both db_path and url",
 		},
 		{
+			name:    "a postgres url with no user is refused",
+			in:      storeInputs{Flag: "postgres://db.host:5432/db"},
+			wantErr: "names no user",
+		},
+		{
+			name:    "a postgres url with no database is refused",
+			in:      storeInputs{Env: "postgres://u@db.host/"},
+			wantErr: "names no database name",
+		},
+		{
+			name:    "a postgres url with neither is refused",
+			in:      storeInputs{Flag: "postgres://db.host/"},
+			wantErr: "names no user and no database name",
+		},
+		{
 			name:       "guard does not apply to a named location",
 			in:         storeInputs{Flag: "/x/a.db"},
 			exists:     []string{legacyInstallerDB},

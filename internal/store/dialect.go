@@ -15,6 +15,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" driver
+
+	"github.com/DanielBlei/rabbithole/internal/config"
 )
 
 // dialect carries the few things the supported engines do not spell the same
@@ -355,6 +357,11 @@ type pgOptions struct {
 	connMaxLifetime time.Duration
 	connMaxIdleTime time.Duration
 
+	// connectTimeout bounds the startup connect. Zero means
+	// config.PostgresConnectTimeout; tests set it small to reach the timeout path
+	// without waiting ten seconds for it.
+	connectTimeout time.Duration
+
 	// exclusive claims the single-writer guard for the life of the Store.
 	// Only `serve` asks for it: one-shot CLI commands have to keep working while
 	// a server is up, and it is a second server that does the damage.
@@ -389,8 +396,17 @@ func openPostgres(ctx context.Context, dsn, label string, opts pgOptions) (*Stor
 
 	// sql.Open is lazy, so without this the first failure would surface from
 	// whichever query happened to run first rather than from opening the store.
-	if err := db.PingContext(ctx); err != nil {
+	//
+	// The ping gets a deadline of its own, so the wait is bounded even when the
+	// DSN names no connect_timeout.
+	connectTimeout := orDefault(opts.connectTimeout, config.PostgresConnectTimeout)
+	pingCtx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+	if err := db.PingContext(pingCtx); err != nil {
 		_ = db.Close()
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("connect to postgres at %s: gave up after %s: %w", label, connectTimeout, err)
+		}
 		return nil, fmt.Errorf("connect to postgres at %s: %w", label, err)
 	}
 
