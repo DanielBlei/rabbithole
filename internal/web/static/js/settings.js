@@ -279,15 +279,39 @@
       var tag = ctl(r, '[data-stp-tag]'), mod = ctl(r, '[data-stp-mod]'), kc = ctl(r, '[data-stp-keychip]');
       var changed = isChanged(r);
       // An emptied reference reads as no key, whatever the saved one said. A key
-      // pasted into .env whose reference is not saved yet says so.
+      // pasted into .env whose reference is not saved yet says so, quietly. A name
+      // the config may not reference says that, because saving it cannot work.
       if (kc) {
         if (!kc.dataset.was) kc.dataset.was = kc.className + '|' + kc.textContent;
-        var was = kc.dataset.was.split('|'), empty = r.querySelector('input[name="' + r.dataset.fld + '"]').value.trim() === '';
-        var pending = r.dataset.pasted === '1' && changed && !empty;
-        kc.className = pending ? 'stp-chip stp-chip--warn' : empty && r.dataset.raw !== '' ? 'stp-chip stp-chip--dim' : was[0];
-        kc.textContent = pending ? 'In .env, not saved yet' : empty && r.dataset.raw !== '' ? 'No key set' : was[1];
         var note = ctl(r, '[data-stp-keynote]');
-        if (note) note.hidden = !pending;
+        if (note && note.dataset.was === undefined) note.dataset.was = note.hidden ? '' : note.textContent;
+        var was = kc.dataset.was.split('|'), ref = r.querySelector('input[name="' + r.dataset.fld + '"]').value.trim();
+        var empty = ref === '', refused = !empty && !/^\$(?:RABBITHOLE_[A-Z0-9_]*_API_KEY|\{RABBITHOLE_[A-Z0-9_]*_API_KEY\})$/.test(ref);
+        // "pasted" only vouches for the exact reference the paste or copy
+        // returned; editing it to something else must not borrow that status.
+        var pastedHere = r.dataset.pasted === '1' && ref === r.dataset.pastedref;
+        var pending = pastedHere && changed && !empty;
+        var say = function(tone, text, line){
+          kc.className = 'stp-chip stp-chip--' + tone;
+          kc.textContent = text;
+          if (note) { note.textContent = line || ''; note.hidden = !line; }
+        };
+        if (refused) {
+          say('warn', 'Not a RABBITHOLE_*_API_KEY reference');
+        } else if (pending) {
+          say('dim', 'In .env', 'Saved to ' + (r.dataset.envpath || '.env') + '.');
+        } else if (pastedHere && !empty) {
+          say('ok', 'Set in .env', 'Using ' + (r.dataset.envpath || '.env') + '.');
+        } else if (empty && r.dataset.raw !== '') {
+          say('dim', 'No key set');
+        } else if (ref !== r.dataset.raw) {
+          // A hand-typed reference the page never verified; the status the
+          // server rendered belongs to the old value, not this one.
+          say('dim', 'Not checked yet');
+        } else {
+          say(was[0].replace('stp-chip stp-chip--', ''), was[1], note && note.dataset.was);
+        }
+        applyAlias(r);
       }
       if (tag) tag.hidden = !isDefault(r);
       if (mod) mod.hidden = !changed;
@@ -393,6 +417,8 @@
       var el = ctl(row, '[data-stp-err]');
       el.textContent = e.msg;
       el.hidden = false;
+      // The refusal now says the rule, so the key's action line drops its copy.
+      if (row.dataset.kind === 'key') applyAlias(row);
       first = first || row;
     });
     if (first) {
@@ -439,6 +465,7 @@
       var pane = root.querySelector('[data-stp-pane="' + slug + '"]');
       if (pane) resetWithin(pane);
     });
+    applyAlias(keyRow());
     form.addEventListener('submit', function(e){ e.preventDefault(); });
     form.addEventListener('input', function(e){
       var row = e.target.closest('[data-fld]');
@@ -449,6 +476,7 @@
     });
     form.addEventListener('change', function(e){
       var row = e.target.closest('[data-fld]');
+      if (row && e.target.closest('[data-stp-keymode]')) { applyKeyMode(row); return; }
       if (row && resetInput(row)) resetInput(row).value = '0';
       if (row && row.dataset.kind === 'sys' && e.target.type === 'radio' && e.target.value === 'custom') {
         var ta = row.querySelector('textarea');
@@ -517,13 +545,9 @@
       }
       if (e.target.closest('[data-stp-review]')) { review(); return; }
       if (e.target.closest('[data-stp-test]')) { testConnection(); return; }
-      if (e.target.closest('[data-stp-paste]')) {
-        var pb = form.querySelector('[data-stp-pastebox]');
-        pb.hidden = !pb.hidden;
-        if (!pb.hidden) pb.querySelector('[data-stp-pasteval]').focus();
-        return;
-      }
       if (e.target.closest('[data-stp-pastesave]')) { pasteKey(); return; }
+      var alias = e.target.closest('[data-stp-aliasgo]');
+      if (alias) { pasteKey(alias.getAttribute('data-stp-aliasgo')); return; }
       var cmp = e.target.closest('[data-stp-compare]');
       if (cmp) { compare(cmp); return; }
       var rb = e.target.closest('[data-stp-rollback]');
@@ -602,30 +626,139 @@
     }).catch(function(){ btn.disabled = false; show('is-bad', 'Failed', 'Could not reach the server.'); });
   }
 
+  // ---- the key control ---------------------------------------------------
+  // One input, one job at a time, picked by a radio pair: a $NAME reference, or
+  // a pasted value the server writes to .env under the canonical variable.
+  var CANON = 'RABBITHOLE_INFERENCE_API_KEY';
+  function keyRow(){ return form && form.querySelector('[data-fld="inference.api_key"]'); }
+  function keyRef(row){ return row.querySelector('[data-stp-keyref]'); }
+  function keyMode(row){
+    var r = row && row.querySelector('[data-stp-keymode] input:checked');
+    return r ? r.value : 'variable';
+  }
+  function applyKeyMode(row){
+    if (!row) return;
+    var paste = keyMode(row) === 'paste', box = ctl(row, '[data-stp-pastebox]');
+    keyRef(row).hidden = paste;
+    if (box) box.hidden = !paste;
+    if (paste) {
+      // The reference field is hidden, not gone: it is still what a save
+      // submits. Selecting Paste key must not hand it a reference before a
+      // key is actually written, or saving here with nothing pasted can
+      // activate an unset or unrelated existing RABBITHOLE_INFERENCE_API_KEY.
+      // pasteKey() sets the real reference once the key is saved.
+      var val = box && box.querySelector('[data-stp-pasteval]');
+      if (val && !val.disabled) val.focus();
+    }
+    refresh();
+  }
+  // A name the config may not reference: offer to copy its value into .env under
+  // the canonical name. Only the name travels out, and the copy is one-shot (it
+  // does not follow later changes to the variable it came from).
+  function applyAlias(row){
+    var line = ctl(row, '[data-stp-alias]');
+    if (!line) return;
+    // Braces have to be paired, or a malformed reference that the server's own
+    // parseRef would reject reads here as a well-formed name to offer a copy for.
+    var m = /^\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)\})$/.exec(keyRef(row).value.trim());
+    var name = m && (m[1] || m[2]);
+    var canon = row.dataset.keycanon || CANON;
+    // A saved config may name any RABBITHOLE_*_API_KEY variable, not only this
+    // field's own canonical one, so only a name outside that rule is refused.
+    var refused = !!name && name !== canon && !/^RABBITHOLE_[A-Z0-9_]*_API_KEY$/.test(name) && !!ctl(row, '[data-stp-pastebox]');
+    if (!refused) {
+      if (line.innerHTML) line.innerHTML = '';
+      line.hidden = true;
+      line.dataset.sig = '';
+      return;
+    }
+    // A refusal already under the field says the rule, so the line only offers the
+    // action then. Rebuilt only when what it says changes, so a focused button and
+    // its hover state survive a repaint.
+    var err = ctl(row, '[data-stp-err]');
+    var explained = !!err && !err.hidden && err.textContent.trim() !== '';
+    var sig = name + (explained ? '|e' : '|n');
+    line.hidden = false;
+    if (line.dataset.sig === sig) return;
+    line.dataset.sig = sig;
+    line.textContent = '';
+    if (!explained) {
+      line.appendChild(document.createTextNode('A saved config may only name ' + canon + ', not $' + name + '. '));
+    }
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'stp-link';
+    btn.setAttribute('data-stp-aliasgo', name);
+    btn.textContent = 'Copy $' + name + ' into .env.';
+    line.appendChild(btn);
+    line.appendChild(document.createTextNode(' One-shot: later changes to $' + name + ' do not reach .env.'));
+  }
+
   // Pasting a key writes it to .env on the server and hands back only the name
   // of the variable, which goes into the draft like any other edit.
-  function pasteKey(){
-    var box = form.querySelector('[data-stp-pastebox]'), val = box.querySelector('[data-stp-pasteval]');
-    var err = box.querySelector('[data-stp-pasteerr]');
-    err.hidden = true;
+  function pasteKey(from){
+    var row = keyRow();
+    if (!row) return;
+    var box = ctl(row, '[data-stp-pastebox]'), val = box && box.querySelector('[data-stp-pasteval]');
+    // An alias copy runs from Variable mode, where the paste box (and its own
+    // error line) stays hidden, so its failures have to surface in the row's
+    // regular error line instead or they are never seen.
+    var boxVisible = !!box && !box.hidden;
+    var err = boxVisible ? box.querySelector('[data-stp-pasteerr]') : ctl(row, '[data-stp-err]');
+    if (err) err.hidden = true;
+    if (!from && val && val.value.trim() === '') {
+      if (err) { err.textContent = 'Paste the key first.'; err.hidden = false; }
+      return;
+    }
     var body = new URLSearchParams();
-    body.set('value', val.value);
+    if (from) body.set('from', from); else body.set('value', val.value);
     body.set('expected_version', form.dataset.version);
     post('/settings/key', body).then(reply).then(function(r){
-      val.value = '';
+      if (val) val.value = '';
       var j = r.json || {};
       if (r.res.status === 409 && j.conflict) { showBanner(j.message, true); return; }
-      if (!r.res.ok || !j.ok) { err.textContent = j.message || 'Could not save the key.'; err.hidden = false; return; }
-      var row = form.querySelector('[data-fld="inference.api_key"]');
-      row.querySelector('input[name="inference.api_key"]').value = j.ref;
-      var chip = row.querySelector('[data-stp-keychip]');
-      chip.className = 'stp-chip stp-chip--' + (j.tone || '');
-      chip.textContent = j.chip;
-      chip.dataset.was = chip.className + '|' + chip.textContent;
+      if (!r.res.ok || !j.ok) {
+        if (err) { err.textContent = j.message || 'Could not save the key.'; err.hidden = false; }
+        return;
+      }
+      keyRef(row).value = j.ref;
+      var chip = ctl(row, '[data-stp-keychip]');
+      if (chip) {
+        chip.className = 'stp-chip stp-chip--' + (j.tone || '');
+        chip.textContent = j.chip;
+        chip.dataset.was = chip.className + '|' + chip.textContent;
+      }
       row.dataset.pasted = '1';
-      box.hidden = true;
+      row.dataset.pastedref = j.ref;
+      // A saved page reloads from the server and picks Variable mode up fresh;
+      // one that stays open (another row is still dirty) has to switch back
+      // itself, or the row is left showing Paste mode with its input emptied.
+      var modeInput = ctl(row, '[data-stp-keymode] input[value="variable"]');
+      if (modeInput && !modeInput.checked) { modeInput.checked = true; applyKeyMode(row); }
+      applyAlias(row);
+      // The value is in .env; the reference still has to be stored or the run
+      // never reads it. When the key is the only edit there is nothing to review,
+      // so store it now instead of sending the person to the save bar.
+      var hot = changedRows();
+      if (hot.length === 1 && hot[0] === row) { saveRef(j.message); return; }
       refresh();
-    }).catch(function(){ err.textContent = 'Could not reach the server.'; err.hidden = false; });
+    }).catch(function(){
+      if (err) { err.textContent = 'Could not reach the server.'; err.hidden = false; }
+    });
+  }
+  // Stores the draft after a key write, and says what happened.
+  function saveRef(what){
+    post('/settings/save', draft()).then(reply).then(function(r){
+      // The key row already shows "saved" on the strength of the paste that
+      // led here; a refused save has to repaint it so the chip does not keep
+      // claiming a reference the running config never got.
+      if (failed(r)) { refresh(); return; }
+      var j = r.json || {};
+      reloadWith((what || '') + ' ' + (j.message || 'Saved.'));
+    }).catch(function(){
+      showBanner('Could not reach the server. The key is in .env; save the page to use it.', false);
+      refresh();
+    });
   }
 
   function compare(btn){
@@ -763,6 +896,8 @@
 
   // ---- leaving with unsaved edits ----------------------------------------
   // Holds an action until the person picks. Tab switches never come here.
+  // A caller may add a third, primary choice: labels.save plus a saveAction that
+  // is handed onSaved and onFailed. Nothing proceeds until the save resolves.
   function ask(text, proceed, labels){
     if (!askLayer) { proceed(); return; }
     labels = labels || {title: 'You have unsaved changes', yes: 'Discard', no: 'Keep editing'};
@@ -772,10 +907,12 @@
         '<div class="modal__frame modal__frame--ask" role="alertdialog" aria-modal="true" aria-labelledby="stpLeaveTitle">' +
           '<div class="modal__bar"><span class="modal__title" id="stpLeaveTitle"></span>' +
           '<button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button></div>' +
-          '<div class="stp-dlg"><p class="stp-dlg__lead"></p></div>' +
+          '<div class="stp-dlg"><p class="stp-dlg__lead"></p>' +
+            '<p class="stp-dlg__err" role="alert" data-stp-leave-err hidden></p></div>' +
           '<div class="modal__foot stp-dlg__foot">' +
             '<button class="clk-btn" type="button" data-modal-close data-stp-no></button>' +
             '<button class="clk-btn" type="button" data-stp-leave></button>' +
+            (labels.save ? '<button class="clk-btn clk-btn--go" type="button" data-stp-leave-save></button>' : '') +
           '</div>' +
         '</div>' +
       '</div>';
@@ -789,6 +926,54 @@
       if (!labels.stay) skipGuard = true;
       proceed();
     });
+    var save = askLayer.querySelector('[data-stp-leave-save]');
+    if (save) {
+      save.textContent = labels.save;
+      // The dialog can be dismissed while the request is out; nothing may happen
+      // after that, least of all a navigation.
+      var open = function(){ return askLayer.contains(save); };
+      save.addEventListener('click', function(){
+        var err = askLayer.querySelector('[data-stp-leave-err]');
+        var busy = function(on){
+          askLayer.querySelectorAll('.clk-btn').forEach(function(b){ b.disabled = on; });
+          if (err && on) err.hidden = true;
+        };
+        busy(true);
+        labels.saveAction(function(){
+          if (!open()) return;
+          askLayer.innerHTML = '';
+          if (!labels.stay) skipGuard = true;
+          proceed();
+        }, function(msg){
+          if (!open()) return;
+          busy(false);
+          if (!err) return;
+          err.textContent = msg;
+          err.hidden = false;
+        });
+      });
+    }
+  }
+  // Saves the draft, then goes where the click was going. A save that needs the
+  // host-move confirmation opens the review dialog instead: that switch is the
+  // only place to grant it, so navigating would lose the confirmation.
+  function saveThen(href, done, fail){
+    var leave = function(){ if (askLayer) askLayer.innerHTML = ''; };
+    post('/settings/save', draft()).then(reply).then(function(r){
+      var j = r.json || {};
+      if (r.res.ok && j.ok) { done(); return; }
+      if (r.res.status === 409 && j.conflict) { leave(); closeModal(); showBanner(j.message, true); return; }
+      if (r.res.status === 422 && j.errors) {
+        var host = j.errors.length === 1 && j.errors[0].field === 'inference.host';
+        leave();
+        // The host-move confirmation lives in the review dialog, so open it
+        // rather than replacing it with an error the person cannot act on.
+        if (host) { review(); return; }
+        showErrors(j.errors, j.message);
+        return;
+      }
+      fail((j.message || 'That did not work. Try again.') + ' (Not saved.)');
+    }).catch(function(){ fail('Could not reach the server. (Not saved.)'); });
   }
   document.addEventListener('click', function(e){
     var link = e.target.closest('a[href]');
@@ -798,7 +983,10 @@
     if (link.hasAttribute('download') || link.origin !== window.location.origin || link.hasAttribute('hx-get') || !dirty()) return;
     if (link.getAttribute('href').charAt(0) === '#') return;
     e.preventDefault();
-    ask('Your settings changes are not saved yet.', function(){ window.location.href = link.href; });
+    var href = link.href;
+    ask('Your settings changes are not saved yet.', function(){ window.location.href = href; },
+      {title: 'You have unsaved changes', yes: 'Discard', no: 'Keep editing', save: 'Save it and go',
+       saveAction: function(done, fail){ saveThen(href, done, fail); }});
   });
   window.addEventListener('beforeunload', function(e){
     if (!dirty()) return;

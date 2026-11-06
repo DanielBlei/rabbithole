@@ -69,14 +69,37 @@ default.
 
 - **Another change landed first.** If the settings changed elsewhere (another tab, `config import`)
   while you were editing, saving says "Settings changed elsewhere". Reload to see the latest.
-- **Leaving with unsaved edits** asks first. Switching tabs does not.
+- **Leaving with unsaved edits** asks first, and offers **Save it and go** beside Discard and Keep
+  editing. Save writes the version and then goes where you clicked; if the save is refused, the
+  dialog stays and says why. Switching tabs does not ask.
 - **Moving the host.** If you change the inference host while an API key is set, the review asks
   before the key is sent to the new host.
 
-**API key.** Paste a key in the page and it is written to `./.env` (never echoed back), and the
-settings store only the `$RABBITHOLE_INFERENCE_API_KEY` reference. Start `serve` with
-`--no-env-write` to turn this off. A key already set in the environment cannot be overwritten from
-the page. Restart `serve` after a key changes, see [Known limitations](#known-limitations).
+**API key.** The key row has one input and a two-way switch, because a key can be supplied in two
+ways and only one of them applies at a time.
+
+- **Variable** holds a `$NAME` reference, the same text the config file carries. The chip beside the
+  row says where that variable comes from: `Set in environment`, `Set in .env`, or `Missing`. A name
+  that the rule refuses reads `Not a RABBITHOLE_*_API_KEY reference`, and a button beside it copies
+  that variable into `.env` under `RABBITHOLE_INFERENCE_API_KEY` so the value you already have
+  works. Only the name is used to find it; the value never leaves the machine.
+- **Paste key** holds the secret. `Save key` writes it to `./.env` under
+  `RABBITHOLE_INFERENCE_API_KEY`, and the settings store the reference, never the value. When the
+  key is the only edit on the page, the reference is saved at the same time, so the next ingest run
+  uses it with nothing else to do. The control opens on **Variable** every time: pasting is a
+  choice, not a state the page puts you in.
+- A key that is already where rabbithole reads it is reported quietly: the chip says `In .env` or
+  `In environment`, and a small line names the file it was found in. Once the reference is saved
+  the same line says `Using <file>`, which is the state a run is in. Nothing is nagged about, and
+  leaving the reference unsaved is allowed.
+
+A value with characters outside letters, digits and `. _ ~ + / = : -` cannot be stored in `.env`,
+so paste such a key into the file by hand when you control the host. `--no-env-write` turns the
+paste mode off, and the row then says so and names the variable to set where the server starts. A
+key that the process environment already sets cannot be overwritten from the page.
+
+Nothing about a pasted key needs a restart. A key you export in your shell profile does, because
+that environment exists before `serve` starts.
 
 **Test connection** builds the scorer from the values on screen, saved or not, and checks the
 model. It writes nothing.
@@ -206,6 +229,8 @@ with `_API_KEY`. That list is deliberately narrow. Any other name is refused on 
 config file cannot point at `$AWS_SECRET_ACCESS_KEY` and a changed `host` cannot carry an
 unrelated variable to another server. `RABBITHOLE_DB` and `RABBITHOLE_DB_PASSWORD` can never be
 config references. The error suggests the fix: `export RABBITHOLE_INFERENCE_API_KEY=$YOUR_VAR`.
+In Settings → Scoring the rule is one click away: a refused name shows a warning chip and a button
+that copies that variable into `.env` under the allowed name.
 
 - The reference is shown in Settings, Advanced, in `config export` and in `config history`. It is a
   name, not a secret. The value is never shown or logged.
@@ -632,6 +657,19 @@ a fallback: if it cannot be reached, the command fails instead of quietly using 
 config file passed with the deprecated `--config` flag) tune the pool and are an error beside a
 SQLite path.
 
+**The URL has to name the user and the database.** A URL that leaves either out
+(`postgres://db.example.com/`, or a bare `postgres://db.example.com`) is refused at startup, before
+anything is dialled, with `store.url names no user and no database name`. The driver would
+otherwise connect as your operating system's user name, to a database of that same name, and the
+mistake would come back later as `authentication failed` or `database does not exist`. A host and a
+port from 1 to 65535 are required as well, and are reported the same way.
+
+**A connect that cannot be made fails in ten seconds by default.** The attempt is bounded, so a filtered port
+or a host that never answers ends in `connect to postgres at <host>/<database>: gave up after 10s`
+rather than in a wait you have to interrupt. `serve` logs `connecting to postgres` before it dials,
+so a boot that stops after that line is a connect in progress, not a hang. See
+[`?connect_timeout=`](#connection-timeout) to raise the budget.
+
 **One process at a time.** Whichever engine you choose, only one `rabbithole serve` may point at
 a store at a time; machines take turns. On Postgres the second server is refused at startup
 (`another rabbithole is already serving this store`) instead of being left to mark the first
@@ -693,6 +731,26 @@ go **down**, not up.
 | `--db-conn-max-lifetime` | `30m` | Age at which a pooled connection is retired; lower it if something in front recycles connections |
 
 SQLite needs neither.
+
+### Connection timeout
+
+The connect itself is bounded, because a port that is filtered rather than closed answers nothing:
+the dial waits out the operating system's retry budget per resolved address, which is minutes, and
+the process looks hung. The default is 10 s, several times what a reachable server needs, and it is
+written into the connection as `connect_timeout` unless the URL names its own:
+
+| Setting | Default | What it is |
+|---|---|---|
+| `?connect_timeout=<seconds>` in `RABBITHOLE_DB` | `10` | How long one connect attempt may take before it fails with `gave up after ...` |
+
+Raise it for a host that is slow to accept, such as a serverless database waking from zero:
+
+```sh
+RABBITHOLE_DB='postgres://you@db.example.com:5432/rabbithole?connect_timeout=30'
+```
+
+A connect that exceeds it fails at startup, which is the intended trade: a boot that hangs gives no
+way to tell a slow network from a wrong password from a schema step that never returns.
 
 ### Behind a pooler
 
@@ -863,9 +921,10 @@ store locator. A Postgres user should move to `RABBITHOLE_DB` and `RABBITHOLE_DB
 
 ## Known limitations
 
-- **A CLI key rotation does not reach a running `serve`.** The server's environment is fixed when it
-  starts. After you change a key in `.env` or your shell, restart `serve`. The next CLI command
-  sees the new key at once.
+- **A key written outside the page does not reach a running `serve`.** A key saved from Settings →
+  Scoring is in the server's environment at once. A key you add to `.env` by hand, or export in your
+  shell, needs a restart: the server's environment is fixed when it starts. The next CLI command
+  sees it at once.
 - **`.env` writers are not coordinated across processes.** rabbithole replaces the file atomically,
   but two commands that write a key at the same moment can lose one write. Run imports one at a
   time.

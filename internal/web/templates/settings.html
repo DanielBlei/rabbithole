@@ -27,16 +27,17 @@
      its control, data-default and data-raw let the page tell a pinned value from
      the default, and data-applies lists the providers that read it. */}}
 {{define "stpField"}}
-<div class="stp-row{{if eq .Kind "sys"}} stp-row--stack{{end}}{{if eq .Kind "key"}} stp-row--top{{end}}{{if .Hidden}} is-off{{end}}" data-fld="{{.Key}}" data-kind="{{.Kind}}" data-default="{{.Default}}"{{if .Defaults}} data-defaults="{{.Defaults}}"{{end}} data-raw="{{.Raw}}"{{if .Applies}} data-applies="{{.Applies}}"{{end}} data-name="{{.Name}}">
+<div class="stp-row{{if eq .Kind "sys"}} stp-row--stack{{end}}{{if eq .Kind "key"}} stp-row--top{{end}}{{if .Hidden}} is-off{{end}}" data-fld="{{.Key}}" data-kind="{{.Kind}}" data-default="{{.Default}}"{{if .Defaults}} data-defaults="{{.Defaults}}"{{end}} data-raw="{{.Raw}}"{{if .Applies}} data-applies="{{.Applies}}"{{end}} data-name="{{.Name}}"{{if eq .Kind "key"}} data-keycanon="{{.CanonicalName}}" data-envpath="{{.EnvPath}}"{{end}}>
   <div class="stp-row__l">
     <div class="stp-row__nl">
       <label class="stp-row__n" for="f-{{.Key}}">{{.Name}}</label>
       {{with .Tip}}{{template "stpHint" .}}{{end}}
-      <span class="stp-row__tags">{{if eq .Kind "key"}}<span class="stp-chip stp-chip--{{.Tone}}" data-stp-keychip>{{.Chip}}</span>{{end}}<span class="stp-chip stp-chip--def" data-stp-tag{{if not .Tag}} hidden{{end}}>Default</span><i class="stp-mod" data-stp-mod title="Changed since the last save" hidden></i>{{if eq .Kind "key"}}<span class="stp-row__note" data-stp-keynote hidden>Key saved to .env. Review and save to start using it.</span>{{end}}</span>
+      <span class="stp-row__tags">{{if eq .Kind "key"}}<span class="stp-chip stp-chip--{{.Tone}}" data-stp-keychip>{{.Chip}}</span>{{end}}<span class="stp-chip stp-chip--def" data-stp-tag{{if not .Tag}} hidden{{end}}>Default</span><i class="stp-mod" data-stp-mod title="Changed since the last save" hidden></i>{{if eq .Kind "key"}}<span class="stp-row__note" data-stp-keynote{{if not .KeyNote}} hidden{{end}}>{{.KeyNote}}</span>{{end}}</span>
       {{if ne .Kind "key"}}{{if ne .Kind "sys"}}<button type="button" class="stp-link" data-stp-usedefault{{if not .Raw}} hidden{{end}}>Use default</button>{{end}}{{end}}</div>
     {{if .Help}}<p class="stp-row__h">{{.Help}}</p>{{end}}
     {{if .Note}}<p class="stp-row__h">{{.Note}}</p>{{end}}
     <p class="stp-row__err" role="alert" data-stp-err hidden></p>
+    {{if eq .Kind "key"}}<p class="stp-row__h stp-key__alias" data-stp-alias hidden></p>{{end}}
   </div>
   <div class="stp-row__c">
   {{if and (ne .Kind "key") (ne .Kind "sys")}}<input type="hidden" name="{{.Key}}__reset" value="0" data-stp-reset>{{end}}
@@ -68,16 +69,24 @@
       <textarea class="stp-area stp-area--sys" name="{{.Key}}_text" rows="16" data-builtin="{{.SysBuiltin}}" data-draft="{{.SysText}}" placeholder="No instructions are sent." aria-label="Instructions" spellcheck="false" readonly>{{if eq .SysMode "custom"}}{{.SysText}}{{else if eq .SysMode "default"}}{{.SysBuiltin}}{{end}}</textarea>
     </div>
   {{else if eq .Kind "key"}}
-    <div class="stp-key">
-      <input class="stp-in stp-in--ref" type="text" id="f-{{.Key}}" name="{{.Key}}" value="{{.Raw}}" placeholder="$RABBITHOLE_INFERENCE_API_KEY" aria-label="Variable that holds the key" autocomplete="off" spellcheck="false">
-      {{if .Pasteable}}<button type="button" class="clk-btn" data-stp-paste>Paste a key</button>{{end}}
+    {{/* One input, one job at a time: a $NAME reference, or a pasted value that is
+         written to .env under the canonical variable. The mode is a real radio
+         pair so the page can read it the way it reads any other choice. */}}
+    <div class="stp-key" data-stp-key>
+      <div class="stp-seg stp-key__mode" role="radiogroup" aria-label="How the key is supplied" data-stp-keymode>
+        <label class="stp-seg__o"><input type="radio" name="{{.Key}}__mode" value="variable" checked><span>Variable</span></label>
+        <label class="stp-seg__o"><input type="radio" name="{{.Key}}__mode" value="paste"{{if not .Pasteable}} disabled title="Writing a key from here is turned off"{{end}}><span>Paste key</span></label>
+      </div>
+      <input class="stp-in stp-in--ref" type="text" id="f-{{.Key}}" name="{{.Key}}" value="{{.Raw}}" placeholder="${{.CanonicalName}}" aria-label="Variable that holds the key" autocomplete="off" spellcheck="false" data-stp-keyref>
       {{if .Pasteable}}
       <div class="stp-paste" data-stp-pastebox hidden>
         <input class="stp-in" type="password" data-stp-pasteval placeholder="Paste the key here" aria-label="API key" autocomplete="new-password" spellcheck="false">
-        <button type="button" class="clk-btn clk-btn--go" data-stp-pastesave>Save to .env</button>
-        <p class="stp-row__h">Saved to <code>{{.EnvPath}}</code>. The config only names the variable.</p>
+        <button type="button" class="clk-btn clk-btn--go" data-stp-pastesave>Save key</button>
+        <p class="stp-row__h">Writes <code>{{.CanonicalName}}</code> to <code>{{.EnvPath}}</code>. Allowed: letters, digits and <code>. _ ~ + / = : -</code>.</p>
         <p class="stp-row__err" role="alert" data-stp-pasteerr hidden></p>
       </div>
+      {{else}}
+      <p class="stp-row__h" data-stp-aliasoff>Writing a key from here is turned off (<code>--no-env-write</code>). Set <code>{{.CanonicalName}}</code> where the server starts.</p>
       {{end}}
     </div>
   {{end}}

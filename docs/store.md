@@ -104,6 +104,26 @@ The other default they disagree on is NULL ordering: SQLite sorts NULL last unde
 Postgres first. `ORDER BY` over a nullable column therefore says `NULLS LAST` explicitly, and
 `unscoredSentinel` exists for the same reason.
 
+**The URL has to say who connects, and the connect is bounded.** Two failures used to be silent,
+and silence at boot is the worst shape a startup error can take: no listener to connect to, no
+error to read, nothing to interrupt but the process. `store.url` is now checked before anything is
+dialled: a URL naming no host, no user or no database is refused, with the part that is missing.
+The driver fills each of them in from the operating system (its user name, a database of that
+name, the local socket, port 5432), so the original mistake would surface as `authentication
+failed` a minute later, or never, against a host that does not answer.
+
+The connect itself is bounded by `config.PostgresConnectTimeout` (10 s unless `?connect_timeout=`
+says otherwise), twice over: the value goes into the DSN as the driver's own `connect_timeout`, and
+the ping gets a context with the same deadline. A port that is filtered rather than closed is the
+case this exists for; TCP retries run for minutes per resolved address, and nothing in the output
+distinguishes that from a hung schema step. `serve` logs `connecting to postgres` before it dials,
+and a timeout is reported as `gave up after 10s`.
+
+The deadline covers the connect only. The DDL and the writer-lock claim run on the startup context,
+which has no deadline of its own: the lock is non-blocking by construction
+(`pg_try_advisory_lock`), and a statement on an established connection comes back with an error
+rather than waiting indefinitely.
+
 ## SQLite pragmas
 
 Applied per pooled connection via the DSN:
