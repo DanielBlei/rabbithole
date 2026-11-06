@@ -1,0 +1,12 @@
+{{/* SPDX-FileCopyrightText: 2026 The Rabbit Hole Authors
+     SPDX-License-Identifier: Apache-2.0 */}}
+
+{{/* The answer to a bulk action or an Undo: each changed row as an out-of-band
+     replacement, the page counts, and the toast marker. The request swaps
+     nothing in place (hx-swap="none"), so everything here is out of band. */}}
+{{define "sourceBulk"}}{{range .Rows}}{{if .OOB}}{{template "sourceItem" .}}{{end}}{{end}}{{template "sourceOOB" .}}{{with .Flash.Msg}}{{template "sourceFlash" $.Flash}}{{end}}{{end}}
+
+{{/* The toast marker. static/js/net.js reads data-msg (and data-undo, the token
+     of the change's Undo, with data-ids, the sources it covers) when it lands,
+     then empties it. The Sources page holds an empty one for it to land on. */}}
+{{define "sourceFlash"}}<div id="srcFlash" hx-swap-oob="true" data-msg="{{.Msg}}"{{with .Undo}} data-undo="{{.}}"{{end}}{{with .IDs}} data-ids="{{.}}"{{end}} hidden></div>{{end}}

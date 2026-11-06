@@ -40,5 +40,6 @@ CLAUDE.md
 .headroom
 .claude/
 .agents/
+.codex/
 skills-lock.json
 .playwright-mcp/

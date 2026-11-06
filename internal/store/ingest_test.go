@@ -116,6 +116,10 @@ func TestIngestRunListAndErrors(t *testing.T) {
 	if len(page2) != 1 || page2[0].ID != first {
 		t.Errorf("offset not applied: %+v", page2)
 	}
+
+	if n, err := db.CountIngestRuns(ctx); err != nil || n != 2 {
+		t.Errorf("CountIngestRuns = %d, %v, want 2", n, err)
+	}
 }
 
 // InterruptStaleIngestRuns flips leftover 'running' rows to error/interrupted

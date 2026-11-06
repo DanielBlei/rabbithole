@@ -147,7 +147,7 @@ func TestSettingsGeneralShowsEffectiveValues(t *testing.T) {
 	if !shownAsSet || strings.Contains(body, "From your computer login") {
 		t.Errorf("a set prompt name should show as itself; body=%s", body)
 	}
-	for _, want := range []string{`hx-get="/sources"`, `data-stp-import`, `data-stp-feedcount`} {
+	for _, want := range []string{`<a class="clk-btn" href="/sources"`, `data-stp-import`, `data-stp-feedcount`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("General lacks %q", want)
 		}
@@ -441,7 +441,7 @@ func TestSettingsAdvancedRepliesAreLockedAndShowTheBuiltInText(t *testing.T) {
 			t.Errorf("advanced lacks %q", want)
 		}
 	}
-	if strings.Index(body, "Model tuning") > strings.Index(body, "data-stp-replies") {
+	if strings.Index(body, `Model<span class="sp"> </span>tuning`) > strings.Index(body, "data-stp-replies") {
 		t.Error("Model tuning should come before Replies")
 	}
 }

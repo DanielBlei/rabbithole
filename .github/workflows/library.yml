@@ -1,0 +1,110 @@
+name: Library
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'library/**'
+      - 'internal/library/**'
+      - 'internal/tags/**'
+      - 'internal/ingest/library*_test.go'
+      - 'internal/config/examples_test.go'
+      - 'internal/feeds/**'
+      - 'docs/examples/feeds.yaml'
+      - 'Makefile'
+      - 'internal/ingest/academic.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/library.yml'
+  pull_request:
+    paths:
+      - 'library/**'
+      - 'internal/library/**'
+      - 'internal/tags/**'
+      - 'internal/ingest/library*_test.go'
+      - 'internal/config/examples_test.go'
+      - 'internal/feeds/**'
+      - 'docs/examples/feeds.yaml'
+      - 'Makefile'
+      - 'internal/ingest/academic.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/library.yml'
+  # Weekly, for link rot: paths filters do not apply to schedules.
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: library-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      failures: ${{ steps.failures.outputs.lines }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Check
+        run: make library-check
+
+      # Runs even when the format check failed, so one run reports both.
+      - name: URLs
+        id: urls
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: make library-urls 2>&1 | tee urls.log
+
+      - name: Collect failures
+        id: failures
+        if: ${{ !cancelled() && steps.urls.outcome == 'failure' }}
+        shell: bash
+        run: |
+          {
+            echo 'lines<<LIBRARY_FAILURES_EOF'
+            grep -F 'LIBRARY-FAIL' urls.log || true
+            echo 'LIBRARY_FAILURES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  # Scheduled runs only: one open issue collects the link rot.
+  issue:
+    needs: check
+    if: ${{ always() && github.event_name == 'schedule' && needs.check.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          FAILURES: ${{ needs.check.outputs.failures }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='Library link check failed'
+          fence="$(printf '\140\140\140')"
+          body="$(printf 'The weekly library check failed: %s\n' "$RUN_URL")"
+          if [ -n "$FAILURES" ]; then
+            body="$(printf '%s\n%s\n%s\n%s\n' "$body" "$fence" "$FAILURES" "$fence")"
+          else
+            body="$(printf '%s\nNo URL failures were reported: the format check failed, or the run did not finish (timeout).\n' "$body")"
+          fi
+          num="$(gh issue list --state open --search "\"$title\" in:title" \
+            --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")"
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

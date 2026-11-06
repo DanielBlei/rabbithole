@@ -1,0 +1,17 @@
+{{/* A themed single-choice menu (static/js/listbox.js). The pick lives in the
+     hidden radios, so a page reads and listens to plain radios named .Name;
+     choosing an option checks one and fires a bubbling change. */}}
+{{define "listbox"}}<div class="stp-menu{{if .Inline}} stp-menu--inline{{end}}" id="{{.ID}}" data-stp-menu data-default="{{.Default}}"{{if .OOB}} hx-swap-oob="true"{{end}}>
+  <button type="button" class="stp-menu__btn{{if .On}} is-on{{end}}" data-stp-menubtn aria-haspopup="listbox" aria-expanded="false" aria-label="{{.Label}}">{{if .Key}}<span class="stp-menu__k">{{.Key}}</span>{{end}}<span class="stp-menu__cur" data-stp-menucur>{{.Current}}</span><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5l3 3 3-3"/></svg></button>
+  <ul class="stp-menu__list" role="listbox" tabindex="-1" aria-label="{{.Label}}" hidden>
+    {{- range .Options}}
+    <li role="option" data-value="{{.Value}}" data-label="{{.Text}}" aria-selected="false"><span class="stp-menu__n">{{.Label}}</span>{{if .Hint}}<span class="stp-menu__p">{{.Hint}}</span>{{end}}</li>
+    {{- end}}
+  </ul>
+  <div class="stp-sr" hidden>
+    {{- $d := .}}
+    {{- range .Options}}
+    <input type="radio" name="{{$d.Name}}" value="{{.Value}}" aria-label="{{.Label}}"{{if eq .Value $d.Value}} checked{{end}}>
+    {{- end}}
+  </div>
+</div>{{end}}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,6 +117,33 @@ func TestManagerRunLifecycle(t *testing.T) {
 	want := store.IngestCounts{Fetched: 20, Scored: 5, Skipped: 10, Failed: 1}
 	if last.Status != store.IngestStatusOK || last.Counts != want {
 		t.Errorf("finished row wrong: %+v", last)
+	}
+}
+
+// A run fetches through the client the manager was given.
+func TestManagerRunUsesClient(t *testing.T) {
+	m, release := newManagerForTest(t, Outcome{}, nil)
+	got := make(chan *http.Client, 1)
+	m.run = func(
+		_ context.Context,
+		_ config.Config,
+		_ profile.Snapshot,
+		_ *store.Store,
+		_ time.Time,
+		opts Options,
+	) (Outcome, error) {
+		got <- opts.Client
+		return Outcome{}, nil
+	}
+	want := &http.Client{}
+	m.SetClient(want)
+	if err := m.Start(context.Background(), store.IngestTriggerManual); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	close(release)
+	waitIdle(t, m)
+	if c := <-got; c != want {
+		t.Errorf("run client = %p, want %p", c, want)
 	}
 }
 

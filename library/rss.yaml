@@ -1,0 +1,569 @@
+# The Rabbit Hole source library: RSS and Atom feeds.
+# Format and how to add an entry: library/README.md
+schema_version: 1
+type: rss
+description: Feeds the RSS ingestor reads, grouped for the welcome checklist.
+groups:
+  - name: blogs
+    title: Blogs
+    description: Project and engineering blogs from the AI and cloud-native stack.
+    sources:
+      - name: Kubernetes blog
+        url: https://kubernetes.io/feed.xml
+        description: Release news, SIG updates and deep dives from the Kubernetes project.
+        labels: [Kubernetes, Infra, Open Source]
+
+      - name: CNCF blog
+        url: https://www.cncf.io/feed/
+        description: Project news, case studies and community updates from the Cloud Native Computing Foundation.
+        labels: [Kubernetes, Infra, Open Source]
+
+      - name: Red Hat Emerging Tech
+        url: https://next.redhat.com/feed/
+        description: Research and early-stage projects from Red Hat's Office of the CTO.
+        labels: [Open Source, Infra, AI, Research]
+
+      - name: Red Hat blog
+        url: https://www.redhat.com/en/rss/blog
+        description: Product, open source and industry posts from Red Hat.
+        labels: [Open Source, Infra, AI]
+
+      - name: Go blog
+        url: https://go.dev/blog/feed.atom
+        description: Release notes and design posts from the Go team.
+        labels: [Go, Open Source]
+
+      - name: Hugging Face blog
+        url: https://huggingface.co/blog/feed.xml
+        description: Model releases, libraries and tutorials from Hugging Face.
+        labels: [AI, Open Source, Research]
+
+      - name: PyTorch blog
+        url: https://pytorch.org/feed/
+        description: Release and ecosystem news from the PyTorch project.
+        labels: [AI, Open Source]
+
+      - name: vLLM blog
+        url: https://vllm.ai/blog/rss.xml
+        description: Features, performance work and releases from the vLLM inference engine.
+        labels: [AI, Inference, Open Source]
+
+      - name: Ollama blog
+        url: https://ollama.com/blog/rss.xml
+        description: Feature and model announcements from Ollama.
+        labels: [AI, Inference, Open Source, Developer Tools]
+
+      - name: llm-d blog
+        url: https://llm-d.ai/blog/rss.xml
+        description: Distributed LLM inference on Kubernetes from the llm-d project.
+        labels: [AI, Inference, Kubernetes, Open Source]
+
+      - name: KubeVirt blog
+        url: https://kubevirt.io/feed.xml
+        description: "Virtual machines on Kubernetes: releases and how-tos from KubeVirt."
+        labels: [Kubernetes, Infra, Open Source, Linux]
+
+      - name: Cloudflare blog
+        url: https://blog.cloudflare.com/rss/
+        description: Networking, security and systems engineering write-ups from Cloudflare.
+        labels: [Infra, Security, AI]
+
+      - name: GitHub blog
+        url: https://github.blog/feed/
+        description: Product, engineering and open source news from GitHub.
+        labels: [Open Source, Developer Tools]
+
+      - name: OpenAI news
+        url: https://openai.com/news/rss.xml
+        description: Research, model and product announcements from OpenAI.
+        labels: [AI, Research]
+
+      - name: Google Research blog
+        url: https://research.google/blog/rss/
+        description: Research highlights across ML, systems and science from Google.
+        labels: [AI, Research]
+
+      - name: Simon Willison
+        url: https://simonwillison.net/atom/everything/
+        description: Daily notes on LLMs, tools and the open web.
+        labels: [AI, Developer Tools]
+
+      - name: Lil'Log
+        url: https://lilianweng.github.io/index.xml
+        description: Lilian Weng's long-form surveys of ML research topics.
+        labels: [AI, Research, Agents]
+
+      - name: Ahead of AI
+        url: https://magazine.sebastianraschka.com/feed
+        description: Sebastian Raschka's LLM research digests and from-scratch explainers.
+        labels: [AI, Research, Newsletter]
+
+      - name: LWN.net
+        url: https://lwn.net/headlines/rss
+        description: Linux kernel and free software news.
+        labels: [Linux, Open Source, Security]
+
+  - name: releases
+    title: Releases
+    description: GitHub release feeds for the projects you run.
+    sources:
+      - name: Kubernetes releases
+        url: https://github.com/kubernetes/kubernetes/releases.atom
+        description: New Kubernetes releases and their notes.
+        labels: [Releases, Kubernetes]
+
+      - name: vLLM releases
+        url: https://github.com/vllm-project/vllm/releases.atom
+        description: New vLLM releases and their notes.
+        labels: [Releases, AI, Inference]
+
+      - name: Ollama releases
+        url: https://github.com/ollama/ollama/releases.atom
+        description: New Ollama releases and their notes.
+        labels: [Releases, AI, Inference]
+
+      - name: Go releases
+        url: https://github.com/golang/go/tags.atom
+        description: New Go version tags, including release candidates.
+        labels: [Releases, Go]
+
+      - name: KubeVirt releases
+        url: https://github.com/kubevirt/kubevirt/releases.atom
+        description: New KubeVirt releases and their notes.
+        labels: [Releases, Kubernetes]
+
+      - name: KServe releases
+        url: https://github.com/kserve/kserve/releases.atom
+        description: New KServe releases and their notes.
+        labels: [Releases, AI, Kubernetes]
+
+      - name: Open Data Hub operator releases
+        url: https://github.com/opendatahub-io/opendatahub-operator/releases.atom
+        description: New Open Data Hub operator releases and their notes.
+        labels: [Releases, AI, Kubernetes]
+
+      - name: Ray releases
+        url: https://github.com/ray-project/ray/releases.atom
+        description: New Ray releases and their notes.
+        labels: [Releases, AI, Distributed Systems]
+
+      - name: PyTorch releases
+        url: https://github.com/pytorch/pytorch/releases.atom
+        description: New PyTorch releases and their notes.
+        labels: [Releases, AI]
+
+      - name: Transformers releases
+        url: https://github.com/huggingface/transformers/releases.atom
+        description: New Transformers releases and their notes.
+        labels: [Releases, AI]
+
+      - name: llama.cpp releases
+        url: https://github.com/ggml-org/llama.cpp/releases.atom
+        description: New llama.cpp releases and their notes.
+        labels: [Releases, AI, Inference]
+
+      - name: Podman releases
+        url: https://github.com/podman-container-tools/podman/releases.atom
+        description: New Podman releases and their notes.
+        labels: [Releases, Infra]
+
+      - name: Helm releases
+        url: https://github.com/helm/helm/releases.atom
+        description: New Helm releases and their notes.
+        labels: [Releases, Kubernetes]
+
+      - name: Prometheus releases
+        url: https://github.com/prometheus/prometheus/releases.atom
+        description: New Prometheus releases and their notes.
+        labels: [Releases, Infra]
+
+      - name: kind releases
+        url: https://github.com/kubernetes-sigs/kind/releases.atom
+        description: New kind releases and their notes.
+        labels: [Releases, Kubernetes, Developer Tools]
+
+      - name: llm-d releases
+        url: https://github.com/llm-d/llm-d/releases.atom
+        description: New llm-d releases and their notes.
+        labels: [Releases, AI, Inference, Kubernetes]
+
+      - name: SGLang releases
+        url: https://github.com/sgl-project/sglang/releases.atom
+        description: New SGLang releases and their notes.
+        labels: [Releases, AI, Inference]
+
+      - name: Istio releases
+        url: https://github.com/istio/istio/releases.atom
+        description: New Istio releases and their notes.
+        labels: [Releases, Kubernetes, Infra]
+
+      - name: Argo CD releases
+        url: https://github.com/argoproj/argo-cd/releases.atom
+        description: New Argo CD releases and their notes.
+        labels: [Releases, Kubernetes]
+
+  - name: community
+    title: Community
+    description: Link aggregators filtered for signal.
+    sources:
+      - name: Hacker News front page
+        url: https://hnrss.org/frontpage?points=100
+        description: Front-page Hacker News stories with 100+ points.
+        labels: [Community]
+
+      - name: Hacker News best
+        url: https://hnrss.org/best
+        description: The highest-voted recent Hacker News stories.
+        labels: [Community]
+
+      - name: Show HN
+        url: https://hnrss.org/show?points=50
+        description: Show HN launches with 50+ points.
+        labels: [Community, Developer Tools, AI]
+
+      - name: Lobsters
+        url: https://lobste.rs/rss
+        description: "Lobsters front page: computing links with tagged, moderated discussion."
+        labels: [Community]
+
+      - name: "Lobsters: AI"
+        url: https://lobste.rs/t/ai.rss
+        description: Lobsters stories tagged ai.
+        labels: [Community, AI]
+
+      - name: "Lobsters: Go"
+        url: https://lobste.rs/t/go.rss
+        description: Lobsters stories tagged go.
+        labels: [Community, Go]
+
+      - name: "Lobsters: distributed"
+        url: https://lobste.rs/t/distributed.rss
+        description: Lobsters stories on distributed systems.
+        labels: [Community, Distributed Systems]
+
+      - name: "Lobsters: databases"
+        url: https://lobste.rs/t/databases.rss
+        description: Lobsters stories on databases.
+        labels: [Community, Databases]
+
+      - name: "Lobsters: devops"
+        url: https://lobste.rs/t/devops.rss
+        description: Lobsters stories on operations and infrastructure.
+        labels: [Community, Infra, Security]
+
+      - name: "Lobsters: programming"
+        url: https://lobste.rs/t/programming.rss
+        description: Lobsters stories tagged programming.
+        labels: [Community]
+
+  - name: arxiv-categories
+    title: Papers
+    description: Every new arXiv paper in a category. High volume, so each is capped per run.
+    sources:
+      - name: arXiv cs.LG (Machine Learning)
+        url: https://rss.arxiv.org/rss/cs.LG
+        description: New cs.LG submissions, published each weekday.
+        labels: [Research, Papers, AI]
+        max_items: 25  # weekday firehose
+
+      - name: arXiv cs.AI (Artificial Intelligence)
+        url: https://rss.arxiv.org/rss/cs.AI
+        description: New cs.AI submissions, published each weekday.
+        labels: [Research, Papers, AI]
+        max_items: 25
+
+      - name: arXiv cs.CL (Computation and Language)
+        url: https://rss.arxiv.org/rss/cs.CL
+        description: New cs.CL submissions, published each weekday.
+        labels: [Research, Papers, AI]
+        max_items: 25
+
+      - name: arXiv stat.ML (Statistical Machine Learning)
+        url: https://rss.arxiv.org/rss/stat.ML
+        description: New stat.ML submissions, published each weekday.
+        labels: [Research, Papers, AI]
+        max_items: 25
+
+      - name: arXiv cs.IR (Information Retrieval)
+        url: https://rss.arxiv.org/rss/cs.IR
+        description: New cs.IR submissions, published each weekday.
+        labels: [Research, Papers, AI]
+        max_items: 25
+
+      - name: arXiv cs.MA (Multiagent Systems)
+        url: https://rss.arxiv.org/rss/cs.MA
+        description: New cs.MA submissions, published each weekday.
+        labels: [Research, Papers, Agents]
+        max_items: 25
+
+      - name: arXiv cs.SE (Software Engineering)
+        url: https://rss.arxiv.org/rss/cs.SE
+        description: New cs.SE submissions, published each weekday.
+        labels: [Research, Papers, Software Engineering, AI]
+        max_items: 25
+
+      - name: arXiv cs.DC (Distributed Computing)
+        url: https://rss.arxiv.org/rss/cs.DC
+        description: New cs.DC submissions, published each weekday.
+        labels: [Research, Papers, Distributed Systems]
+        max_items: 25
+
+      - name: arXiv cs.DB (Databases)
+        url: https://rss.arxiv.org/rss/cs.DB
+        description: New cs.DB submissions, published each weekday.
+        labels: [Research, Papers, Databases]
+        max_items: 25
+
+      - name: arXiv cs.OS (Operating Systems)
+        url: https://rss.arxiv.org/rss/cs.OS
+        description: New cs.OS submissions, published each weekday.
+        labels: [Research, Papers, Infra]
+        max_items: 25
+
+      - name: arXiv cs.PF (Performance)
+        url: https://rss.arxiv.org/rss/cs.PF
+        description: New cs.PF submissions, published each weekday.
+        labels: [Research, Papers, Infra, AI]
+        max_items: 25
+
+      - name: arXiv cs.CR (Cryptography and Security)
+        url: https://rss.arxiv.org/rss/cs.CR
+        description: New cs.CR submissions, published each weekday.
+        labels: [Research, Papers, Security]
+        max_items: 25
+
+  - name: coding-agents
+    title: Coding agents
+    description: Changelogs and posts from AI coding agents and their harnesses.
+    sources:
+      - name: Claude Code changelog
+        url: https://code.claude.com/docs/en/changelog/rss.xml
+        description: Version by version notes on Anthropic's terminal coding agent.
+        labels: [AI, Agents, Developer Tools, Releases]
+
+      - name: OpenAI Codex changelog
+        url: https://learn.chatgpt.com/docs/changelog/rss.xml
+        description: Dated updates to OpenAI's Codex across the CLI, IDE and cloud.
+        labels: [AI, Agents, Developer Tools, Releases]
+        max_items: 25
+
+      - name: Cursor changelog
+        url: https://cursor.com/changelog/rss.xml
+        description: Feature drops for the Cursor editor and its agent modes.
+        labels: [AI, Developer Tools, Releases]
+        max_items: 25
+
+      - name: Amp news
+        url: https://ampcode.com/news.rss
+        description: Shipping notes from Sourcegraph's Amp coding agent.
+        labels: [AI, Agents, Developer Tools]
+        max_items: 25
+
+      - name: Zed blog
+        url: https://zed.dev/blog.rss
+        description: Engineering and product posts about the Zed editor and its AI features.
+        labels: [Developer Tools, Software Engineering, AI]
+        max_items: 25
+
+      - name: GitHub Copilot blog
+        url: https://github.blog/ai-and-ml/github-copilot/feed/
+        description: Longer posts on what Copilot can do and how teams use it.
+        labels: [AI, Developer Tools, Agents]
+
+      - name: Goose blog
+        url: https://goose-docs.ai/blog/rss.xml
+        description: Posts on workflows and design for the Goose agent.
+        labels: [Open Source, Agents, Community]
+
+      - name: OpenCode releases
+        url: https://github.com/anomalyco/opencode/releases.atom
+        description: New releases of the open source OpenCode coding agent.
+        labels: [Open Source, Agents, Releases]
+
+      - name: Pi releases
+        url: https://github.com/earendil-works/pi/releases.atom
+        description: New releases of Mario Zechner's minimalist coding agent harness.
+        labels: [Open Source, Agents, Releases]
+
+  - name: ai-news
+    title: AI labs and news
+    description: Model launches, research and analysis from AI labs and independent writers.
+    sources:
+      - name: Google AI blog
+        url: https://blog.google/innovation-and-ai/technology/ai/rss/
+        description: Gemini and AI product announcements from Google.
+        labels: [AI, News]
+
+      - name: Mistral news
+        url: https://mistral.ai/news/rss
+        description: Model releases and product news from Mistral.
+        labels: [AI, Inference, Open Source]
+
+      - name: Latent Space
+        url: https://latent.space/feed
+        description: Practitioner interviews and notes on building with LLMs.
+        labels: [AI, Agents, Newsletter]
+
+      - name: Import AI
+        url: https://importai.substack.com/feed
+        description: Weekly digest of AI research and policy.
+        labels: [AI, Research, Newsletter]
+        # Substack blocks the GitHub Actions runner IP (HTTP 403); fetches fine for real users.
+        ignore_checks: true
+
+      - name: Interconnects
+        url: https://www.interconnects.ai/feed
+        description: Analysis of open models, post-training and lab strategy.
+        labels: [AI, Research, Newsletter]
+
+      - name: The Decoder
+        url: https://the-decoder.com/feed/
+        description: Daily AI news with a focus on new models.
+        labels: [AI, News]
+
+      - name: Ars Technica AI
+        url: https://arstechnica.com/ai/feed/
+        description: Skeptical long form coverage of AI.
+        labels: [AI, News]
+
+  - name: cloud-platform
+    title: Cloud and platform
+    description: Cloud providers, platform engineering and DevOps tooling news.
+    sources:
+      - name: HashiCorp blog
+        url: https://www.hashicorp.com/blog/feed.xml
+        description: Infrastructure as code and secrets tooling news.
+        labels: [Infra, Developer Tools]
+
+      - name: Grafana Labs blog
+        url: https://grafana.com/blog/index.xml
+        description: Observability product launches and how to posts.
+        labels: [Infra, Open Source]
+
+      - name: Docker blog
+        url: https://www.docker.com/feed/
+        description: Container tooling and Docker product updates.
+        labels: [Infra, Developer Tools]
+
+      - name: platformengineering.org
+        url: https://platformengineering.org/blog/rss.xml
+        description: Articles on internal developer platforms and their practice.
+        labels: [Infra, Community]
+        max_items: 25
+
+      - name: The New Stack
+        url: https://thenewstack.io/feed/
+        description: Cloud native, Kubernetes and DevOps news.
+        labels: [Kubernetes, Infra, News]
+
+      - name: InfoQ
+        url: https://feed.infoq.com/
+        description: Architecture and engineering news for practitioners.
+        labels: [Software Engineering, Infra]
+
+      - name: AWS News blog
+        url: https://aws.amazon.com/blogs/aws/feed/
+        description: What AWS has just launched, explained.
+        labels: [Cloud, News]
+
+      - name: AWS Machine Learning blog
+        url: https://aws.amazon.com/blogs/machine-learning/feed/
+        description: Hands on machine learning and generative AI guides on AWS.
+        labels: [AI, Cloud]
+
+      - name: Google Cloud blog
+        url: https://cloudblog.withgoogle.com/rss/
+        description: Google Cloud products, data and AI architectures.
+        labels: [Cloud, Infra]
+
+      - name: Azure blog
+        url: https://azure.microsoft.com/en-us/blog/feed/
+        description: Azure services and AI platform updates.
+        labels: [Cloud, Infra]
+
+      - name: Martin Fowler
+        url: https://martinfowler.com/feed.atom
+        description: Essays on software design and delivery.
+        labels: [Software Engineering]
+
+      - name: Meta Engineering
+        url: https://engineering.fb.com/feed/
+        description: Infrastructure and systems posts from Meta's engineers.
+        labels: [Infra, Distributed Systems, AI]
+
+  - name: linux
+    title: Linux
+    description: Linux desktop, distro and kernel news.
+    sources:
+      - name: 9to5Linux
+        url: https://9to5linux.com/feed
+        description: Linux distribution, kernel and desktop release news.
+        labels: [Linux, News]
+
+      - name: OMG! Ubuntu
+        url: https://www.omgubuntu.co.uk/feed
+        description: Ubuntu, GNOME and Linux app news.
+        labels: [Linux, News]
+
+      - name: It's FOSS News
+        url: https://itsfoss.com/news/rss/
+        description: Open source and Linux news.
+        labels: [Linux, Open Source, News]
+
+      - name: Fedora Magazine
+        url: https://fedoramagazine.org/feed/
+        description: Fedora guides and release news.
+        labels: [Linux, Community]
+
+      - name: KDE news
+        url: https://kde.org/index.xml
+        description: Plasma and KDE application announcements.
+        labels: [Linux, Open Source, Releases]
+
+  - name: gaming
+    title: Gaming
+    description: Gaming news, including playing on Linux.
+    sources:
+      - name: Phoronix
+        url: https://www.phoronix.com/rss.php
+        description: Linux kernel, graphics driver and gaming benchmark news.
+        labels: [Linux, Gaming, News]
+
+      - name: GamingOnLinux
+        url: https://www.gamingonlinux.com/article_rss.php
+        description: Daily news for playing games on Linux.
+        labels: [Gaming, Linux, News]
+        max_items: 25
+
+      - name: Boiling Steam
+        url: https://boilingsteam.com/feed/rss-feed.xml
+        description: Linux and Steam Deck gaming features.
+        labels: [Gaming, Linux, Community]
+        max_items: 25
+
+      - name: Steam news hub
+        url: https://store.steampowered.com/feeds/news/
+        description: Aggregated news and release posts from Steam.
+        labels: [Gaming, News]
+
+      - name: Godot Engine
+        url: https://godotengine.org/rss.xml
+        description: Development snapshots and news from the open source game engine.
+        labels: [Gaming, Open Source, Releases]
+
+      - name: Valve Proton releases
+        url: https://github.com/ValveSoftware/Proton/releases.atom
+        description: New Proton builds for running Windows games on Linux.
+        labels: [Gaming, Linux, Releases]
+
+      - name: Game Developer
+        url: https://www.gamedeveloper.com/rss.xml
+        description: Game design, production and industry coverage.
+        labels: [Gaming, Software Engineering]
+        max_items: 25
+
+      - name: Rock Paper Shotgun
+        url: https://www.rockpapershotgun.com/feed
+        description: PC game news and features.
+        labels: [Gaming, News]
+        max_items: 25

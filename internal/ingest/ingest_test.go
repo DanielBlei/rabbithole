@@ -22,6 +22,10 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
+// loopbackClient reaches the httptest servers the feeds run on, which the
+// ingestion client refuses.
+var loopbackClient = &http.Client{}
+
 // feedRSS renders a one-item RSS feed for a test server.
 func feedRSS(title, link string) string {
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
@@ -169,7 +173,7 @@ func TestRunProcessesFeedsPerSourceAndDedups(t *testing.T) {
 	db := openStore(t, cfg)
 	firstProfile := testProfile("vllm inference latency batching")
 
-	out, err := Run(ctx, cfg.Config, firstProfile, db, time.Now(), Options{Record: true})
+	out, err := Run(ctx, cfg.Config, firstProfile, db, time.Now(), Options{Record: true, Client: loopbackClient})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -196,7 +200,7 @@ func TestRunProcessesFeedsPerSourceAndDedups(t *testing.T) {
 	// scored. The pre-scoring dedup drops them all rather than automatically
 	// rescoring them under the new profile.
 	secondProfile := profile.NewSnapshot("other-profile", "Other profile", "unrelated", false)
-	out2, err := Run(ctx, cfg.Config, secondProfile, db, time.Now(), Options{Record: true})
+	out2, err := Run(ctx, cfg.Config, secondProfile, db, time.Now(), Options{Record: true, Client: loopbackClient})
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -229,7 +233,10 @@ func TestRunDedupsSharedLinkAcrossFeeds(t *testing.T) {
 	cfg := testConfig(t, feedA, feedB)
 	db := openStore(t, cfg)
 
-	out, err := Run(ctx, cfg.Config, testProfile("shared"), db, time.Now(), Options{Record: true})
+	out, err := Run(
+		ctx, cfg.Config, testProfile("shared"), db, time.Now(),
+		Options{Record: true, Client: loopbackClient},
+	)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -267,7 +274,7 @@ func TestRunFetchedCountsOnlyItemsWithinAgeWindow(t *testing.T) {
 	cfg := testConfig(t, feed)
 	db := openStore(t, cfg)
 
-	out, err := Run(ctx, cfg.Config, testProfile("test"), db, time.Now(), Options{Record: true})
+	out, err := Run(ctx, cfg.Config, testProfile("test"), db, time.Now(), Options{Record: true, Client: loopbackClient})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -286,7 +293,14 @@ func TestRunSkipsFailedFeed(t *testing.T) {
 	cfg := testConfig(t, good, bad)
 	db := openStore(t, cfg)
 
-	out, err := Run(ctx, cfg.Config, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
+	out, err := Run(
+		ctx,
+		cfg.Config,
+		testProfile("vllm inference"),
+		db,
+		time.Now(),
+		Options{Record: true, Client: loopbackClient},
+	)
 	if err != nil {
 		t.Fatalf("Run should not fail because one feed failed: %v", err)
 	}
@@ -334,7 +348,14 @@ func TestRunSkipsDisabledFeeds(t *testing.T) {
 	}})
 	db := openStore(t, cfg)
 
-	out, err := Run(ctx, cfg.Config, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
+	out, err := Run(
+		ctx,
+		cfg.Config,
+		testProfile("vllm inference"),
+		db,
+		time.Now(),
+		Options{Record: true, Client: loopbackClient},
+	)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -379,7 +400,14 @@ func TestRunSkipsDeletedFeeds(t *testing.T) {
 		}
 	}
 
-	out, err := Run(ctx, cfg.Config, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
+	out, err := Run(
+		ctx,
+		cfg.Config,
+		testProfile("vllm inference"),
+		db,
+		time.Now(),
+		Options{Record: true, Client: loopbackClient},
+	)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -452,7 +480,7 @@ func TestRunAppliesPerFeedFilters(t *testing.T) {
 				testProfile("test"),
 				db,
 				time.Now(),
-				Options{Record: true},
+				Options{Record: true, Client: loopbackClient},
 			)
 			if err != nil {
 				t.Fatalf("Run: %v", err)
@@ -477,7 +505,14 @@ func TestRunCapKeepsNewestItems(t *testing.T) {
 	}})
 	db := openStore(t, cfg)
 
-	out, err := Run(context.Background(), cfg.Config, testProfile("test"), db, time.Now(), Options{Record: true})
+	out, err := Run(
+		context.Background(),
+		cfg.Config,
+		testProfile("test"),
+		db,
+		time.Now(),
+		Options{Record: true, Client: loopbackClient},
+	)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -517,7 +552,12 @@ func TestRunRecordsFeedFetchHistory(t *testing.T) {
 			db := openStore(t, cfg)
 
 			if _, err := Run(
-				ctx, cfg.Config, testProfile("vllm inference"), db, time.Now(), Options{Record: c.record},
+				ctx,
+				cfg.Config,
+				testProfile("vllm inference"),
+				db,
+				time.Now(),
+				Options{Record: c.record, Client: loopbackClient},
 			); err != nil {
 				t.Fatalf("Run: %v", err)
 			}
@@ -556,7 +596,14 @@ func TestRunAppendsToFeedHistory(t *testing.T) {
 	db := openStore(t, cfg)
 
 	for range 3 {
-		if _, err := Run(ctx, cfg.Config, testProfile("test"), db, time.Now(), Options{Record: true}); err != nil {
+		if _, err := Run(
+			ctx,
+			cfg.Config,
+			testProfile("test"),
+			db,
+			time.Now(),
+			Options{Record: true, Client: loopbackClient},
+		); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
 	}
@@ -588,7 +635,14 @@ func TestRunSkipsUnimplementedFeedTypes(t *testing.T) {
 	}})
 	db := openStore(t, cfg)
 
-	out, err := Run(ctx, cfg.Config, testProfile("vllm inference"), db, time.Now(), Options{Record: true})
+	out, err := Run(
+		ctx,
+		cfg.Config,
+		testProfile("vllm inference"),
+		db,
+		time.Now(),
+		Options{Record: true, Client: loopbackClient},
+	)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

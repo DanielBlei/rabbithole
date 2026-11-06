@@ -148,6 +148,24 @@ func FeedID(url string) string {
 	return hex.EncodeToString(sum[:])[:feedIDLen]
 }
 
+// FeedURLKey returns the form two feed URLs share when they point at the same
+// feed: scheme and host lowercased, fragment and trailing slashes dropped,
+// path case and query kept. It is for matching only; FeedID hashes the raw URL.
+func FeedURLKey(raw string) string {
+	s := strings.TrimSpace(raw)
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" {
+		return strings.ToLower(s)
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	u.Fragment = ""
+	u.RawFragment = ""
+	u.Path = strings.TrimRight(u.Path, "/")
+	u.RawPath = strings.TrimRight(u.RawPath, "/")
+	return u.String()
+}
+
 // NormalizeFeedURL fills in a missing scheme with https, so "example.com/feed"
 // is a URL rather than a validation error.
 func NormalizeFeedURL(raw string) string {
@@ -219,8 +237,14 @@ func decodeFeeds(raw []byte) (*FeedsDoc, error) {
 	if err := yaml.Unmarshal(raw, &root); err != nil {
 		return nil, err
 	}
-	if !hasFeedsKey(&root) {
-		return nil, errors.New("not a feeds file: no feeds list")
+	feeds, sources := feedsListKeys(&root)
+	switch {
+	case feeds != nil && sources != nil:
+		return nil, errors.New("not a feeds file: has both feeds: and sources:, keep one")
+	case feeds == nil && sources == nil:
+		return nil, errors.New("not a feeds file: no feeds or sources list")
+	case sources != nil:
+		sources.Value = "feeds"
 	}
 	doc := &FeedsDoc{}
 	if err := root.Decode(doc); err != nil {
@@ -229,21 +253,25 @@ func decodeFeeds(raw []byte) (*FeedsDoc, error) {
 	return doc, nil
 }
 
-// hasFeedsKey reports whether the document is a mapping with a top-level feeds key.
-func hasFeedsKey(root *yaml.Node) bool {
+// feedsListKeys returns the top-level key nodes named feeds and sources. Either
+// is nil when the document is not a mapping or lacks that key.
+func feedsListKeys(root *yaml.Node) (feeds, sources *yaml.Node) {
 	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
-		return false
+		return nil, nil
 	}
 	m := root.Content[0]
 	if m.Kind != yaml.MappingNode {
-		return false
+		return nil, nil
 	}
 	for i := 0; i+1 < len(m.Content); i += 2 {
-		if m.Content[i].Value == "feeds" {
-			return true
+		switch m.Content[i].Value {
+		case "feeds":
+			feeds = m.Content[i]
+		case "sources":
+			sources = m.Content[i]
 		}
 	}
-	return false
+	return feeds, sources
 }
 
 // MarshalFeeds renders a feed set as a seed file. yaml.Marshal defaults to

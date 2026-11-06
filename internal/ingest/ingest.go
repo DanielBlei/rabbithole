@@ -9,6 +9,7 @@ package ingest
 
 import (
 	"context"
+	"net/http"
 	"sort"
 	"time"
 
@@ -26,6 +27,11 @@ import (
 type Options struct {
 	Think  bool // enable model reasoning during scoring
 	Record bool // write the cycle's items and results to the store
+	// Client fetches the feeds; nil means feeds.NewClient.
+	Client *http.Client
+	// RunID is the history row of the run this cycle belongs to. Its feed
+	// fetches are linked to it; 0 links none (CLI and dry runs).
+	RunID int64
 }
 
 // Outcome is the result of one cycle. Rendering it (markdown file, stdout,
@@ -37,6 +43,9 @@ type Outcome struct {
 	Scored  int           // items the model scored, across all feeds
 	Skipped int           // items skipped as already scored or as duplicate links in this run
 	Failed  int           // items the model failed to score
+	// Sites pairs every fetched feed with the site that stands for it, for the
+	// icon pass that follows the run.
+	Sites []IconSite
 }
 
 // preparedFeed is one feed's post-fetch filtering result. Computing these
@@ -70,6 +79,9 @@ func Run(
 	opts Options,
 ) (Outcome, error) {
 	logger := zerolog.Ctx(ctx)
+	if opts.Client == nil {
+		opts.Client = feeds.NewClient("")
+	}
 	// One read of the feed set for the whole run. The Sources page can edit
 	// feeds while this is in flight, and a run that re-read the store partway
 	// through would fetch one set and tag against another.
@@ -99,7 +111,7 @@ func Run(
 	// dispatchFetch returns one Result per feed, positionally — results[i] is
 	// active[i]'s outcome. That pairing is used directly below rather than
 	// flattening the items and regrouping them by feed name.
-	results := dispatchFetch(ctx, active)
+	results := dispatchFetch(ctx, opts.Client, active)
 	fetched, failed := tallyFetches(results)
 	logger.Info().Int("items", fetched).Int("failed_feeds", failed).
 		Str("elapsed", time.Since(fetchStart).Round(100*time.Millisecond).String()).Msg("fetched items")
@@ -107,7 +119,7 @@ func Run(
 	// Per-feed fetch outcomes are recorded whether or not the run records
 	// items: a dead feed should surface even on a --dry-run. Best-effort —
 	// history is observability and must never fail the run.
-	if err := recordFeedFetches(ctx, db, active, results); err != nil {
+	if err := recordFeedFetches(ctx, db, opts.RunID, active, results); err != nil {
 		logger.Warn().Err(err).Msg("recording feed fetch history failed")
 	}
 
@@ -187,6 +199,9 @@ func Run(
 		if resolved {
 			return scorer, nil
 		}
+		if cfg.Inference.Provider != config.ProviderHeuristic {
+			logger.Info().Str("backend", cfg.Inference.Provider).Msg("connecting to model")
+		}
 		s, err := resolveConfiguredScorer(ctx, cfg, opts.Think)
 		if err != nil {
 			return nil, err
@@ -201,7 +216,7 @@ func Run(
 	// run early (a DB error, a backend that fails to resolve) still returns
 	// accurate counts for the feeds already completed, instead of resetting
 	// everything to zero.
-	outcome := Outcome{}
+	outcome := Outcome{Sites: iconSites(active, results)}
 	for i, f := range active {
 		p := prepared[i]
 		if p.raw == 0 {
@@ -231,9 +246,16 @@ func Run(
 			return outcome, err
 		}
 
+		// Batches run in parallel, so progress reports a completion count.
+		scoreStart := time.Now()
 		scores := rank.ScoreAll(
 			ctx, s, scoringContext.Profile, p.unseen, cfg.Inference.BatchSize, cfg.Inference.MaxParallel,
 			rank.WithFeedback(scoringContext.Feedback),
+			rank.OnBatch(func(done, total, _ int) {
+				logger.Info().Str("feed", f.Name).Int("done", done).Int("of", total).
+					Str("elapsed", time.Since(scoreStart).Round(100*time.Millisecond).String()).
+					Msg("scoring progress")
+			}),
 		)
 		failed := len(p.unseen) - len(scores)
 		outcome.Failed += failed
@@ -312,10 +334,12 @@ func tallyFetches(results []feeds.Result) (items, failed int) {
 // recordFeedFetches appends each source's fetch outcome to the feed history so
 // a feed that has stopped resolving is visible in the UI instead of only in
 // one run's log, then trims the history to its retention bound. feeds and
-// results are positionally paired (see Run).
+// results are positionally paired (see Run). A positive runID links the rows
+// to that run's history row.
 func recordFeedFetches(
 	ctx context.Context,
 	db *store.Store,
+	runID int64,
 	feedCfgs []config.ResolvedFeed,
 	results []feeds.Result,
 ) error {
@@ -334,7 +358,7 @@ func recordFeedFetches(
 		}
 		fetches = append(fetches, f)
 	}
-	if err := db.RecordFeedFetches(ctx, fetches); err != nil {
+	if err := db.RecordRunFetches(ctx, runID, fetches); err != nil {
 		return err
 	}
 	// Append-only needs a ceiling; trimming here keeps it tied to the only

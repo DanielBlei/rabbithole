@@ -78,6 +78,12 @@
 
   function isDocked(){ return wide.matches && !root.hasAttribute('data-rail'); }
 
+  // The tab is re-rendered out of band, so it is looked up each time.
+  function setExpanded(on){
+    var t = document.getElementById('navTab');
+    if (t) t.setAttribute('aria-expanded', on ? 'true' : 'false');
+  }
+
   var closeT = null, openT = null;
   function stopTimers(){
     clearTimeout(closeT); clearTimeout(openT);
@@ -87,11 +93,13 @@
     stopTimers();
     rail.classList.add('open');
     document.body.classList.add('nav-open');
+    setExpanded(true);
   }
   function closeNow(){
     stopTimers();
     rail.classList.remove('open');
     document.body.classList.remove('nav-open');
+    setExpanded(false);
   }
   function closeSoon(){
     if (isDocked()) return;
@@ -156,7 +164,11 @@
   document.addEventListener('click', function(e){
     if (e.target.closest('[data-rail-toggle]')){ setDocked(!isDocked()); return; }
     // The tab only exists while collapsed, and clicking it pins the menu back.
-    if (e.target.closest('#navTab')){ setDocked(true); return; }
+    // Below the docking width a tap has no hover to lean on, so it opens the menu.
+    if (e.target.closest('#navTab')){
+      if (wide.matches) setDocked(true); else open();
+      return;
+    }
     if (!isDocked() && rail.classList.contains('open') && !rail.contains(e.target)) closeNow();
   });
   document.addEventListener('keydown', function(e){

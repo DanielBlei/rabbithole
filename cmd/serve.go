@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/httpclient"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
+	"github.com/DanielBlei/rabbithole/internal/library"
 	"github.com/DanielBlei/rabbithole/internal/server"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -282,19 +287,25 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	feedClient := feeds.NewClient(buildVersion())
+	mgr.SetClient(feedClient)
 
 	srv := server.New(db, src, serveAddr, mgr, log)
+	srv.FeedClient = feedClient
 	srv.TrustProxies(proxies)
 	srv.Dev(serveDev)
 	srv.ManagedBy(configPath)
 	srv.EnvFile(s.env, serveNoEnvWrite)
 	srv.StoreInfo(s.storeInfo)
+	libLoader := newLibraryLoader(buildVersion(), serveDev)
+	srv.Library(libLoader)
 	httpSrv := newHTTPServer(serveAddr, srv.Routes(), tlsConfig)
 	// Bound here rather than in the goroutine, so a taken port fails the command.
 	ln, err := net.Listen("tcp", serveAddr)
 	if err != nil {
 		return err
 	}
+	startLibrary(libLoader)
 
 	scheme := "http"
 	if tlsConfig != nil {
@@ -322,24 +333,89 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		srv.Drain()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
-		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("shutdown: %w", err)
+		httpErr := httpSrv.Shutdown(shutdownCtx)
+		if httpErr != nil {
+			log.Error().Err(httpErr).Msg("http shutdown failed")
 		}
 
 		// Drain any in-flight ingest run before the deferred db.Close() runs,
 		// so it never writes through a closed *sql.DB. Its own timeout budget,
 		// separate from the HTTP drain above, so a slow HTTP shutdown doesn't
-		// shortchange the run's chance to wind down cleanly.
+		// shortchange the run's chance to wind down cleanly. It runs even when
+		// the HTTP drain failed.
 		mgrShutdownCtx, mgrCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer mgrCancel()
 		mgr.Shutdown(mgrShutdownCtx)
 
+		if httpErr != nil {
+			return fmt.Errorf("shutdown: %w", httpErr)
+		}
 		err := <-errCh
 		log.Info().Msg("server stopped")
 		return err
 	case err := <-errCh:
 		return err
 	}
+}
+
+// libraryTimeout bounds one request to the library host.
+const libraryTimeout = 5 * time.Second
+
+// libraryBase reads RABBITHOLE_LIBRARY_URL: empty is the default, "off" turns the
+// library off, anything else must be an http(s) URL with a host. custom is true
+// for a mirror other than the default. A bad value is an error and the default
+// is returned with it.
+func libraryBase(raw string) (base string, custom bool, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return library.DefaultBaseURL, false, nil
+	}
+	if strings.EqualFold(raw, "off") {
+		return "off", false, nil
+	}
+	u, perr := url.Parse(raw)
+	if perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return library.DefaultBaseURL, false, fmt.Errorf(
+			"%s must be off or an http(s) URL with a host, got %q", config.LibraryURLEnv, raw)
+	}
+	same := strings.EqualFold(strings.TrimRight(raw, "/"), strings.TrimRight(library.DefaultBaseURL, "/"))
+	return raw, !same, nil
+}
+
+// startLibrary starts the library's first load in the background, so the
+// Library is ready by the first Sources visit. It returns at once, so it never
+// delays serving, and fetches nothing when the library is off.
+func startLibrary(l *library.Loader) {
+	l.Snapshot()
+}
+
+// newLibraryLoader builds the loader of the source library. Nothing is fetched
+// until the loader is asked, which serve does once at start. The default host is reached on 80 and 443 only;
+// a mirror chosen through the environment may use any port. With dev set and no
+// library URL in the environment, ./library is read from disk when it holds rss.yaml.
+func newLibraryLoader(version string, dev bool) *library.Loader {
+	raw := os.Getenv(config.LibraryURLEnv)
+	if _, err := os.Stat(filepath.Join("library", "rss.yaml")); dev && strings.TrimSpace(raw) == "" && err == nil {
+		log.Info().Msg("reading the Library from ./library")
+		return library.NewLoader(library.Options{Dir: os.DirFS("library"), Log: log})
+	}
+	base, custom, err := libraryBase(raw)
+	if err != nil {
+		log.Warn().Err(err).Msg("ignoring the library URL, using the default")
+	}
+	client := httpclient.NewSafe(httpclient.Options{
+		Timeout:      libraryTimeout,
+		MaxRedirects: 3,
+		UserAgent:    "rabbithole/" + version + " (+https://github.com/DanielBlei/rabbithole)",
+		AllowPrivate: httpclient.AllowPrivateFromEnv(),
+		AnyPort:      custom,
+		Proxy:        http.ProxyFromEnvironment,
+	})
+	return library.NewLoader(library.Options{
+		Client:  client,
+		BaseURL: base,
+		Log:     log,
+	})
 }
 
 // logActiveConfig says which config version is in force, or that the defaults are.

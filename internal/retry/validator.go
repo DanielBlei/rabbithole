@@ -63,7 +63,7 @@ func (v *Validator) Validate(
 		models = m
 		return nil
 	}, func(attempt int, err error, delay time.Duration) {
-		logger.Debug().Str("backend", v.name).Int("attempt", attempt).Err(err).
+		logger.Info().Str("backend", v.name).Int("attempt", attempt).Err(err).
 			Str("retry_in", delay.String()).Msg(v.name + ": not reachable yet, retrying")
 	})
 	if err != nil {

@@ -5,7 +5,11 @@ package feeds
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"html"
+	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -13,11 +17,20 @@ import (
 
 	"github.com/mmcdole/gofeed"
 	"github.com/rs/zerolog"
+
+	"github.com/DanielBlei/rabbithole/internal/httpclient"
 )
 
+// FetchTimeout bounds how long one source may take to fetch.
+const FetchTimeout = 30 * time.Second
+
 const (
-	fetchTimeout = 30 * time.Second
+	fetchTimeout = FetchTimeout
 	maxParallel  = 8
+	// MaxFeedBytes caps one feed response body.
+	MaxFeedBytes = 16 << 20
+	// maxFeedRedirects is the redirect chain a feed fetch follows.
+	maxFeedRedirects = 5
 	// summaryLimit caps the summary text sent to the scoring model.
 	// Most RSS feeds only provide a short excerpt (300-600 chars) in
 	// <description>, not the full article; the limit guards against
@@ -36,17 +49,42 @@ type Source struct {
 // set and no Items — failures are reported, not swallowed, so the caller can
 // record feed health and still carry on with the sources that did work.
 type Result struct {
-	Source  Source
-	Items   []Item
-	Err     error
+	Source Source
+	Items  []Item
+	Err    error
+	// Site is the feed's own site address from its link, empty when the feed
+	// declares none or the source is not a feed.
+	Site    string
 	Elapsed time.Duration
 	At      time.Time // when the fetch finished
 }
 
-// FetchAll fetches every source concurrently and returns one Result per
-// source, in the order the sources were given. Individual feed failures are
-// logged and carried on the Result rather than failing the run.
-func FetchAll(ctx context.Context, sources []Source) []Result {
+// NewClient returns the client feed ingestion fetches through: it refuses
+// private and metadata addresses (the private ranges open with
+// RABBITHOLE_ALLOW_PRIVATE_FETCH), follows a few redirects, honours the proxy
+// environment and identifies itself as rabbithole/version.
+func NewClient(version string) *http.Client {
+	if version == "" {
+		version = "dev"
+	}
+	return httpclient.NewSafe(httpclient.Options{
+		Timeout:      fetchTimeout,
+		AnyPort:      true,
+		MaxRedirects: maxFeedRedirects,
+		UserAgent:    "rabbithole/" + version + " (+https://github.com/DanielBlei/rabbithole)",
+		AllowPrivate: httpclient.AllowPrivateFromEnv(),
+		Proxy:        http.ProxyFromEnvironment,
+	})
+}
+
+// FetchAll fetches every source concurrently through client and returns one
+// Result per source, in the order the sources were given. A nil client means
+// NewClient. Individual feed failures are logged and carried on the Result
+// rather than failing the run.
+func FetchAll(ctx context.Context, client *http.Client, sources []Source) []Result {
+	if client == nil {
+		client = NewClient("")
+	}
 	logger := zerolog.Ctx(ctx)
 	sem := make(chan struct{}, maxParallel)
 	// Indexed writes rather than an append under a mutex, so results come back
@@ -64,8 +102,8 @@ func FetchAll(ctx context.Context, sources []Source) []Result {
 			start := time.Now()
 			// gofeed.Parser lazily initializes internal state on first use and
 			// is not goroutine-safe, so each fetch gets its own (cheap) parser.
-			items, err := fetchOne(ctx, gofeed.NewParser(), src)
-			res := Result{Source: src, Items: items, Err: err, Elapsed: time.Since(start), At: time.Now()}
+			items, site, err := fetchOne(ctx, newParser(client), src)
+			res := Result{Source: src, Items: items, Site: site, Err: err, Elapsed: time.Since(start), At: time.Now()}
 			if err != nil {
 				logger.Warn().Str("feed", src.Name).Err(err).Msg("skipping feed")
 			} else {
@@ -79,13 +117,27 @@ func FetchAll(ctx context.Context, sources []Source) []Result {
 	return results
 }
 
-func fetchOne(ctx context.Context, parser *gofeed.Parser, src Source) ([]Item, error) {
+// newParser returns a parser bound to client. The User-Agent is left empty so
+// the client's own applies, and a body past MaxFeedBytes fails the parse.
+func newParser(client *http.Client) *gofeed.Parser {
+	p := gofeed.NewParser()
+	p.Client = client
+	p.UserAgent = ""
+	p.MaxByteSize = MaxFeedBytes
+	return p
+}
+
+// fetchOne returns a feed's items and its site address (http or https only).
+func fetchOne(ctx context.Context, parser *gofeed.Parser, src Source) ([]Item, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
 
 	feed, err := parser.ParseURLWithContext(src.URL, ctx)
+	if errors.Is(err, gofeed.ErrResponseTooLarge) {
+		return nil, "", fmt.Errorf("%w: over %d bytes", httpclient.ErrTooLarge, MaxFeedBytes)
+	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	items := make([]Item, 0, len(feed.Items))
 	for _, it := range feed.Items {
@@ -109,7 +161,26 @@ func fetchOne(ctx context.Context, parser *gofeed.Parser, src Source) ([]Item, e
 			Tags:      src.Tags,
 		})
 	}
-	return items, nil
+	return items, siteLink(src.URL, feed.Link), nil
+}
+
+// siteLink resolves a channel link against the feed's address and keeps it only
+// when it is an http(s) address.
+func siteLink(feedURL, link string) string {
+	link = strings.TrimSpace(link)
+	base, err := url.Parse(feedURL)
+	if link == "" || err != nil {
+		return ""
+	}
+	ref, err := url.Parse(link)
+	if err != nil {
+		return ""
+	}
+	site := base.ResolveReference(ref).String()
+	if SiteOrigin(site) == "" {
+		return ""
+	}
+	return site
 }
 
 var tagRE = regexp.MustCompile(`<[^>]*>`)

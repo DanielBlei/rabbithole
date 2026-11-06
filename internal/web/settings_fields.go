@@ -270,15 +270,33 @@ var tips = map[string]string{
 		"This browser stays signed in.",
 }
 
+// sourceTips is the "?" bubble copy of the Sources pages, keyed by the id a
+// template names. It is kept apart from tips, which every Settings page shows.
+var sourceTips = map[string]string{
+	"src-ingest": "Ingestion fetches every enabled feed, then scores new items against your profile.",
+	"src-runs": "A run fetches every enabled feed, then scores the new items. " +
+		"Each feed uses its own since and max items.",
+	"src-volume": "Stored items per week, last 8 weeks. Retention and the since window cut older history.",
+	"src-signal": "Last 30 days. Signal is the score from your profile, not read or thumbs counts.",
+	"src-defaults": "What every feed uses unless it sets the value itself. " +
+		"Leave a field blank and it falls through to the built-in.",
+	"src-import": "Choose a sources.yaml file, or drop one anywhere on this page. " +
+		"You see what changes before anything is added.",
+}
+
 // tipFor is the "?" bubble for a key, nil when it has none. The templates
 // reach it as `tip`; a key that names no copy renders nothing, and a test
 // fails when a bubble's copy sits on no page.
 func tipFor(key string) *tipView {
+	label := "More about this setting"
 	text, ok := tips[key]
 	if !ok {
-		return nil
+		if text, ok = sourceTips[key]; !ok {
+			return nil
+		}
+		label = "More about this"
 	}
-	return &tipView{ID: "tip-" + strings.NewReplacer(".", "-").Replace(key), Text: text}
+	return &tipView{ID: "tip-" + strings.NewReplacer(".", "-").Replace(key), Text: text, Label: label}
 }
 
 func init() {

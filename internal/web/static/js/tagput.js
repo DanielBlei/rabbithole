@@ -3,9 +3,10 @@
 // comma-joined field, and both want a tag to be the same colour wherever it
 // appears.
 //
-// This file owns the only global the frontend defines: window.tagput. Everything
-// else is delegated document listeners, but the Maze needs to recolour chips
-// after its own swaps, so the two need a seam.
+// This file owns window.tagput, one of the two globals the frontend defines (the
+// other is window.rhListbox). Everything else is delegated document listeners,
+// but the Maze needs to recolour chips after its own swaps, so the two need a
+// seam.
 (function () {
   // ---- tag colours ----------------------------------------------------
   // Each tag name maps to one of TAG_COLORS palette classes (.tag--cN in the
@@ -35,7 +36,7 @@
   }
   // Chips this file renders, plus the read-only ones the server prints.
   function colorChips() {
-    document.querySelectorAll('.tagput__chip, .tagput__sug, .src__tag').forEach(function (el) {
+    document.querySelectorAll('.tagput__chip, .tagput__sug, .src__tag, .mg .tag[data-tag], .plan .tag[data-tag]').forEach(function (el) {
       var name = (el.dataset.tag || el.textContent).trim();
       if (name) { colorize(el, name); }
     });
@@ -154,6 +155,8 @@
 
   document.addEventListener('DOMContentLoaded', initAll);
   document.body.addEventListener('htmx:afterSwap', initAll);
+  // Rows a live refresh swaps in out of band carry the server's tag colours.
+  document.body.addEventListener('htmx:oobAfterSwap', initAll);
 
   window.tagput = { colorize: colorize, cycleColor: cycleColor, colorChips: colorChips, initAll: initAll };
 })();

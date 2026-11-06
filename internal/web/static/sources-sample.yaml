@@ -1,0 +1,54 @@
+# The Rabbit Hole feed list, in the shape `sources import` and the Sources page read.
+#
+# Import it with `rabbithole sources import docs/examples/feeds.yaml`, or drop it on
+# the Sources page. Feeds live in the store: an import adds the ones it has never
+# seen and skips the rest, so it is safe to repeat. Nothing writes back to this
+# file; `rabbithole sources export` (or the Sources page) gets the live set out.
+#
+# RSS is the default when `type` is omitted. Academic sources use
+# `type: academic`; blog and news are not yet implemented.
+#
+# Inheritance, feed identity, health: docs/configuration.md
+
+# Applied to any feed that doesn't set the knob itself.
+defaults:
+  since: 14d      # ignore items older than this; accepts d/h/m (14d, 336h, 90m)
+  max_items: 25   # items per feed per run, some return hundreds; omit for no cap
+
+feeds:
+  # Minimum: a unique name and a URL. The rest falls through to defaults.
+  #
+  # A feed is identified by its URL: renaming keeps its history, changing the URL
+  # starts a new feed. Names must be unique; items are filed under the name.
+  - name: Red Hat Emerging Tech
+    url: https://next.redhat.com/feed/
+    tags: [Open Source, Infra]
+
+  - name: Hugging Face blog
+    url: https://huggingface.co/blog/feed.xml
+    tags: [AI, Open Source]
+
+  # Academic saved search; the host selects the provider (shapes below).
+  - name: "arXiv: RAG research"
+    type: academic
+    url: https://arxiv.org/search?q=retrieval+augmented+generation
+    tags: [AI, Research, Papers]
+
+  - name: "Medium: AI"
+    url: https://medium.com/feed/tag/artificial-intelligence
+    since: 2d      # override the default window for one feed
+    max_items: 10  # high volume: keep only a few items per run
+    enabled: false # kept but never fetched; switch on from the Sources page
+    tags: [AI, Medium]
+
+# Medium URL shapes:
+#   https://medium.com/feed/tag/<tag>
+#   https://medium.com/feed/@<username>
+#
+# Academic URL shapes (type: academic). The host picks the provider, `q` is the
+# search, and each provider honours its own filters, for example:
+#   https://arxiv.org/search?q=<words>
+#       plain words search every field; arXiv syntax passes through
+#       (q=cat:cs.CL, q=ti:agents+AND+au:smith)
+#   https://api.crossref.org/works?q=<words>&publisher=<name>&journal=<title>&issn=<issn>
+#   https://www.semanticscholar.org/search?q=<words>&min_citations=<n>&open_access=true

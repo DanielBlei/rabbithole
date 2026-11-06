@@ -6,6 +6,7 @@ package ingest
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -18,7 +19,7 @@ import (
 // its own file (rss.go, blog.go, news.go, academic.go) implementing this
 // signature, so adding a new source kind's ingest support means adding a file
 // and a registry entry here, not touching the dispatch logic itself.
-type typeFetcher func(ctx context.Context, sources []feeds.Source) []feeds.Result
+type typeFetcher func(ctx context.Context, client *http.Client, sources []feeds.Source) []feeds.Result
 
 // fetchers maps every known feed type to its fetch implementation. RSS and
 // academic sources are implemented; blog and news remain placeholders until
@@ -35,7 +36,7 @@ var fetchers = map[config.FeedType]typeFetcher{
 // routing each group to its type's fetcher. The returned slice is positional
 // with active — results[i] is active[i]'s outcome — which is what the rest of
 // Run relies on to pair a feed's config with what its fetch produced.
-func dispatchFetch(ctx context.Context, active []config.ResolvedFeed) []feeds.Result {
+func dispatchFetch(ctx context.Context, client *http.Client, active []config.ResolvedFeed) []feeds.Result {
 	results := make([]feeds.Result, len(active))
 
 	byType := make(map[config.FeedType][]int, len(active))
@@ -55,12 +56,12 @@ func dispatchFetch(ctx context.Context, active []config.ResolvedFeed) []feeds.Re
 			// Only reachable if a feed's resolved type isn't in the registry —
 			// config.Feed.Validate rejects unrecognized types before a feed ever
 			// reaches the store, so this is a belt-and-suspenders fallback.
-			fetch = func(ctx context.Context, sources []feeds.Source) []feeds.Result {
+			fetch = func(ctx context.Context, _ *http.Client, sources []feeds.Source) []feeds.Result {
 				return skipUnimplemented(ctx, sources, t)
 			}
 		}
 
-		sub := fetch(ctx, sources)
+		sub := fetch(ctx, client, sources)
 		for j, idx := range idxs {
 			results[idx] = sub[j]
 		}

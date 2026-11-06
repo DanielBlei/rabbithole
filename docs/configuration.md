@@ -46,6 +46,7 @@ lists every setting with its default, to copy lines from.
 |---|---|---|
 | Run settings: model, scoring, your name | The store | The Settings page or `config import` (the deprecated `serve --config` still works) |
 | Feeds (sources) | The store | The Sources page, `sources import` |
+| The source library | GitHub, loaded in the background at start | `RABBITHOLE_LIBRARY_URL`, see [The source library](#the-source-library) |
 | Interest profiles | The store | Settings → Profiles |
 | Where the store is, the listen address, TLS | Flags and the environment | `--db` or `RABBITHOLE_DB`, `--addr`, the `--tls-*` flags |
 | Secrets (API keys, the Postgres password) | The environment or `./.env` | Your shell profile, or editing `.env` |
@@ -364,6 +365,63 @@ startup. See [cli.md](cli.md#sources).
 An old config whose `ingest.feeds` names a feeds file is honoured only when you import that config
 (see [Upgrading from v0.2.x](#upgrading-from-v02x)).
 
+### The source library
+
+The **Library** in the Sources side menu lists ready-made feeds grouped by topic, and the Overview
+suggests some that match the tags of your sources. The lists are fetched from the project's GitHub
+`main` branch in the background when the server starts, and refreshed hourly: a fix to the library
+reaches every install within that hour. Pages show the last good copy and never wait for GitHub; the
+Library parts of Sources fill in as soon as the first load lands. If GitHub is unreachable, the
+Library page says so and offers **Try again**.
+
+To trim the Library to what you want, **Hide** a source, or tick several (use **Select all** after a
+tag filter) and hide them together. Hidden sources leave the list and the Overview suggestions; the
+**Hidden** view shows them again with **Unhide**. Hiding never removes a source you already added,
+and new entries that the project adds later still appear.
+
+- `RABBITHOLE_LIBRARY_URL` loads the library from another directory URL (a mirror or a fork that holds
+  `rss.yaml` and `academic.yaml`), on any port. `off` turns the Library off.
+- From a checkout, `make serve DEV=1` reads the Library from `./library` instead (unless
+  `RABBITHOLE_LIBRARY_URL` is set), so an edit shows within seconds without pushing.
+- The usual `HTTPS_PROXY` and `NO_PROXY` variables are honoured. With a proxy, the proxy resolves
+  hostnames, so they are not checked here; IP addresses and `localhost` in a URL still are.
+- The fetch refuses private and loopback addresses. For a mirror on your own network set
+  `RABBITHOLE_ALLOW_PRIVATE_FETCH=1`. Link-local addresses, cloud metadata included, stay blocked.
+  A bad `RABBITHOLE_LIBRARY_URL` (not `off`, not an http or https URL with a host) is logged at
+  startup and the default is used. A redirect from https to http is refused.
+
+Both variables can be set in `./.env` like the other `RABBITHOLE_*` ones. Contributing a source:
+[`library/README.md`](https://github.com/DanielBlei/rabbithole/blob/main/library/README.md).
+
+### Fetching feeds
+
+Ingestion fetches every feed through the same guarded client as the source library, with these
+limits. Academic sources go through the same guarded client but keep their own size limits and
+User-Agent.
+
+- A fetch takes at most 30 seconds, follows at most 5 redirects, and reads at most 16 MiB per RSS
+  feed. A feed over the cap fails with "The feed is larger than 16 MiB."
+- Private and loopback addresses are refused, so a feed on your LAN or `localhost` fails with a
+  note naming `RABBITHOLE_ALLOW_PRIVATE_FETCH`. Set it to `1` (in `./.env` or the environment) to
+  fetch those feeds. Typical cases are a self-hosted blog on your network and RSS-Bridge, RSSHub or
+  FreshRSS running in Docker next to Rabbit Hole. Link-local addresses, cloud metadata included,
+  stay blocked. Find feeds and Preview in the Add form follow the same rule. See
+  [the troubleshooting entry](troubleshooting.md#a-feed-on-my-network-or-in-docker-stopped-fetching).
+- A redirect from a public address into a private one is blocked even with
+  `RABBITHOLE_ALLOW_PRIVATE_FETCH=1`; a feed that starts on your LAN may redirect within it. The
+  rule stops a feed (or an open redirect on a trusted host) from bouncing the server into the
+  private network. With the opt-out on, a feed host whose own DNS points at a private address is
+  fetched, because that is not a redirect.
+- A redirect from https to http is refused.
+- `HTTPS_PROXY` and `NO_PROXY` are honoured; with a proxy, the proxy resolves hostnames, so only
+  IP addresses and `localhost` in a feed URL are checked.
+- RSS requests identify as `rabbithole/<version>`.
+- Source icons come from the site each feed links to. They are fetched in the background after you
+  add or change a source and at the end of each ingestion run, never while a page loads, and follow
+  the same private-address rule. A site with no usable icon (or only an SVG one) shows a letter
+  tile instead. The Library rows use icons shipped with the Library, so browsing it contacts no
+  site you did not add.
+
 ### Feed URLs
 
 You can leave `https://` off: `example.com/feed.xml` is filled in for you, here and on the
@@ -377,6 +435,9 @@ between can see which feed you asked for.
 
 A `defaults:` block followed by the feed list. Any RSS or Atom URL works as `type: rss`;
 academic searches are described under [Academic sources](#academic-sources).
+
+The list key can be `feeds:` or `sources:`. Import a file from the Sources page and it shows
+what would change (new, already subscribed, removed, clashing) before anything is added.
 
 ```yaml
 defaults:

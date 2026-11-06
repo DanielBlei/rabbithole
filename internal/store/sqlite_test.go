@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
 
@@ -1049,5 +1051,42 @@ func TestOpenStampsSchemaVersion(t *testing.T) {
 
 	if _, err := Open(path); !errors.Is(err, ErrSchemaVersion) {
 		t.Errorf("Open at wrong version: %v, want ErrSchemaVersion", err)
+	}
+}
+
+// A write transaction that reads before it writes must wait for a concurrent
+// writer instead of failing with SQLITE_BUSY: it takes the write lock when it
+// begins, so the other writer queues behind it on busy_timeout.
+func TestWriteTxReadThenWriteWaitsForOtherWriter(t *testing.T) {
+	if onPostgres() {
+		t.Skip("SQLite locking")
+	}
+	db := openTestStore(t)
+	ctx := context.Background()
+
+	other := make(chan error, 1)
+	err := db.inTx(ctx, func(tx *sql.Tx) error {
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM feeds`).Scan(&n); err != nil {
+			return err
+		}
+		go func() {
+			_, err := db.AddFeed(ctx, config.Feed{Name: "B", URL: "https://b.example/rss"})
+			other <- err
+		}()
+		select {
+		case err := <-other:
+			t.Errorf("other writer finished while the tx held the write lock: %v", err)
+			other <- err
+		case <-time.After(200 * time.Millisecond):
+		}
+		_, err := db.addFeedTx(ctx, tx, config.Feed{Name: "A", URL: "https://a.example/rss"})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("read-then-write tx: %v", err)
+	}
+	if err := <-other; err != nil {
+		t.Fatalf("other writer: %v", err)
 	}
 }

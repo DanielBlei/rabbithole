@@ -122,7 +122,7 @@ func (s *Store) ReplaceItemScores(
 		}
 		updated += int(n)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := s.commitWrite(ctx, tx); err != nil {
 		return 0, fmt.Errorf("commit score replacements: %w", err)
 	}
 	return updated, nil

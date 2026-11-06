@@ -232,7 +232,7 @@ func TestGateCoversEverythingButHealthAndAssets(t *testing.T) {
 func TestCrossOriginPostsAreRefused(t *testing.T) {
 	srv, _ := newTestServer(t)
 	routes := srv.Routes()
-	for _, path := range []string{"/todos", "/login", "/logout"} {
+	for _, path := range []string{"/todos", "/login", "/logout", "/sources/discover", "/sources/preview"} {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("title=x"))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("Sec-Fetch-Site", "cross-site")

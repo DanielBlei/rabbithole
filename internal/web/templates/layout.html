@@ -36,9 +36,10 @@
     <div class="topbar__left">
       <span class="wordmark"><b>The Rabbit Hole</b></span>
       <span class="breaker">/</span>
-      <nav class="topbar__nav">
-        <a class="{{if eq .Active "feed"}}active{{end}}" href="/feed">Feed</a>
-        <a class="{{if eq .Active "maze"}}active{{end}}" href="/maze">Maze</a>
+      <nav class="topbar__nav" aria-label="Main">
+        <a class="{{if eq .Active "feed"}}active{{end}}" href="/feed"{{if eq .Active "feed"}} aria-current="page"{{end}}>Feed</a>
+        <a class="{{if eq .Active "sources"}}active{{end}}" href="/sources"{{if eq .Active "sources"}} aria-current="page"{{end}}>Sources</a>
+        <a class="{{if eq .Active "maze"}}active{{end}}" href="/maze"{{if eq .Active "maze"}} aria-current="page"{{end}}>Maze</a>
       </nav>
     </div>
     <div class="topbar__right">
@@ -47,7 +48,7 @@
       <div class="topbar__amb">
         {{template "ingestChip" .Chrome.Chip}}
         <span class="topbar__sep" aria-hidden="true"></span>
-        <div class="clock" id="clock" aria-label="Current date and time">
+        <div class="clock" id="clock" role="group" aria-label="Current date and time">
           <span class="clock__time"></span>
           <span class="clock__date"></span>
         </div>
@@ -105,6 +106,14 @@
         <span class="navrail__ds">the rabbit hole</span>
       </span>
     </a>
+    <a class="navrail__item navrail__item--page{{if eq .Active "sources"}} navrail__item--on{{end}}" href="/sources"
+       {{if eq .Active "sources"}}aria-current="page"{{end}}>
+      <span class="navrail__mk" aria-hidden="true">&#10095;</span>
+      <span class="navrail__txt">
+        <span class="navrail__nm">Sources<i class="navrail__cur" aria-hidden="true"></i></span>
+        <span class="navrail__ds">feeds &amp; health</span>
+      </span>
+    </a>
     <a class="navrail__item navrail__item--page{{if eq .Active "maze"}} navrail__item--on{{end}}" href="/maze"
        {{if eq .Active "maze"}}aria-current="page"{{end}}>
       <span class="navrail__mk" aria-hidden="true">&#10095;</span>
@@ -125,12 +134,6 @@
          all three a drawer's length away from the pages. */}}
     <div class="navrail__foot">
       <div class="navrail__sec"><span>config</span></div>
-      <button class="navrail__item navrail__item--cmd" type="button"
-              hx-get="/sources" hx-target="#modal" hx-swap="innerHTML" aria-label="Sources">
-        <span class="navrail__sig" aria-hidden="true">$</span>
-        <span class="navrail__cmd">sources</span>
-        <span class="navrail__note">feeds &amp; defaults</span>
-      </button>
       {{template "navIngest" .Chrome}}
       {{/* The gear goes to the same page; this is the route for anyone already
            in the menu. */}}
@@ -165,10 +168,9 @@
         <p class="ask__lead">Nothing has been ingested yet.</p>
         <p class="ask__sub">A few places worth a look before your first feed. <span class="welcome__opt">All optional.</span></p>
         <ul class="welcome__steps">
-          <li><button class="welcome__step{{if index .Chrome.Welcome "sources"}} is-done{{end}}" type="button" data-welcome-step="sources"
-                      hx-get="/sources" hx-target="#modal" hx-swap="innerHTML">
+          <li><a class="welcome__step{{if index .Chrome.Welcome "sources"}} is-done{{end}}" href="/sources" data-welcome-step="sources">
             <span class="welcome__txt">Check your sources<small>the feeds that get read</small></span>
-            <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></button></li>
+            <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></a></li>
           <li><a class="welcome__step{{if index .Chrome.Welcome "profile"}} is-done{{end}}" href="/settings/profiles" data-welcome-step="profile">
             <span class="welcome__txt">Check your profile<small>what gets ranked up and down</small></span>
             <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></a></li>
@@ -178,8 +180,8 @@
             <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></button></li>
         </ul>
       </div>
-      <div class="modal__foot welcome__foot">
-        <button class="prof-form__save" type="button" data-modal-close>got it</button>
+      <div class="modal__foot stp-dlg__foot">
+        <button class="clk-btn clk-btn--go" type="button" data-modal-close>got it</button>
       </div>
     </div>
   </div>
@@ -190,10 +192,16 @@
        is parsed. Each file says at the top what it owns. -->
   <script src="/static/js/net.js" defer></script>
   <script src="/static/js/chrome.js" defer></script>
+  <script src="/static/js/hint.js" defer></script>
   {{/* Ahead of modal.js on purpose: both bind Escape on document, and the
-       sources search box has to swallow the key before the dialog acts on it. */}}
+       sources search box has to swallow the key before modal.js acts on it. */}}
   <script src="/static/js/tagput.js" defer></script>
-  <script src="/static/js/sources.js" defer></script>
+  {{/* Ahead of sources.js and settings.js, which use the rhListbox global it
+       defines. Escape is handled on the menu element itself. */}}
+  <script src="/static/js/listbox.js" defer></script>
+  {{/* The Sources page fills this in: sources.js and library.js bind Escape
+       ahead of modal.js, so they load here and not in the scripts block. */}}
+  {{block "pagescripts" .}}{{end}}
   <script src="/static/js/modal.js" defer></script>
   <script src="/static/js/profiles.js" defer></script>
   <script src="/static/js/welcome.js" defer></script>
@@ -231,7 +239,7 @@
      pulsing while a run is live. */}}
 {{define "navTab"}}
 <button id="navTab" class="navtab{{if eq .IngDot "err"}} navtab--err{{else if eq .IngDot "warn"}} navtab--warn{{else if eq .IngDot "run"}} navtab--run{{end}}"
-        {{if .OOB}}hx-swap-oob="true"{{end}} type="button" aria-label="Menu">
+        {{if .OOB}}hx-swap-oob="true"{{end}} type="button" aria-label="Menu" aria-controls="navRail" aria-expanded="false">
   <span></span><span></span><span></span>
 </button>
 {{end}}
@@ -243,5 +251,5 @@
      stopping itself. */}}
 {{define "ingWatch"}}
 <span id="ingWatch" hidden data-running="{{if .Running}}1{{else}}0{{end}}" {{if .OOB}}hx-swap-oob="true"{{end}}
-      {{if .Running}}hx-get="/ingest/chrome" hx-trigger="every 3s" hx-swap="none"{{end}}></span>
+      {{if .Running}}hx-get="/ingest/chrome" hx-trigger="every 3s [!document.hidden]" hx-swap="none"{{end}}></span>
 {{end}}

@@ -7,7 +7,7 @@
   {{if .Note}}<p class="acct__note" role="status">{{.Note}}</p>{{end}}
   <article class="acct__card">
     <section class="stp-group" data-tone="teal">
-      <header class="stp-group__h"><div><h3><span class="stp-group__t">{{if eq .Mode "enabled"}}Signed in{{else}}Access{{end}}</span></h3></div></header>
+      <header class="stp-group__h"><div><h3><span class="stp-group__t">{{if eq .Mode "enabled"}}{{ttl "Signed in"}}{{else}}Access{{end}}</span></h3></div></header>
       <div class="stp-box">
         <div class="stp-row">
           <div class="stp-row__l acct__who">

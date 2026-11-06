@@ -310,7 +310,10 @@ func TestRunExcludesRatedCandidateFromFeedback(t *testing.T) {
 		}
 	}
 
-	out, err := Run(t.Context(), cfg.Config, testProfile("profile"), db, time.Now(), Options{Record: true})
+	out, err := Run(
+		t.Context(), cfg.Config, testProfile("profile"), db, time.Now(),
+		Options{Record: true, Client: loopbackClient},
+	)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -356,7 +359,7 @@ func TestRunSendsActiveFeedbackToScorer(t *testing.T) {
 	}
 
 	_, err := Run(
-		t.Context(), cfg.Config, testProfile("profile"), db, time.Now(), Options{Record: true},
+		t.Context(), cfg.Config, testProfile("profile"), db, time.Now(), Options{Record: true, Client: loopbackClient},
 	)
 	if err != nil {
 		t.Fatalf("Run: %v", err)

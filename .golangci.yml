@@ -1,5 +1,9 @@
 version: "2"
 
+run:
+  build-tags:
+    - network
+
 linters:
   enable:
     - govet

@@ -192,6 +192,29 @@ vulncheck: ## Scan dependencies for known vulnerabilities
 .PHONY: check
 check: lint test-race build ## The gate CI runs (run before committing; needs golangci-lint)
 
+##@ Library
+
+# library-check is offline; `check` covers it through test-race. library-urls and
+# library-icons need the network, so they are not part of `check`. CI runs
+# library-urls when library paths change and weekly (.github/workflows/library.yml).
+# library-icons regenerates library/icons.json; library-check fails when a source
+# has no entry there. RABBITHOLE_LIBRARY_ICONS_ONLY_MISSING=1 fetches only sources
+# the file lacks and keeps every other entry as it is; RABBITHOLE_LIBRARY_ICONS_DROP=1
+# lets a site that now has no icon lose the icon it had (otherwise it is kept).
+
+.PHONY: library-check
+library-check: ## Check library/ format, uniqueness and feeds.yaml parity (offline)
+	@RABBITHOLE_DB= RABBITHOLE_DB_PASSWORD= go test -count=1 ./internal/library/...
+	@RABBITHOLE_DB= RABBITHOLE_DB_PASSWORD= go test -count=1 -run TestLibrary ./internal/ingest/ ./internal/config/
+
+.PHONY: library-urls
+library-urls: ## Fetch every library source through the app's fetchers (network)
+	@RABBITHOLE_DB= RABBITHOLE_DB_PASSWORD= go test -tags=network -count=1 -timeout 20m -run TestLibrarySourcesLive ./internal/ingest/
+
+.PHONY: library-icons
+library-icons: ## Fetch every library source's site icon and write library/icons.json (network)
+	@RABBITHOLE_DB= RABBITHOLE_DB_PASSWORD= RABBITHOLE_LIBRARY_ICONS_WRITE=1 go test -tags=network -count=1 -timeout 20m -v -run TestLibraryIconsWrite ./internal/library/
+
 ##@ Debug
 
 .PHONY: debug

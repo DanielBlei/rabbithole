@@ -5,6 +5,7 @@ package ingest
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
@@ -12,6 +13,6 @@ import (
 
 // fetchNews is a placeholder: news ingest isn't implemented yet, so every news
 // feed is logged and skipped rather than fetched.
-func fetchNews(ctx context.Context, sources []feeds.Source) []feeds.Result {
+func fetchNews(ctx context.Context, _ *http.Client, sources []feeds.Source) []feeds.Result {
 	return skipUnimplemented(ctx, sources, config.FeedTypeNews)
 }

@@ -1,31 +1,91 @@
-{{/* One feed in the list: status, name, and the enable toggle. The toggle is
-     here rather than in the detail pane so parking feeds down a long list never
-     costs a round trip through the editor. The data- attributes are what the
-     page's client-side search matches on. */}}
-{{define "sourceRow"}}
-<div class="srow{{if .Selected}} srow--on{{end}}{{if not .Enabled}} srow--off{{end}}{{if .Deleted}} srow--gone{{end}}"
-     data-src-row data-name="{{.Name}}" data-url="{{.URL}}" data-tags="{{.TagsAttr}}" data-type="{{.Type}}"
-     data-state="{{if .Deleted}}gone{{else if .Enabled}}on{{else}}off{{end}}">
-  <a class="srow__pick" href="#" hx-get="/sources/{{.ID}}" hx-target="#srcBody" hx-swap="outerHTML"
-     {{if .Selected}}aria-current="true"{{end}}>
-    <span class="srow__dot srow__dot--{{.State}}" title="{{.Detail}}" aria-hidden="true"></span>
-    <span class="srow__nm">{{.Name}}</span>
-    {{if ne .Type "rss"}}<span class="src__tag srow__kind">{{.Type}}</span>{{end}}
-    {{if .FailStreak}}<span class="srow__streak" title="consecutive failures">&times;{{.FailStreak}}</span>{{end}}
-  </a>
+{{/* One source's list unit: its row, and its editor under it while open. A
+     mutation of one source swaps just this unit. The row has a tick for the
+     bulk bar, monogram and name, fetch history, first tag, stored items per
+     week, signal, the fetch switch and an Edit button; the switch is here
+     rather than in the editor so parking sources down a long list never costs
+     a round trip through it. The data- attributes on the unit are what the
+     page's client-side search, filters and sort read. */}}
+{{define "sourceItem"}}
+<div class="mg-item" id="src-{{.ID}}" data-src-row data-name="{{.Name}}" data-url="{{.URL}}"
+     data-tags="{{.TagsAttr}}" data-own-tags="{{.OwnTagsAttr}}" data-type="{{.Type}}" data-state="{{.State}}"
+     data-perweek="{{.PerWeekAttr}}" data-signal="{{.SignalAttr}}" data-last="{{.LastAttr}}"{{if .Deleted}} data-removed="1"{{end}}{{if .OOB}} hx-swap-oob="true"{{end}}>
+  <div class="mg-row{{if eq .State "error"}} is-failing{{else if eq .State "flaky"}} is-flaky{{end}}{{if .Deleted}} is-removed{{else if not .Enabled}} is-off{{end}}{{if .Selected}} is-open{{end}}">
+    <div class="mg-c mg-c--chk">
+      <label class="stp-check"><input type="checkbox" id="pick-{{.ID}}" value="{{.ID}}" aria-label="Select {{.Name}}" data-src-pick><span class="stp-check__box" aria-hidden="true"></span></label>
+    </div>
 
-  {{if .Deleted}}
-    <button class="srow__tg srow__tg--restore" type="button"
-            hx-post="/sources/{{.ID}}/restore" hx-target="#srcBody" hx-swap="outerHTML">restore</button>
-  {{else}}
-    <button class="srow__tg{{if .Enabled}} is-on{{end}}" type="button"
-            role="switch" aria-checked="{{if .Enabled}}true{{else}}false{{end}}"
-            aria-label="{{if .Enabled}}Disable{{else}}Enable{{end}} {{.Name}}"
-            hx-post="/sources/{{.ID}}/enabled" hx-target="#srcBody" hx-swap="outerHTML"
-            hx-vals='{"enabled":"{{if .Enabled}}off{{else}}on{{end}}"}'>
-      <span class="srow__knob" aria-hidden="true"></span>
-      <span class="srow__tgtxt">{{if .Enabled}}on{{else}}off{{end}}</span>
-    </button>
-  {{end}}
+    <div class="mg-c mg-c--src">
+      {{template "favicon" (fav .Icon .Name .URL 20)}}
+      <div class="mg-name" title="{{.Name}}&#10;{{.URL}}">
+        <span class="mg-nm"><span class="mg-nm__t">{{.Name}}</span></span>
+        <span class="mg-host">{{.ShortHost}}{{.KindNote}}</span>
+      </div>
+    </div>
+
+    <div class="mg-c mg-c--health">
+      {{if eq .State "never"}}
+      <span class="hs hs--none">Waiting for first run</span>
+      {{else}}
+      <span class="hs{{if .Dim}} hs--dim{{end}}" role="img" aria-label="{{.StripLabel}}">{{range .Ticks}}<span class="hs__t hs__t--{{.Class}}"{{with .Title}} title="{{.}}"{{end}}></span>{{end}}</span>
+      {{with .StateText}}<span class="mg-state mg-state--{{$.StateTone}}"{{with $.StateTitle}} title="{{.}}"{{end}}>{{.}}</span>{{end}}
+      {{end}}
+    </div>
+
+    <div class="mg-meta">
+      <div class="mg-c mg-c--tags">
+        <span class="mg-k">Tags</span>
+        {{if .Tags}}
+        <span class="mg-tagrow" data-tag-fit>
+          {{range .TagChips}}<span class="tag tag--clip tag--c{{.Color}}" data-tag="{{.Name}}" title="{{.Name}}">{{.Name}}</span>{{end}}
+          <span class="tag tag--more" data-tag-more hidden></span>
+        </span>
+        {{else}}<span class="sh-hint">none</span>{{end}}
+      </div>
+
+      <div class="mg-c mg-c--vol">
+        <span class="mg-k">Stored / week</span>
+        {{if eq .State "never"}}<span class="mg-vol"><b>0</b></span>
+        {{else}}<span class="mg-vol"><b>{{.Stats.PerWeekText}}</b></span>{{end}}
+      </div>
+
+      <div class="mg-c mg-c--sig">
+        <span class="mg-k">Signal</span>
+        {{if eq .State "never"}}<span class="sh-hint">No data yet</span>
+        {{else if not .Stats.Sig.Enough}}<span class="sh-hint" title="{{.SigTitle}}">Not enough data</span>
+        {{else}}<span class="mg-sig" title="{{.SigTitle}}"><b>{{.Stats.Sig.Pct}}%</b>{{template "tierBar" .Stats.Sig.Bar}}</span>{{end}}
+      </div>
+    </div>
+
+    <div class="mg-c mg-c--tog">
+      {{if .Deleted}}
+      <button class="srow__tg srow__tg--restore" type="button" aria-label="Restore {{.Name}}"
+              hx-post="/sources/feed/{{.ID}}/restore" hx-target="#src-{{.ID}}" hx-swap="outerHTML">Restore</button>
+      {{else}}
+      <button class="srow__tg{{if .Enabled}} is-on{{end}}" type="button"
+              role="switch" aria-checked="{{if .Enabled}}true{{else}}false{{end}}" aria-label="Fetch {{.Name}}"
+              hx-post="/sources/feed/{{.ID}}/enabled" hx-target="#src-{{.ID}}" hx-swap="outerHTML"
+              hx-vals='{"enabled":"{{if .Enabled}}off{{else}}on{{end}}"}'>
+        <span class="srow__knob" aria-hidden="true"></span>
+        <span class="srow__tgtxt">{{if .Enabled}}on{{else}}off{{end}}</span>
+      </button>
+      {{end}}
+    </div>
+
+    <div class="mg-c mg-c--act">
+      {{/* The button keeps its hx-get while open: closing is done in the page
+           (static/js/sources.js), which turns it back into Edit. */}}
+      {{if not .Deleted}}
+      <button class="clk-btn mg-edit" type="button" aria-expanded="{{if .Editor}}true{{else}}false{{end}}" aria-controls="ed-{{.ID}}"
+              aria-label="{{if .Editor}}Close editor for {{.Name}}{{else}}Edit {{.Name}}{{end}}"
+              hx-get="/sources/feed/{{.ID}}" hx-target="#src-{{.ID}}" hx-swap="outerHTML"
+              {{if .Editor}}data-src-close=""{{else}}data-src-open=""{{end}}>{{if .Editor}}Close{{else}}Edit{{end}}</button>
+      {{end}}
+    </div>
+  </div>
+  {{with .Editor}}{{template "sourceEditor" .}}{{end}}
 </div>
 {{end}}
+
+{{/* The answer to a one-source request: the unit, then the page-level updates a
+     mutation owes. */}}
+{{define "sourceUnit"}}{{template "sourceItem" .Unit}}{{template "sourceOOB" .}}{{end}}

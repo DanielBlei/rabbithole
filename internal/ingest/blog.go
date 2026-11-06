@@ -5,6 +5,7 @@ package ingest
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
@@ -12,6 +13,6 @@ import (
 
 // fetchBlog is a placeholder: blog ingest isn't implemented yet, so every blog
 // feed is logged and skipped rather than fetched.
-func fetchBlog(ctx context.Context, sources []feeds.Source) []feeds.Result {
+func fetchBlog(ctx context.Context, _ *http.Client, sources []feeds.Source) []feeds.Result {
 	return skipUnimplemented(ctx, sources, config.FeedTypeBlog)
 }

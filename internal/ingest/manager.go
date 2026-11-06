@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -29,6 +30,10 @@ const maxLogLines = 800
 // finishTimeout bounds the history-row finalization write after a run ends.
 // The run's own context may already be cancelled, so the write gets its own.
 const finishTimeout = 5 * time.Second
+
+// pruneTimeout bounds the history trim after a run, which can delete many rows
+// and logs.
+const pruneTimeout = 30 * time.Second
 
 // runFunc matches Run's signature; Manager calls through it so tests can
 // substitute a stub instead of a real fetch→score→record cycle.
@@ -58,6 +63,14 @@ const (
 	RunKindRescore RunKind = "rescore"
 )
 
+// noun words the run for its first and last log lines.
+func (k RunKind) noun() string {
+	if k == RunKindRescore {
+		return "rescore"
+	}
+	return "ingestion"
+}
+
 // Manager owns ingest and explicit rescore runs inside the serve process. It
 // enforces one shared single-flight slot, runs work on a server-owned context
 // so it survives the triggering request, records every run in ingest_history,
@@ -69,10 +82,23 @@ type Manager struct {
 	run      runFunc
 	rescore  rescoreFunc
 	logLevel zerolog.Level // --debug also prints the run's lines in the terminal
+	client   *http.Client  // fetches feeds; nil means feeds.NewClient
 
 	mu     sync.Mutex
 	active *activeRun // nil when idle
 	buf    *logBuffer // most recent run's log, kept after the run finishes
+
+	// Icon passes run outside the run slot. iconMu admits one pass at a time;
+	// root is their context, cancelled by Shutdown; bg tracks them so Shutdown
+	// can wait; pending records a kick that arrived while a pass held iconMu. The
+	// root, closed, pending and bg's Add are guarded by mu, and iconMu is released
+	// under mu so a kick is either run by the finishing pass or starts its own.
+	iconMu  sync.Mutex
+	root    context.Context
+	stop    context.CancelFunc
+	closed  bool
+	pending bool
+	bg      sync.WaitGroup
 }
 
 // activeRun is the in-flight cycle's handle.
@@ -82,6 +108,7 @@ type activeRun struct {
 	cancel  context.CancelFunc
 	done    chan struct{}
 	kind    RunKind
+	trigger string
 	profile string
 	window  time.Duration
 }
@@ -92,10 +119,25 @@ type activeRun struct {
 // the store.
 type Status struct {
 	Running   bool
+	RunID     int64     // history row of the live run; zero unless running
 	StartedAt time.Time // zero unless running
 	Lines     []string  // raw zerolog JSON, one event per line
-	Kind      RunKind
-	Profile   string
+	// Seq numbers the last line in Lines, counting from 1 across the whole
+	// run; the lines before the first one in Lines fell off the ring.
+	Seq     int64
+	Kind    RunKind
+	Profile string
+}
+
+// LogChunk is the part of a live run's log newer than a cursor.
+type LogChunk struct {
+	Lines []string // raw zerolog JSON, oldest first
+	// Last is the sequence number of the newest line the run has logged. A
+	// caller passes it back as the next cursor.
+	Last int64
+	// Dropped counts lines between the cursor and the first of Lines that fell
+	// off the ring before they were read.
+	Dropped int64
 }
 
 // NewManager returns a Manager for db that reads its run config from src. logLevel decides whether a run's own
@@ -111,6 +153,9 @@ func NewManager(db *store.Store, src config.Source, logLevel zerolog.Level) (*Ma
 		run: Run, rescore: RescoreRecent, logLevel: logLevel,
 	}, nil
 }
+
+// SetClient sets the client runs fetch feeds through; call it before the first run.
+func (m *Manager) SetClient(c *http.Client) { m.client = c }
 
 // Start launches a run in the background and returns immediately. If a run is
 // already in flight it is a no-op — the caller shows the live run instead
@@ -156,7 +201,7 @@ func (m *Manager) start(
 	runCtx, cancel := context.WithCancel(context.Background())
 	run := &activeRun{
 		id: id, started: time.Now(), cancel: cancel, done: make(chan struct{}),
-		kind: kind, profile: activeProfile.Name, window: window,
+		kind: kind, trigger: triggeredBy, profile: activeProfile.Name, window: window,
 	}
 	m.active = run
 	m.buf = newLogBuffer(maxLogLines)
@@ -174,19 +219,84 @@ func (m *Manager) Cancel() {
 	}
 }
 
-// Shutdown cancels any in-flight run and blocks until it has finished, or ctx
-// is done, whichever comes first. A no-op when idle.
+// Shutdown cancels any in-flight run and icon pass and blocks until they have
+// finished, or ctx is done, whichever comes first. No pass starts afterwards.
 func (m *Manager) Shutdown(ctx context.Context) {
 	m.mu.Lock()
+	m.closed = true
+	m.rootLocked()
+	m.stop()
 	run := m.active
 	m.mu.Unlock()
-	if run == nil {
+
+	if run != nil {
+		run.cancel()
+		select {
+		case <-run.done:
+		case <-ctx.Done():
+			return
+		}
+	}
+	idle := make(chan struct{})
+	go func() {
+		m.bg.Wait()
+		close(idle)
+	}()
+	select {
+	case <-idle:
+	case <-ctx.Done():
+	}
+}
+
+// rootLocked returns the context icon passes run on, creating it on first use.
+// Callers hold m.mu.
+func (m *Manager) rootLocked() context.Context {
+	if m.root == nil {
+		m.root, m.stop = context.WithCancel(context.Background())
+	}
+	return m.root
+}
+
+// KickIcons looks up the icons of feeds that have none or a stale one, in the
+// background. A kick that arrives while a pass runs is not dropped: the running
+// pass is followed by one more. It does nothing after Shutdown.
+func (m *Manager) KickIcons() {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
 		return
 	}
-	run.cancel()
-	select {
-	case <-run.done:
-	case <-ctx.Done():
+	if !m.iconMu.TryLock() {
+		m.pending = true
+		m.mu.Unlock()
+		return
+	}
+	ctx := m.rootLocked()
+	m.bg.Add(1)
+	m.mu.Unlock()
+
+	go func() {
+		defer m.bg.Done()
+		RefreshIcons(ctx, m.db, m.client, nil, time.Now())
+		m.endIconPass(ctx)
+	}()
+}
+
+// endIconPass finishes the pass that holds iconMu: while kicks arrived during it,
+// it runs one more kick pass per round, then releases iconMu. After Shutdown a
+// pending kick is dropped.
+func (m *Manager) endIconPass(ctx context.Context) {
+	for {
+		m.mu.Lock()
+		if !m.pending || m.closed {
+			m.pending = false
+			m.iconMu.Unlock()
+			m.mu.Unlock()
+			return
+		}
+		m.pending = false
+		m.mu.Unlock()
+		RefreshIcons(ctx, m.db, m.client, nil, time.Now())
 	}
 }
 
@@ -197,6 +307,7 @@ func (m *Manager) Status() Status {
 	st := Status{}
 	if m.active != nil {
 		st.Running = true
+		st.RunID = m.active.id
 		st.StartedAt = m.active.started
 		st.Kind = m.active.kind
 		st.Profile = m.active.profile
@@ -204,9 +315,23 @@ func (m *Manager) Status() Status {
 	buf := m.buf
 	m.mu.Unlock()
 	if buf != nil {
-		st.Lines = buf.snapshot()
+		st.Lines, st.Seq = buf.snapshotSeq()
 	}
 	return st
+}
+
+// LogSince returns the lines of run id's log after sequence number after (zero
+// for all of them). It reports false unless id is the run in flight; a caller
+// then reads the run's stored log instead.
+func (m *Manager) LogSince(id, after int64) (LogChunk, bool) {
+	m.mu.Lock()
+	buf := m.buf
+	live := m.active != nil && m.active.id == id
+	m.mu.Unlock()
+	if !live || buf == nil {
+		return LogChunk{}, false
+	}
+	return buf.since(after), true
 }
 
 // execute runs one cycle to completion and finalizes its history row.
@@ -220,7 +345,15 @@ func (m *Manager) execute(
 
 	runLogger := newRunLogger(buf, m.logLevel)
 	ctx = runLogger.WithContext(ctx)
-	var counts store.IngestCounts
+	var (
+		counts store.IngestCounts
+		sites  []IconSite
+	)
+	startLog := runLogger.Info().Str("trigger", run.trigger).Str("profile", activeProfile.Name)
+	if run.kind == RunKindRescore {
+		startLog = startLog.Str("window", run.window.String())
+	}
+	startLog.Msg("starting " + run.kind.noun())
 	// One snapshot for the whole run: a config change lands on the next run.
 	cfg, _, err := m.src.Active(ctx)
 	if err != nil {
@@ -243,7 +376,10 @@ func (m *Manager) execute(
 		outcome, err = m.run(ctx, cfg, activeProfile, m.db, time.Now(), Options{
 			Think:  cfg.Inference.ThinkEnabled(),
 			Record: true,
+			Client: m.client,
+			RunID:  run.id,
 		})
+		sites = outcome.Sites
 		counts = store.IngestCounts{
 			Fetched:  outcome.Fetched,
 			NewItems: len(outcome.Unseen),
@@ -273,6 +409,12 @@ func (m *Manager) execute(
 		runLogger.Error().Str("kind", string(run.kind)).Str("error", msg).
 			Msg(string(run.kind) + " failed")
 	}
+	// Every run closes with the same line, after any failure or cancel line
+	// that says why.
+	runLogger.Info().
+		Str("status", string(status)).
+		Str("elapsed", time.Since(run.started).Round(100*time.Millisecond).String()).
+		Msg(run.kind.noun() + " finished")
 
 	// The run's ctx may be cancelled (that's how Cancel works); the history
 	// write must still land, so it gets its own short-lived context.
@@ -286,6 +428,13 @@ func (m *Manager) execute(
 	// failure must never fail the run.
 	if ferr := m.db.SaveIngestRunLog(finishCtx, run.id, buf.snapshot()); ferr != nil {
 		zlog.Error().Err(ferr).Int64("run", run.id).Msg("saving ingest run log failed")
+	}
+	// Trim old runs once this one is finished: the row is no longer 'running',
+	// so it counts toward the retained newest. Best-effort, like the log save.
+	pruneCtx, pruneCancel := context.WithTimeout(context.Background(), pruneTimeout)
+	defer pruneCancel()
+	if ferr := m.db.PruneIngestRuns(pruneCtx, 0, 0); ferr != nil {
+		zlog.Error().Err(ferr).Int64("run", run.id).Msg("pruning ingest history failed")
 	}
 
 	// The one line a plain serve prints for a run, and all an unattended run
@@ -307,9 +456,24 @@ func (m *Manager) execute(
 		Str("took", time.Since(run.started).Round(time.Second).String()).
 		Msg("scoring run finished")
 
+	// The pass is claimed under the lock that frees the slot, so Shutdown either
+	// sees it in bg or stops it from starting. It follows a run that succeeded
+	// and reported the sites it fetched.
 	m.mu.Lock()
 	m.active = nil
+	pass := run.kind == RunKindIngest && status == store.IngestStatusOK && sites != nil && !m.closed
+	var passCtx context.Context
+	if pass {
+		passCtx = m.rootLocked()
+		m.bg.Add(1)
+	}
 	m.mu.Unlock()
+	if pass {
+		defer m.bg.Done()
+		m.iconMu.Lock()
+		RefreshIcons(passCtx, m.db, m.client, sites, time.Now())
+		m.endIconPass(passCtx)
+	}
 }
 
 // newRunLogger builds the logger for one run. Everything lands in buf, which the
@@ -333,6 +497,7 @@ func newRunLogger(buf *logBuffer, logLevel zerolog.Level) zerolog.Logger {
 type logBuffer struct {
 	mu    sync.Mutex
 	lines []string
+	total int64 // lines ever written; the newest line's sequence number
 	max   int
 }
 
@@ -344,6 +509,7 @@ func (b *logBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.lines = append(b.lines, strings.TrimRight(string(p), "\n"))
+	b.total++
 	if len(b.lines) > b.max {
 		b.lines = b.lines[len(b.lines)-b.max:]
 	}
@@ -351,9 +517,35 @@ func (b *logBuffer) Write(p []byte) (int, error) {
 }
 
 func (b *logBuffer) snapshot() []string {
+	lines, _ := b.snapshotSeq()
+	return lines
+}
+
+// snapshotSeq returns the buffered lines and the sequence number of the last.
+func (b *logBuffer) snapshotSeq() ([]string, int64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	out := make([]string, len(b.lines))
 	copy(out, b.lines)
-	return out
+	return out, b.total
+}
+
+// since returns the lines numbered above after. Sequence numbers start at 1 and
+// never reset, so a cursor older than the ring's oldest line gets the oldest
+// onward with the count it missed in Dropped.
+func (b *logBuffer) since(after int64) LogChunk {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	oldest := b.total - int64(len(b.lines)) + 1
+	after = min(max(after, 0), b.total)
+	chunk := LogChunk{Last: b.total}
+	first := after + 1
+	if first < oldest {
+		chunk.Dropped = oldest - first
+		first = oldest
+	}
+	if first <= b.total {
+		chunk.Lines = append([]string(nil), b.lines[first-oldest:]...)
+	}
+	return chunk
 }

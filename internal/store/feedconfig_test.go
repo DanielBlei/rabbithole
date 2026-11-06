@@ -4,6 +4,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -103,7 +104,7 @@ func TestFeedRoundTripsType(t *testing.T) {
 	news := untyped
 	news.ID = id
 	news.Type = config.FeedTypeNews
-	if err := db.UpdateFeed(t.Context(), id, news); err != nil {
+	if _, err := db.UpdateFeed(t.Context(), id, news); err != nil {
 		t.Fatalf("UpdateFeed: %v", err)
 	}
 	if got := feedNamed(t, liveFeeds(t, db), "Untyped").Type; got != config.FeedTypeNews {
@@ -302,7 +303,7 @@ func TestUpdateFeedKeepsID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddFeed: %v", err)
 	}
-	if err := db.UpdateFeed(t.Context(), id, config.Feed{
+	if _, err := db.UpdateFeed(t.Context(), id, config.Feed{
 		Name: "Alpha", URL: "https://alpha.test/feed.xml",
 	}); err != nil {
 		t.Fatalf("UpdateFeed: %v", err)
@@ -325,12 +326,12 @@ func TestUpdateFeedRejectsAnotherFeedsName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddFeed: %v", err)
 	}
-	err = db.UpdateFeed(t.Context(), id, config.Feed{Name: "Alpha", URL: "https://beta.test/feed"})
+	_, err = db.UpdateFeed(t.Context(), id, config.Feed{Name: "Alpha", URL: "https://beta.test/feed"})
 	if !errors.Is(err, ErrFeedNameTaken) {
 		t.Errorf("err = %v, want ErrFeedNameTaken", err)
 	}
 	// A feed keeping its own name is not a conflict with itself.
-	if err := db.UpdateFeed(t.Context(), id, config.Feed{Name: "Beta", URL: "https://beta.test/feed"}); err != nil {
+	if _, err := db.UpdateFeed(t.Context(), id, config.Feed{Name: "Beta", URL: "https://beta.test/feed"}); err != nil {
 		t.Errorf("a feed could not keep its own name: %v", err)
 	}
 }
@@ -388,7 +389,7 @@ func TestSeedFeedsIsAdditiveOnly(t *testing.T) {
 		t.Fatalf("SetFeedEnabled: %v", err)
 	}
 	beta := feedNamed(t, liveFeeds(t, db), "Beta")
-	if err := db.UpdateFeed(t.Context(), beta.ID, config.Feed{
+	if _, err := db.UpdateFeed(t.Context(), beta.ID, config.Feed{
 		Name: "Beta", URL: "https://beta.test/feed", Since: feedPtrDur(3 * time.Hour),
 	}); err != nil {
 		t.Fatalf("UpdateFeed: %v", err)
@@ -536,8 +537,12 @@ func TestFeedsDocRoundTrips(t *testing.T) {
 }
 
 // items.source stores the feed's name, so a rename has to take its items along.
-func TestRenameSource(t *testing.T) {
+func TestUpdateFeedRenamesItems(t *testing.T) {
 	db := openTestStore(t)
+	id, err := db.AddFeed(t.Context(), config.Feed{Name: "Old Name", URL: "https://old.test/feed"})
+	if err != nil {
+		t.Fatalf("AddFeed: %v", err)
+	}
 	if err := db.Record(t.Context(), []feeds.Item{
 		{ID: "a", Source: "Old Name", Title: "A", Link: "https://x.test/a"},
 		{ID: "b", Source: "Old Name", Title: "B", Link: "https://x.test/b"},
@@ -546,9 +551,9 @@ func TestRenameSource(t *testing.T) {
 		t.Fatalf("Record: %v", err)
 	}
 
-	moved, err := db.RenameSource(t.Context(), "Old Name", "New Name")
+	moved, err := db.UpdateFeed(t.Context(), id, config.Feed{Name: "New Name", URL: "https://old.test/feed"})
 	if err != nil {
-		t.Fatalf("RenameSource: %v", err)
+		t.Fatalf("UpdateFeed: %v", err)
 	}
 	if moved != 2 {
 		t.Errorf("moved = %d, want 2", moved)
@@ -566,9 +571,78 @@ func TestRenameSource(t *testing.T) {
 		t.Errorf("sources = %+v, want the two moved and Other untouched", sources)
 	}
 
-	// A no-op rename must not touch anything.
-	if moved, err := db.RenameSource(t.Context(), "New Name", "New Name"); err != nil || moved != 0 {
-		t.Errorf("no-op rename moved %d rows (err %v)", moved, err)
+	// An edit that keeps the name must not touch any item.
+	moved, err = db.UpdateFeed(
+		t.Context(),
+		id,
+		config.Feed{Name: "New Name", URL: "https://old.test/feed", Tags: []string{"ai"}},
+	)
+	if err != nil || moved != 0 {
+		t.Errorf("same-name update moved %d rows (err %v)", moved, err)
+	}
+}
+
+// A rename that cannot re-file its items must leave the feed as it was.
+func TestUpdateFeedRenameRollsBack(t *testing.T) {
+	db := openTestStore(t)
+	id, err := db.AddFeed(t.Context(), config.Feed{Name: "Old Name", URL: "https://old.test/feed"})
+	if err != nil {
+		t.Fatalf("AddFeed: %v", err)
+	}
+
+	if _, err := db.exec(t.Context(), `ALTER TABLE items RENAME TO items_x`); err != nil {
+		t.Fatalf("rename items away: %v", err)
+	}
+	restored := false
+	restore := func() {
+		if restored {
+			return
+		}
+		restored = true
+		if _, err := db.exec(context.Background(), `ALTER TABLE items_x RENAME TO items`); err != nil {
+			t.Errorf("restore items: %v", err)
+		}
+	}
+	t.Cleanup(restore)
+
+	if _, err := db.UpdateFeed(
+		t.Context(),
+		id,
+		config.Feed{Name: "New Name", URL: "https://old.test/feed"},
+	); err == nil {
+		t.Fatal("UpdateFeed succeeded without an items table, want an error")
+	}
+	restore()
+
+	got, err := db.FeedByID(t.Context(), id)
+	if err != nil {
+		t.Fatalf("FeedByID: %v", err)
+	}
+	if got.Name != "Old Name" {
+		t.Errorf("name = %q after a failed rename, want %q", got.Name, "Old Name")
+	}
+}
+
+func TestUpdateFeedMissing(t *testing.T) {
+	db := openTestStore(t)
+	_, err := db.UpdateFeed(t.Context(), "nope", config.Feed{Name: "A", URL: "https://a.test/feed"})
+	if !errors.Is(err, ErrFeedNotFound) {
+		t.Errorf("err = %v, want ErrFeedNotFound", err)
+	}
+}
+
+func TestUpdateFeedDeleted(t *testing.T) {
+	db := openTestStore(t)
+	id, err := db.AddFeed(t.Context(), config.Feed{Name: "A", URL: "https://a.test/feed"})
+	if err != nil {
+		t.Fatalf("AddFeed: %v", err)
+	}
+	if err := db.SoftDeleteFeed(t.Context(), id); err != nil {
+		t.Fatalf("SoftDeleteFeed: %v", err)
+	}
+	_, err = db.UpdateFeed(t.Context(), id, config.Feed{Name: "B", URL: "https://a.test/feed"})
+	if !errors.Is(err, ErrFeedNotFound) {
+		t.Errorf("err = %v, want ErrFeedNotFound", err)
 	}
 }
 
@@ -592,5 +666,105 @@ func TestSetDefaultSinceKeepsTheOtherDefaults(t *testing.T) {
 	}
 	if d.Since == nil || d.Since.Std() != 48*time.Hour || d.MaxItems == nil || *d.MaxItems != 5 || len(d.Tags) != 1 {
 		t.Errorf("defaults = %+v, want since overwritten and the rest kept", d)
+	}
+}
+
+// insertRawFeed writes a row straight to the table, bypassing the key check,
+// so a test can hold URL twins the way an older store does.
+func insertRawFeed(t *testing.T, db *Store, name, url string) string {
+	t.Helper()
+	now := sqlTime(time.Now())
+	id := config.FeedID(url)
+	if _, err := db.exec(t.Context(), sqlInsertFeed, id, name, url,
+		nil, nil, nil, nil, nil, now, now); err != nil {
+		t.Fatalf("insert %q: %v", name, err)
+	}
+	return id
+}
+
+func TestAddFeedRejectsURLKeyTwinOfLiveFeed(t *testing.T) {
+	db := openTestStore(t)
+	if _, err := db.AddFeed(t.Context(), config.Feed{Name: "Alpha", URL: "https://alpha.test/feed"}); err != nil {
+		t.Fatalf("AddFeed: %v", err)
+	}
+	for _, url := range []string{"https://alpha.test/feed/", "https://ALPHA.test/feed", "HTTPS://Alpha.Test/feed#top"} {
+		_, err := db.AddFeed(t.Context(), config.Feed{Name: "Twin", URL: url})
+		if !errors.Is(err, ErrFeedURLTaken) {
+			t.Errorf("AddFeed(%q) err = %v, want ErrFeedURLTaken", url, err)
+		}
+	}
+	// Path case is part of the key.
+	if _, err := db.AddFeed(t.Context(), config.Feed{Name: "Cased", URL: "https://alpha.test/Feed"}); err != nil {
+		t.Errorf("a path that differs by case is a different feed: %v", err)
+	}
+}
+
+func TestAddFeedRestoresDeletedURLKeyTwin(t *testing.T) {
+	db := openTestStore(t)
+	id, err := db.AddFeed(t.Context(), config.Feed{Name: "Alpha", URL: "https://alpha.test/feed"})
+	if err != nil {
+		t.Fatalf("AddFeed: %v", err)
+	}
+	if err := db.SoftDeleteFeed(t.Context(), id); err != nil {
+		t.Fatalf("SoftDeleteFeed: %v", err)
+	}
+	again, err := db.AddFeed(t.Context(), config.Feed{Name: "Alpha", URL: "https://Alpha.test/feed/"})
+	if err != nil {
+		t.Fatalf("AddFeed twin of a deleted feed: %v", err)
+	}
+	if again != id {
+		t.Errorf("id = %q, want the deleted row's %q", again, id)
+	}
+	live := liveFeeds(t, db)
+	if len(live) != 1 || live[0].URL != "https://Alpha.test/feed/" {
+		t.Errorf("live = %+v, want the restored row with the typed URL", live)
+	}
+}
+
+func TestUpdateFeedKeepsStoredTwinsEditable(t *testing.T) {
+	db := openTestStore(t)
+	insertRawFeed(t, db, "Alpha", "https://alpha.test/feed")
+	twin := insertRawFeed(t, db, "Alpha twin", "https://alpha.test/feed/")
+
+	if _, err := db.UpdateFeed(
+		t.Context(),
+		twin,
+		config.Feed{Name: "Renamed", URL: "https://alpha.test/feed/"},
+	); err != nil {
+		t.Fatalf("renaming one of two stored twins: %v", err)
+	}
+	if got := feedNamed(t, liveFeeds(t, db), "Renamed"); got.ID != twin {
+		t.Errorf("renamed feed id = %q, want %q", got.ID, twin)
+	}
+}
+
+func TestUpdateFeedRejectsAnotherFeedsURLKey(t *testing.T) {
+	db := openTestStore(t)
+	if _, err := db.AddFeed(t.Context(), config.Feed{Name: "Alpha", URL: "https://alpha.test/feed"}); err != nil {
+		t.Fatalf("AddFeed: %v", err)
+	}
+	id, err := db.AddFeed(t.Context(), config.Feed{Name: "Beta", URL: "https://beta.test/feed"})
+	if err != nil {
+		t.Fatalf("AddFeed: %v", err)
+	}
+	_, err = db.UpdateFeed(t.Context(), id, config.Feed{Name: "Beta", URL: "https://ALPHA.test/feed/"})
+	if !errors.Is(err, ErrFeedURLTaken) {
+		t.Errorf("err = %v, want ErrFeedURLTaken", err)
+	}
+}
+
+func TestSeedFeedsSkipsURLKeyTwin(t *testing.T) {
+	db := openTestStore(t)
+	insertRawFeed(t, db, "Alpha", "https://alpha.test/feed")
+	result, err := db.SeedFeeds(t.Context(), config.FeedsDoc{Feeds: []config.Feed{
+		{Name: "Other", URL: "https://Alpha.test/feed/"},
+		{Name: "Fresh", URL: "https://fresh.test/feed"},
+		{Name: "Fresh twin", URL: "https://fresh.test/feed/"},
+	}})
+	if err != nil {
+		t.Fatalf("SeedFeeds: %v", err)
+	}
+	if result.Added != 1 || result.Skipped != 2 {
+		t.Errorf("result = %+v, want 1 added and 2 skipped", result)
 	}
 }

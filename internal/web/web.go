@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"html"
 	"html/template"
 	"io/fs"
 	"net/http"
@@ -15,13 +16,16 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/httplog"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
+	"github.com/DanielBlei/rabbithole/internal/library"
 	"github.com/DanielBlei/rabbithole/internal/profilemgr"
 	"github.com/DanielBlei/rabbithole/internal/rank"
 	"github.com/DanielBlei/rabbithole/internal/store"
@@ -35,19 +39,34 @@ import (
 // is harmless (a page just ignores the ones it doesn't use). Parsed once at
 // startup; a parse failure is a build-time mistake, so fail fast.
 var (
-	feedTmpl = pageTmpl("feed.html")
-	mazeTmpl = pageTmpl("maze.html")
+	feedTmpl    = pageTmpl("feed.html")
+	mazeTmpl    = pageTmpl("maze.html")
+	sourcesTmpl = pageTmpl("sources.html")
 )
 
 // pageTmpl builds the template set for one page: the shared layout and partials
 // plus the named page file under templates/.
 func pageTmpl(page string) *template.Template {
-	return template.Must(template.New(page).Funcs(template.FuncMap{"tip": tipFor}).ParseFS(
-		templatesFS,
-		"templates/layout.html",
-		"templates/partials/*.html",
-		"templates/"+page,
-	))
+	return template.Must(
+		template.New(page).
+			Funcs(template.FuncMap{
+				"tip": tipFor, "ttl": ttl, "monogram": monogram, "fav": fav, "clip": clipText, "tier": tierWords,
+				"findFailed": func() string { return findErrorFallback },
+			}).
+			ParseFS(
+				templatesFS,
+				"templates/layout.html",
+				"templates/partials/*.html",
+				"templates/"+page,
+			),
+	)
+}
+
+// ttl renders a section title with each space wrapped in a span.sp, so the
+// Default theme can draw the space as a hyphen (a space is invisible in CSS
+// once wrapped). The words are escaped first, so the result is safe HTML.
+func ttl(s string) template.HTML {
+	return template.HTML(strings.ReplaceAll(html.EscapeString(s), " ", `<span class="sp"> </span>`))
 }
 
 // listLimit bounds how many rows the digest page pulls per render. The current
@@ -85,6 +104,17 @@ type Web struct {
 	src      config.Source
 	ing      *ingest.Manager
 	profiles *profilemgr.Service
+	library  *library.Loader
+
+	// feedClient is the guarded client the Add form's find and preview fetch
+	// through; nil builds a default one on first use.
+	feedClient     *http.Client
+	feedClientOnce sync.Once
+
+	// now is the clock the Sources page reads; nil is time.Now.
+	now      func() time.Time
+	srcStats statsCache // per-source volume and signal, shared by every Sources response
+	undo     undoLog    // recent Manage changes their Undo toast can reverse
 
 	sessions *sessionStore // logged-in browsers, in memory: a restart logs everyone out
 	limiter  *loginLimiter
@@ -97,6 +127,9 @@ type Web struct {
 	env       EnvSource  // where api key variables came from, for the settings page
 	storeInfo *StoreInfo // what boot knew about the store, nil when not reported
 
+	// libraryWait bounds how long the Library page waits for a library that has not loaded.
+	libraryWait time.Duration
+
 	envFile    *config.EnvFile // the .env a pasted key is written to
 	noEnvWrite bool            // --no-env-write: pasting a key is refused
 	// scorerCheck builds the scorer for "Test connection"; nil uses the real one.
@@ -108,8 +141,10 @@ type Web struct {
 func New(db *store.Store, src config.Source, ing *ingest.Manager) *Web {
 	return &Web{
 		db: db, src: src, ing: ing,
-		profiles: profilemgr.New(db),
-		sessions: newSessionStore(), limiter: newLoginLimiter(),
+		profiles:    profilemgr.New(db),
+		library:     library.NewLoader(library.Options{}),
+		libraryWait: libraryWaitDefault,
+		sessions:    newSessionStore(), limiter: newLoginLimiter(),
 		hashing: make(chan struct{}, hashSlots), trusted: DefaultTrustedProxies,
 	}
 }
@@ -175,18 +210,40 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /profiles/rescore", s.handleProfileRescore)
 	mux.HandleFunc("DELETE /profiles/{id}", s.handleProfileDelete)
 	mux.HandleFunc("GET /sources", s.handleSources)
+	mux.HandleFunc("GET /sources/manage", s.handleSourcesManage)
 	mux.HandleFunc("GET /sources/new", s.handleSourceNew)
+	mux.HandleFunc("GET /sources/live", s.handleSourcesLive)
+	mux.HandleFunc("GET /sources/check", s.handleSourceCheck)
 	mux.HandleFunc("GET /sources/defaults", s.handleSourceDefaults)
 	mux.HandleFunc("GET /sources/export", s.handleSourceExport)
-	mux.HandleFunc("GET /sources/{id}", s.handleSourceSelect)
+	mux.HandleFunc("GET /sources/import", s.handleSourceImportDialog)
+	mux.HandleFunc("GET /sources/feed/{id}", s.handleSourceSelect)
+	mux.HandleFunc("GET /sources/libfill", s.handleLibraryFill)
+	mux.HandleFunc("GET /sources/library", s.handleLibrary)
+	mux.HandleFunc("GET /sources/library/{group}", s.handleLibraryGroup)
+	mux.HandleFunc("POST /sources/library/plan", s.handleLibraryPlan)
+	mux.HandleFunc("POST /sources/library/apply", s.handleLibraryApply)
+	mux.HandleFunc("POST /sources/library/restore", s.handleLibraryRestore)
+	mux.HandleFunc("POST /sources/library/hide", s.handleLibraryHide)
+	mux.HandleFunc("POST /sources/library/unhide", s.handleLibraryUnhide)
+	mux.HandleFunc("POST /sources/library/refresh", s.handleLibraryRefresh)
 	mux.HandleFunc("POST /sources", s.handleSourceAdd)
+	mux.HandleFunc("POST /sources/bulk", s.handleSourcesBulk)
+	mux.HandleFunc("POST /sources/discover", s.handleSourceDiscover)
+	mux.HandleFunc("POST /sources/preview", s.handleSourcePreview)
+	mux.HandleFunc("POST /sources/undo/{token}", s.handleSourcesUndo)
 	mux.HandleFunc("POST /sources/import", s.handleSourceImport)
+	mux.HandleFunc("POST /sources/import/preview", s.handleSourceImportPreview)
+	mux.HandleFunc("POST /sources/import/apply", s.handleSourceImportApply)
 	mux.HandleFunc("POST /sources/defaults", s.handleSourceSaveDefaults)
-	mux.HandleFunc("POST /sources/{id}", s.handleSourceSave)
-	mux.HandleFunc("POST /sources/{id}/enabled", s.handleSourceEnabled)
-	mux.HandleFunc("POST /sources/{id}/restore", s.handleSourceRestore)
-	mux.HandleFunc("GET /sources/{id}/confirm-delete", s.handleSourceConfirmDelete)
-	mux.HandleFunc("DELETE /sources/{id}", s.handleSourceDelete)
+	mux.HandleFunc("POST /sources/feed/{id}", s.handleSourceSave)
+	mux.HandleFunc("POST /sources/feed/{id}/enabled", s.handleSourceEnabled)
+	mux.HandleFunc("POST /sources/feed/{id}/restore", s.handleSourceRestore)
+	mux.HandleFunc("DELETE /sources/feed/{id}", s.handleSourceDelete)
+	mux.HandleFunc("GET /ingestion", s.handleIngestion)
+	mux.HandleFunc("GET /ingestion/live", s.handleIngestionLive)
+	mux.HandleFunc("GET /ingestion/runs/{id}", s.handleIngestionRun)
+	mux.HandleFunc("GET /ingestion/runs/{id}/log", s.handleIngestionRunLog)
 	mux.HandleFunc("GET /ingest", s.handleIngest)
 	mux.HandleFunc("GET /ingest/status", s.handleIngestStatus)
 	mux.HandleFunc("GET /ingest/chrome", s.handleIngestChrome)
@@ -200,6 +257,8 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /items/{id}/bookmark", s.handleBookmark)
 	mux.HandleFunc("POST /items/{id}/rate", s.handleRate)
 	mux.HandleFunc("POST /todos", s.handleAddTodo)
+	mux.Handle("GET /icons/{feedID}", httplog.QuietHandler(http.HandlerFunc(s.handleIcon)))
+	mux.Handle("GET /icons/library/{id}", httplog.QuietHandler(http.HandlerFunc(s.handleLibraryIcon)))
 	mux.HandleFunc("POST /todos/{id}/toggle", s.handleToggleTodo)
 	mux.HandleFunc("POST /todos/{id}/tags", s.handleSetTodoTags)
 	mux.HandleFunc("DELETE /todos/{id}", s.handleDeleteTodo)
@@ -267,6 +326,28 @@ func (s *Web) staticControl() string {
 // no-cache, so a rebuild shows on the next reload rather than after the normal
 // cache window.
 func (s *Web) SetDev(on bool) { s.dev = on }
+
+// SetFeedClient sets the client the Add form's find and preview fetch through;
+// call it before serving. Without one a default guarded client is built on first use.
+func (s *Web) SetFeedClient(c *http.Client) { s.feedClient = c }
+
+// feedHTTP returns the feed client, building the default once when none was set.
+func (s *Web) feedHTTP() *http.Client {
+	s.feedClientOnce.Do(func() {
+		if s.feedClient == nil {
+			s.feedClient = feeds.NewClient("")
+		}
+	})
+	return s.feedClient
+}
+
+// SetLibrary sets the loader the Library page reads. Without one the library
+// reports not loaded and nothing is fetched.
+func (s *Web) SetLibrary(l *library.Loader) {
+	if l != nil {
+		s.library = l
+	}
+}
 
 // SetManagedBy names the --config file, so the settings page can say that edits
 // made there are kept until the file changes.

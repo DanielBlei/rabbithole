@@ -5,9 +5,13 @@ package feeds
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/DanielBlei/rabbithole/internal/httpclient"
 )
 
 const sampleRSS = `<?xml version="1.0" encoding="UTF-8"?>
@@ -35,7 +39,7 @@ func TestFetchAllParsesItems(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	results := FetchAll(context.Background(), []Source{{Name: "Test", URL: srv.URL}})
+	results := FetchAll(context.Background(), srv.Client(), []Source{{Name: "Test", URL: srv.URL}})
 	if len(results) != 1 {
 		t.Fatalf("got %d results, want 1", len(results))
 	}
@@ -72,7 +76,7 @@ func TestFetchAllSkipsBadFeed(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	results := FetchAll(context.Background(), []Source{{Name: "Bad", URL: srv.URL}})
+	results := FetchAll(context.Background(), srv.Client(), []Source{{Name: "Bad", URL: srv.URL}})
 	if n := len(results[0].Items); n != 0 {
 		t.Fatalf("got %d items, want 0 from a failing feed", n)
 	}
@@ -100,7 +104,7 @@ func TestFetchAllReturnsResultsInSourceOrder(t *testing.T) {
 	// Fetches run concurrently; results must still come back positionally so
 	// a caller can pair them with the sources it passed in.
 	sources := []Source{{Name: "A", URL: bad.URL}, {Name: "B", URL: good.URL}, {Name: "C", URL: bad.URL}}
-	results := FetchAll(context.Background(), sources)
+	results := FetchAll(context.Background(), good.Client(), sources)
 	if len(results) != 3 {
 		t.Fatalf("got %d results, want 3", len(results))
 	}
@@ -114,6 +118,59 @@ func TestFetchAllReturnsResultsInSourceOrder(t *testing.T) {
 	}
 	if results[0].Err == nil || results[2].Err == nil {
 		t.Error("A and C should have failed")
+	}
+}
+
+func TestFetchAllRefusesLoopbackByDefault(t *testing.T) {
+	t.Setenv(httpclient.AllowPrivateEnv, "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(sampleRSS))
+	}))
+	defer srv.Close()
+
+	for _, client := range []*http.Client{nil, NewClient("1.2.3")} {
+		res := FetchAll(context.Background(), client, []Source{{Name: "Local", URL: srv.URL}})[0]
+		if !errors.Is(res.Err, httpclient.ErrBlockedAddress) {
+			t.Errorf("err = %v, want ErrBlockedAddress", res.Err)
+		}
+	}
+}
+
+func TestFetchAllRejectsOversizedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`<?xml version="1.0"?><rss version="2.0"><channel><title>Big</title><description>`))
+		chunk := []byte(strings.Repeat("x", 1<<20))
+		for range MaxFeedBytes/len(chunk) + 1 {
+			_, _ = w.Write(chunk)
+		}
+		_, _ = w.Write([]byte(`</description></channel></rss>`))
+	}))
+	defer srv.Close()
+
+	res := FetchAll(context.Background(), srv.Client(), []Source{{Name: "Big", URL: srv.URL}})[0]
+	if !errors.Is(res.Err, httpclient.ErrTooLarge) {
+		t.Fatalf("err = %v, want ErrTooLarge", res.Err)
+	}
+	if len(res.Items) != 0 {
+		t.Errorf("got %d items from an oversized feed", len(res.Items))
+	}
+}
+
+func TestNewClientSendsUserAgentAndHonoursOptIn(t *testing.T) {
+	t.Setenv(httpclient.AllowPrivateEnv, "1")
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("User-Agent")
+		_, _ = w.Write([]byte(sampleRSS))
+	}))
+	defer srv.Close()
+
+	res := FetchAll(context.Background(), NewClient("1.2.3"), []Source{{Name: "UA", URL: srv.URL}})[0]
+	if res.Err != nil {
+		t.Fatal(res.Err)
+	}
+	if want := "rabbithole/1.2.3 (+https://github.com/DanielBlei/rabbithole)"; got != want {
+		t.Errorf("User-Agent = %q, want %q", got, want)
 	}
 }
 

@@ -5,7 +5,7 @@
 <div class="prof" id="profilesSettings">
   {{if .Error}}<p class="stp-callout stp-callout--warn prof__error" role="alert">{{.Error}}</p>{{end}}
   <section class="stp-group" data-tone="green">
-    <header class="stp-group__h"><h3><span class="stp-group__t">Active profile</span></h3></header>
+    <header class="stp-group__h"><h3><span class="stp-group__t">{{ttl "Active profile"}}</span></h3></header>
     <div class="stp-box">
       <div class="stp-row">
         <div class="stp-row__l">
@@ -22,7 +22,7 @@
 
   <section class="stp-group" data-tone="teal">
     <header class="stp-group__h stp-group__h--act">
-      <div><h3><span class="stp-group__t">All profiles</span>{{with tip "profiles"}}{{template "stpHint" .}}{{end}}</h3></div>
+      <div><h3><span class="stp-group__t">{{ttl "All profiles"}}</span>{{with tip "profiles"}}{{template "stpHint" .}}{{end}}</h3></div>
       <button class="clk-btn clk-btn--go prof__new" type="button" hx-get="/profiles/new" hx-target="#profilesSettings" hx-swap="outerHTML">New profile</button>
     </header>
     <div class="stp-box" aria-label="Interest profiles">
@@ -63,7 +63,7 @@
 {{define "profileForm"}}
 <div class="prof-form">
   <header class="stp-group__h stp-group__h--act">
-    <div><h3><span class="stp-group__t">{{if .Adding}}New profile{{else}}{{if .Builtin}}Built-in profile{{else}}Edit profile{{end}}{{end}}</span></h3></div>
+    <div><h3><span class="stp-group__t">{{if .Adding}}{{ttl "New profile"}}{{else}}{{if .Builtin}}{{ttl "Built-in profile"}}{{else}}{{ttl "Edit profile"}}{{end}}{{end}}</span></h3></div>
     <button class="clk-btn" type="button" hx-get="/profiles" hx-target="#profilesSettings" hx-swap="outerHTML" aria-label="Close profile editor">Close</button>
   </header>
   {{if .Notice}}<p class="prof-form__ok stp-note" role="status">{{.Notice}}</p>{{end}}

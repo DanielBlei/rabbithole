@@ -28,7 +28,7 @@ func TestProfileSettingsRenderDefaultImmutable(t *testing.T) {
 	for _, want := range []string{
 		`data-stp-pane="profiles"`,
 		`id="profilesSettings"`,
-		"Active profile",
+		`Active<span class="sp"> </span>profile`,
 		"Default",
 		"Immutable. Duplicate it to make an editable copy.",
 		`hx-post="/profiles/` + profile.DefaultID + `/duplicate"`,

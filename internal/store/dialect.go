@@ -130,6 +130,10 @@ func (sqliteDialect) additiveTables() []additive {
 		{table: "onboarding", ddl: onboardingSchema, upgradeSeed: onboardingUpgradeSeed},
 		{table: "config_versions", ddl: configSchema},
 		{table: "config_imports", ddl: configImportSchema},
+		{table: "feed_icons", ddl: feedIconSchema},
+		{table: "library_hidden", ddl: libraryHiddenSchema},
+		{table: "ingest_run_fetches", ddl: ingestRunFetchSchema},
+		{table: "store_version", ddl: storeVersionSchema},
 	}
 }
 
@@ -275,6 +279,10 @@ func (postgresDialect) additiveTables() []additive {
 		{table: "onboarding", ddl: onboardingSchema, upgradeSeed: onboardingUpgradeSeed},
 		{table: "config_versions", ddl: configSchema},
 		{table: "config_imports", ddl: configImportSchema},
+		{table: "feed_icons", ddl: feedIconSchemaPG},
+		{table: "library_hidden", ddl: libraryHiddenSchemaPG},
+		{table: "ingest_run_fetches", ddl: ingestRunFetchSchemaPG},
+		{table: "store_version", ddl: storeVersionSchemaPG},
 	}
 }
 
@@ -530,8 +538,21 @@ func (s *Store) exec(ctx context.Context, q string, args ...any) (sql.Result, er
 	return s.db.ExecContext(ctx, s.d.rebind(q), args...)
 }
 
+// commitWrite records a feed or item write and commits it, so the bump and the
+// write land together or not at all.
+func (s *Store) commitWrite(ctx context.Context, tx *sql.Tx) error {
+	if err := s.bumpVersion(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) txQueryRow(ctx context.Context, tx *sql.Tx, q string, args ...any) *sql.Row {
 	return tx.QueryRowContext(ctx, s.d.rebind(q), args...)
+}
+
+func (s *Store) txQuery(ctx context.Context, tx *sql.Tx, q string, args ...any) (*sql.Rows, error) {
+	return tx.QueryContext(ctx, s.d.rebind(q), args...)
 }
 
 func (s *Store) txExec(ctx context.Context, tx *sql.Tx, q string, args ...any) (sql.Result, error) {

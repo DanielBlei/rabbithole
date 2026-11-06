@@ -201,6 +201,10 @@ type StoreConfig struct {
 // DBPasswordEnv supplies the Postgres password, overriding store.url's.
 const DBPasswordEnv = "RABBITHOLE_DB_PASSWORD"
 
+// LibraryURLEnv overrides the directory the source library is fetched from.
+// Empty means the project default; "off" turns the library off.
+const LibraryURLEnv = "RABBITHOLE_LIBRARY_URL"
+
 // defaultSSLMode is applied when the URL names none. It encrypts without
 // verifying the certificate, which is the one mode that works out of the box on
 // the hosted databases the docs point people at: Supabase signs its database
