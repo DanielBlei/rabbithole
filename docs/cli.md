@@ -27,7 +27,7 @@ run uses the defaults.
 
 | Flag | Description | Default |
 |---|---|---|
-| `--db` | Where the store is: a SQLite path or a `postgres://` URL. Also `RABBITHOLE_DB` | a file in your user data dir, see [Store location](configuration.md#store-location) |
+| `--db` | Where the store is: a SQLite path or a `postgres://user@host/database` URL, which must name the user and the database. Also `RABBITHOLE_DB` | a file in your user data dir, see [Store location](configuration.md#store-location) |
 | `--config` | **Deprecated:** import a config file on start. Use `rabbithole config import FILE` instead. For compatibility it still behaves as before: it is applied when it changes since it was last applied; edits made in Settings are kept until then. A change saves a new version. A `store` block in it only locates the store for that command and is never saved. Optional | none |
 | `--env-file` | The env file read for `RABBITHOLE_*` variables the environment does not set | `./.env` |
 | `--db-max-conns` | Postgres only: cap the connection pool | `10` |
@@ -109,14 +109,15 @@ to finish.
 | `--tls-cert`, `--tls-key` | Serve HTTPS with this PEM certificate and key; give both or neither |
 | `--insecure-http` | Allow plain HTTP on an address other than loopback, for a TLS proxy on another host |
 | `--trusted-proxies` | Comma-separated networks or addresses whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed; default `127.0.0.0/8,::1/128`, empty trusts none |
-| `--no-env-write` | Settings never writes a pasted API key to `.env`: the paste action is hidden and the endpoint refuses |
+| `--no-env-write` | Settings never writes a key to `.env`: the paste mode is disabled with the reason beside it, and the endpoint refuses |
 | `--dev` | Serve the CSS, scripts and fonts `no-cache`, so an edit shows on the next reload instead of up to 5 minutes later, and read the Library from `./library` when it exists and `RABBITHOLE_LIBRARY_URL` is unset. For working on them; `DEV=1 make serve` passes it |
 
 With the deprecated `--config` flag, the log says
 `config imported from <file>; edits in Settings are kept until the file changes`, and the settings
 page shows the same note. A running `serve` reads the active settings at the start of each ingest
 run, so `config import` and `config rollback` from another terminal apply to the next run with no
-restart. Its environment is fixed at start, so restart it after changing an API key.
+restart. A key pasted in Settings → Scoring applies at once; a key added to `.env` by hand or
+exported in a shell needs a restart, because the environment is fixed at start.
 
 Without either, an `--addr` that other machines can reach (`:8080`, `0.0.0.0`, a LAN address)
 is refused, since the login would cross the network unencrypted.

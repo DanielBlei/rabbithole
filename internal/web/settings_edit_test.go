@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -625,8 +626,11 @@ func TestSettingsPastedKeyRefusedWhenEnvironmentSetsItOrWritingIsOff(t *testing.
 	w.SetEnvFile(env, false)
 	t.Setenv("RABBITHOLE_INFERENCE_API_KEY", "from-the-real-environment")
 	code, body := send(t, w, "/settings/key", formFor(t, db, "value", "sk-new-key-1"))
-	if code != http.StatusConflict || !strings.Contains(body, "set in the environment") {
+	if code != http.StatusConflict || !strings.Contains(body, "set in the process environment") {
 		t.Errorf("env-set paste = %d %s", code, body)
+	}
+	if !strings.Contains(body, "restart") {
+		t.Errorf("the refusal does not say a restart is needed: %s", body)
 	}
 	if _, err := os.Stat(env.Path); err == nil {
 		t.Error("the .env was written")
@@ -637,8 +641,14 @@ func TestSettingsPastedKeyRefusedWhenEnvironmentSetsItOrWritingIsOff(t *testing.
 	if code != http.StatusForbidden || !strings.Contains(body, "turned off") {
 		t.Errorf("--no-env-write paste = %d %s", code, body)
 	}
-	if strings.Contains(get(t, w, "/settings/scoring"), "data-stp-paste") {
-		t.Error("the paste action should be hidden under --no-env-write")
+	page := get(t, w, "/settings/scoring")
+	if strings.Contains(page, "data-stp-pasteval") {
+		t.Error("the paste box should be gone under --no-env-write")
+	}
+	for _, want := range []string{"data-stp-aliasoff", "--no-env-write", "RABBITHOLE_INFERENCE_API_KEY"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("--no-env-write page lacks %q, which explains the missing control", want)
+		}
 	}
 
 	// An unwritable .env says so, without the key.
@@ -712,12 +722,19 @@ func TestSettingsTestConnectionUsesTheRealProviderChecks(t *testing.T) {
 
 func TestSettingsPageCarriesTheEditingMarkup(t *testing.T) {
 	w, db := configTestWeb(t)
+	env, err := config.LoadEnvFile(filepath.Join(t.TempDir(), ".env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.SetEnvFile(env, false)
 	saveConfig(t, db, "user: a\n", store.ConfigSourceUI, 0)
 	body := get(t, w, "/settings/scoring")
 	for _, want := range []string{
 		`name="expected_version" value="1"`, `data-stp-savebar`, `data-stp-discard`, `data-stp-review`, `data-stp-test`,
 		`class="stp-seg"`, `name="inference.provider"`, `data-stp-switch`, `data-stp-less`, `/static/js/settings.js`,
 		`data-fld="inference.api_key"`, `data-applies="ollama vllm openai"`,
+		`data-stp-keymode`, `value="variable"`, `value="paste"`, `data-stp-keyref`, `data-stp-pasteval`,
+		`data-stp-pastesave`, `data-stp-alias`, `Save key`, `data-keycanon="RABBITHOLE_INFERENCE_API_KEY"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("Scoring lacks %q", want)
@@ -730,9 +747,14 @@ func TestSettingsPageCarriesTheEditingMarkup(t *testing.T) {
 		}
 	}
 	js := get(t, w, "/static/js/settings.js")
-	for _, want := range []string{"beforeunload", "You have unsaved changes", "Keep editing", "Discard"} {
+	for _, want := range []string{
+		"beforeunload", "You have unsaved changes", "Keep editing", "Discard",
+		// The leave dialog offers Save, and the key chip agrees with the name rule.
+		"data-stp-leave-save", "saveThen", "data-stp-aliasgo", "Not a RABBITHOLE_*_API_KEY reference",
+		"applyKeyMode",
+	} {
 		if !strings.Contains(js, want) {
-			t.Errorf("settings.js lacks the leave guard piece %q", want)
+			t.Errorf("settings.js lacks %q", want)
 		}
 	}
 }
@@ -1206,5 +1228,151 @@ func TestSettingsImportPreviewCountsValuesEqualToTheDefault(t *testing.T) {
 	}
 	if versionOf(t, db) != 0 {
 		t.Fatal("a preview must not save")
+	}
+}
+
+// A key the machine already holds under the person's own name is one click from
+// working: the value is copied into .env under the canonical variable and never
+// travels over the network.
+func TestSettingsCopiesAnotherVariableIntoTheCanonicalName(t *testing.T) {
+	const secret = "copied-from-my-gateway-variable"
+	w, db := configTestWeb(t)
+	logs := logCapture(t)
+	env, err := config.LoadEnvFile(filepath.Join(t.TempDir(), ".env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.SetEnvFile(env, false)
+	t.Setenv("RABBITHOLE_INFERENCE_API_KEY", "")
+	t.Setenv("MY_GATEWAY_KEY", secret)
+
+	code, body := send(t, w, "/settings/key", formFor(t, db, "from", "MY_GATEWAY_KEY"))
+	if code != http.StatusOK {
+		t.Fatalf("copy = %d %s", code, body)
+	}
+	var r editReply
+	_ = json.Unmarshal([]byte(body), &r)
+	if r.Ref != "$RABBITHOLE_INFERENCE_API_KEY" || r.Chip != "Set in .env" {
+		t.Errorf("reply = %+v, want the canonical reference and the .env chip", r)
+	}
+	if raw, _ := os.ReadFile(env.Path); string(raw) != "RABBITHOLE_INFERENCE_API_KEY="+secret+"\n" {
+		t.Errorf(".env = %q, want the value under the canonical name", raw)
+	}
+	if strings.Contains(body, secret) || strings.Contains(logs.String(), secret) {
+		t.Error("the copied value reached a reply or a log line")
+	}
+
+	// A name this server does not hold is refused, and says which one it was.
+	t.Setenv("NOT_SET_ANYWHERE", "")
+	code, body = send(t, w, "/settings/key", formFor(t, db, "from", "NOT_SET_ANYWHERE"))
+	if code != http.StatusUnprocessableEntity || !strings.Contains(body, "$NOT_SET_ANYWHERE is not set") {
+		t.Errorf("unset name = %d %s", code, body)
+	}
+	// Only a shell-exportable name is read at all.
+	code, body = send(t, w, "/settings/key", formFor(t, db, "from", "not a name"))
+	if code != http.StatusUnprocessableEntity || !strings.Contains(body, "not a variable name") {
+		t.Errorf("bad name = %d %s", code, body)
+	}
+	// Writing keys from the page is off: no copy either.
+	w.SetEnvFile(env, true)
+	code, body = send(t, w, "/settings/key", formFor(t, db, "from", "MY_GATEWAY_KEY"))
+	if code != http.StatusForbidden {
+		t.Errorf("copy under --no-env-write = %d %s", code, body)
+	}
+}
+
+// The control's mode follows the saved reference: the canonical name supplied by
+// .env was pasted here, anything else is a variable the person names.
+// The control opens on Variable whatever the store holds: pasting is a choice, not
+// a state the page puts a returning operator in. A key that is already where
+// rabbithole reads it is reported quietly, without a warning.
+func TestSettingsKeyRowOpensOnAVariableAndReportsAKeyQuietly(t *testing.T) {
+	const tpl = `data-fld="inference.api_key"[^>]*data-keycanon="RABBITHOLE_INFERENCE_API_KEY"`
+	cases := []struct {
+		name   string
+		config string
+		env    string
+		chip   string
+		note   string
+	}{
+		{"nothing set", "", "", "No key set", ""},
+		{"the canonical name, in .env", "inference:\n  api_key: $RABBITHOLE_INFERENCE_API_KEY\n",
+			"RABBITHOLE_INFERENCE_API_KEY=sk-one\n", "Set in .env", "Using "},
+		{"in .env, reference not saved yet", "", "RABBITHOLE_INFERENCE_API_KEY=sk-one\n",
+			"In .env", "Found in /"},
+		{"another allowed name", "inference:\n  api_key: $RABBITHOLE_SUMMARY_API_KEY\n", "", "Missing", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// The .env loader skips a name the process already sets, and it sets
+			// the names it reads, so each case starts from a clean environment.
+			// The .env loader skips a name the process already sets, and it sets
+			// the names it reads, so each case starts from a clean environment.
+			for _, k := range []string{"RABBITHOLE_INFERENCE_API_KEY", "RABBITHOLE_SUMMARY_API_KEY"} {
+				old, had := os.LookupEnv(k)
+				if err := os.Unsetenv(k); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if had {
+						_ = os.Setenv(k, old)
+						return
+					}
+					_ = os.Unsetenv(k)
+				})
+			}
+			w, db := configTestWeb(t)
+			dir := t.TempDir()
+			path := filepath.Join(dir, ".env")
+			if tc.env != "" {
+				if err := os.WriteFile(path, []byte(tc.env), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			env, err := config.LoadEnvFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w.SetEnvFile(env, false)
+			if tc.config != "" {
+				saveConfig(t, db, tc.config, store.ConfigSourceUI, 0)
+			}
+			page := get(t, w, "/settings/scoring")
+			row := regexp.MustCompile(tpl).FindString(page)
+			if row == "" {
+				t.Fatalf("the key row has no data-keycanon: %s", page)
+			}
+			// Variable is the mode the page opens on, and the reference input shows.
+			if !regexp.MustCompile(`value="variable" checked>`).MatchString(page) {
+				t.Error("the control does not open on Variable")
+			}
+			if regexp.MustCompile(`value="paste" checked>`).MatchString(page) {
+				t.Error("the control opens on Paste key")
+			}
+			if regexp.MustCompile(`data-stp-keyref hidden>`).MatchString(page) {
+				t.Error("the reference input is hidden on load")
+			}
+			// Quiet: a key that is already readable is not dressed as a warning.
+			chipRE := `stp-chip--(\w+)" data-stp-keychip>` + regexp.QuoteMeta(tc.chip)
+			chip := regexp.MustCompile(chipRE).FindStringSubmatch(page)
+			if chip == nil {
+				t.Fatalf("chip %q is missing", tc.chip)
+			}
+			if strings.Contains(tc.chip, "Set in") || tc.chip == "In .env" || tc.chip == "No key set" {
+				if chip[1] == "warn" {
+					t.Errorf("chip %q is a warning, want a quiet tone", tc.chip)
+				}
+			}
+			note := regexp.MustCompile(`data-stp-keynote( hidden)?>([^<]*)<`).FindStringSubmatch(page)
+			if note == nil {
+				t.Fatal("the key row has no note element")
+			}
+			if tc.note == "" && note[1] == "" {
+				t.Errorf("a note is shown with nothing to say: %q", note[2])
+			}
+			if tc.note != "" && (note[1] != "" || !strings.Contains(note[2], tc.note)) {
+				t.Errorf("note = %q (hidden %v), want %q shown", note[2], note[1] != "", tc.note)
+			}
+		})
 	}
 }

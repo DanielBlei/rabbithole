@@ -450,9 +450,16 @@ func systemValue(form url.Values, add func(key, msg string)) string {
 func checkDraft(draft *config.Config, problems []fieldProblem) []fieldProblem {
 	if _, err := draft.Canonical(); err != nil {
 		for _, fe := range config.FieldErrors(err) {
-			if !slices.ContainsFunc(problems, func(p fieldProblem) bool { return p.Field == fe.Field }) {
-				problems = append(problems, fe)
+			if slices.ContainsFunc(problems, func(p fieldProblem) bool { return p.Field == fe.Field }) {
+				continue
 			}
+			// The name rule is right but its wording is about a config file. The
+			// page can name the two ways out, so it does.
+			if fe.Field == keyAPIKey {
+				fe.Msg = "A saved config may only name a RABBITHOLE_*_API_KEY variable, so this name" +
+					" cannot be stored. Copy the value into .env below, or switch to Paste key."
+			}
+			problems = append(problems, fe)
 		}
 	}
 	bad := func(key string) bool {
