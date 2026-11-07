@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -265,6 +266,26 @@ func TestSoftDeleteAndRestore(t *testing.T) {
 	}
 }
 
+// Two concurrent restores of the same feed must not both succeed: the second
+// one lands on an already-live row and should report a failed match rather
+// than silently re-touching it (and bumping store_version again).
+func TestRestoreFeedRejectsAnAlreadyLiveFeed(t *testing.T) {
+	db := openTestStore(t)
+	id, err := db.AddFeed(t.Context(), config.Feed{Name: "Alpha", URL: "https://alpha.test/feed"})
+	if err != nil {
+		t.Fatalf("AddFeed: %v", err)
+	}
+	if err := db.SoftDeleteFeed(t.Context(), id); err != nil {
+		t.Fatalf("SoftDeleteFeed: %v", err)
+	}
+	if err := db.RestoreFeed(t.Context(), id); err != nil {
+		t.Fatalf("RestoreFeed: %v", err)
+	}
+	if err := db.RestoreFeed(t.Context(), id); !errors.Is(err, ErrFeedNotFound) {
+		t.Errorf("RestoreFeed on an already-live feed = %v, want %v", err, ErrFeedNotFound)
+	}
+}
+
 // A deleted feed still holds its unique name and URL, so re-adding it has to be
 // an undelete rather than a constraint failure — with the values just typed.
 func TestAddFeedRestoresADeletedMatch(t *testing.T) {
@@ -293,6 +314,35 @@ func TestAddFeedRestoresADeletedMatch(t *testing.T) {
 	}
 	if live[0].Name != "Alpha Renamed" || live[0].MaxItems == nil || *live[0].MaxItems != 4 {
 		t.Errorf("restore kept the old values instead of the new ones: %+v", live[0])
+	}
+}
+
+// Two AddFeed calls that both resolve to the same deleted row (the race a
+// concurrent request can hit between findFeedConflict and the restore write)
+// must not both succeed: the second one lands on an already-live row and has
+// to report a failed match rather than silently re-touching it.
+func TestAddFeedRestoreTxRejectsAnAlreadyLiveFeed(t *testing.T) {
+	db := openTestStore(t)
+	const url = "https://alpha.test/feed"
+	f := config.Feed{Name: "Alpha", URL: url}
+	id, err := db.AddFeed(t.Context(), f)
+	if err != nil {
+		t.Fatalf("AddFeed: %v", err)
+	}
+	if err := db.SoftDeleteFeed(t.Context(), id); err != nil {
+		t.Fatalf("SoftDeleteFeed: %v", err)
+	}
+
+	restore := func() error {
+		return db.inTx(t.Context(), func(tx *sql.Tx) error {
+			return db.restoreFeedTx(t.Context(), tx, id, f)
+		})
+	}
+	if err := restore(); err != nil {
+		t.Fatalf("first restore: %v", err)
+	}
+	if err := restore(); !errors.Is(err, ErrFeedNotFound) {
+		t.Errorf("restoreFeedTx on an already-live feed = %v, want %v", err, ErrFeedNotFound)
 	}
 }
 

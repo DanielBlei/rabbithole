@@ -113,13 +113,19 @@ func TestLibrarySourcesLive(t *testing.T) {
 
 	for i, job := range jobs {
 		t.Run(job.file+"/"+job.name, func(t *testing.T) {
-			if job.ignoreChecks {
-				t.Skip("ignore_checks set in the library")
+			reason := reasons[i]
+			if reason == "" {
+				return
 			}
-			if reason := reasons[i]; reason != "" {
-				t.Errorf("LIBRARY-FAIL %s %s %q %s: %q%s",
-					job.file, job.group, job.name, job.url, reason, liveHint(reason))
+			// ignore_checks exists for a host that blocks CI runners, not a
+			// blanket skip: a failure that does not look like that block is
+			// still reported, or a source that is genuinely dead for real
+			// users would never surface here.
+			if job.ignoreChecks && liveHint(reason) == blockedHint {
+				t.Skip("ignore_checks set in the library, and this looks like a runner block: " + reason)
 			}
+			t.Errorf("LIBRARY-FAIL %s %s %q %s: %q%s",
+				job.file, job.group, job.name, job.url, reason, liveHint(reason))
 		})
 	}
 }

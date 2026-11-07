@@ -113,7 +113,7 @@ const (
 	// on the values you just typed, not the ones it had when it was parked.
 	sqlRestoreFeed = `UPDATE feeds
 		SET name = ?, url = ?, type = ?, enabled = ?, since = ?, max_items = ?, tags = ?, updated_at = ?, deleted_at = NULL
-		WHERE id = ?`
+		WHERE id = ? AND deleted_at IS NOT NULL`
 
 	sqlUpdateFeed = `UPDATE feeds
 		SET name = ?, url = ?, type = ?, enabled = ?, since = ?, max_items = ?, tags = ?, updated_at = ?
@@ -121,7 +121,7 @@ const (
 
 	sqlSetFeedEnabled = `UPDATE feeds SET enabled = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`
 	sqlSoftDeleteFeed = `UPDATE feeds SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`
-	sqlUndeleteFeed   = `UPDATE feeds SET deleted_at = NULL, updated_at = ? WHERE id = ?`
+	sqlUndeleteFeed   = `UPDATE feeds SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL`
 
 	// Name and URL are unique across live *and* deleted rows, so collision
 	// checks ignore deleted_at and the caller decides what to do with the hit.
@@ -328,15 +328,16 @@ func (s *Store) insertFeedTx(ctx context.Context, tx *sql.Tx, f config.Feed) (st
 // restoreFeedTx brings a deleted row back with the values of f, replacing the
 // ones it was parked with. RestoreFeed is the plain undelete that keeps them.
 func (s *Store) restoreFeedTx(ctx context.Context, tx *sql.Tx, id string, f config.Feed) error {
-	if _, err := s.txExec(ctx, tx, sqlRestoreFeed, f.Name, f.URL, nullFeedType(f.Type),
+	res, err := s.txExec(ctx, tx, sqlRestoreFeed, f.Name, f.URL, nullFeedType(f.Type),
 		nullBool(f.Enabled), nullDuration(f.Since), nullInt(f.MaxItems), nullTags(f.Tags),
-		sqlTime(time.Now()), id); err != nil {
+		sqlTime(time.Now()), id)
+	if err != nil {
 		if taken := s.feedUniqueErr(err, f); taken != nil {
 			return taken
 		}
 		return fmt.Errorf("restore feed %q: %w", f.Name, err)
 	}
-	return nil
+	return expectOneRow(res, id)
 }
 
 // UpdateFeed writes new values for an existing feed and reports how many items
@@ -414,31 +415,37 @@ func (s *Store) renameSourceTx(ctx context.Context, tx *sql.Tx, oldName, newName
 // SetFeedEnabled parks or unparks a feed. A nil value clears the column, so the
 // feed goes back to inheriting whatever the defaults say.
 func (s *Store) SetFeedEnabled(ctx context.Context, id string, on *bool) error {
-	res, err := s.exec(ctx, sqlSetFeedEnabled, nullBool(on), sqlTime(time.Now()), id)
-	if err != nil {
-		return fmt.Errorf("set feed enabled %q: %w", id, err)
-	}
-	return expectOneRow(res, id)
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		res, err := s.txExec(ctx, tx, sqlSetFeedEnabled, nullBool(on), sqlTime(time.Now()), id)
+		if err != nil {
+			return fmt.Errorf("set feed enabled %q: %w", id, err)
+		}
+		return expectOneRow(res, id)
+	})
 }
 
 // SoftDeleteFeed hides a feed from the ingest cycle and the page while keeping
 // its row — see feedConfigSchema for why deletion isn't a DELETE.
 func (s *Store) SoftDeleteFeed(ctx context.Context, id string) error {
-	now := sqlTime(time.Now())
-	res, err := s.exec(ctx, sqlSoftDeleteFeed, now, now, id)
-	if err != nil {
-		return fmt.Errorf("delete feed %q: %w", id, err)
-	}
-	return expectOneRow(res, id)
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		now := sqlTime(time.Now())
+		res, err := s.txExec(ctx, tx, sqlSoftDeleteFeed, now, now, id)
+		if err != nil {
+			return fmt.Errorf("delete feed %q: %w", id, err)
+		}
+		return expectOneRow(res, id)
+	})
 }
 
 // RestoreFeed brings a soft-deleted feed back with the values it had.
 func (s *Store) RestoreFeed(ctx context.Context, id string) error {
-	res, err := s.exec(ctx, sqlUndeleteFeed, sqlTime(time.Now()), id)
-	if err != nil {
-		return fmt.Errorf("restore feed %q: %w", id, err)
-	}
-	return expectOneRow(res, id)
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		res, err := s.txExec(ctx, tx, sqlUndeleteFeed, sqlTime(time.Now()), id)
+		if err != nil {
+			return fmt.Errorf("restore feed %q: %w", id, err)
+		}
+		return expectOneRow(res, id)
+	})
 }
 
 // SetFeedDefaults replaces the set-wide fallbacks.
@@ -446,12 +453,14 @@ func (s *Store) SetFeedDefaults(ctx context.Context, d config.FeedDefaults) erro
 	if err := d.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrFeedInvalid, err)
 	}
-	if _, err := s.exec(ctx, sqlSetFeedDefaults,
-		nullBool(d.Enabled), nullDuration(d.Since), nullInt(d.MaxItems), nullTags(d.Tags),
-		sqlTime(time.Now())); err != nil {
-		return fmt.Errorf("set feed defaults: %w", err)
-	}
-	return nil
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		if _, err := s.txExec(ctx, tx, sqlSetFeedDefaults,
+			nullBool(d.Enabled), nullDuration(d.Since), nullInt(d.MaxItems), nullTags(d.Tags),
+			sqlTime(time.Now())); err != nil {
+			return fmt.Errorf("set feed defaults: %w", err)
+		}
+		return nil
+	})
 }
 
 // SetDefaultSince sets the set-wide lookback and leaves the other defaults as

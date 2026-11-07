@@ -49,7 +49,7 @@
       </div>
 
       <div class="mg-c mg-c--sig">
-        <span class="mg-k">Signal</span>
+        <span class="mg-k">Signal {{tier "atleastIcon"}}</span>
         {{if eq .State "never"}}<span class="sh-hint">No data yet</span>
         {{else if not .Stats.Sig.Enough}}<span class="sh-hint" title="{{.SigTitle}}">Not enough data</span>
         {{else}}<span class="mg-sig" title="{{.SigTitle}}"><b>{{.Stats.Sig.Pct}}%</b>{{template "tierBar" .Stats.Sig.Bar}}</span>{{end}}

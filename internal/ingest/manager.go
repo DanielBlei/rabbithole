@@ -209,6 +209,20 @@ func (m *Manager) start(
 	return nil
 }
 
+// Guard reports whether a run is live and, when none is, holds the manager's
+// lock until release is called. A caller that must not let a run start
+// between its own check and the write that depends on it (a feed rename,
+// which a run resolves to a name at start) calls release once that write has
+// committed. release is always safe to call and to defer.
+func (m *Manager) Guard() (release func(), running bool) {
+	m.mu.Lock()
+	if m.active != nil {
+		m.mu.Unlock()
+		return func() {}, true
+	}
+	return m.mu.Unlock, false
+}
+
 // Cancel cancels the in-flight run, if any. The run winds down through its
 // context (fetch and scoring both honor it) and is recorded as cancelled.
 func (m *Manager) Cancel() {

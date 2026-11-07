@@ -241,6 +241,15 @@ var feedErrorExplanations = []feedErrorExplanation{
 		find: findWebPageText,
 	},
 	{
+		// arxiv.go, crossref.go and semantic_scholar.go all report a failed
+		// fetch the same way: "<provider> returned <status>". Any one of them
+		// can answer with any 5xx, not only 503. Checked before the timeout
+		// pattern below: resp.Status for a 504 reads "504 Gateway Timeout",
+		// which would otherwise match "timeout" first.
+		re:   regexp.MustCompile(`(?i)\b(?:arxiv|crossref|semantic scholar) returned 5\d\d\b`),
+		text: "The academic source is temporarily unavailable. Usually clears on its own: re-run ingestion later.",
+	},
+	{
 		re: regexp.MustCompile(`(?i)deadline exceeded|timeout|timed out`),
 		text: fmt.Sprintf(
 			"The site took longer than %d seconds to answer. Often temporary: re-run ingestion, or disable it if it keeps happening.",
@@ -252,10 +261,6 @@ var feedErrorExplanations = []feedErrorExplanation{
 		re:   regexp.MustCompile(`no such host`),
 		text: "The host name does not resolve. Check the address for typos, or remove the source if the site is gone.",
 		find: findNoHostText,
-	},
-	{
-		re:   regexp.MustCompile(`arxiv returned 503`),
-		text: "arXiv is temporarily unavailable. Usually clears on its own: re-run ingestion later.",
 	},
 }
 

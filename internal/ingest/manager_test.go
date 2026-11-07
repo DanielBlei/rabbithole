@@ -398,6 +398,66 @@ func TestManagerCancel(t *testing.T) {
 	}
 }
 
+// Guard on an idle manager holds the lock a Start needs: a caller mid-write
+// (a feed rename) can rely on no run starting until it calls release, closing
+// the gap a plain Status().Running check would leave open.
+func TestManagerGuardBlocksAStartUntilReleased(t *testing.T) {
+	m, release := newManagerForTest(t, Outcome{}, nil)
+
+	unlock, running := m.Guard()
+	if running {
+		t.Fatal("Guard reported running on an idle manager")
+	}
+
+	started := make(chan error, 1)
+	go func() { started <- m.Start(context.Background(), store.IngestTriggerManual) }()
+	select {
+	case <-started:
+		t.Fatal("Start proceeded while Guard still held the lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	unlock()
+	select {
+	case err := <-started:
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start never proceeded after release")
+	}
+	close(release)
+	waitIdle(t, m)
+}
+
+// Guard on a manager with a run already active reports it immediately and
+// does not hold the lock, since there is nothing left to prevent.
+func TestManagerGuardReportsAnActiveRun(t *testing.T) {
+	m, release := newManagerForTest(t, Outcome{}, nil)
+	if err := m.Start(context.Background(), store.IngestTriggerManual); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	unlock, running := m.Guard()
+	unlock()
+	if !running {
+		t.Fatal("Guard reported idle while a run was active")
+	}
+
+	// The lock was not left held: Status (which locks the same mutex) returns
+	// at once rather than blocking.
+	done := make(chan struct{})
+	go func() { m.Status(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Status blocked, Guard must have left the lock held")
+	}
+
+	close(release)
+	waitIdle(t, m)
+}
+
 // logContains reports whether any captured log line contains substr.
 func logContains(m *Manager, substr string) bool {
 	for _, ln := range m.Status().Lines {

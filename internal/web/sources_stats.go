@@ -129,6 +129,10 @@ func tierWords(key string) string {
 		return fmt.Sprintf("under %d", midSignalScore)
 	case "atleast":
 		return fmt.Sprintf("%d or higher", highSignalScore)
+	// atleastIcon is the same bound as a short visible tag next to a label,
+	// the way the Feed page's stat tiles already read ("high signal ≥7").
+	case "atleastIcon":
+		return fmt.Sprintf("≥%d", highSignalScore)
 	}
 	return ""
 }
