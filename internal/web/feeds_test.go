@@ -153,7 +153,22 @@ func TestExplainFeedError(t *testing.T) {
 			want: "took longer than 30 seconds",
 		},
 		{name: "dns", raw: "dial tcp: lookup x.invalid: no such host", want: "does not resolve"},
-		{name: "arxiv 503", raw: "arxiv returned 503 Service Unavailable", want: "arXiv is temporarily unavailable"},
+		{
+			name: "arxiv 503", raw: "arxiv returned 503 Service Unavailable",
+			want: "academic source is temporarily unavailable",
+		},
+		{
+			name: "crossref 502", raw: "crossref returned 502 Bad Gateway",
+			want: "academic source is temporarily unavailable",
+		},
+		{
+			name: "semantic scholar 500", raw: "semantic scholar returned 500 Internal Server Error",
+			want: "academic source is temporarily unavailable",
+		},
+		{
+			name: "crossref 504 gateway timeout", raw: "crossref returned 504 Gateway Timeout",
+			want: "academic source is temporarily unavailable",
+		},
 		{
 			name: "private address",
 			raw:  `Get "http://10.0.0.5/feed": dial tcp 10.0.0.5:80: blocked address: 10.0.0.5 (private range)`,

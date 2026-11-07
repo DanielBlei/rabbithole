@@ -77,7 +77,7 @@ func TestManageColumnCells(t *testing.T) {
 	body := renderItem(t, never)
 	for _, want := range []string{
 		`<span class="mg-k">Stored / week</span>`, `<span class="mg-vol"><b>0</b></span>`,
-		`<span class="mg-k">Signal</span>`, `No data yet`,
+		"<span class=\"mg-k\">Signal ≥7</span>", `No data yet`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("never: missing %q; body=%s", want, body)
@@ -122,7 +122,7 @@ func TestManageHeaderAndEmptyCopy(t *testing.T) {
 	page := get(t, w, "/sources/manage")
 	for _, want := range []string{
 		`<span class="mg-c mg-c--vol" title="Items stored per week, 8-week average">Stored / week</span>`,
-		`<span class="mg-c mg-c--sig" title="Share of scored items rated 7 or higher, last 30 days">Signal</span>`,
+		"<span class=\"mg-c mg-c--sig\" title=\"Share of scored items rated 7 or higher, last 30 days\">Signal ≥7</span>",
 		`No source matches your search or tag.`,
 		`data-src-clearall>Clear search and tag</button>`,
 	} {

@@ -376,11 +376,25 @@ func (s *Web) handleSourceSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	renamed := previous.Name != feed.Name
-	if renamed && s.ing.Status().Running {
-		s.writeUnit(w, r, id, unitOpts{override: editFormWithError(r, id, errRenameDuringRun)})
-		return
+	var release func()
+	if renamed {
+		// Held across the rename's own write, so a run cannot start in the gap
+		// between this check and that write committing: it would otherwise
+		// resolve the feed's old name and file this run's items under it.
+		// Released as soon as that write is done, and before anything below
+		// that reads ingest status itself (which takes the same lock).
+		var running bool
+		release, running = s.ing.Guard()
+		if running {
+			release()
+			s.writeUnit(w, r, id, unitOpts{override: editFormWithError(r, id, errRenameDuringRun)})
+			return
+		}
 	}
 	moved, err := s.db.UpdateFeed(ctx, id, feed)
+	if release != nil {
+		release()
+	}
 	if err != nil {
 		if isFeedInputError(err) {
 			s.writeUnit(w, r, id, unitOpts{override: editFormWithError(r, id, err)})

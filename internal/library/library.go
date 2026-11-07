@@ -47,7 +47,7 @@ type Source struct {
 	Description  string
 	Labels       []string // display form; each label's slug is tags.Normalize(label)
 	MaxItems     int      // 0 when unset
-	IgnoreChecks bool     // skip the live-network health check (e.g. a host that blocks CI runners)
+	IgnoreChecks bool     // tolerate a live-network check failure that looks like a runner block (e.g. a host that blocks CI runners); other failures still fail the check
 }
 
 // knownTypes lists the types in Library.Files order.

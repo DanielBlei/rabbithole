@@ -19,6 +19,11 @@ import (
 // maxBulkIDs caps how many sources one bulk request or selected export names.
 const maxBulkIDs = 500
 
+// bulkFormLimit bounds the posted action, tag and comma-joined id list; at
+// maxBulkIDs ids this comfortably holds them with room to spare, well under
+// the large default ParseForm falls back to without it.
+const bulkFormLimit = 64 << 10
+
 // Copy of the bulk replies.
 const (
 	bulkNothingCopy  = "Nothing to change."
@@ -61,14 +66,26 @@ var bulkActions = map[store.BulkOp]bulkAction{
 }
 
 // parseBulkIDs splits a comma-joined id list, dropping blanks and repeats. ok
-// is false for a list over maxBulkIDs.
+// is false for a list over maxBulkIDs; the cap is checked as ids accumulate,
+// so a huge posted list cannot force an unbounded amount of work before it is
+// rejected.
 func parseBulkIDs(raw string) (ids []string, ok bool) {
+	seen := make(map[string]struct{})
 	for part := range strings.SplitSeq(raw, ",") {
-		if id := strings.TrimSpace(part); id != "" && !slices.Contains(ids, id) {
-			ids = append(ids, id)
+		id := strings.TrimSpace(part)
+		if id == "" {
+			continue
 		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		if len(ids) >= maxBulkIDs {
+			return ids, false
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
 	}
-	return ids, len(ids) <= maxBulkIDs
+	return ids, true
 }
 
 // handleSourcesBulk applies one action to the selected sources in a single
@@ -78,6 +95,16 @@ func parseBulkIDs(raw string) (ids []string, ok bool) {
 // fit.
 func (s *Web) handleSourcesBulk(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	r.Body = http.MaxBytesReader(w, r.Body, bulkFormLimit)
+	if err := r.ParseForm(); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			http.Error(w, "form too large", http.StatusRequestEntityTooLarge)
+		} else {
+			http.Error(w, "could not read the form", http.StatusBadRequest)
+		}
+		return
+	}
 	op := store.BulkOp(r.PostFormValue("action"))
 	action, ok := bulkActions[op]
 	if !ok {
