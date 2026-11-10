@@ -22,8 +22,10 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/decisionbrief"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/httplog"
+	"github.com/DanielBlei/rabbithole/internal/inference"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/library"
 	"github.com/DanielBlei/rabbithole/internal/profilemgr"
@@ -105,6 +107,7 @@ type Web struct {
 	ing      *ingest.Manager
 	profiles *profilemgr.Service
 	library  *library.Loader
+	briefs   *decisionbrief.Service
 
 	// feedClient is the guarded client the Add form's find and preview fetch
 	// through; nil builds a default one on first use.
@@ -139,7 +142,7 @@ type Web struct {
 // New returns a Web backed by db, reading the run config from src once per request. ing owns the
 // in-process ingest runs the UI triggers and watches.
 func New(db *store.Store, src config.Source, ing *ingest.Manager) *Web {
-	return &Web{
+	w := &Web{
 		db: db, src: src, ing: ing,
 		profiles:    profilemgr.New(db),
 		library:     library.NewLoader(library.Options{}),
@@ -147,7 +150,25 @@ func New(db *store.Store, src config.Source, ing *ingest.Manager) *Web {
 		sessions:    newSessionStore(), limiter: newLoginLimiter(),
 		hashing: make(chan struct{}, hashSlots), trusted: DefaultTrustedProxies,
 	}
+	w.briefs = decisionbrief.New(db, w.profiles, func(ctx context.Context) (decisionbrief.Generator, error) {
+		cfg, _, err := src.Active(ctx)
+		if err != nil {
+			return nil, err
+		}
+		eff := cfg.Effective()
+		return inference.ResolveBrief(ctx, eff.Inference, eff.Inference.ThinkEnabled())
+	})
+	return w
 }
+
+// SetBriefGenerator replaces the Decision Brief generator. It exists for tests
+// so a dive can run without a model server.
+func (s *Web) SetBriefGenerator(f decisionbrief.GeneratorFunc) {
+	s.briefs = decisionbrief.New(s.db, s.profiles, f)
+}
+
+// SetBriefFetcher replaces the article fetcher. It exists for tests.
+func (s *Web) SetBriefFetcher(f decisionbrief.Fetcher) { s.briefs.SetFetcher(f) }
 
 // pagePromptUser is the shell-prompt name the pages wear. A stored config that
 // cannot be read is logged and the default name is used: these pages need
@@ -256,6 +277,9 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("POST /items/{id}/hide", s.handleHide)
 	mux.HandleFunc("POST /items/{id}/bookmark", s.handleBookmark)
 	mux.HandleFunc("POST /items/{id}/rate", s.handleRate)
+	mux.HandleFunc("POST /items/{id}/brief", s.handleBriefStart)
+	mux.HandleFunc("POST /items/{id}/brief/refresh", s.handleBriefRefresh)
+	mux.HandleFunc("GET /items/{id}/brief/status", s.handleBriefStatus)
 	mux.HandleFunc("POST /todos", s.handleAddTodo)
 	mux.Handle("GET /icons/{feedID}", httplog.QuietHandler(http.HandlerFunc(s.handleIcon)))
 	mux.Handle("GET /icons/library/{id}", httplog.QuietHandler(http.HandlerFunc(s.handleLibraryIcon)))
@@ -504,6 +528,8 @@ type rowData struct {
 	// TagsAttr is the source feed's tags as recorded, comma-joined — the row's
 	// data-tags, which the client-side tag filter matches against.
 	TagsAttr string
+	// Brief is the on-demand Decision Brief state rendered in the dive panel.
+	Brief briefView
 }
 
 func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
@@ -606,7 +632,7 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	items := toRows(rows)
+	items := s.toRows(r.Context(), rows)
 	chrome := s.chrome(r.Context())
 	data := pageData{
 		Title:      "The Rabbit Hole",
@@ -903,7 +929,7 @@ func (s *Web) handleNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := feedTmpl.ExecuteTemplate(w, "row", toRow(row)); err != nil {
+	if err := feedTmpl.ExecuteTemplate(w, "row", s.toRow(r.Context(), row)); err != nil {
 		// Status is likely already written; log rather than double-write.
 		log.Error().Err(err).Msg("render note row")
 	}
@@ -945,7 +971,7 @@ func (s *Web) toggleStatus(w http.ResponseWriter, r *http.Request, target string
 	// Only status changed, so render the in-memory row rather than re-fetching.
 	cur.Status = next
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := feedTmpl.ExecuteTemplate(w, "row", toRow(cur)); err != nil {
+	if err := feedTmpl.ExecuteTemplate(w, "row", s.toRow(r.Context(), cur)); err != nil {
 		// Status is likely already written; log rather than double-write.
 		log.Error().Err(err).Msg("render toggle row")
 	}
@@ -973,7 +999,7 @@ func (s *Web) handleBookmark(w http.ResponseWriter, r *http.Request) {
 	// Only the bookmark flag changed, so render the in-memory row.
 	cur.Bookmarked = next
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := feedTmpl.ExecuteTemplate(w, "row", toRow(cur)); err != nil {
+	if err := feedTmpl.ExecuteTemplate(w, "row", s.toRow(r.Context(), cur)); err != nil {
 		// Status is likely already written; log rather than double-write.
 		log.Error().Err(err).Msg("render bookmark row")
 	}
@@ -1012,7 +1038,7 @@ func (s *Web) handleRate(w http.ResponseWriter, r *http.Request) {
 	// Only the rating changed, so render the in-memory row.
 	cur.UserScore = next
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := feedTmpl.ExecuteTemplate(w, "row", toRow(cur)); err != nil {
+	if err := feedTmpl.ExecuteTemplate(w, "row", s.toRow(r.Context(), cur)); err != nil {
 		// Status is likely already written; log rather than double-write.
 		log.Error().Err(err).Msg("render rate row")
 	}
@@ -1193,6 +1219,35 @@ func toRows(rows []store.ItemRow) []rowData {
 		out[i] = toRow(row)
 	}
 	return out
+}
+
+// toRows builds the feed page's rows and loads every brief state in one query.
+func (s *Web) toRows(ctx context.Context, rows []store.ItemRow) []rowData {
+	out := toRows(rows)
+	ids := make([]string, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
+	}
+	snaps, err := s.briefs.Statuses(ctx, ids)
+	if err != nil {
+		log.Warn().Err(err).Msg("loading brief states")
+	}
+	for i := range out {
+		out[i].Brief = briefViewFor(snaps[out[i].ID])
+	}
+	return out
+}
+
+// toRow builds one row's view model including its brief state, for the
+// fragments mutation handlers swap back in place.
+func (s *Web) toRow(ctx context.Context, row store.ItemRow) rowData {
+	rd := toRow(row)
+	snap, err := s.briefs.Status(ctx, row.ID)
+	if err != nil {
+		log.Warn().Err(err).Str("item", row.ID).Msg("loading brief state")
+	}
+	rd.Brief = briefViewFor(snap)
+	return rd
 }
 
 // toRow builds the view model for a single item. Used both for the full page
