@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"html"
 	"html/template"
 	"io/fs"
@@ -486,6 +487,7 @@ type rowData struct {
 	ScoreModel       string
 	ScoreProfile     string
 	ScoreProfileHash string
+	ScoreFeedback    string
 	// The user's own rating. It lights a thumb; when adaptive feedback is
 	// active, explicit ratings may also inform future scores. Either one
 	// re-posted clears it.
@@ -1224,6 +1226,7 @@ func toRow(row store.ItemRow) rowData {
 		rd.ScoreModel = strOf(row.LLMScoreModel)
 		rd.ScoreProfile = strOf(row.LLMProfileName)
 		rd.ScoreProfileHash = shortHash(strOf(row.LLMProfileHash))
+		rd.ScoreFeedback = feedbackProvenance(row)
 	}
 	if row.UserScore != nil {
 		rd.RatedUp = *row.UserScore == rateUp
@@ -1237,6 +1240,23 @@ func toRow(row store.ItemRow) rowData {
 		rd.NoteHTML = renderMarkdown(rd.Note)
 	}
 	return rd
+}
+
+// feedbackProvenance renders the adaptive context a score used, empty for a
+// profile-only score. The same counts and hash are available over the API.
+func feedbackProvenance(row store.ItemRow) string {
+	hash := strOf(row.LLMFeedbackHash)
+	if hash == "" {
+		return ""
+	}
+	positive, negative := 0, 0
+	if row.LLMFeedbackPositive != nil {
+		positive = *row.LLMFeedbackPositive
+	}
+	if row.LLMFeedbackNegative != nil {
+		negative = *row.LLMFeedbackNegative
+	}
+	return fmt.Sprintf("feedback %dP/%dN @%s", positive, negative, shortHash(hash))
 }
 
 func shortHash(hash string) string {

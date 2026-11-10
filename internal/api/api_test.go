@@ -130,6 +130,7 @@ func TestHandleListItems(t *testing.T) {
 	digested := []store.DigestEntry{{
 		Item: items[0], Score: 8, Reason: "solid writeup",
 		ProfileID: "profile-systems", ProfileName: "Systems", ProfileHash: "abc123",
+		FeedbackPositive: 3, FeedbackNegative: 2, FeedbackHash: "feedback123",
 	}}
 	if err := s.db.Record(ctx, items, digested, time.Now()); err != nil {
 		t.Fatalf("Record: %v", err)
@@ -164,6 +165,11 @@ func TestHandleListItems(t *testing.T) {
 		got.LLMProfileName == nil || *got.LLMProfileName != "Systems" ||
 		got.LLMProfileHash == nil || *got.LLMProfileHash != "abc123" {
 		t.Errorf("item a profile provenance = %+v", got)
+	}
+	if got == nil || got.LLMFeedbackPositive == nil || *got.LLMFeedbackPositive != 3 ||
+		got.LLMFeedbackNegative == nil || *got.LLMFeedbackNegative != 2 ||
+		got.LLMFeedbackHash == nil || *got.LLMFeedbackHash != "feedback123" {
+		t.Errorf("item a feedback provenance = %+v", got)
 	}
 }
 

@@ -18,17 +18,23 @@ import (
 
 // loadScoringContext snapshots the active profile and recent explicit ratings
 // once per ingest or rescore operation. Reading feedback here rather than per
-// batch keeps every item in a run scored against the same context. A read
-// failure aborts like the other run-wide store reads instead of silently
-// falling back to profile-only scoring; callers skip this call when there is
-// nothing to score. Items in candidates are the operation's scoring targets;
-// they never appear as feedback examples for their own scores.
+// batch keeps every item in a run scored against the same context. Adaptive
+// ranking can be switched off, in which case the context is exactly the
+// profile-only one and the store is not read for feedback. A read failure
+// aborts like the other run-wide store reads instead of silently falling back to
+// profile-only scoring; callers skip this call when there is nothing to score.
+// Items in candidates are the operation's scoring targets; they never appear as
+// feedback examples for their own scores.
 func loadScoringContext(
 	ctx context.Context,
 	db *store.Store,
 	activeProfile profile.Snapshot,
 	candidates []feeds.Item,
+	adaptiveRanking bool,
 ) (rank.ScoringContext, error) {
+	if !adaptiveRanking {
+		return rank.ProfileContext(activeProfile.Content), nil
+	}
 	examples, err := db.RecentFeedbackExcluding(ctx, candidateLinks(candidates))
 	if err != nil {
 		return rank.ScoringContext{}, fmt.Errorf("load explicit feedback: %w", err)
