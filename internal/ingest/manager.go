@@ -88,6 +88,11 @@ type Manager struct {
 	active *activeRun // nil when idle
 	buf    *logBuffer // most recent run's log, kept after the run finishes
 
+	// onRunComplete, when set, is called after a successful ingest run so the
+	// classification worker can look at the items that run just recorded. It
+	// must not block; the worker owns its own queue and context.
+	onRunComplete func()
+
 	// Icon passes run outside the run slot. iconMu admits one pass at a time;
 	// root is their context, cancelled by Shutdown; bg tracks them so Shutdown
 	// can wait; pending records a kick that arrived while a pass held iconMu. The
@@ -156,6 +161,14 @@ func NewManager(db *store.Store, src config.Source, logLevel zerolog.Level) (*Ma
 
 // SetClient sets the client runs fetch feeds through; call it before the first run.
 func (m *Manager) SetClient(c *http.Client) { m.client = c }
+
+// SetOnRunComplete registers a non-blocking hook fired after a successful
+// ingest run, before the icon pass. Call it before serving.
+func (m *Manager) SetOnRunComplete(fn func()) {
+	m.mu.Lock()
+	m.onRunComplete = fn
+	m.mu.Unlock()
+}
 
 // Start launches a run in the background and returns immediately. If a run is
 // already in flight it is a no-op — the caller shows the live run instead
@@ -475,13 +488,24 @@ func (m *Manager) execute(
 	// and reported the sites it fetched.
 	m.mu.Lock()
 	m.active = nil
+	hook := m.onRunComplete
+	notify := run.kind == RunKindIngest && status == store.IngestStatusOK && hook != nil && !m.closed
 	pass := run.kind == RunKindIngest && status == store.IngestStatusOK && sites != nil && !m.closed
 	var passCtx context.Context
 	if pass {
 		passCtx = m.rootLocked()
 		m.bg.Add(1)
 	}
+	if notify {
+		m.bg.Add(1)
+	}
 	m.mu.Unlock()
+	if notify {
+		go func() {
+			defer m.bg.Done()
+			hook()
+		}()
+	}
 	if pass {
 		defer m.bg.Done()
 		m.iconMu.Lock()

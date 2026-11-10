@@ -129,6 +129,7 @@ Every field is optional. A setting you leave out takes its default, now and in l
 | `inference.batch_size` | Articles per scoring request | `1` |
 | `inference.max_parallel` | Scoring requests in flight | `1` |
 | `inference.model_tuning.*` | Decoding limits, see [model_tuning](#inferencemodel_tuning) | see below |
+| `classification.*` | Content keywords and assumptions, see [classification](#classification) | inherits the inference backend |
 | `ingest.digest_dir` | Deprecated, removed in v0.4.0. Output directory for `ingest --markdown`; use `--out <dir>` instead | none |
 
 A file may also carry `ingest.since`, which is not a stored setting. It is an import-only alias for the
@@ -214,6 +215,50 @@ off logs a warning at startup.
 >   lengthen the prompt and increase the chance of the model losing track of individual items.
 
 
+### classification
+
+Content tags — keywords and assumptions — are produced by a second model pass over scored
+items. The block mirrors `inference`. When `provider`, `host`, `model`, `api_key`, `think`,
+`effort` or `structured_output` is left out, it takes the inference value, so one local
+endpoint only has to be configured once. A different provider gets the usual built-in
+endpoint defaults.
+
+```yaml
+classification:
+  enabled: true
+  provider: ollama        # optional: defaults to inference.provider
+  model: qwen3.5:4b       # optional: defaults to inference.model
+  batch_size: 1
+  max_parallel: 1
+  interval: 10m           # how often serve self-heals the queue
+  show_keywords: true
+  show_assumptions: false
+  vocabulary_hint: false
+```
+
+| Field | Description | Default |
+|---|---|---|
+| `classification.enabled` | Run the background classifier in `serve` | `true` |
+| `classification.provider` | `ollama` \| `vllm` \| `openai` \| `heuristic` | `inference.provider` |
+| `classification.host`, `model`, `api_key`, `think`, `effort`, `structured_output` | Same shapes and rules as the inference fields | inherited when the provider matches |
+| `classification.batch_size` | Items per classification request | `1` |
+| `classification.max_parallel` | Classification requests in flight | `1` |
+| `classification.interval` | How often the worker scans for items that need a verdict | `10m` |
+| `classification.model_tuning.*` | Same limits as [`inference.model_tuning`](#inferencemodel_tuning), applied to classification | same defaults |
+| `classification.show_keywords` | Display default for keyword chips | `true` |
+| `classification.show_assumptions` | Display default for assumption chips; only valid while keywords are on | `false` |
+| `classification.vocabulary_hint` | Add the current top tags to the prompt to reduce vocabulary drift | `false` |
+
+**The hard rule.** `show_assumptions: true` with `show_keywords: false` is rejected at config
+validation for YAML imports, API saves and the UI alike, because assumptions are guesses and
+must never be displayed without the facts they were derived from. The classifier uses an open
+vocabulary: aliases are curated with `rabbithole tags alias`, never inferred. A model-free
+`heuristic` provider does not classify at all; items stay unclassified until a model is set.
+
+Classification runs in its own worker, separate from ingest, so a slow or failing model never
+blocks feed fetching. Newly scored items are queued as ingest finishes; a periodic scan
+self-heals anything missed, and `rabbithole classify backfill` fills history explicitly.
+
 ## Secrets
 
 The store never holds a secret. It holds a reference to an environment variable, and the
@@ -223,6 +268,10 @@ variable is resolved when a run needs it.
 inference:
   api_key: $RABBITHOLE_INFERENCE_API_KEY
 ```
+
+`classification.api_key` follows the same rule with its own variable,
+`RABBITHOLE_CLASSIFICATION_API_KEY`, so the classifier can use a different credential from
+scoring.
 
 The reference must be a whole `$NAME` or `${NAME}` where `NAME` starts with `RABBITHOLE_` and ends
 with `_API_KEY`. That list is deliberately narrow. Any other name is refused on import, so a
