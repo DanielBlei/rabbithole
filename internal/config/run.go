@@ -32,20 +32,22 @@ const RunSchemaVersion = 2
 // that are not stored (store, profile, ingest.feeds). It is decoded leniently,
 // so unknown keys are ignored.
 type File struct {
-	User      string        `yaml:"user"`
-	Profile   string        `yaml:"profile"`
-	Inference FileInference `yaml:"inference"`
-	Ingest    FileIngest    `yaml:"ingest"`
-	Store     StoreConfig   `yaml:"store"`
+	User          string              `yaml:"user"`
+	Profile       string              `yaml:"profile"`
+	Inference     FileInference       `yaml:"inference"`
+	Ingest        FileIngest          `yaml:"ingest"`
+	DecisionBrief DecisionBriefConfig `yaml:"decision_brief"`
+	Store         StoreConfig         `yaml:"store"`
 }
 
 // Config is the stored shape: what the config store keeps and what ingest
 // and the web UI read. The store block, profile and ingest.feeds are import
 // directives and live elsewhere.
 type Config struct {
-	User      string          `yaml:"user,omitempty"` // shell-prompt name on the web UI; blank falls back to the OS user
-	Inference InferenceConfig `yaml:"inference,omitempty"`
-	Ingest    IngestConfig    `yaml:"ingest,omitempty"`
+	User          string              `yaml:"user,omitempty"` // shell-prompt name on the web UI; blank falls back to the OS user
+	Inference     InferenceConfig     `yaml:"inference,omitempty"`
+	Ingest        IngestConfig        `yaml:"ingest,omitempty"`
+	DecisionBrief DecisionBriefConfig `yaml:"decision_brief,omitempty"`
 }
 
 // IngestConfig is the stored part of the ingest block.
@@ -141,9 +143,10 @@ func ReadFile(path string) (File, error) {
 // normalization removed.
 func (f File) Split() (run Config, store StoreConfig, legacy Legacy, dropped []string) {
 	run = Config{
-		User:      f.User,
-		Inference: f.Inference.InferenceConfig,
-		Ingest:    IngestConfig{DigestDir: f.Ingest.DigestDir},
+		User:          f.User,
+		Inference:     f.Inference.InferenceConfig,
+		Ingest:        IngestConfig{DigestDir: f.Ingest.DigestDir},
+		DecisionBrief: f.DecisionBrief,
 	}
 	dropped = run.Normalize()
 	legacy.ProfilePath = f.Profile
@@ -226,6 +229,11 @@ func (r *Config) DropDefaults() (dropped []string) {
 	for _, f := range inferenceFields {
 		if f.isSet(in) {
 			try("inference."+f.name, func(c *Config) { f.clear(&c.Inference) })
+		}
+	}
+	for _, f := range decisionBriefFields {
+		if f.isSet(&r.DecisionBrief) {
+			try("decision_brief."+f.name, func(c *Config) { f.clear(&c.DecisionBrief) })
 		}
 	}
 	return dropped
@@ -332,6 +340,7 @@ func (r *Config) applyDefaults() {
 	if in.MaxParallel <= 0 {
 		in.MaxParallel = defaultMaxParallel
 	}
+	r.DecisionBrief = r.DecisionBrief.WithDefaults()
 }
 
 // FieldError is one validation failure, keyed by the dotted field name so a UI
@@ -384,6 +393,20 @@ func (r *Config) validate() error {
 		if err := ValidRef(in.APIKey); err != nil {
 			add(inferenceKeyField, "%s: %s", inferenceKeyField, err)
 		}
+	}
+	if r.DecisionBrief.MaxArticleBytes > MaxDecisionBriefMaxArticleBytes {
+		add("decision_brief.max_article_bytes",
+			"decision_brief.max_article_bytes must be at most %d", MaxDecisionBriefMaxArticleBytes)
+	}
+	if r.DecisionBrief.MaxTextBytes > MaxDecisionBriefMaxTextBytes {
+		add("decision_brief.max_text_bytes",
+			"decision_brief.max_text_bytes must be at most %d", MaxDecisionBriefMaxTextBytes)
+	}
+	if r.DecisionBrief.MaxOutputTokens > MaxDecisionBriefMaxOutputTokens ||
+		r.DecisionBrief.MaxOutputTokens < MinDecisionBriefMaxOutputTokens {
+		add("decision_brief.max_output_tokens",
+			"decision_brief.max_output_tokens must be between %d and %d",
+			MinDecisionBriefMaxOutputTokens, MaxDecisionBriefMaxOutputTokens)
 	}
 	return errors.Join(errs...)
 }

@@ -136,6 +136,7 @@ func (sqliteDialect) additiveTables() []additive {
 		{table: "library_hidden", ddl: libraryHiddenSchema},
 		{table: "ingest_run_fetches", ddl: ingestRunFetchSchema},
 		{table: "store_version", ddl: storeVersionSchema},
+		{table: "item_briefs", ddl: itemBriefSchema},
 	}
 }
 
@@ -285,6 +286,7 @@ func (postgresDialect) additiveTables() []additive {
 		{table: "library_hidden", ddl: libraryHiddenSchemaPG},
 		{table: "ingest_run_fetches", ddl: ingestRunFetchSchemaPG},
 		{table: "store_version", ddl: storeVersionSchemaPG},
+		{table: "item_briefs", ddl: itemBriefSchemaPG},
 	}
 }
 
