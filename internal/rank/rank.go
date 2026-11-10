@@ -86,7 +86,14 @@ func ScoreAll(
 		maxParallel = 1
 	}
 	scoringContext := ScoringContext{Profile: profile, Feedback: o.feedback}
-	provenance := scoringContext.Provenance()
+	// Only a ContextScorer receives the feedback selection, so only its scores
+	// may claim feedback provenance. Check before the verdictGuard wrap, which
+	// implements ContextScorer for every backend.
+	_, contextual := s.(ContextScorer)
+	var provenance FeedbackProvenance
+	if contextual {
+		provenance = scoringContext.Provenance()
+	}
 	batches := chunk(items, batchSize)
 	logger := zerolog.Ctx(ctx)
 	guard := &verdictGuard{Scorer: s}
@@ -117,7 +124,9 @@ func ScoreAll(
 			}
 			mu.Lock()
 			for _, sc := range scores {
-				sc.Feedback = provenance
+				if contextual {
+					sc.Feedback = provenance
+				}
 				out[sc.ID] = sc
 				logger.Debug().Int("score", sc.Score).Str("reason", sc.Reason).
 					Str("title", truncate(titles[sc.ID], 80)).Msg("scored item")
