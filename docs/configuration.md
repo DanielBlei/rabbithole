@@ -129,7 +129,21 @@ Every field is optional. A setting you leave out takes its default, now and in l
 | `inference.batch_size` | Articles per scoring request | `1` |
 | `inference.max_parallel` | Scoring requests in flight | `1` |
 | `inference.model_tuning.*` | Decoding limits, see [model_tuning](#inferencemodel_tuning) | see below |
+| `decision_brief.max_article_bytes` | Largest article page fetched for an on-demand Decision Brief | 5 MiB (cap 16 MiB) |
+| `decision_brief.max_text_bytes` | Prepared full text sent to the model | 32 KiB (cap 256 KiB) |
+| `decision_brief.max_output_tokens` | Cap on the brief's model reply | 1024 (256–4096) |
 | `ingest.digest_dir` | Deprecated, removed in v0.4.0. Output directory for `ingest --markdown`; use `--out <dir>` instead | none |
+
+The `decision_brief` block sizes the on-demand deep dive. It is config-file only; the Settings
+form has no fields for it in v1. Timeouts, the redirect cap, the 80/443 port policy and the
+two-concurrent-dive cap are fixed in their packages rather than configurable.
+
+```yaml
+decision_brief:
+  max_article_bytes: 5242880
+  max_text_bytes: 32768
+  max_output_tokens: 1024
+```
 
 A file may also carry `ingest.since`, which is not a stored setting. It is an import-only alias for the
 [feed defaults](#feeds) `since`: importing the file sets it there. See [Deprecated keys](#deprecated-keys).

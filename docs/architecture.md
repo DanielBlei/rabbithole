@@ -102,8 +102,31 @@ next run without a restart:
 
 The limit of all this is the source material: an RSS feed that publishes a two-line teaser is
 scored on that teaser, and academic sources are scored on the metadata or summary returned by
-their provider. Full-text page retrieval is not part of the scoring path. Direct ingestion of
+their provider. Full-text page retrieval is **not** part of the scoring path. Direct ingestion of
 ordinary pages without a feed remains on the roadmap below.
+
+## On-demand Decision Brief
+
+A **dive** is the only path that fetches an article page, and only after the reader asks for
+one. It never runs during ingest and never writes the feed score.
+
+```mermaid
+flowchart TD
+    U[reader clicks dive] --> S[decisionbrief service<br/>single-flight per item, cap 2]
+    S --> F[articlefetch: hardened client<br/>20 s, 5 MiB, HTML only]
+    F --> X[articleextract: x/net/html,<br/>plain text, no JavaScript]
+    X --> P[articletext.Prepare:<br/>bound, word count, reading time]
+    P --> G[one ChatJSON call<br/>+ at most one retry]
+    G --> V[validate score/enum/text]
+    V --> B[(item_briefs)]
+    B --> R[ready panel: both scores,<br/>why, ideas, caveats, provenance]
+```
+
+The feed score and the full-text score are stored and displayed separately. A failed dive is a
+product state with a stable code; it never removes the row, its feed score, or an older ready
+brief. The fetch client refuses loopback, private, link-local and metadata destinations on every
+redirect hop, allows only ports 80/443, and treats the page text as untrusted data in the prompt.
+Only the latest brief per item is kept; there is no brief history in v1.
 
 ## Provider startup checks
 
@@ -148,7 +171,10 @@ internal/httpclient   shared HTTP transport (bearer auth injection), plus the sa
 internal/library      the source library: format checks and the loader that fetches it from GitHub main
 internal/retry        exponential backoff for a still-starting-up inference server
 internal/digest       markdown renderer
-internal/store        SQLite or Postgres (items, profiles, feed config, config versions, run history, user state)
+internal/articlefetch on-demand article retrieval through the hardened client
+internal/articleextract HTML to readable plain text, bounded and script-free
+internal/decisionbrief per-item full-text Decision Brief lifecycle
+internal/store        SQLite or Postgres (items, profiles, feed config, config versions, run history, user state, item briefs)
 internal/server       composition root for serve: mounts api + web behind the login gate, health endpoints
 internal/api          JSON API route set (/api/*)
 internal/web          server-rendered htmx UI, the login gate and sessions, templates and static assets
@@ -166,7 +192,7 @@ scripts/              install.sh (the release installer) and a throwaway Postgre
   today), including ordinary pages that publish no feed.
 - **Adaptive ranking**: feed `status`/`user_score`/`user_note` history (recorded via
   `items` or the API) back into the scoring prompt as liked/disliked examples.
-- **Full-text crawl**: fetch the article page and score the piece itself, rather than the
-  summary a feed chose to publish about it.
+- **Scheduled deep dives**: automatic full-text analysis of top-N items. Today the Decision
+  Brief is strictly on demand, one explicit dive at a time.
 - **Scheduling & delivery**: systemd timer or cron to run ingest unattended, plus email,
   push or an output feed so the digest reaches you instead of waiting to be opened.
