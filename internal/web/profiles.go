@@ -13,6 +13,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feedback"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/profile"
@@ -124,6 +125,10 @@ func (s *Web) adaptiveRankingView(ctx context.Context) adaptiveRankingView {
 	if !cfg.AdaptiveRankingEnabled() {
 		return adaptiveRankingView{State: "Off", Tone: "dim", Count: count,
 			Detail: "Profile-only scoring. Recorded ratings are not used."}
+	}
+	if providerOf(cfg.Inference) == config.ProviderHeuristic {
+		return adaptiveRankingView{State: "Profile-only", Tone: "dim", Count: count,
+			Detail: "The keyword provider does not use ratings. Choose a model provider to enable adaptive ranking."}
 	}
 	if count < feedback.MinExamples {
 		return adaptiveRankingView{State: "Collecting", Tone: "warn", Count: count,

@@ -88,6 +88,24 @@ func TestProfileSettingsAdaptiveRankingIndicator(t *testing.T) {
 	}
 }
 
+func TestProfileSettingsAdaptiveRankingProfileOnlyProvider(t *testing.T) {
+	w, db := configTestWeb(t)
+	saveConfig(t, db, "inference:\n  provider: heuristic\n", store.ConfigSourceUI, 0)
+	body := get(t, w, "/settings/profiles")
+	for _, want := range []string{
+		"Adaptive ranking",
+		">Profile-only<",
+		"The keyword provider does not use ratings. Choose a model provider to enable adaptive ranking.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("profile-only provider indicator missing %q", want)
+		}
+	}
+	if strings.Contains(body, "Future scores learn from your ratings.") {
+		t.Error("promptless provider still claims future scores learn from ratings")
+	}
+}
+
 func TestProfileRescoreConfirmationAndStart(t *testing.T) {
 	w := newTestWeb(t)
 	ctx := context.Background()

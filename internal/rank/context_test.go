@@ -366,6 +366,29 @@ func (s *profileOnlyScorer) Score(_ context.Context, profile string, items []fee
 
 func (s *profileOnlyScorer) Validate(context.Context) error { return nil }
 
+type contextScorer struct {
+	context ScoringContext
+}
+
+func (s *contextScorer) Score(ctx context.Context, profile string, items []feeds.Item) ([]ItemScore, error) {
+	return s.ScoreContext(ctx, ProfileContext(profile), items)
+}
+
+func (s *contextScorer) ScoreContext(
+	_ context.Context,
+	scoringContext ScoringContext,
+	items []feeds.Item,
+) ([]ItemScore, error) {
+	s.context = scoringContext
+	scores := make([]ItemScore, 0, len(items))
+	for _, item := range items {
+		scores = append(scores, ItemScore{ID: item.ID, Score: 5, Reason: "Relevant to the reader."})
+	}
+	return scores, nil
+}
+
+func (s *contextScorer) Validate(context.Context) error { return nil }
+
 func TestScoreAllKeepsPromptlessScorersProfileOnly(t *testing.T) {
 	selection := feedback.Selection{Positive: []feedback.Example{
 		{ItemID: "p1", Title: "One", UserScore: 10},
@@ -383,6 +406,27 @@ func TestScoreAllKeepsPromptlessScorersProfileOnly(t *testing.T) {
 	if scorer.profile != "profile" {
 		t.Errorf("promptless scorer received %q, want the profile alone", scorer.profile)
 	}
+	if prov := got["a"].Feedback; prov.Used() || prov.Count() != 0 || prov.Hash != "" {
+		t.Errorf("promptless score provenance = %+v, want none", prov)
+	}
+}
+
+func TestScoreAllPromptlessScorersRecordNoProvenance(t *testing.T) {
+	selection := feedback.Selection{Positive: []feedback.Example{
+		{ItemID: "p1", Title: "One", UserScore: 10},
+		{ItemID: "p2", Title: "Two", UserScore: 10},
+		{ItemID: "p3", Title: "Three", UserScore: 10},
+	}}
+	for _, scorer := range []Scorer{&profileOnlyScorer{}, NewHeuristic()} {
+		got := ScoreAll(context.Background(), scorer, "profile",
+			[]feeds.Item{{ID: "a", Title: "A"}}, 1, 1, WithFeedback(selection))
+		if len(got) != 1 {
+			t.Fatalf("%T scores = %+v, want one", scorer, got)
+		}
+		if prov := got["a"].Feedback; prov.Used() || prov.Count() != 0 || prov.Hash != "" {
+			t.Errorf("%T provenance = %+v, want none without feedback context", scorer, prov)
+		}
+	}
 }
 
 func TestScoreAllRecordsFeedbackProvenance(t *testing.T) {
@@ -391,11 +435,14 @@ func TestScoreAllRecordsFeedbackProvenance(t *testing.T) {
 		{ItemID: "p2", Title: "Two", UserScore: 10},
 		{ItemID: "p3", Title: "Three", UserScore: 10},
 	}}
-	scorer := &profileOnlyScorer{}
+	scorer := &contextScorer{}
 	got := ScoreAll(context.Background(), scorer, "profile", []feeds.Item{{ID: "a", Title: "A"}}, 1, 1,
 		WithFeedback(selection))
 	if len(got) != 1 {
 		t.Fatalf("scores = %+v, want one", got)
+	}
+	if !scorer.context.Feedback.Active() {
+		t.Fatalf("contextual scorer did not receive the feedback selection: %+v", scorer.context)
 	}
 	prov := got["a"].Feedback
 	if !prov.Used() || prov.Positive != 3 || prov.Negative != 0 || prov.Count() != 3 {

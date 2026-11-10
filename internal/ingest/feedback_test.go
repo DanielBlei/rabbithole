@@ -609,6 +609,34 @@ func TestRescoreRecordsFeedbackProvenance(t *testing.T) {
 	}
 }
 
+func TestRescoreHeuristicRecordsNoFeedbackProvenance(t *testing.T) {
+	db := openFeedbackStore(t)
+	rated := feedbackItems()[:3]
+	seedRatedItems(t, db, rated, map[string]int{"p1": 10, "p2": 10, "p3": 10})
+	candidates := candidateItems()
+	if err := db.Record(t.Context(), candidates, nil, time.Now()); err != nil {
+		t.Fatalf("Record candidates: %v", err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Inference.BatchSize = 6
+	cfg.Inference.MaxParallel = 1
+	snapshot := profile.NewSnapshot("p", "Profile", "top tier: local inference", false)
+	if _, err := rescoreItems(t.Context(), *cfg, snapshot, db, candidates, rank.NewHeuristic()); err != nil {
+		t.Fatalf("rescoreItems: %v", err)
+	}
+	for _, candidate := range candidates {
+		row, err := db.Get(t.Context(), candidate.ID)
+		if err != nil {
+			t.Fatalf("Get rescored item %s: %v", candidate.ID, err)
+		}
+		if row.LLMFeedbackPositive != nil || row.LLMFeedbackNegative != nil || row.LLMFeedbackHash != nil {
+			t.Fatalf("%s promptless rescore provenance = +%v -%v @%v, want none",
+				candidate.ID, row.LLMFeedbackPositive, row.LLMFeedbackNegative, row.LLMFeedbackHash)
+		}
+	}
+}
+
 func TestLoadScoringContextDisabledIsProfileOnly(t *testing.T) {
 	db := openFeedbackStore(t)
 	seedRatedItems(t, db, feedbackItems(), map[string]int{
@@ -744,6 +772,33 @@ func TestRunRecordsNoProvenanceWithoutFeedback(t *testing.T) {
 	}
 	if row.LLMFeedbackPositive != nil || row.LLMFeedbackNegative != nil || row.LLMFeedbackHash != nil {
 		t.Fatalf("profile-only score carries provenance = +%v -%v @%v",
+			row.LLMFeedbackPositive, row.LLMFeedbackNegative, row.LLMFeedbackHash)
+	}
+}
+
+func TestRunHeuristicRecordsNoFeedbackProvenance(t *testing.T) {
+	link := "https://x.test/heuristic-no-provenance"
+	cfg := testConfig(t, config.Feed{Name: "Feed", URL: serveRSS(t, feedRSS("New article", link))})
+	db := openStore(t, cfg)
+
+	rated := []feeds.Item{
+		{ID: "rated-p1", Source: "Blog", Title: "Rated one", Link: "https://x.test/rated-1"},
+		{ID: "rated-p2", Source: "Blog", Title: "Rated two", Link: "https://x.test/rated-2"},
+		{ID: "rated-p3", Source: "Blog", Title: "Rated three", Link: "https://x.test/rated-3"},
+	}
+	seedRatedItems(t, db, rated, map[string]int{"rated-p1": 10, "rated-p2": 10, "rated-p3": 10})
+
+	if _, err := Run(
+		t.Context(), cfg.Config, testProfile("profile"), db, time.Now(), Options{Record: true, Client: loopbackClient},
+	); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	row, err := db.Get(t.Context(), feedItemID(link))
+	if err != nil {
+		t.Fatalf("Get scored item: %v", err)
+	}
+	if row.LLMFeedbackPositive != nil || row.LLMFeedbackNegative != nil || row.LLMFeedbackHash != nil {
+		t.Fatalf("promptless score carries provenance = +%v -%v @%v",
 			row.LLMFeedbackPositive, row.LLMFeedbackNegative, row.LLMFeedbackHash)
 	}
 }
