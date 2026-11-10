@@ -385,6 +385,70 @@ func TestScoreAllKeepsPromptlessScorersProfileOnly(t *testing.T) {
 	}
 }
 
+func TestScoreAllRecordsFeedbackProvenance(t *testing.T) {
+	selection := feedback.Selection{Positive: []feedback.Example{
+		{ItemID: "p1", Title: "One", UserScore: 10},
+		{ItemID: "p2", Title: "Two", UserScore: 10},
+		{ItemID: "p3", Title: "Three", UserScore: 10},
+	}}
+	scorer := &profileOnlyScorer{}
+	got := ScoreAll(context.Background(), scorer, "profile", []feeds.Item{{ID: "a", Title: "A"}}, 1, 1,
+		WithFeedback(selection))
+	if len(got) != 1 {
+		t.Fatalf("scores = %+v, want one", got)
+	}
+	prov := got["a"].Feedback
+	if !prov.Used() || prov.Positive != 3 || prov.Negative != 0 || prov.Count() != 3 {
+		t.Fatalf("provenance = %+v, want 3 positive and a hash", prov)
+	}
+	if prov.Hash != selection.Hash() {
+		t.Errorf("provenance hash = %q, want the selection hash %q", prov.Hash, selection.Hash())
+	}
+}
+
+func TestScoreAllOmitsProvenanceWithoutActiveFeedback(t *testing.T) {
+	tests := []struct {
+		name     string
+		feedback feedback.Selection
+	}{
+		{name: "none"},
+		{name: "below threshold", feedback: feedback.Selection{Positive: []feedback.Example{
+			{ItemID: "p1", Title: "One", UserScore: 10},
+			{ItemID: "p2", Title: "Two", UserScore: 10},
+		}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scorer := &profileOnlyScorer{}
+			var opts []Option
+			if tt.feedback.Positive != nil || tt.feedback.Negative != nil {
+				opts = append(opts, WithFeedback(tt.feedback))
+			}
+			got := ScoreAll(context.Background(), scorer, "profile",
+				[]feeds.Item{{ID: "a", Title: "A"}}, 1, 1, opts...)
+			if len(got) != 1 {
+				t.Fatalf("scores = %+v, want one", got)
+			}
+			if prov := got["a"].Feedback; prov.Used() || prov.Count() != 0 || prov.Hash != "" {
+				t.Errorf("provenance = %+v, want none", prov)
+			}
+		})
+	}
+}
+
+func TestBuildUserPromptContextKeepsTrustBoundaryVerbatim(t *testing.T) {
+	selection := feedback.Selection{Positive: []feedback.Example{
+		{ItemID: "p1", Title: "One", UserScore: 10},
+		{ItemID: "p2", Title: "Two", UserScore: 10},
+		{ItemID: "p3", Title: "Three", UserScore: 10},
+	}}
+	prompt := BuildUserPromptContext(ScoringContext{Profile: "profile", Feedback: selection},
+		[]feeds.Item{{Title: "article"}})
+	if !strings.Contains(prompt, feedbackPreamble) {
+		t.Errorf("prompt does not contain the trust-boundary preamble verbatim:\n%s", prompt)
+	}
+}
+
 func numberedLines(text string) []string {
 	var lines []string
 	for _, line := range strings.Split(text, "\n") {

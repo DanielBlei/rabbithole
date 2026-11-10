@@ -219,6 +219,21 @@ func TestConfigSourceDefaultsWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestConfigSourceAdaptiveRankingToggleRoundTrips(t *testing.T) {
+	s := openTestStore(t)
+	src := s.ConfigSource()
+	cfg, version, err := src.Active(t.Context())
+	if err != nil || version != 0 || !cfg.AdaptiveRankingEnabled() {
+		t.Fatalf("defaults = toggle on? %v, version %d, err %v", cfg.AdaptiveRankingEnabled(), version, err)
+	}
+	off := false
+	saveRun(t, s, config.Config{AdaptiveRanking: &off}, 0)
+	cfg, version, err = src.Active(t.Context())
+	if err != nil || version != 1 || cfg.AdaptiveRankingEnabled() {
+		t.Fatalf("saved = toggle on? %v, version %d, err %v", cfg.AdaptiveRankingEnabled(), version, err)
+	}
+}
+
 func TestConfigSourceParsesActiveVersion(t *testing.T) {
 	s := openTestStore(t)
 	src := s.ConfigSource()

@@ -13,6 +13,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/DanielBlei/rabbithole/internal/feedback"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/profile"
 	"github.com/DanielBlei/rabbithole/internal/profilemgr"
@@ -30,6 +31,17 @@ type profileSettingsData struct {
 	Form       *profileFormData
 	Error      string
 	RunActive  bool
+	Adaptive   adaptiveRankingView
+}
+
+// adaptiveRankingView is the activity indicator beside the active profile.
+// State is the word shown on the chip; Detail explains what that means and how
+// many explicit ratings feed it.
+type adaptiveRankingView struct {
+	State  string
+	Detail string
+	Tone   string
+	Count  int
 }
 
 type profileRowData struct {
@@ -75,7 +87,10 @@ func (s *Web) profileSettings(ctx context.Context, form *profileFormData) profil
 		log.Error().Err(err).Msg("list profiles for settings")
 		return profileSettingsData{Error: "profiles unavailable: " + err.Error(), Form: form}
 	}
-	data := profileSettingsData{Form: form, RunActive: s.ing.Status().Running}
+	data := profileSettingsData{
+		Form: form, RunActive: s.ing.Status().Running,
+		Adaptive: s.adaptiveRankingView(ctx),
+	}
 	for _, item := range items {
 		data.Rows = append(data.Rows, profileRowData{
 			ID: item.ID, Name: item.Name, Builtin: item.Builtin, Active: item.Active,
@@ -88,6 +103,34 @@ func (s *Web) profileSettings(ctx context.Context, form *profileFormData) profil
 		data.ActiveName = profile.DefaultName
 	}
 	return data
+}
+
+// adaptiveRankingView reports whether explicit feedback will shape the next
+// score and how much explicit signal has accumulated. A store or config read
+// failure is logged and shown as unavailable rather than taking the page down.
+func (s *Web) adaptiveRankingView(ctx context.Context) adaptiveRankingView {
+	count, err := s.db.CountExplicitFeedback(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("count explicit feedback for settings")
+		return adaptiveRankingView{State: "Unavailable", Tone: "warn",
+			Detail: "Could not read the rating count."}
+	}
+	cfg, _, err := s.src.Active(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("read config for adaptive ranking indicator")
+		return adaptiveRankingView{State: "Unavailable", Tone: "warn", Count: count,
+			Detail: "Could not read the adaptive ranking setting."}
+	}
+	if !cfg.AdaptiveRankingEnabled() {
+		return adaptiveRankingView{State: "Off", Tone: "dim", Count: count,
+			Detail: "Profile-only scoring. Recorded ratings are not used."}
+	}
+	if count < feedback.MinExamples {
+		return adaptiveRankingView{State: "Collecting", Tone: "warn", Count: count,
+			Detail: fmt.Sprintf("%d of %d ratings needed to activate.", count, feedback.MinExamples)}
+	}
+	return adaptiveRankingView{State: "Active", Tone: "ok", Count: count,
+		Detail: "Future scores learn from your ratings."}
 }
 
 func (s *Web) handleProfileNew(w http.ResponseWriter, r *http.Request) {

@@ -23,6 +23,19 @@ const (
 	maxFeedbackScan = 500
 )
 
+// CountExplicitFeedback returns how many items carry an explicit thumbs-up or
+// thumbs-down rating. It counts the whole history, unlike RecentFeedback, which
+// is bounded for the prompt, so the UI can show how much signal has accumulated.
+func (s *Store) CountExplicitFeedback(ctx context.Context) (int, error) {
+	var n int
+	if err := s.queryRow(ctx,
+		"SELECT COUNT(*) FROM items WHERE user_score IN (10, 0)",
+	).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count explicit feedback: %w", err)
+	}
+	return n, nil
+}
+
 // RecentFeedback returns up to feedback.MaxExamples explicitly positive and
 // negative ratings, newest item date first. Publication date is preferred;
 // first-seen date is used when publication date is absent. Intermediate and

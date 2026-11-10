@@ -99,6 +99,25 @@ func TestSettingsSaveWritesOneVersionFromTheUI(t *testing.T) {
 	}
 }
 
+func TestSettingsSaveAdaptiveRankingToggle(t *testing.T) {
+	w, db := configTestWeb(t)
+	code, r := sendJSON(t, w, "/settings/save", formFor(t, db,
+		"adaptive_ranking", "false", "inference.provider", "heuristic"))
+	if code != http.StatusOK || !r.OK {
+		t.Fatalf("save = %d %+v", code, r)
+	}
+	if got := activeContent(t, db); !strings.Contains(got, "adaptive_ranking: false") {
+		t.Errorf("stored config lacks the off toggle:\n%s", got)
+	}
+	cfg, _, err := db.ConfigSource().Active(t.Context())
+	if err != nil {
+		t.Fatalf("Active: %v", err)
+	}
+	if cfg.AdaptiveRankingEnabled() {
+		t.Error("saved config still reports adaptive ranking on")
+	}
+}
+
 func TestSettingsSaveIdenticalToTheActiveConfigWritesNothing(t *testing.T) {
 	w, db := configTestWeb(t)
 	saveConfig(t, db, "inference:\n  provider: vllm\n  model: m\n", store.ConfigSourceUI, 0)
@@ -1151,8 +1170,8 @@ inference:
 		t.Fatalf("version = %d, want %d", got, before+1)
 	}
 	got := activeContent(t, db)
-	for _, key := range []string{"user", "provider", "host", "model", "api_key", "think", "effort", "batch_size",
-		"max_parallel", "structured_output", "system_prompt", "reason_max_chars"} {
+	for _, key := range []string{"user", "adaptive_ranking", "provider", "host", "model", "api_key", "think", "effort",
+		"batch_size", "max_parallel", "structured_output", "system_prompt", "reason_max_chars"} {
 		if strings.Contains(got, key) {
 			t.Errorf("stored config still pins %s: %q", key, got)
 		}

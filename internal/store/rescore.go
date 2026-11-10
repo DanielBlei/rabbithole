@@ -15,13 +15,16 @@ import (
 // ScoreReplacement is a completed replacement for an item's model-owned
 // scoring fields. User-owned state is deliberately absent.
 type ScoreReplacement struct {
-	ItemID      string
-	Score       int
-	Reason      string
-	Model       string
-	ProfileID   string
-	ProfileName string
-	ProfileHash string
+	ItemID           string
+	Score            int
+	Reason           string
+	Model            string
+	ProfileID        string
+	ProfileName      string
+	ProfileHash      string
+	FeedbackPositive int
+	FeedbackNegative int
+	FeedbackHash     string
 }
 
 // RecentScoredItems returns already-scored stored items whose publication
@@ -99,6 +102,7 @@ func (s *Store) ReplaceItemScores(
 	stmt, err := s.prepareTx(ctx, tx, `UPDATE items SET
 		llm_score = ?, llm_score_reason = ?, llm_score_model = ?,
 		llm_profile_id = ?, llm_profile_name = ?, llm_profile_hash = ?,
+		llm_feedback_positive = ?, llm_feedback_negative = ?, llm_feedback_hash = ?,
 		updated_at = ?
 		WHERE id = ?`)
 	if err != nil {
@@ -108,9 +112,16 @@ func (s *Store) ReplaceItemScores(
 
 	now := sqlTime(time.Now())
 	for _, replacement := range replacements {
+		var feedbackPositive, feedbackNegative, feedbackHash any
+		if replacement.FeedbackHash != "" {
+			feedbackPositive = replacement.FeedbackPositive
+			feedbackNegative = replacement.FeedbackNegative
+			feedbackHash = replacement.FeedbackHash
+		}
 		res, err := stmt.ExecContext(ctx,
 			replacement.Score, replacement.Reason, nullIfEmpty(replacement.Model),
 			replacement.ProfileID, replacement.ProfileName, replacement.ProfileHash,
+			feedbackPositive, feedbackNegative, feedbackHash,
 			now, replacement.ItemID,
 		)
 		if err != nil {

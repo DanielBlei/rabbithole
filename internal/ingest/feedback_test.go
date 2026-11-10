@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/feedback"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/profile"
 	"github.com/DanielBlei/rabbithole/internal/rank"
@@ -85,7 +86,7 @@ func TestLoadScoringContextIncludesExplicitRatings(t *testing.T) {
 	}
 	activeProfile := testProfile("top tier: local inference")
 
-	scoringContext, err := loadScoringContext(t.Context(), db, activeProfile, nil)
+	scoringContext, err := loadScoringContext(t.Context(), db, activeProfile, nil, true)
 	if err != nil {
 		t.Fatalf("loadScoringContext: %v", err)
 	}
@@ -124,7 +125,7 @@ func TestLoadScoringContextIgnoresModelScores(t *testing.T) {
 		t.Fatalf("Record: %v", err)
 	}
 
-	scoringContext, err := loadScoringContext(t.Context(), db, testProfile("profile"), nil)
+	scoringContext, err := loadScoringContext(t.Context(), db, testProfile("profile"), nil, true)
 	if err != nil {
 		t.Fatalf("loadScoringContext: %v", err)
 	}
@@ -144,7 +145,7 @@ func TestLoadScoringContextExcludesCandidates(t *testing.T) {
 	candidates := []feeds.Item{items[0], items[1], items[3]}
 	excluded := candidateKeys(candidates)
 
-	scoringContext, err := loadScoringContext(t.Context(), db, testProfile("profile"), candidates)
+	scoringContext, err := loadScoringContext(t.Context(), db, testProfile("profile"), candidates, true)
 	if err != nil {
 		t.Fatalf("loadScoringContext: %v", err)
 	}
@@ -171,7 +172,7 @@ func TestLoadScoringContextDeactivatesAfterCandidateExclusion(t *testing.T) {
 	seedRatedItems(t, db, items, map[string]int{"p1": 10, "p2": 10, "p3": 10})
 	candidates := []feeds.Item{items[0], items[1]}
 
-	scoringContext, err := loadScoringContext(t.Context(), db, testProfile("profile"), candidates)
+	scoringContext, err := loadScoringContext(t.Context(), db, testProfile("profile"), candidates, true)
 	if err != nil {
 		t.Fatalf("loadScoringContext: %v", err)
 	}
@@ -208,7 +209,7 @@ func TestLoadScoringContextBackfillsOlderFeedback(t *testing.T) {
 	})
 	candidates := items[len(items)-5:] // the five newest ratings are all being scored
 
-	scoringContext, err := loadScoringContext(t.Context(), db, testProfile("profile"), candidates)
+	scoringContext, err := loadScoringContext(t.Context(), db, testProfile("profile"), candidates, true)
 	if err != nil {
 		t.Fatalf("loadScoringContext: %v", err)
 	}
@@ -570,4 +571,193 @@ func TestRescoreBackfillsOlderFeedbackWhenNewestAreCandidates(t *testing.T) {
 			t.Errorf("positive feedback = %v, want older examples %v", got, want)
 		}
 	}
+}
+
+func TestRescoreRecordsFeedbackProvenance(t *testing.T) {
+	db := openFeedbackStore(t)
+	rated := feedbackItems()[:3]
+	seedRatedItems(t, db, rated, map[string]int{"p1": 10, "p2": 10, "p3": 10})
+	candidates := candidateItems()
+	if err := db.Record(t.Context(), candidates, nil, time.Now()); err != nil {
+		t.Fatalf("Record candidates: %v", err)
+	}
+
+	think := false
+	cfg := &config.Config{}
+	cfg.Inference.Think = &think
+	cfg.Inference.BatchSize = 6
+	cfg.Inference.MaxParallel = 1
+	snapshot := profile.NewSnapshot("p", "Profile", "top tier: local inference", false)
+	scorer := &capturingContextScorer{}
+	if _, err := rescoreItems(t.Context(), *cfg, snapshot, db, candidates, scorer); err != nil {
+		t.Fatalf("rescoreItems: %v", err)
+	}
+	contexts := scorer.captured()
+	if len(contexts) == 0 {
+		t.Fatal("scorer received no context")
+	}
+	row, err := db.Get(t.Context(), candidates[0].ID)
+	if err != nil {
+		t.Fatalf("Get rescored item: %v", err)
+	}
+	if row.LLMFeedbackPositive == nil || *row.LLMFeedbackPositive != 3 ||
+		row.LLMFeedbackNegative == nil || *row.LLMFeedbackNegative != 0 ||
+		row.LLMFeedbackHash == nil || *row.LLMFeedbackHash != contexts[0].Provenance().Hash {
+		t.Fatalf("rescore provenance = +%v -%v @%v, want 3/0/%s",
+			row.LLMFeedbackPositive, row.LLMFeedbackNegative, row.LLMFeedbackHash,
+			contexts[0].Provenance().Hash)
+	}
+}
+
+func TestLoadScoringContextDisabledIsProfileOnly(t *testing.T) {
+	db := openFeedbackStore(t)
+	seedRatedItems(t, db, feedbackItems(), map[string]int{
+		"p1": 10, "p2": 10, "p3": 10, "n1": 0, "n2": 0, "n3": 0,
+	})
+	activeProfile := testProfile("profile")
+	scoringContext, err := loadScoringContext(t.Context(), db, activeProfile, nil, false)
+	if err != nil {
+		t.Fatalf("loadScoringContext: %v", err)
+	}
+	if scoringContext.Feedback.Active() {
+		t.Fatalf("feedback = %+v, want none when adaptive ranking is off", scoringContext.Feedback)
+	}
+	items := feedbackItems()
+	got := rank.BuildUserPromptContext(scoringContext, items)
+	want := rank.BuildUserPrompt(activeProfile.Content, items)
+	if got != want {
+		t.Errorf("disabled toggle changed the prompt:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestRunDisablesAdaptiveFeedbackWhenOff(t *testing.T) {
+	host, prompts := newScoringServer(t)
+	link := "https://x.test/disabled-toggle"
+	cfg := testConfig(t, config.Feed{Name: "Feed", URL: serveRSS(t, feedRSS("New article", link))})
+	cfg.Inference.Provider = "vllm"
+	cfg.Inference.Host = host
+	cfg.Inference.Model = "test-model"
+	think := false
+	cfg.Inference.Think = &think
+	off := false
+	cfg.AdaptiveRanking = &off
+	db := openStore(t, cfg)
+
+	rated := []feeds.Item{
+		{ID: "rated-p1", Source: "Blog", Title: "Rated one", Link: "https://x.test/rated-1"},
+		{ID: "rated-p2", Source: "Blog", Title: "Rated two", Link: "https://x.test/rated-2"},
+		{ID: "rated-p3", Source: "Blog", Title: "Rated three", Link: "https://x.test/rated-3"},
+	}
+	if err := db.Record(t.Context(), rated, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	for _, item := range rated {
+		rating := 10
+		if err := db.UpdateUserState(t.Context(), item.ID, store.UserPatch{UserScore: &rating}); err != nil {
+			t.Fatalf("rate %s: %v", item.ID, err)
+		}
+	}
+
+	if _, err := Run(
+		t.Context(), cfg.Config, testProfile("profile"), db, time.Now(), Options{Record: true, Client: loopbackClient},
+	); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got := prompts()
+	if len(got) != 1 {
+		t.Fatalf("scoring prompts = %d, want 1", len(got))
+	}
+	if strings.Contains(got[0], "READER FEEDBACK") {
+		t.Errorf("disabled adaptive ranking sent feedback:\n%s", got[0])
+	}
+}
+
+func TestRunRecordsFeedbackProvenance(t *testing.T) {
+	host, _ := newScoringServer(t)
+	link := "https://x.test/provenance-candidate"
+	cfg := testConfig(t, config.Feed{Name: "Feed", URL: serveRSS(t, feedRSS("New article", link))})
+	cfg.Inference.Provider = "vllm"
+	cfg.Inference.Host = host
+	cfg.Inference.Model = "test-model"
+	think := false
+	cfg.Inference.Think = &think
+	db := openStore(t, cfg)
+
+	rated := []feeds.Item{
+		{ID: "rated-p1", Source: "Blog", Title: "Rated one", Link: "https://x.test/rated-1"},
+		{ID: "rated-p2", Source: "Blog", Title: "Rated two", Link: "https://x.test/rated-2"},
+		{ID: "rated-p3", Source: "Blog", Title: "Rated three", Link: "https://x.test/rated-3"},
+	}
+	if err := db.Record(t.Context(), rated, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	for _, item := range rated {
+		rating := 10
+		if err := db.UpdateUserState(t.Context(), item.ID, store.UserPatch{UserScore: &rating}); err != nil {
+			t.Fatalf("rate %s: %v", item.ID, err)
+		}
+	}
+
+	if _, err := Run(
+		t.Context(), cfg.Config, testProfile("profile"), db, time.Now(), Options{Record: true, Client: loopbackClient},
+	); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	row, err := db.Get(t.Context(), feedItemID(link))
+	if err != nil {
+		t.Fatalf("Get scored item: %v", err)
+	}
+	if row.LLMFeedbackPositive == nil || *row.LLMFeedbackPositive != 3 ||
+		row.LLMFeedbackNegative == nil || *row.LLMFeedbackNegative != 0 ||
+		row.LLMFeedbackHash == nil || len(*row.LLMFeedbackHash) != 64 {
+		t.Fatalf("provenance = +%d -%d @%v, want 3/0 and a 64-character hash",
+			intValue(row.LLMFeedbackPositive), intValue(row.LLMFeedbackNegative), strValue(row.LLMFeedbackHash))
+	}
+	examples, err := db.RecentFeedback(t.Context())
+	if err != nil {
+		t.Fatalf("RecentFeedback: %v", err)
+	}
+	if want := feedback.Select(examples).Hash(); *row.LLMFeedbackHash != want {
+		t.Errorf("provenance hash = %q, want selection hash %q", *row.LLMFeedbackHash, want)
+	}
+}
+
+func TestRunRecordsNoProvenanceWithoutFeedback(t *testing.T) {
+	host, _ := newScoringServer(t)
+	link := "https://x.test/no-provenance"
+	cfg := testConfig(t, config.Feed{Name: "Feed", URL: serveRSS(t, feedRSS("New article", link))})
+	cfg.Inference.Provider = "vllm"
+	cfg.Inference.Host = host
+	cfg.Inference.Model = "test-model"
+	think := false
+	cfg.Inference.Think = &think
+	db := openStore(t, cfg)
+
+	if _, err := Run(
+		t.Context(), cfg.Config, testProfile("profile"), db, time.Now(), Options{Record: true, Client: loopbackClient},
+	); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	row, err := db.Get(t.Context(), feedItemID(link))
+	if err != nil {
+		t.Fatalf("Get scored item: %v", err)
+	}
+	if row.LLMFeedbackPositive != nil || row.LLMFeedbackNegative != nil || row.LLMFeedbackHash != nil {
+		t.Fatalf("profile-only score carries provenance = +%v -%v @%v",
+			row.LLMFeedbackPositive, row.LLMFeedbackNegative, row.LLMFeedbackHash)
+	}
+}
+
+func intValue(v *int) int {
+	if v == nil {
+		return -1
+	}
+	return *v
+}
+
+func strValue(v *string) string {
+	if v == nil {
+		return "<nil>"
+	}
+	return *v
 }
