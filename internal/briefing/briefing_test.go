@@ -82,6 +82,20 @@ type fakeProfiles struct{ snap profile.Snapshot }
 
 func (f fakeProfiles) Resolve(context.Context) (profile.Snapshot, error) { return f.snap, nil }
 
+// blockingProfiles stalls Resolve until release closes. It puts a caller
+// deterministically inside the single-flight window after the flight is taken
+// but before the generating row is persisted.
+type blockingProfiles struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b blockingProfiles) Resolve(context.Context) (profile.Snapshot, error) {
+	close(b.entered)
+	<-b.release
+	return profile.Default(), nil
+}
+
 type fakeGenerator struct {
 	mu      sync.Mutex
 	replies []string
@@ -282,6 +296,9 @@ func TestPromptConstruction(t *testing.T) {
 }
 
 func TestParseValidation(t *testing.T) {
+	// MaxEmergingTopics+1 topics: the Go-side backstop for providers that
+	// ignore the schema's maxItems.
+	overTopics := "[" + strings.TrimSuffix(strings.Repeat(`"t",`, MaxEmergingTopics+1), ",") + "]"
 	tests := []struct {
 		name string
 		raw  string
@@ -289,6 +306,11 @@ func TestParseValidation(t *testing.T) {
 	}{
 		{"valid", validJSON(), ""},
 		{"fenced", "```json\n" + validJSON() + "\n```", ""},
+		{
+			"missing emerging topics is valid",
+			`{"executive_summary":"s","developments":[{"headline":"h","synthesis":"x","why_it_matters":"w","item_ids":[1]}],"recommended_reading":[]}`,
+			"",
+		},
 		{
 			"invented id",
 			`{"executive_summary":"s","developments":[{"headline":"h","synthesis":"x","why_it_matters":"w","item_ids":[9]}],"recommended_reading":[]}`,
@@ -308,6 +330,11 @@ func TestParseValidation(t *testing.T) {
 			"over cap",
 			`{"executive_summary":"s","developments":[{"headline":"h","synthesis":"x","why_it_matters":"w","item_ids":[1]},{"headline":"h","synthesis":"x","why_it_matters":"w","item_ids":[1]},{"headline":"h","synthesis":"x","why_it_matters":"w","item_ids":[1]}],"recommended_reading":[]}`,
 			"cap is 2",
+		},
+		{
+			"over emerging topics cap",
+			`{"executive_summary":"s","developments":[{"headline":"h","synthesis":"x","why_it_matters":"w","item_ids":[1]}],"emerging_topics":` + overTopics + `,"recommended_reading":[]}`,
+			"emerging_topics has",
 		},
 		{"empty summary", `{"executive_summary":" ","developments":[],"recommended_reading":[]}`, "empty"},
 		{
@@ -330,6 +357,37 @@ func TestParseValidation(t *testing.T) {
 				t.Fatalf("error = %v, want substring %q", err, tt.want)
 			}
 		})
+	}
+}
+
+// TestSchemaCapsEmergingTopicsIndependently pins the review fix: the
+// emerging_topics cap must be its own constant, not a reuse of
+// max_developments.
+func TestSchemaCapsEmergingTopicsIndependently(t *testing.T) {
+	var s struct {
+		Properties struct {
+			Developments struct {
+				MaxItems int `json:"maxItems"`
+			} `json:"developments"`
+			EmergingTopics struct {
+				MaxItems int `json:"maxItems"`
+			} `json:"emerging_topics"`
+			RecommendedReading struct {
+				MaxItems int `json:"maxItems"`
+			} `json:"recommended_reading"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(Schema(1, 1), &s); err != nil {
+		t.Fatalf("unmarshal schema: %v", err)
+	}
+	p := s.Properties
+	if p.Developments.MaxItems != 1 || p.RecommendedReading.MaxItems != 1 {
+		t.Errorf("developments/recommended_reading maxItems = %d/%d, want 1/1",
+			p.Developments.MaxItems, p.RecommendedReading.MaxItems)
+	}
+	if p.EmergingTopics.MaxItems != MaxEmergingTopics {
+		t.Errorf("emerging_topics maxItems = %d, want the independent cap %d",
+			p.EmergingTopics.MaxItems, MaxEmergingTopics)
 	}
 }
 
@@ -496,6 +554,120 @@ func TestSingleFlightReturnsGeneratingState(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("briefing never became ready: %q", got.Status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestStartJoinerSeesGeneratingBeforePersist pins the review fix for the
+// single-flight race: in the window between taking the flight and persisting
+// the generating row, a joining Start must return the generating state (with
+// the row's deterministic ID) rather than leaving the caller to re-query a
+// store that has nothing yet.
+func TestStartJoinerSeesGeneratingBeforePersist(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	// No items: once released, the owner finishes without any model call.
+	st := newFakeStore()
+	svc := New(st, blockingProfiles{entered: entered, release: release},
+		func(context.Context) (Generator, error) {
+			t.Error("generator must not be called on the joiner path")
+			return nil, errors.New("unreachable")
+		})
+	start := time.Date(2026, 1, 6, 0, 0, 0, 0, time.UTC)
+	ctx := context.Background()
+
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		if _, err := svc.Start(ctx, "daily", start, options()); err != nil {
+			t.Errorf("owner Start: %v", err)
+		}
+	}()
+	<-entered // the owner holds the flight; no row exists yet
+
+	joined, err := svc.Start(ctx, "daily", start, options())
+	if err != nil {
+		t.Fatalf("joining Start: %v", err)
+	}
+	if joined.Status != store.BriefingGenerating {
+		t.Fatalf("joining Start status = %q, want generating", joined.Status)
+	}
+	if joined.ID == "" {
+		t.Fatal("joining Start returned no ID: a panel cannot render the generating state from it")
+	}
+	if joined.ID != briefingID(Period{Kind: "daily", Start: start}) {
+		t.Errorf("joining Start ID = %q, want the deterministic period ID", joined.ID)
+	}
+	if st.saveCount() != 0 {
+		t.Fatalf("saves = %d, want 0 while the owner is still inside its pre-persist window", st.saveCount())
+	}
+
+	close(release)
+	<-firstDone
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if got := st.get("daily", start); got.Status == store.BriefingReady {
+			break
+		} else if time.Now().After(deadline) {
+			t.Fatalf("briefing never became ready: %q", got.Status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestStateReportsInFlightRun pins the read side of the single flight: while
+// a run holds the flight, State reports the period as generating even before
+// the first row is persisted, and the store's row once the run finishes. A
+// period with no run and no row stays a plain not-found.
+func TestStateReportsInFlightRun(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	// No items: once released, the owner finishes without any model call.
+	st := newFakeStore()
+	svc := New(st, blockingProfiles{entered: entered, release: release},
+		func(context.Context) (Generator, error) {
+			t.Error("generator must not be called for State")
+			return nil, errors.New("unreachable")
+		})
+	start := time.Date(2026, 1, 6, 0, 0, 0, 0, time.UTC)
+	ctx := context.Background()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := svc.Start(ctx, "daily", start, options()); err != nil {
+			t.Errorf("owner Start: %v", err)
+		}
+	}()
+	<-entered // the owner holds the flight; no row exists yet
+
+	b, err := svc.State(ctx, "daily", start)
+	if err != nil {
+		t.Fatalf("State during flight: %v", err)
+	}
+	if b.Status != store.BriefingGenerating {
+		t.Fatalf("State during flight status = %q, want generating", b.Status)
+	}
+	if b.ID != briefingID(Period{Kind: "daily", Start: start}) {
+		t.Errorf("State during flight ID = %q, want the deterministic period ID", b.ID)
+	}
+	if st.saveCount() != 0 {
+		t.Fatalf("saves = %d, want 0 while the owner is still inside its pre-persist window", st.saveCount())
+	}
+	if _, err := svc.State(ctx, "daily", start.AddDate(0, 0, -1)); !errors.Is(err, store.ErrBriefingNotFound) {
+		t.Fatalf("State for a quiet period = %v, want ErrBriefingNotFound", err)
+	}
+
+	close(release)
+	<-done
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		b, err := svc.State(ctx, "daily", start)
+		if err == nil && b.Status == store.BriefingReady {
+			break
+		} else if time.Now().After(deadline) {
+			t.Fatalf("State never became ready: %+v %v", b, err)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

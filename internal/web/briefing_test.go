@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/DanielBlei/rabbithole/internal/briefing"
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
+	"github.com/DanielBlei/rabbithole/internal/profile"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
@@ -373,6 +376,198 @@ func TestBriefingGenerateSingleFlightAcrossRequests(t *testing.T) {
 			t.Fatalf("briefing never became ready: %+v %v", b, err)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// blockingWebProfiles stalls profile resolution so a generate request sits
+// deterministically inside the single-flight window after the flight is taken
+// but before the generating row is persisted.
+type blockingWebProfiles struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b blockingWebProfiles) Resolve(context.Context) (profile.Snapshot, error) {
+	close(b.entered)
+	<-b.release
+	return profile.Default(), nil
+}
+
+// TestBriefingGenerateRendersGeneratingDuringPrePersistWindow pins the web
+// half of the single-flight fix: the generate response renders from
+// svc.Start's return value, so a request that joins an in-flight generation
+// inside the pre-persistence window gets the generating panel, not the "No
+// briefing is stored" empty state with an active Generate button.
+func TestBriefingGenerateRendersGeneratingDuringPrePersistWindow(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	gen := &blockingGenerator{reply: webBriefingJSON}
+	w := newBriefingWeb(t, gen)
+	w.briefingSvc = briefing.New(w.db, blockingWebProfiles{entered: entered, release: release},
+		func(context.Context) (briefing.Generator, error) { return gen, nil })
+
+	form := url.Values{"kind": {"daily"}, "period": {briefingToday()}}
+	newRequest := func() *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/briefing/generate", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return req
+	}
+
+	first := httptest.NewRecorder()
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		w.Routes().ServeHTTP(first, newRequest())
+	}()
+	<-entered // the owner holds the flight; no generating row exists yet
+
+	second := httptest.NewRecorder()
+	w.Routes().ServeHTTP(second, newRequest())
+	if second.Code != http.StatusOK {
+		t.Fatalf("joining generate status = %d; body=%s", second.Code, second.Body)
+	}
+	body := second.Body.String()
+	if !strings.Contains(body, "Generating this briefing") {
+		t.Errorf("joining request did not receive the generating panel:\n%s", body)
+	}
+	if strings.Contains(body, "No briefing is stored for this period yet") {
+		t.Errorf("joining request received the empty state:\n%s", body)
+	}
+	if !strings.Contains(body, `type="submit" disabled`) {
+		t.Errorf("joining request left the Generate button enabled:\n%s", body)
+	}
+
+	close(release)
+	<-firstDone
+	start, _ := time.ParseInLocation("2006-01-02", briefingToday(), time.UTC)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		b, err := w.db.BriefingForPeriod(context.Background(), "daily", start)
+		if err == nil && b.Status == store.BriefingReady {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("briefing never became ready: %+v %v", b, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestBriefingStatusShowsGeneratingDuringPrePersistWindow pins the read half
+// of the single-flight fix: the status poll and the page render consult the
+// service's in-memory state, so a reader that arrives during the window
+// before the owner's first write still sees the generating panel instead of
+// the empty state with an active Generate button.
+func TestBriefingStatusShowsGeneratingDuringPrePersistWindow(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	gen := &blockingGenerator{reply: webBriefingJSON}
+	w := newBriefingWeb(t, gen)
+	w.briefingSvc = briefing.New(w.db, blockingWebProfiles{entered: entered, release: release},
+		func(context.Context) (briefing.Generator, error) { return gen, nil })
+
+	form := url.Values{"kind": {"daily"}, "period": {briefingToday()}}
+	owner := httptest.NewRequest(http.MethodPost, "/briefing/generate", strings.NewReader(form.Encode()))
+	owner.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	first := httptest.NewRecorder()
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		w.Routes().ServeHTTP(first, owner)
+	}()
+	<-entered // the owner holds the flight; no generating row exists yet
+
+	readers := []struct{ name, path string }{
+		{"status poll", "/briefing/status?kind=daily&period=" + briefingToday()},
+		{"page", "/briefing?kind=daily&period=" + briefingToday()},
+	}
+	for _, rd := range readers {
+		rec := httptest.NewRecorder()
+		w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, rd.path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d; body=%s", rd.name, rec.Code, rec.Body)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "Generating this briefing") {
+			t.Errorf("%s did not receive the generating panel:\n%s", rd.name, body)
+		}
+		if strings.Contains(body, "No briefing is stored for this period yet") {
+			t.Errorf("%s received the empty state:\n%s", rd.name, body)
+		}
+		if !strings.Contains(body, `type="submit" disabled`) {
+			t.Errorf("%s left the Generate button enabled:\n%s", rd.name, body)
+		}
+	}
+
+	close(release)
+	<-firstDone
+	start, _ := time.ParseInLocation("2006-01-02", briefingToday(), time.UTC)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		b, err := w.db.BriefingForPeriod(context.Background(), "daily", start)
+		if err == nil && b.Status == store.BriefingReady {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("briefing never became ready: %+v %v", b, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// The poll converges on the stored result once the run finishes.
+	rec := httptest.NewRecorder()
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/briefing/status?kind=daily&period="+briefingToday(), nil))
+	if !strings.Contains(rec.Body.String(), "One article mattered.") {
+		t.Errorf("status after completion did not render the briefing:\n%s", rec.Body)
+	}
+}
+
+// TestBriefingRestartRecoveryRendersRetry pins the UI half of the restart
+// recovery: after the boot sweep (cmd/serve.go runs it before serving, and
+// aborts the boot when it fails) fails a row a previous process left
+// generating, the page explains the interruption and offers a retry instead
+// of polling a generation that can never finish.
+func TestBriefingRestartRecoveryRendersRetry(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "restart.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.Record(context.Background(),
+		[]feeds.Item{{ID: "a", Source: "S1", Title: "A", Link: "https://x/a"}},
+		nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	start := time.Date(2026, 1, 6, 0, 0, 0, 0, time.UTC)
+	if _, err := db.SaveBriefing(context.Background(), store.Briefing{
+		ID: "briefing-orphaned", PeriodKind: "daily",
+		PeriodStart: start, PeriodEnd: start.AddDate(0, 0, 1),
+		Status: store.BriefingGenerating, ItemCount: 3,
+	}); err != nil {
+		t.Fatalf("SaveBriefing: %v", err)
+	}
+
+	// The boot step serve performs before serving, over the same database.
+	if n, err := db.RecoverInterruptedBriefings(context.Background()); err != nil || n != 1 {
+		t.Fatalf("RecoverInterruptedBriefings = (%d, %v), want (1, nil)", n, err)
+	}
+	w := New(db, config.Static{}, testIngestManager(t, db))
+
+	rec := httptest.NewRecorder()
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/briefing?kind=daily&period=2026-01-06", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /briefing status = %d; body=%s", rec.Code, rec.Body)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "could not be generated") {
+		t.Errorf("recovered row did not render as failed:\n%s", body)
+	}
+	if !strings.Contains(body, "generation was interrupted") {
+		t.Errorf("recovered row lost the retry hint:\n%s", body)
+	}
+	if !strings.Contains(body, ">Try again<") {
+		t.Errorf("recovered row offers no retry:\n%s", body)
 	}
 }
 

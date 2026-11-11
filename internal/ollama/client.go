@@ -283,7 +283,9 @@ func (c *Client) ChatJSON(
 		Options:  opts,
 		Messages: messages,
 	}
-	if len(schema) > 0 {
+	// The same escape hatch as scoring: providers/models that reject a compiled
+	// JSON-schema grammar get the shape from the system prompt alone.
+	if len(schema) > 0 && !c.tuning.Unconstrained {
 		req.Format = schema
 	}
 	c.setThink(req)

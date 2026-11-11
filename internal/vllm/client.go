@@ -360,14 +360,19 @@ func (c *Client) ChatJSON(
 		Stream:   false,
 		tokenCap: c.tokenCap(maxTokens),
 		Messages: messages,
-		ResponseFormat: &responseFormat{
+	}
+	// The same escape hatch as scoring: providers/models that reject strict
+	// json_schema mode get the shape from the system prompt alone. An empty
+	// schema also omits it, so the request never carries a null schema.
+	if len(schema) > 0 && !c.tuning.Unconstrained {
+		reqBody.ResponseFormat = &responseFormat{
 			Type: "json_schema",
 			JSONSchema: &jsonSchema{
 				Name:   "briefing",
 				Strict: true,
 				Schema: schema,
 			},
-		},
+		}
 	}
 	switch {
 	case c.flavor == OpenAI:

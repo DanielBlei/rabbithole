@@ -90,6 +90,12 @@ func (o Options) withDefaults() Options {
 	o.MaxArticles = b.MaxArticles
 	o.MaxDevelopments = b.MaxDevelopments
 	o.RecommendedReads = b.RecommendedReads
+	// The config boundary rejects over-limit values, but Options can also be
+	// built programmatically from a config that was never validated; the caps
+	// keep the run inside what the store and schema accept.
+	o.MaxArticles = min(o.MaxArticles, config.MaxBriefingArticles)
+	o.MaxDevelopments = min(o.MaxDevelopments, config.MaxBriefingDevelopments)
+	o.RecommendedReads = min(o.RecommendedReads, config.MaxBriefingRecommendedReads)
 	if o.MaxOutputTokens <= 0 {
 		o.MaxOutputTokens = DefaultMaxOutputTokens
 	}
@@ -203,6 +209,26 @@ func (s *Service) Start(ctx context.Context, kind string, periodStart time.Time,
 	return b, nil
 }
 
+// State returns the authoritative state of one period's briefing: a run that
+// holds the single flight is reported as generating even before its first row
+// is persisted, so a reader never sees an empty state while generation is
+// active. With no active run it is exactly the store's row, or
+// store.ErrBriefingNotFound. periodStart is resolved through PeriodAt, so any
+// date inside the period names it.
+func (s *Service) State(ctx context.Context, kind string, periodStart time.Time) (store.Briefing, error) {
+	period, err := PeriodAt(kind, periodStart)
+	if err != nil {
+		return store.Briefing{}, err
+	}
+	s.mu.Lock()
+	running := s.running[flightKey(period)]
+	s.mu.Unlock()
+	if !running {
+		return s.store.BriefingForPeriod(ctx, period.Kind, period.Start)
+	}
+	return s.joinerRow(ctx, period)
+}
+
 type runState struct {
 	period  Period
 	profile profile.Snapshot
@@ -234,18 +260,12 @@ func (s *Service) begin(
 	if err != nil {
 		return nil, store.Briefing{}, err
 	}
-	key := period.Kind + "|" + period.Start.Format(time.RFC3339)
+	key := flightKey(period)
 
 	s.mu.Lock()
 	if s.running[key] {
 		s.mu.Unlock()
-		b, err := s.store.BriefingForPeriod(ctx, period.Kind, period.Start)
-		if errors.Is(err, store.ErrBriefingNotFound) {
-			return nil, store.Briefing{
-				PeriodKind: period.Kind, PeriodStart: period.Start, PeriodEnd: period.End,
-				Status: store.BriefingGenerating,
-			}, nil
-		}
+		b, err := s.joinerRow(ctx, period)
 		return nil, b, err
 	}
 	s.running[key] = true
@@ -341,6 +361,27 @@ func (s *Service) fail(ctx context.Context, b store.Briefing, cause error) (stor
 	return saved, fmt.Errorf("%w: %w", ErrGenerationFailed, cause)
 }
 
+// flightKey identifies the single flight for one period.
+func flightKey(p Period) string {
+	return p.Kind + "|" + p.Start.Format(time.RFC3339)
+}
+
+// joinerRow is what a reader concurrent with an active run sees: the run's
+// persisted row once its first write has landed, or the synthetic generating
+// row — carrying the same deterministic ID the owner is about to save — in
+// the window before that write.
+func (s *Service) joinerRow(ctx context.Context, period Period) (store.Briefing, error) {
+	b, err := s.store.BriefingForPeriod(ctx, period.Kind, period.Start)
+	if errors.Is(err, store.ErrBriefingNotFound) {
+		return store.Briefing{
+			ID:         briefingID(period),
+			PeriodKind: period.Kind, PeriodStart: period.Start, PeriodEnd: period.End,
+			Status: store.BriefingGenerating,
+		}, nil
+	}
+	return b, err
+}
+
 func briefingID(p Period) string {
 	sum := sha256.Sum256([]byte(p.Kind + "|" + p.Start.UTC().Format(time.RFC3339)))
 	return "briefing-" + hex.EncodeToString(sum[:12])
@@ -421,6 +462,10 @@ func (b Briefing) validate(maxItem, maxDevelopments, recommendedReads int) error
 	if len(b.RecommendedReading) > recommendedReads {
 		return fmt.Errorf("recommended_reading has %d entries, cap is %d",
 			len(b.RecommendedReading), recommendedReads)
+	}
+	if len(b.EmergingTopics) > MaxEmergingTopics {
+		return fmt.Errorf("emerging_topics has %d entries, cap is %d",
+			len(b.EmergingTopics), MaxEmergingTopics)
 	}
 	for i, d := range b.Developments {
 		if strings.TrimSpace(d.Headline) == "" || strings.TrimSpace(d.Synthesis) == "" {

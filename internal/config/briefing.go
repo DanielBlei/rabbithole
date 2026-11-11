@@ -23,7 +23,9 @@ type BriefingConfig struct {
 }
 
 // WithDefaults returns b with every unset or non-positive field replaced by its
-// default. Values above the hard caps are pulled back to them.
+// default. Values above the hard caps are left alone here and rejected by
+// validate when the config is loaded, so an over-limit import is an error
+// rather than a silent clamp.
 func (b BriefingConfig) WithDefaults() BriefingConfig {
 	if b.MaxArticles <= 0 {
 		b.MaxArticles = DefaultBriefingMaxArticles
@@ -34,9 +36,6 @@ func (b BriefingConfig) WithDefaults() BriefingConfig {
 	if b.RecommendedReads <= 0 {
 		b.RecommendedReads = DefaultBriefingRecommendedReads
 	}
-	b.MaxArticles = min(b.MaxArticles, MaxBriefingArticles)
-	b.MaxDevelopments = min(b.MaxDevelopments, MaxBriefingDevelopments)
-	b.RecommendedReads = min(b.RecommendedReads, MaxBriefingRecommendedReads)
 	return b
 }
 

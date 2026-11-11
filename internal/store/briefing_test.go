@@ -148,3 +148,56 @@ func TestBriefingItemsAreBoundedAndScored(t *testing.T) {
 		t.Error("over-cap limit accepted")
 	}
 }
+
+// TestRecoverInterruptedBriefings pins the startup recovery policy: only rows
+// still generating are failed (with the retry-hint error), terminal rows are
+// untouched, and a second sweep is a no-op.
+func TestRecoverInterruptedBriefings(t *testing.T) {
+	db := openTestStore(t)
+	ctx := context.Background()
+	start := time.Date(2026, 1, 6, 0, 0, 0, 0, time.UTC)
+	save := func(id string, offset int, status string) {
+		t.Helper()
+		s := start.AddDate(0, 0, offset)
+		if _, err := db.SaveBriefing(ctx, Briefing{
+			ID: id, PeriodKind: "daily", PeriodStart: s, PeriodEnd: s.AddDate(0, 0, 1),
+			Status: status,
+		}); err != nil {
+			t.Fatalf("SaveBriefing(%s): %v", id, err)
+		}
+	}
+	save("briefing-generating", 0, BriefingGenerating)
+	save("briefing-generating-2", 1, BriefingGenerating)
+	save("briefing-ready", 2, BriefingReady)
+	save("briefing-failed", 3, BriefingFailed)
+
+	n, err := db.RecoverInterruptedBriefings(ctx)
+	if err != nil {
+		t.Fatalf("RecoverInterruptedBriefings: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("recovered = %d, want 2", n)
+	}
+
+	recovered, err := db.BriefingForPeriod(ctx, "daily", start)
+	if err != nil {
+		t.Fatalf("BriefingForPeriod: %v", err)
+	}
+	if recovered.Status != BriefingFailed {
+		t.Errorf("recovered status = %q, want failed", recovered.Status)
+	}
+	if recovered.Error != interruptedBriefingError {
+		t.Errorf("recovered error = %q, want the retry hint", recovered.Error)
+	}
+	ready, err := db.BriefingForPeriod(ctx, "daily", start.AddDate(0, 0, 2))
+	if err != nil {
+		t.Fatalf("BriefingForPeriod(ready): %v", err)
+	}
+	if ready.Status != BriefingReady || ready.Error != "" {
+		t.Errorf("ready row was touched: %+v", ready)
+	}
+
+	if n, err := db.RecoverInterruptedBriefings(ctx); err != nil || n != 0 {
+		t.Errorf("second sweep recovered = (%d, %v), want (0, nil)", n, err)
+	}
+}

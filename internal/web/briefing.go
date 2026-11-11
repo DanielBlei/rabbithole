@@ -70,7 +70,9 @@ func (s *Web) handleBriefing(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	stored, err := s.db.BriefingForPeriod(r.Context(), period.Kind, period.Start)
+	// The service's state, not a bare store read: a run that has taken the
+	// single flight but not persisted its row yet still renders as generating.
+	stored, err := s.briefingSvc.State(r.Context(), period.Kind, period.Start)
 	if err != nil && !errors.Is(err, store.ErrBriefingNotFound) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -114,17 +116,16 @@ func (s *Web) handleBriefingGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := briefingOptions(cfg)
-	if _, err := svc.Start(r.Context(), period.Kind, period.Start, opts); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	stored, err := s.db.BriefingForPeriod(r.Context(), period.Kind, period.Start)
-	if err != nil && !errors.Is(err, store.ErrBriefingNotFound) {
+	// The panel renders from Start's return value, never a store re-query: a
+	// request that joins an in-flight generation gets the generating state
+	// directly, even in the window before the owner has persisted its row.
+	b, err := svc.Start(r.Context(), period.Kind, period.Start, opts)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := briefingTmpl.ExecuteTemplate(w, "briefingPanel", briefingPanelFor(period, stored)); err != nil {
+	if err := briefingTmpl.ExecuteTemplate(w, "briefingPanel", briefingPanelFor(period, b)); err != nil {
 		log.Error().Err(err).Msg("render briefing generating panel")
 	}
 }
@@ -135,7 +136,10 @@ func (s *Web) handleBriefingStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	stored, err := s.db.BriefingForPeriod(r.Context(), period.Kind, period.Start)
+	// The service's state, not a bare store read: a poll that lands during
+	// the window before the owner's first write still renders the generating
+	// panel instead of flipping to the empty state.
+	stored, err := s.briefingSvc.State(r.Context(), period.Kind, period.Start)
 	if err != nil && !errors.Is(err, store.ErrBriefingNotFound) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

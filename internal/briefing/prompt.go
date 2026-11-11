@@ -67,7 +67,14 @@ func excerpt(s string, limit int) string {
 	return strings.TrimSpace(string(runes[:limit])) + "…"
 }
 
-// Schema is the provider-enforced output shape, with the caps baked in.
+// MaxEmergingTopics bounds the emerging_topics list. It deliberately has no
+// configuration knob: it only backstops the schema's maxItems for providers
+// that ignore it, so it is sized once from the same ceiling as the other
+// briefing lists rather than coupled to max_developments.
+const MaxEmergingTopics = 20
+
+// Schema is the provider-enforced output shape, with the caps baked in. The
+// emerging_topics cap is independent of maxDevelopments.
 func Schema(maxDevelopments, recommendedReads int) json.RawMessage {
 	return json.RawMessage(fmt.Sprintf(`{
   "type": "object",
@@ -102,5 +109,5 @@ func Schema(maxDevelopments, recommendedReads int) json.RawMessage {
   },
   "required": ["executive_summary", "developments", "recommended_reading"],
   "additionalProperties": false
-}`, maxDevelopments, maxDevelopments, recommendedReads))
+}`, maxDevelopments, MaxEmergingTopics, recommendedReads))
 }

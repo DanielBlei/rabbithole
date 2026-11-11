@@ -4,12 +4,14 @@
 package inference
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DanielBlei/rabbithole/internal/briefing"
 	"github.com/DanielBlei/rabbithole/internal/config"
@@ -149,10 +151,15 @@ func TestResolveExpandsAPIKeyReferences(t *testing.T) {
 }
 
 func TestResolveBriefing(t *testing.T) {
-	for _, tt := range []struct{ provider, model string }{{"ollama", "m:latest"}, {"openai", "m"}, {"vllm", "m"}} {
+	for _, tt := range []struct{ provider, model, list string }{
+		{"ollama", "m:latest", `{"models":[{"model":"m:latest"}]}`},
+		{"openai", "m", `{"data":[{"id":"m"}]}`},
+		{"vllm", "m", `{"data":[{"id":"m"}]}`},
+	} {
 		provider := tt.provider
-		t.Run(provider+" builds a generator without a probe", func(t *testing.T) {
-			cfg := config.InferenceConfig{Provider: provider, Host: "http://127.0.0.1:1", Model: tt.model}
+		t.Run(provider+" builds a generator through the validation probe", func(t *testing.T) {
+			host := serveJSON(t, tt.list)
+			cfg := config.InferenceConfig{Provider: provider, Host: host, Model: tt.model}
 			gen, err := ResolveBriefing(t.Context(), cfg, false)
 			if err != nil {
 				t.Fatalf("ResolveBriefing: %v", err)
@@ -162,6 +169,19 @@ func TestResolveBriefing(t *testing.T) {
 			}
 		})
 	}
+	t.Run("an unreachable backend fails here, not as a persisted briefing", func(t *testing.T) {
+		// A closed port with no listener fails the probe with connection
+		// refused; the validator would back off for ~90s before giving up, so
+		// the test's deadline cuts the wait and still proves the failure
+		// surfaces from ResolveBriefing itself.
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		cfg := config.InferenceConfig{Provider: "vllm", Host: "http://127.0.0.1:1", Model: "m"}
+		_, err := ResolveBriefing(ctx, cfg, false)
+		if err == nil || !strings.Contains(err.Error(), "backend validation") {
+			t.Fatalf("ResolveBriefing() error = %v, want a backend validation error", err)
+		}
+	})
 	t.Run("heuristic is unavailable", func(t *testing.T) {
 		gen, err := ResolveBriefing(t.Context(), config.InferenceConfig{Provider: "heuristic"}, false)
 		if gen != nil || !errors.Is(err, briefing.ErrBriefingUnavailable) {
@@ -173,4 +193,39 @@ func TestResolveBriefing(t *testing.T) {
 			t.Fatal("unknown provider accepted")
 		}
 	})
+}
+
+// TestResolveBriefingHonoursStructuredOutput pins the review fix: the briefing
+// generator must be negotiated with the same capability derivation as scoring,
+// so inference.structured_output: false reaches the client instead of being
+// silently ignored while the schema is enforced anyway.
+func TestResolveBriefingHonoursStructuredOutput(t *testing.T) {
+	for _, structured := range []bool{true, false} {
+		var synthesis map[string]any
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if r.Method == http.MethodGet {
+				_, _ = w.Write([]byte(`{"data":[{"id":"llama3"}]}`))
+				return
+			}
+			_ = json.NewDecoder(r.Body).Decode(&synthesis)
+			_, _ = w.Write([]byte(
+				`{"choices":[{"message":{"content":"{\"ok\":true}"},"finish_reason":"stop"}],"usage":{"completion_tokens":3}}`,
+			))
+		}))
+		t.Cleanup(srv.Close)
+
+		cfg := config.InferenceConfig{Provider: "vllm", Host: srv.URL, Model: "llama3", StructuredOutput: &structured}
+		gen, err := ResolveBriefing(t.Context(), cfg, true)
+		if err != nil {
+			t.Fatalf("ResolveBriefing(structured=%v): %v", structured, err)
+		}
+		if _, err := gen.ChatJSON(t.Context(), "system", "user",
+			json.RawMessage(`{"type":"object"}`), 64); err != nil {
+			t.Fatalf("ChatJSON(structured=%v): %v", structured, err)
+		}
+		if _, sent := synthesis["response_format"]; sent != structured {
+			t.Errorf("structured_output=%v: response_format sent = %v", structured, sent)
+		}
+	}
 }

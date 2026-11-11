@@ -27,6 +27,11 @@ const MaxBriefingItems = 100
 // ErrBriefingNotFound is returned when no briefing exists for a period.
 var ErrBriefingNotFound = errors.New("briefing not found")
 
+// interruptedBriefingError is stored on rows recovered by
+// RecoverInterruptedBriefings. The failed-state panel shows it verbatim, so it
+// is phrased for the reader and names the retry path.
+const interruptedBriefingError = "generation was interrupted before it finished (the server restarted while this briefing was being written); generate again to retry"
+
 // Briefing is one persisted period briefing plus the provenance of the run
 // that produced it.
 type Briefing struct {
@@ -160,6 +165,31 @@ func (s *Store) SaveBriefing(ctx context.Context, b Briefing) (Briefing, error) 
 		return Briefing{}, fmt.Errorf("save briefing: %w", err)
 	}
 	return s.BriefingForPeriod(ctx, b.PeriodKind, b.PeriodStart)
+}
+
+// RecoverInterruptedBriefings fails every briefing still marked generating
+// and returns how many it recovered.
+//
+// Recovery policy: generation runs in one process and every briefing row is
+// written from that process, so a row still generating after startup belongs
+// to a run that died with its process and can never finish. The sweep runs
+// once at startup, before this process can serve a generate request, so it
+// cannot interrupt a legitimate active generation. The failed row keeps the
+// UI's normal retry path ("Try again"). A deployment running several app
+// processes against one shared database must not call this.
+func (s *Store) RecoverInterruptedBriefings(ctx context.Context) (int, error) {
+	res, err := s.exec(ctx, `UPDATE briefings
+		SET status = ?, error = ?, updated_at = ?
+		WHERE status = ?`,
+		BriefingFailed, interruptedBriefingError, sqlTime(time.Now()), BriefingGenerating)
+	if err != nil {
+		return 0, fmt.Errorf("recover interrupted briefings: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("recover interrupted briefings: %w", err)
+	}
+	return int(n), nil
 }
 
 // BriefingForPeriod returns the stored briefing for one period.
