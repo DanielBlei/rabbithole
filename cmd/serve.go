@@ -214,6 +214,26 @@ func (r *certReloader) getCertificate(*tls.ClientHelloInfo) (*tls.Certificate, e
 	return r.cert, nil
 }
 
+// recoverBriefings is the serve boot step for the single-process generation
+// contract: every briefing row is written from this process, so a row still
+// generating at startup belongs to a run that died with the previous process.
+// It is failed (with the retry hint readers see) before serving starts; see
+// store.RecoverInterruptedBriefings for the policy. A failed sweep is an
+// error, not a log line, so the server never serves indefinitely with
+// unrecovered rows.
+func recoverBriefings(ctx context.Context, db *store.Store) error {
+	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	n, err := db.RecoverInterruptedBriefings(sctx)
+	if err != nil {
+		return fmt.Errorf("briefing: startup recovery: %w", err)
+	}
+	if n > 0 {
+		log.Info().Int("briefings", n).Msg("briefing: failed generation(s) interrupted by a restart")
+	}
+	return nil
+}
+
 // newHTTPServer is the server serve runs: h behind the connection time limits,
 // over TLS when tlsConfig is set.
 func newHTTPServer(addr string, h http.Handler, tlsConfig *tls.Config) *http.Server {
@@ -289,6 +309,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	feedClient := feeds.NewClient(buildVersion())
 	mgr.SetClient(feedClient)
+
+	// A briefing still generating at boot belongs to a run that died with the
+	// previous process and can never finish. Like the ingest reconciliation
+	// above, failing it here is the single-writer session's job, and an error
+	// aborts the boot: serving with unrecovered rows would leave readers
+	// polling a generation that can never finish.
+	if err := recoverBriefings(ctx, db); err != nil {
+		return err
+	}
 
 	srv := server.New(db, src, serveAddr, mgr, log)
 	srv.FeedClient = feedClient

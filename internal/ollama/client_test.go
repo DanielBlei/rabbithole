@@ -346,3 +346,98 @@ func TestScoreOmitsSystemMessageWhenPromptEmpty(t *testing.T) {
 		})
 	}
 }
+
+func TestChatJSONSendsSchemaAndCaps(t *testing.T) {
+	var got struct {
+		Format   json.RawMessage `json:"format"`
+		Options  map[string]any  `json:"options"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/api/chat") {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"{\"ok\":true}"},"done":true}` + "\n"))
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{NumCtx: 4096}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := c.ChatJSON(t.Context(), "system", "user",
+		json.RawMessage(`{"type":"object"}`), 1234)
+	if err != nil {
+		t.Fatalf("ChatJSON: %v", err)
+	}
+	if content != `{"ok":true}` {
+		t.Errorf("content = %q", content)
+	}
+	if string(got.Format) != `{"type":"object"}` {
+		t.Errorf("format = %s", got.Format)
+	}
+	if got.Options["num_predict"] != float64(1234) || got.Options["num_ctx"] != float64(4096) {
+		t.Errorf("options = %v", got.Options)
+	}
+	if len(got.Messages) != 2 || got.Messages[0].Role != "system" || got.Messages[1].Role != "user" {
+		t.Errorf("messages = %+v", got.Messages)
+	}
+}
+
+// TestChatJSONUnconstrainedSendsNoFormat pins the review fix: ChatJSON must
+// honor tuning.Unconstrained exactly like ScoreContext, so providers that
+// reject a compiled JSON-schema grammar keep working for synthesis calls.
+func TestChatJSONUnconstrainedSendsNoFormat(t *testing.T) {
+	var got map[string]json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"{\"ok\":true}"},"done":true}` + "\n"))
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{Unconstrained: true}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ChatJSON(t.Context(), "system", "user",
+		json.RawMessage(`{"type":"object"}`), 64); err != nil {
+		t.Fatalf("ChatJSON: %v", err)
+	}
+	if f, ok := got["format"]; ok && string(f) != "null" && string(f) != `""` {
+		t.Errorf("format = %s, want none when unconstrained", f)
+	}
+}
+
+// TestChatJSONOmitsFormatWithoutSchema keeps the no-schema call from
+// regressing into grammar enforcement: a caller that passes no schema (the
+// shape comes from the system prompt) must not have one imposed.
+func TestChatJSONOmitsFormatWithoutSchema(t *testing.T) {
+	var got map[string]json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"{\"ok\":true}"},"done":true}` + "\n"))
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ChatJSON(t.Context(), "system", "user", nil, 64); err != nil {
+		t.Fatalf("ChatJSON: %v", err)
+	}
+	// api.ChatRequest omits a nil Format, so the request must carry no format
+	// key at all, not a null or empty one.
+	if f, ok := got["format"]; ok {
+		t.Errorf("format = %s, want none without a schema", f)
+	}
+}

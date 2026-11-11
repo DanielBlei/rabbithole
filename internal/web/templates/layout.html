@@ -40,6 +40,7 @@
         <a class="{{if eq .Active "feed"}}active{{end}}" href="/feed"{{if eq .Active "feed"}} aria-current="page"{{end}}>Feed</a>
         <a class="{{if eq .Active "sources"}}active{{end}}" href="/sources"{{if eq .Active "sources"}} aria-current="page"{{end}}>Sources</a>
         <a class="{{if eq .Active "maze"}}active{{end}}" href="/maze"{{if eq .Active "maze"}} aria-current="page"{{end}}>Maze</a>
+        <a class="{{if eq .Active "briefing"}}active{{end}}" href="/briefing"{{if eq .Active "briefing"}} aria-current="page"{{end}}>Briefing</a>
       </nav>
     </div>
     <div class="topbar__right">
@@ -120,6 +121,14 @@
       <span class="navrail__txt">
         <span class="navrail__nm">Maze<i class="navrail__cur" aria-hidden="true"></i></span>
         <span class="navrail__ds">day-to-day</span>
+      </span>
+    </a>
+    <a class="navrail__item navrail__item--page{{if eq .Active "briefing"}} navrail__item--on{{end}}" href="/briefing"
+       {{if eq .Active "briefing"}}aria-current="page"{{end}}>
+      <span class="navrail__mk" aria-hidden="true">&#10095;</span>
+      <span class="navrail__txt">
+        <span class="navrail__nm">Briefing<i class="navrail__cur" aria-hidden="true"></i></span>
+        <span class="navrail__ds">daily / weekly</span>
       </span>
     </a>
     {{/* Weather, for the two placements that put it in here rather than on the
