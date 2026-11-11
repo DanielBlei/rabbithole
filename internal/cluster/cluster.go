@@ -104,7 +104,11 @@ type Stats struct {
 
 // Build groups items into story clusters. Exact duplicates are grouped first
 // without model calls. Blocking limits later comparisons, and every non-exact
-// merge must pass verification.
+// merge must pass verification. Each cluster's representative is its
+// highest-scored member, newest first on ties, then lowest item ID — the order
+// prepareItems sorts by. When ctx expires mid-run the model-assisted merging
+// stops, but the groups built so far (the exact ones included) are returned
+// rather than discarded, so a partial result can replace a stale one.
 func Build(ctx context.Context, items []Item, opts Options) ([]Cluster, Stats, error) {
 	opts = opts.withDefaults()
 	logger := zerolog.Ctx(ctx)
@@ -122,9 +126,21 @@ func Build(ctx context.Context, items []Item, opts Options) ([]Cluster, Stats, e
 
 	candidates := newCandidateIndex()
 	clusters := make([]*workingCluster, 0, len(groups))
+	deadlineHit := false
 	for _, group := range groups {
-		if err := ctx.Err(); err != nil {
-			return nil, stats, err
+		if ctx.Err() != nil {
+			// The deadline expired mid-run. Model-assisted merging stops here,
+			// but the work already done must not be lost: every remaining
+			// group — the exact duplicates included, which need no model —
+			// becomes a standalone cluster so the partial result can still
+			// replace the stale one.
+			if !deadlineHit {
+				deadlineHit = true
+				stats.VerificationFallback = true
+				logger.Warn().Msg("story clustering: deadline reached, finishing without model comparisons")
+			}
+			clusters = append(clusters, standaloneCluster(len(clusters), group))
+			continue
 		}
 		merged := -1
 		var mergeSimilarity float64
@@ -154,15 +170,7 @@ func Build(ctx context.Context, items []Item, opts Options) ([]Cluster, Stats, e
 			candidates.add(clusters[merged].id, items, group)
 			continue
 		}
-		method := ""
-		confidence := 0.0
-		if len(group) > 1 {
-			method, confidence = "exact", 1
-		}
-		clusters = append(clusters, &workingCluster{
-			id: len(clusters), members: append([]int(nil), group...),
-			method: method, confidence: confidence,
-		})
+		clusters = append(clusters, standaloneCluster(len(clusters), group))
 		candidates.add(len(clusters)-1, items, group)
 	}
 
@@ -195,6 +203,22 @@ type workingCluster struct {
 	confidence float64
 }
 
+// standaloneCluster turns an exact group into its own cluster: exact
+// duplicates carry full confidence, a lone item none.
+func standaloneCluster(id int, group []int) *workingCluster {
+	method, confidence := "", 0.0
+	if len(group) > 1 {
+		method, confidence = "exact", 1
+	}
+	return &workingCluster{
+		id: id, members: append([]int(nil), group...),
+		method: method, confidence: confidence,
+	}
+}
+
+// prepareItems drops items without an ID or title, deduplicates by ID, sorts by
+// score (descending), publication time (newest first) then ID, and caps the
+// result at limit. The sort order also fixes each cluster's representative.
 func prepareItems(items []Item, limit int) []Item {
 	seen := make(map[string]struct{}, len(items))
 	out := make([]Item, 0, len(items))
@@ -228,6 +252,10 @@ func prepareItems(items []Item, limit int) []Item {
 	return out
 }
 
+// exactGroups unions items that are deterministically the same story — equal
+// normalized URL, equal normalized title within one source, or an equal
+// high-confidence title across sources — into index groups ordered by first
+// member.
 func exactGroups(items []Item) [][]int {
 	parent := make([]int, len(items))
 	for i := range parent {
@@ -263,9 +291,17 @@ func exactGroups(items []Item) [][]int {
 		owner[key] = i
 	}
 	for i, it := range items {
-		add(i, "u:"+normalizeURL(it.Link))
+		// Keys carry a prefix, so an empty normalized value would still build a
+		// key ("u:") and union every item that shares the emptiness — an item
+		// with no link, or a title that is all punctuation. Only a real value
+		// may group.
+		if u := normalizeURL(it.Link); u != "" {
+			add(i, "u:"+u)
+		}
 		title := normalizeTitle(it.Title)
-		add(i, "ts:"+title+"\x00"+normalizeSource(it.Source))
+		if title != "" {
+			add(i, "ts:"+title+"\x00"+normalizeSource(it.Source))
+		}
 		if len(significantTokens(it.Title)) >= minCrossSourceTitleTokens {
 			add(i, "t:"+title)
 		}
@@ -284,6 +320,9 @@ func exactGroups(items []Item) [][]int {
 	return groups
 }
 
+// loadEmbeddings embeds every item's title and summary, falling back to nil
+// (conservative blocking) when the embedder fails or returns a mismatched
+// count. A nil result is not an error.
 func loadEmbeddings(ctx context.Context, items []Item, opts Options, stats *Stats, logger *zerolog.Logger) [][]float64 {
 	if opts.Embedder == nil {
 		return nil
@@ -308,6 +347,9 @@ func loadEmbeddings(ctx context.Context, items []Item, opts Options, stats *Stat
 	return got
 }
 
+// similarity scores two groups' representative items: cosine over embeddings
+// when they loaded, otherwise Jaccard over title and summary tokens. The bool
+// reports whether the score clears the matching threshold.
 func similarity(items []Item, a []int, b []int, embeddings [][]float64, opts Options) (float64, bool) {
 	ai, bi := a[0], b[0]
 	if embeddings != nil {
@@ -319,6 +361,10 @@ func similarity(items []Item, a []int, b []int, embeddings [][]float64, opts Opt
 	return score, score >= fallbackJaccardThreshold
 }
 
+// verify asks the verifier whether two items are the same development. A
+// verifier error counts as "not the same" (the pair stays separate) rather than
+// failing the run. Without a verifier, or once the budget is spent, it falls
+// back to conservativeSame. The second bool reports whether the model was used.
 func verify(ctx context.Context, opts Options, a, b Item, stats *Stats, logger *zerolog.Logger) (bool, bool) {
 	if opts.Verifier != nil && stats.Verifications < opts.MaxVerifications {
 		stats.Verifications++
@@ -334,6 +380,8 @@ func verify(ctx context.Context, opts Options, a, b Item, stats *Stats, logger *
 	return conservativeSame(a, b), false
 }
 
+// conservativeSame reports the no-model verdict for a candidate pair: same
+// normalized URL, or equal high-confidence titles.
 func conservativeSame(a, b Item) bool {
 	ua, ub := normalizeURL(a.Link), normalizeURL(b.Link)
 	if ua != "" && ua == ub {
@@ -353,6 +401,8 @@ func newCandidateIndex() *candidateIndex {
 	return &candidateIndex{bands: make(map[uint64][]int)}
 }
 
+// add indexes a group's members under their blocking keys so later groups can
+// find this cluster as a merge candidate.
 func (c *candidateIndex) add(cluster int, items []Item, group []int) {
 	seen := make(map[uint64]struct{}, len(group)*4)
 	for _, idx := range group {
@@ -366,6 +416,9 @@ func (c *candidateIndex) add(cluster int, items []Item, group []int) {
 	}
 }
 
+// forItems returns up to limit cluster ids sharing a blocking key with the
+// group, preferring the rarest keys so common bands do not crowd out better
+// candidates.
 func (c *candidateIndex) forItems(items []Item, group []int, limit int) []int {
 	type bucket struct {
 		key uint64
@@ -407,6 +460,9 @@ func (c *candidateIndex) forItems(items []Item, group []int, limit int) []int {
 	return out
 }
 
+// blockKeys builds the LSH-style blocking keys for one item: four simhash
+// bands over its significant tokens, plus its first twelve title tokens. Two
+// items sharing any key become comparison candidates.
 func blockKeys(it Item) []uint64 {
 	bands := simhash(significantTokens(it.Title + " " + excerpt(it.Summary, maxSummaryForClustering)))
 	keys := make([]uint64, 0, 16)
@@ -432,6 +488,9 @@ func blockKeys(it Item) []uint64 {
 	return keys
 }
 
+// simhash computes a 64-bit locality-sensitive hash of tokens: each bit is the
+// majority vote of that bit across token hashes, so near-identical token sets
+// hash near-identically.
 func simhash(tokens []string) uint64 {
 	var bits [64]int
 	seen := make(map[string]struct{}, len(tokens))
@@ -460,6 +519,8 @@ func simhash(tokens []string) uint64 {
 	return out
 }
 
+// clusterID derives a stable ID from the sorted member IDs, so rebuilding the
+// same membership yields the same cluster row.
 func clusterID(items []ClusterItem) string {
 	ids := make([]string, len(items))
 	for i, item := range items {
@@ -470,6 +531,9 @@ func clusterID(items []ClusterItem) string {
 	return "story-" + hex.EncodeToString(sum[:])[:16]
 }
 
+// normalizeURL canonicalizes a link for comparison: lowercase scheme and host,
+// drop the www prefix, fragment and tracking parameters, and trailing slashes.
+// An unparseable value is lowercased as-is; an empty one stays empty.
 func normalizeURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -503,16 +567,21 @@ func normalizeURL(raw string) string {
 	return u.Scheme + "://" + u.Host + u.Path + "?" + u.RawQuery
 }
 
+// normalizeTitle lowercases a title and reduces every run of non-alphanumerics
+// to a single space; an all-punctuation title normalizes to the empty string.
 func normalizeTitle(title string) string {
 	return strings.Join(strings.FieldsFunc(strings.ToLower(title), func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	}), " ")
 }
 
+// normalizeSource lowercases a source name and collapses its whitespace.
 func normalizeSource(source string) string {
 	return strings.Join(strings.Fields(strings.ToLower(source)), " ")
 }
 
+// significantTokens splits text into lowercase alphanumeric tokens, dropping
+// tokens shorter than three runes and stop words.
 func significantTokens(text string) []string {
 	fields := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
@@ -530,6 +599,7 @@ func significantTokens(text string) []string {
 	return out
 }
 
+// tokenSet is the set form of significantTokens, for Jaccard comparison.
 func tokenSet(text string) map[string]struct{} {
 	out := make(map[string]struct{})
 	for _, token := range significantTokens(text) {
@@ -538,6 +608,8 @@ func tokenSet(text string) map[string]struct{} {
 	return out
 }
 
+// jaccard is the intersection-over-union of two token sets; empty sets never
+// match.
 func jaccard(a, b map[string]struct{}) float64 {
 	if len(a) == 0 || len(b) == 0 {
 		return 0
@@ -555,6 +627,8 @@ func jaccard(a, b map[string]struct{}) float64 {
 	return float64(intersection) / float64(union)
 }
 
+// cosine is the cosine similarity of two equal-length vectors; vectors of
+// different length or zero magnitude score 0.
 func cosine(a, b []float64) float64 {
 	if len(a) == 0 || len(a) != len(b) {
 		return 0
@@ -571,6 +645,7 @@ func cosine(a, b []float64) float64 {
 	return dot / (math.Sqrt(aa) * math.Sqrt(bb))
 }
 
+// excerpt trims s to at most limit runes.
 func excerpt(s string, limit int) string {
 	r := []rune(strings.TrimSpace(s))
 	if len(r) <= limit {

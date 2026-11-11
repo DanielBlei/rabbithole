@@ -47,6 +47,91 @@ func testItem(id, source, title, link string) Item {
 	}
 }
 
+// cancellingVerifier simulates a model endpoint slow enough that the run's
+// deadline expires: the first verification call both fails and cancels the
+// context the build runs under.
+type cancellingVerifier struct {
+	cancel context.CancelFunc
+	calls  int
+}
+
+func (v *cancellingVerifier) SameDevelopment(context.Context, Item, Item) (bool, error) {
+	v.calls++
+	v.cancel()
+	return false, errors.New("verification unavailable")
+}
+
+// Items that normalize to empty values — no link, or a title with no
+// alphanumerics — must not share a grouping key with every other such item.
+func TestEmptyNormalizedValuesDoNotGroupUnrelatedItems(t *testing.T) {
+	items := []Item{
+		testItem("a", "S1", "First story about a release", ""),
+		testItem("b", "S2", "Second story about a launch", ""),
+		testItem("p", "S1", "!!!", "https://example.com/p"),
+		testItem("q", "S1", "???", "https://example.com/q"),
+	}
+	clusters, _, err := Build(context.Background(), items, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clusters) != 0 {
+		t.Errorf("clusters = %+v, want none: empty links or punctuation-only titles grouped", clusters)
+	}
+}
+
+// A deadline that expires mid-run must not discard the whole build: the exact
+// groups (which need no model) survive as standalone clusters and the partial
+// result is returned without an error.
+func TestDeadlineKeepsExactClusters(t *testing.T) {
+	items := []Item{
+		testItem("a", "S1", "Big story unfolds today in city", "https://example.com/a"),
+		testItem("b", "S2", "Big story unfolds today in town", "https://example.com/b"),
+		testItem("c", "S1", "Unrelated exact piece", "https://example.com/same"),
+		testItem("d", "S2", "Unrelated exact piece", "https://example.com/same"),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	verifier := &cancellingVerifier{cancel: cancel}
+	clusters, stats, err := Build(ctx, items, Options{Verifier: verifier})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("verifier calls = %d, want 1", verifier.calls)
+	}
+	if len(clusters) != 1 || clusters[0].Method != "exact" || len(clusters[0].Items) != 2 {
+		t.Fatalf("clusters = %+v, want the exact pair {c,d} only", clusters)
+	}
+	if clusters[0].Items[0].ItemID != "c" || clusters[0].Items[1].ItemID != "d" {
+		t.Errorf("cluster members = %+v, want c and d", clusters[0].Items)
+	}
+	if !stats.VerificationFallback {
+		t.Error("stats do not report the model-comparison cutoff")
+	}
+}
+
+// The representative is deterministic: the highest-scored member, newest first
+// on ties, then item ID.
+func TestRepresentativeIsHighestScoredMember(t *testing.T) {
+	low := testItem("low", "S1", "Same development reported twice here", "https://example.com/1")
+	low.Score = 2
+	high := testItem("high", "S2", "Same development reported twice here", "https://example.com/2")
+	high.Score = 9
+	clusters, _, err := Build(context.Background(), []Item{low, high}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clusters) != 1 {
+		t.Fatalf("clusters = %d, want 1", len(clusters))
+	}
+	if clusters[0].RepresentativeItemID != "high" {
+		t.Errorf("representative = %q, want high", clusters[0].RepresentativeItemID)
+	}
+	if clusters[0].Items[0].ItemID != "high" {
+		t.Errorf("first member = %q, want high", clusters[0].Items[0].ItemID)
+	}
+}
+
 func TestExactDuplicatesGroupWithoutModelCalls(t *testing.T) {
 	items := []Item{
 		testItem("a", "S1", "A major lab ships a new reasoning model",

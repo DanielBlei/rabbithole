@@ -101,3 +101,42 @@ func TestStoryClustersRejectInvalidMetadata(t *testing.T) {
 		t.Fatalf("invalid cluster error = %v, want representative error", err)
 	}
 }
+
+func TestHasStoryClusters(t *testing.T) {
+	db := openTestStore(t)
+	ctx := t.Context()
+
+	has, err := db.HasStoryClusters(ctx)
+	if err != nil {
+		t.Fatalf("HasStoryClusters on empty store: %v", err)
+	}
+	if has {
+		t.Error("empty store reports clusters")
+	}
+
+	seed := []StoryCluster{{
+		ID: "story-1", RepresentativeItemID: "a", Method: "exact", Confidence: 1,
+		Items: []StoryClusterItem{{ItemID: "a", Position: 0}},
+	}}
+	if err := db.ReplaceStoryClusters(ctx, seed); err != nil {
+		t.Fatalf("ReplaceStoryClusters: %v", err)
+	}
+	has, err = db.HasStoryClusters(ctx)
+	if err != nil {
+		t.Fatalf("HasStoryClusters: %v", err)
+	}
+	if !has {
+		t.Error("store with a cluster reports none")
+	}
+
+	if err := db.ReplaceStoryClusters(ctx, nil); err != nil {
+		t.Fatalf("ReplaceStoryClusters empty: %v", err)
+	}
+	has, err = db.HasStoryClusters(ctx)
+	if err != nil {
+		t.Fatalf("HasStoryClusters after wipe: %v", err)
+	}
+	if has {
+		t.Error("wiped store reports clusters")
+	}
+}

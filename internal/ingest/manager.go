@@ -423,8 +423,14 @@ func (m *Manager) execute(
 		runLogger.Error().Str("kind", string(run.kind)).Str("error", msg).
 			Msg(string(run.kind) + " failed")
 	}
-	if status == store.IngestStatusOK {
-		clusterCtx, clusterCancel := context.WithTimeout(context.Background(), StoryClusterTimeout)
+	if status == store.IngestStatusOK &&
+		ShouldRebuildClusters(ctx, m.db, counts.NewItems, run.kind == RunKindRescore, runLogger) {
+		// Derived from the run context, not Background(): the run logger is on
+		// it (so the clustering lines reach the run log the UI shows) and so do
+		// Cancel and Shutdown. The status is OK, so the context is still live
+		// here; a race with cancellation merely ends clustering early, which
+		// RebuildStoryClusters treats as best-effort.
+		clusterCtx, clusterCancel := context.WithTimeout(ctx, StoryClusterTimeout)
 		if _, cerr := RebuildStoryClusters(clusterCtx, cfg, m.db); cerr != nil {
 			runLogger.Warn().Err(cerr).Msg("story clustering failed; the feed is unchanged")
 		}

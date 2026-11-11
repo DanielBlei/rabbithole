@@ -1,4 +1,9 @@
 {{define "storyGroup"}}
+{{/* The representative is the group's highest-scored member (newest first on
+     ties, then item ID) — the order the clustering run sorts by, so the choice
+     is deterministic across rebuilds. Members keep their own score and reason
+     here; the seen/hide/bookmark controls live on the individual view, one
+     toggle away. */}}
 <div class="story-group{{if not .Members}} story-group--single{{end}}">
   {{template "row" .Representative}}
   {{if .Members}}
@@ -6,7 +11,7 @@
     <summary>{{.MemberCount}} related {{if eq .MemberCount 1}}item{{else}}items{{end}} on this story</summary>
     <ul class="story-group__list">
       {{range .Members}}
-      <li><a href="{{.Link}}" target="_blank" rel="noopener noreferrer">{{.Title}}</a><span>{{.Source}} &middot; {{.Date}}</span></li>
+      <li><a href="{{.Link}}" target="_blank" rel="noopener noreferrer">{{.Title}}</a><span>{{if .Scored}}score {{.Score}}/10 &middot; {{end}}{{.Source}} &middot; {{.Date}}</span>{{if .Reason}}<span class="story-group__why" title="{{.Reason}}">{{.Reason}}</span>{{end}}</li>
       {{end}}
     </ul>
   </details>

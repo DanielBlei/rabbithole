@@ -515,6 +515,8 @@ type feedGroup struct {
 	MemberCount    int
 }
 
+// rowIDs collects the item ids of the rendered rows, for looking up which
+// clusters the current view intersects.
 func rowIDs(rows []rowData) []string {
 	ids := make([]string, len(rows))
 	for i, row := range rows {
@@ -523,6 +525,10 @@ func rowIDs(rows []rowData) []string {
 	return ids
 }
 
+// toFeedGroups folds the rendered rows into feed groups: a row in a known
+// cluster opens the group as its representative (the first such row in feed
+// order) and carries the other visible members; a row in no cluster renders as
+// a group of one. Members outside the current filters stay out of the group.
 func toFeedGroups(rows []rowData, clusters []store.StoryCluster) []feedGroup {
 	clusterOf := make(map[string]int, len(rows))
 	for i, cluster := range clusters {
@@ -557,6 +563,8 @@ func toFeedGroups(rows []rowData, clusters []store.StoryCluster) []feedGroup {
 	return groups
 }
 
+// feedGroupToggleURL copies the current query and flips the grouped flag, so
+// the toggle keeps every other filter applied.
 func feedGroupToggleURL(q url.Values, grouped bool) string {
 	v := make(url.Values, len(q))
 	for key, values := range q {
@@ -573,6 +581,9 @@ func feedGroupToggleURL(q url.Values, grouped bool) string {
 	return "/feed"
 }
 
+// exactStoryClusters is the no-store fallback for a grouped view: it groups
+// the rendered rows by exact duplicate only, with no model calls. A build
+// failure yields no clusters rather than an ungrouped page.
 func exactStoryClusters(rows []rowData) []store.StoryCluster {
 	items := make([]cluster.Item, len(rows))
 	for i, row := range rows {

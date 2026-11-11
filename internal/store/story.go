@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -192,6 +193,20 @@ func (s *Store) StoryClusters(ctx context.Context) ([]StoryCluster, error) {
 		created_at, updated_at FROM story_clusters ORDER BY id ASC`)
 }
 
+// HasStoryClusters reports whether any story cluster is persisted. Callers use
+// it to skip a rebuild that cannot change the stored clusters.
+func (s *Store) HasStoryClusters(ctx context.Context) (bool, error) {
+	var one int
+	err := s.queryRow(ctx, `SELECT 1 FROM story_clusters LIMIT 1`).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check story clusters: %w", err)
+	}
+	return true, nil
+}
+
 // StoryClustersForItems returns the clusters that contain at least one of ids.
 func (s *Store) StoryClustersForItems(ctx context.Context, ids []string) ([]StoryCluster, error) {
 	ids = uniqueStoryIDs(ids)
@@ -236,6 +251,8 @@ func (s *Store) StoryClustersForItems(ctx context.Context, ids []string) ([]Stor
 		args...)
 }
 
+// queryStoryClusters runs a story_clusters select and attaches each cluster's
+// items, ordered by rank.
 func (s *Store) queryStoryClusters(ctx context.Context, query string, args ...any) ([]StoryCluster, error) {
 	rows, err := s.query(ctx, query, args...)
 	if err != nil {
@@ -304,6 +321,8 @@ func (s *Store) queryStoryClusters(ctx context.Context, query string, args ...an
 	return clusters, nil
 }
 
+// validateStoryCluster rejects a cluster without an ID, representative or
+// items, or whose representative is not among its items.
 func validateStoryCluster(cluster StoryCluster) error {
 	if strings.TrimSpace(cluster.ID) == "" {
 		return fmt.Errorf("story cluster id is required")
@@ -329,6 +348,7 @@ func validateStoryCluster(cluster StoryCluster) error {
 	return nil
 }
 
+// uniqueStoryIDs trims, drops empty and deduplicates ids, preserving order.
 func uniqueStoryIDs(ids []string) []string {
 	seen := make(map[string]struct{}, len(ids))
 	out := make([]string, 0, len(ids))

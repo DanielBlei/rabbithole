@@ -89,6 +89,13 @@ type chatJSON struct {
 	hc       *http.Client
 }
 
+// ChatJSON sends one system/user chat turn constrained to schema and returns
+// the message content. Providers diverge on endpoint and options: Ollama takes
+// its native /api/chat with format+think, the OpenAI-compatible providers take
+// /v1/chat/completions with a strict response_format (vLLM additionally needs
+// an explicit opt-out to disable a thinking template). Content is capped at
+// maxTokens, which callers must budget for the answer alone when thinking is
+// on, since reasoning tokens count against it.
 func (c *chatJSON) ChatJSON(
 	ctx context.Context,
 	system, user string,
@@ -173,6 +180,8 @@ type embedder struct {
 	hc       *http.Client
 }
 
+// Embed turns texts into vectors, batching requests at embeddingBatchSize and
+// failing whole if any batch fails or the counts do not add up.
 func (e *embedder) Embed(ctx context.Context, texts []string) ([][]float64, error) {
 	if len(texts) == 0 {
 		return nil, nil
@@ -192,6 +201,8 @@ func (e *embedder) Embed(ctx context.Context, texts []string) ([][]float64, erro
 	return out, nil
 }
 
+// embedBatch posts one embedding request and normalizes the three response
+// shapes the providers answer with (embeddings, embedding, data[]).
 func (e *embedder) embedBatch(ctx context.Context, texts []string) ([][]float64, error) {
 	ctx, cancel := context.WithTimeout(ctx, embeddingTimeout)
 	defer cancel()

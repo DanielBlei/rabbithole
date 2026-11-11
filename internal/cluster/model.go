@@ -61,6 +61,8 @@ func (v *ModelVerifier) SameDevelopment(ctx context.Context, a, b Item) (bool, e
 	return out.Same, nil
 }
 
+// verifyPrompt renders the two items as the user message for one verification
+// call, each on a single line and the summary capped.
 func verifyPrompt(a, b Item) string {
 	var out strings.Builder
 	out.WriteString("ITEM A\n")
@@ -71,15 +73,19 @@ func verifyPrompt(a, b Item) string {
 	return out.String()
 }
 
+// writeVerifyItem writes one item's source, title and summary for verifyPrompt.
 func writeVerifyItem(out *strings.Builder, item Item) {
 	fmt.Fprintf(out, "source: %s\ntitle: %s\nsummary: %s\n",
 		oneLine(item.Source), oneLine(item.Title), excerpt(oneLine(item.Summary), 700))
 }
 
+// oneLine collapses all whitespace runs in s to single spaces.
 func oneLine(s string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
 }
 
+// extractJSONObject pulls the outermost JSON object out of a raw model
+// response, tolerating surrounding prose.
 func extractJSONObject(raw string) (string, error) {
 	start := strings.IndexByte(raw, '{')
 	end := strings.LastIndexByte(raw, '}')

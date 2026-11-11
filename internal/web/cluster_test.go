@@ -74,3 +74,76 @@ func TestFeedGroupedFallsBackToExactDuplicates(t *testing.T) {
 		t.Errorf("grouped feed did not group exact duplicates: %s", body)
 	}
 }
+
+// The toggle is rendered twice — on the command line and at the end of the
+// filter row — because Minimal retires the line; CSS shows the copy the
+// layout uses. Both must exist for either look to reach it.
+func TestFeedGroupedToggleRenderedInBarAndFilters(t *testing.T) {
+	w := newTestWeb(t)
+	body := get(t, w, "/feed")
+	if got := strings.Count(body, `class="feed-view"`); got != 2 {
+		t.Errorf("feed-view toggle rendered %d times, want 2 (bar + filters): %s", got, body)
+	}
+}
+
+// Members keep their own score and reason, so a group can be judged without
+// expanding it into the individual view.
+func TestFeedGroupedMemberShowsScoreAndReason(t *testing.T) {
+	w := newTestWeb(t)
+	now := time.Now()
+	if err := w.db.Record(context.Background(), []feeds.Item{
+		{ID: "b", Source: "S2", Title: "B is the same development", Link: "https://x/b", Published: now},
+	}, nil, now); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	// Score the seeded item a: the feed orders newest first, so a renders as
+	// the member under representative b.
+	if err := w.db.Record(context.Background(), []feeds.Item{
+		{ID: "a", Source: "S1", Title: "A", Link: "https://x/a"},
+	}, []store.DigestEntry{{
+		Item:  feeds.Item{ID: "a", Source: "S1", Title: "A", Link: "https://x/a"},
+		Score: 7, Reason: "covers the same launch from a second outlet",
+	}}, now); err != nil {
+		t.Fatalf("Record scored: %v", err)
+	}
+	if err := w.db.ReplaceStoryClusters(context.Background(), []store.StoryCluster{{
+		ID: "story-1", RepresentativeItemID: "b", Method: "exact", Confidence: 1,
+		Items: []store.StoryClusterItem{{ItemID: "a", Position: 0}, {ItemID: "b", Position: 1}},
+	}}); err != nil {
+		t.Fatalf("ReplaceStoryClusters: %v", err)
+	}
+	grouped := get(t, w, "/feed?grouped=1")
+	for _, want := range []string{"score 7/10", "covers the same launch from a second outlet"} {
+		if !strings.Contains(grouped, want) {
+			t.Errorf("grouped member line missing %q: %s", want, grouped)
+		}
+	}
+}
+
+// Under a filter, only the visible rows form the group: a filtered-out member
+// neither renders nor drags its representative out of the results.
+func TestFeedGroupedUnderFilterKeepsOnlyVisibleMembers(t *testing.T) {
+	w := newTestWeb(t)
+	now := time.Now()
+	if err := w.db.Record(context.Background(), []feeds.Item{
+		{ID: "b", Source: "S2", Title: "B is the same development", Link: "https://x/b", Published: now},
+	}, nil, now); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if err := w.db.ReplaceStoryClusters(context.Background(), []store.StoryCluster{{
+		ID: "story-1", RepresentativeItemID: "a", Method: "exact", Confidence: 1,
+		Items: []store.StoryClusterItem{{ItemID: "a", Position: 0}, {ItemID: "b", Position: 1}},
+	}}); err != nil {
+		t.Fatalf("ReplaceStoryClusters: %v", err)
+	}
+	narrowed := get(t, w, "/feed?grouped=1&source=S2")
+	if !strings.Contains(narrowed, "story-group--single") {
+		t.Errorf("filtered grouped feed did not show b as its own group: %s", narrowed)
+	}
+	if strings.Contains(narrowed, "related item") {
+		t.Errorf("filtered grouped feed kept the group summary: %s", narrowed)
+	}
+	if strings.Contains(narrowed, `data-source="S1"`) {
+		t.Errorf("filtered grouped feed leaked the filtered-out member: %s", narrowed)
+	}
+}

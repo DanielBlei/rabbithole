@@ -19,6 +19,25 @@ import (
 // StoryClusterTimeout bounds one automatic clustering rebuild.
 const StoryClusterTimeout = 2 * time.Minute
 
+// ShouldRebuildClusters reports whether a finished OK run warrants a clustering
+// rebuild. New items can change membership, and a rescore changes scores —
+// which pick each cluster's representative — so both rebuild. A run that did
+// neither leaves the clusters as they are, unless none exist yet: the first
+// run after upgrade initializes them. A read failure errs on rebuilding.
+func ShouldRebuildClusters(
+	ctx context.Context, db *store.Store, newItems int, rescore bool, logger zerolog.Logger,
+) bool {
+	if newItems > 0 || rescore {
+		return true
+	}
+	has, err := db.HasStoryClusters(ctx)
+	if err != nil {
+		logger.Warn().Err(err).Msg("story clustering: cannot read stored clusters; rebuilding")
+		return true
+	}
+	return !has
+}
+
 // RebuildStoryClusters rebuilds persisted story metadata from recent stored
 // items. Model use is optional: without embeddings or a verifier it still groups
 // exact duplicates.
@@ -51,7 +70,12 @@ func RebuildStoryClusters(ctx context.Context, cfg config.Config, db *store.Stor
 				opts.Embedder = embedder
 			}
 		}
-		verifier, err := inference.ResolveStoryVerifier(ctx, cfg.Inference, cfg.Inference.ThinkEnabled())
+		// The verifier answers one yes/no question inside a 64-token budget.
+		// Reasoning tokens count against that budget on every provider, so a
+		// thinking model can exhaust it before the JSON verdict appears and
+		// every pair would read as "not the same". The decision needs no
+		// reasoning: always resolve the verifier with thinking off.
+		verifier, err := inference.ResolveStoryVerifier(ctx, cfg.Inference, false)
 		if err != nil {
 			logger.Warn().Err(err).Msg("story clustering: verifier unavailable")
 		} else {

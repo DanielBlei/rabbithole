@@ -1209,6 +1209,7 @@ func wornView(unread, seen, hidden, bookmarked bool) pickState {
 	return st
 }
 
+// toRows builds the view models for a page of item rows.
 func toRows(rows []store.ItemRow) []rowData {
 	out := make([]rowData, len(rows))
 	for i, row := range rows {
