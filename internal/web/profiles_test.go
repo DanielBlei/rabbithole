@@ -44,6 +44,68 @@ func TestProfileSettingsRenderDefaultImmutable(t *testing.T) {
 	}
 }
 
+func TestProfileSettingsAdaptiveRankingIndicator(t *testing.T) {
+	w, _ := configTestWeb(t)
+	body := get(t, w, "/settings/profiles")
+	for _, want := range []string{
+		`data-adaptive-ranking`,
+		"Adaptive ranking",
+		">Collecting<",
+		"0 of 3 ratings needed to activate.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("indicator missing %q", want)
+		}
+	}
+
+	ctx := t.Context()
+	for i, id := range []string{"r1", "r2", "r3"} {
+		item := feeds.Item{
+			ID: id, Source: "S", Title: "Rated " + id, Link: "https://x/" + id,
+			Published: time.Now().Add(-time.Duration(i) * time.Hour),
+		}
+		if err := w.db.Record(ctx, []feeds.Item{item}, nil, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		score := 10
+		if err := w.db.UpdateUserState(ctx, id, store.UserPatch{UserScore: &score}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body = get(t, w, "/settings/profiles")
+	for _, want := range []string{">Active<", "Future scores learn from your ratings.", "<span class=\"stp-row__v\">3</span>"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("active indicator missing %q", want)
+		}
+	}
+
+	saveConfig(t, w.db, "adaptive_ranking: false\n", store.ConfigSourceUI, 0)
+	body = get(t, w, "/settings/profiles")
+	for _, want := range []string{">Off<", "Profile-only scoring. Recorded ratings are not used."} {
+		if !strings.Contains(body, want) {
+			t.Errorf("disabled indicator missing %q", want)
+		}
+	}
+}
+
+func TestProfileSettingsAdaptiveRankingProfileOnlyProvider(t *testing.T) {
+	w, db := configTestWeb(t)
+	saveConfig(t, db, "inference:\n  provider: heuristic\n", store.ConfigSourceUI, 0)
+	body := get(t, w, "/settings/profiles")
+	for _, want := range []string{
+		"Adaptive ranking",
+		">Profile-only<",
+		"The keyword provider does not use ratings. Choose a model provider to enable adaptive ranking.",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("profile-only provider indicator missing %q", want)
+		}
+	}
+	if strings.Contains(body, "Future scores learn from your ratings.") {
+		t.Error("promptless provider still claims future scores learn from ratings")
+	}
+}
+
 func TestProfileRescoreConfirmationAndStart(t *testing.T) {
 	w := newTestWeb(t)
 	ctx := context.Background()

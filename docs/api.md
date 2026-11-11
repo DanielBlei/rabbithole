@@ -47,6 +47,9 @@ Response:
       "llm_profile_id": "profile-...",
       "llm_profile_name": "Systems",
       "llm_profile_hash": "4bcf...",
+      "llm_feedback_positive": 5,
+      "llm_feedback_negative": 3,
+      "llm_feedback_hash": "9d2e...",
       "user_score": null,
       "published_at": "2026-01-01T00:00:00Z"
     }
@@ -56,8 +59,9 @@ Response:
 ```
 
 `llm_score`, `llm_score_reason`, `llm_score_model`, the three `llm_profile_*` provenance
-fields, `user_score` and `published_at` are omitted when unset. Rows scored before profile
-provenance was added remain readable and simply omit the profile fields.
+fields, the three `llm_feedback_*` provenance fields, `user_score` and `published_at` are
+omitted when unset. Rows scored before profile or feedback provenance was added remain
+readable and simply omit the missing fields.
 
 ## GET /api/sources
 

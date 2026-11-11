@@ -75,7 +75,9 @@ func rescoreItems(
 ) (RescoreOutcome, error) {
 	logger := zerolog.Ctx(ctx)
 	outcome := RescoreOutcome{Candidates: len(items)}
-	scoringContext, err := loadScoringContext(ctx, db, activeProfile, items)
+	scoringContext, err := loadScoringContext(
+		ctx, db, activeProfile, items, cfg.AdaptiveRankingEnabled(),
+	)
 	if err != nil {
 		return outcome, err
 	}
@@ -106,13 +108,16 @@ func rescoreItems(
 			continue
 		}
 		replacements = append(replacements, store.ScoreReplacement{
-			ItemID:      item.ID,
-			Score:       score.Score,
-			Reason:      score.Reason,
-			Model:       cfg.Inference.Model,
-			ProfileID:   activeProfile.ID,
-			ProfileName: activeProfile.Name,
-			ProfileHash: activeProfile.Hash,
+			ItemID:           item.ID,
+			Score:            score.Score,
+			Reason:           score.Reason,
+			Model:            cfg.Inference.Model,
+			ProfileID:        activeProfile.ID,
+			ProfileName:      activeProfile.Name,
+			ProfileHash:      activeProfile.Hash,
+			FeedbackPositive: score.Feedback.Positive,
+			FeedbackNegative: score.Feedback.Negative,
+			FeedbackHash:     score.Feedback.Hash,
 		})
 	}
 	updated, err := db.ReplaceItemScores(ctx, replacements)

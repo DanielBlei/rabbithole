@@ -130,6 +130,35 @@ func TestRunDefaults(t *testing.T) {
 	}
 }
 
+func TestAdaptiveRankingDefaultsOn(t *testing.T) {
+	d := RunDefaults()
+	if d.AdaptiveRanking == nil || !*d.AdaptiveRanking || !d.AdaptiveRankingEnabled() {
+		t.Fatalf("default adaptive_ranking = %v, want on", d.AdaptiveRanking)
+	}
+	var zero Config
+	if !zero.AdaptiveRankingEnabled() {
+		t.Error("an unset toggle must mean on")
+	}
+}
+
+func TestAdaptiveRankingFalseRoundTrips(t *testing.T) {
+	cfg := Config{AdaptiveRanking: boolp(false)}
+	raw, err := cfg.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), "adaptive_ranking: false") {
+		t.Fatalf("canonical YAML lost the toggle:\n%s", raw)
+	}
+	back, err := ParseStored(raw, RunSchemaVersion)
+	if err != nil {
+		t.Fatalf("ParseStored: %v", err)
+	}
+	if back.AdaptiveRankingEnabled() || back.AdaptiveRanking == nil || *back.AdaptiveRanking {
+		t.Fatalf("round trip = %v, want off", back.AdaptiveRanking)
+	}
+}
+
 func TestValidateFieldErrors(t *testing.T) {
 	r := Config{
 		Inference: InferenceConfig{
@@ -539,6 +568,10 @@ func TestDropDefaults(t *testing.T) {
 		{"changed think stays",
 			Config{Inference: InferenceConfig{Think: boolp(false), BatchSize: 1}},
 			[]string{"inference.batch_size"}, Config{Inference: InferenceConfig{Think: boolp(false)}}},
+		{"adaptive ranking default is not stored",
+			Config{AdaptiveRanking: boolp(true)}, []string{"adaptive_ranking"}, Config{}},
+		{"adaptive ranking off stays",
+			Config{AdaptiveRanking: boolp(false)}, nil, Config{AdaptiveRanking: boolp(false)}},
 		{
 			"trailing space on the built-in prompt",
 			Config{

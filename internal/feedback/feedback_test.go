@@ -263,6 +263,46 @@ func TestSelectExcluding(t *testing.T) {
 	})
 }
 
+func TestSelectionHashIsStableAndPolarityAware(t *testing.T) {
+	positive := func(ids ...string) []Example {
+		out := make([]Example, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, Example{ItemID: id, UserScore: 10})
+		}
+		return out
+	}
+	negative := func(ids ...string) []Example {
+		out := make([]Example, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, Example{ItemID: id, UserScore: 0})
+		}
+		return out
+	}
+	base := Selection{Positive: positive("p1", "p2"), Negative: negative("n1")}
+	hash := base.Hash()
+	if hash == "" {
+		t.Fatal("active selection has no hash")
+	}
+	if len(hash) != 64 {
+		t.Fatalf("hash length = %d, want 64 hex characters", len(hash))
+	}
+	reordered := Selection{Positive: positive("p2", "p1"), Negative: negative("n1")}
+	if got := reordered.Hash(); got != hash {
+		t.Errorf("reordering changed the hash: %s != %s", got, hash)
+	}
+	flipped := Selection{Positive: positive("p1"), Negative: negative("p2", "n1")}
+	if flipped.Hash() == hash {
+		t.Error("flipping an example's polarity kept the hash")
+	}
+	if got := (Selection{Positive: positive("p1", "p2")}).Hash(); got != "" {
+		t.Errorf("inactive two-rating selection hash = %q, want empty", got)
+	}
+	below := Selection{Positive: positive("p1"), Negative: negative("n1")}
+	if got := below.Hash(); got != "" {
+		t.Errorf("inactive selection hash = %q, want empty", got)
+	}
+}
+
 func ids(examples []Example) []string {
 	var result []string
 	for _, example := range examples {
