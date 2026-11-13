@@ -39,8 +39,20 @@ const (
 	previewEntries = 3
 )
 
-// fallbackPaths are tried against the site root when a page declares no feed.
-var fallbackPaths = []string{"/feed", "/rss", "/rss.xml", "/atom.xml", "/index.xml"}
+// fallbackPaths are tried against the site root when a page declares no feed,
+// after the same names under the typed address's first path segment.
+var fallbackPaths = []string{
+	"/feed", "/rss", "/rss.xml", "/atom.xml", "/index.xml", "/feed.xml", "/feed.atom",
+	"/blog/feed", "/blog/rss.xml", "/blog/feed.xml", "/blog/index.xml", "/blog.rss",
+}
+
+// sectionPaths are tried under the first path segment of the typed address
+// (example.com/blog -> /blog/feed) when a page declares no feed.
+var sectionPaths = []string{"/feed", "/rss.xml", "/feed.xml", "/index.xml", "/atom.xml"}
+
+// maxProbes bounds how many fallback paths one search requests; they are tried
+// verifyParallel at a time and the search stops at the first batch with a feed.
+const maxProbes = 17
 
 // Kind is a feed's format.
 type Kind string
@@ -108,15 +120,15 @@ func discover(ctx context.Context, client *http.Client, rawURL string, maxFeed i
 		return []Candidate{candidateFrom(pg.feed, feedAddress(rawURL, pg.final), "")}, nil
 	}
 
-	refs := declaredFeeds(pg.head, pg.final)
-	if len(refs) == 0 {
-		refs = fallbackFeeds(pg.final)
+	var found []Candidate
+	if refs := declaredFeeds(pg.head, pg.final); len(refs) > 0 {
+		if len(refs) > MaxCandidates {
+			refs = refs[:MaxCandidates]
+		}
+		found = verifyAll(ctx, client, refs, maxFeed)
+	} else {
+		found = probeFallbacks(ctx, client, fallbackFeeds(pg.final), maxFeed)
 	}
-	if len(refs) > MaxCandidates {
-		refs = refs[:MaxCandidates]
-	}
-
-	found := verifyAll(ctx, client, refs, maxFeed)
 	if len(found) == 0 {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -428,14 +440,41 @@ func isCommentsFeed(r feedRef) bool {
 	return strings.Contains(s, "comment")
 }
 
-// fallbackFeeds are the common feed paths on the site root of final.
+// fallbackFeeds are the common feed paths of final: under its first path
+// segment when it has one, then on the site root.
 func fallbackFeeds(final *url.URL) []feedRef {
-	refs := make([]feedRef, 0, len(fallbackPaths))
-	for _, p := range fallbackPaths {
+	var paths []string
+	if seg := strings.SplitN(strings.Trim(final.Path, "/"), "/", 2)[0]; seg != "" {
+		for _, p := range sectionPaths {
+			paths = append(paths, "/"+seg+p)
+		}
+	}
+	paths = append(paths, fallbackPaths...)
+
+	seen := make(map[string]bool, len(paths))
+	refs := make([]feedRef, 0, len(paths))
+	for _, p := range paths {
+		if seen[p] || len(refs) == maxProbes {
+			continue
+		}
+		seen[p] = true
 		u := url.URL{Scheme: final.Scheme, Host: final.Host, Path: p}
 		refs = append(refs, feedRef{url: u.String()})
 	}
 	return refs
+}
+
+// probeFallbacks verifies refs a batch at a time and stops after the first
+// batch that holds a feed, so a site with one feed costs a few requests.
+func probeFallbacks(ctx context.Context, client *http.Client, refs []feedRef, maxFeed int64) []Candidate {
+	for len(refs) > 0 && ctx.Err() == nil {
+		n := min(verifyParallel, len(refs))
+		if found := verifyAll(ctx, client, refs[:n], maxFeed); len(found) > 0 {
+			return found
+		}
+		refs = refs[n:]
+	}
+	return nil
 }
 
 // verifyAll fetches and parses every ref, at most verifyParallel at a time,
