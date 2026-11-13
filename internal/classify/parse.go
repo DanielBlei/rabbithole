@@ -127,22 +127,51 @@ type classificationEntry struct {
 	Assumptions []string
 }
 
-// UnmarshalJSON reads an entry leniently, for models that ignore the schema.
+// UnmarshalJSON reads an entry leniently for models that ignore the schema —
+// lenient about spelling and list shapes, strict about presence: every entry
+// needs a usable index and both label lists. A missing or malformed field is an
+// error, never a silent empty verdict, so the worker retries the item instead
+// of recording an empty classification it would never revisit. An explicitly
+// supplied empty array stays valid: "no keywords" is an answer.
 func (e *classificationEntry) UnmarshalJSON(b []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(b, &fields); err != nil {
 		return err
 	}
+	var haveIndex, haveKeywords, haveAssumptions bool
 	for k, v := range fields {
 		switch normalizeKey(k) {
 		case "index":
-			n, _ := asNumber(v)
+			n, ok := asNumber(v)
+			if !ok {
+				return fmt.Errorf("index is not a number: %s", truncate(string(v), 40))
+			}
 			e.Index = int(math.Round(n))
+			haveIndex = true
 		case "keywords":
-			e.Keywords = asStringList(v)
+			list, ok := asStringList(v)
+			if !ok {
+				return fmt.Errorf("keywords is not a list of labels: %s", truncate(string(v), 40))
+			}
+			e.Keywords = list
+			haveKeywords = true
 		case "assumptions":
-			e.Assumptions = asStringList(v)
+			list, ok := asStringList(v)
+			if !ok {
+				return fmt.Errorf("assumptions is not a list of labels: %s", truncate(string(v), 40))
+			}
+			e.Assumptions = list
+			haveAssumptions = true
 		}
+	}
+	if !haveIndex {
+		return fmt.Errorf("classification entry is missing index")
+	}
+	if !haveKeywords {
+		return fmt.Errorf("classification entry is missing keywords")
+	}
+	if !haveAssumptions {
+		return fmt.Errorf("classification entry is missing assumptions")
 	}
 	return nil
 }
@@ -169,18 +198,24 @@ func asNumber(v json.RawMessage) (float64, bool) {
 }
 
 // asStringList reads an array of labels, a single label, or label objects.
-func asStringList(v json.RawMessage) []string {
+// ok is false for anything else — a number, a boolean, null, an object, or an
+// array whose elements are neither strings nor label objects — so a malformed
+// field is rejected rather than becoming a silently empty list.
+func asStringList(v json.RawMessage) ([]string, bool) {
+	if len(v) == 0 || string(v) == "null" {
+		return nil, false
+	}
 	var list []string
 	if err := json.Unmarshal(v, &list); err == nil {
-		return list
+		return list, true
 	}
 	var single string
 	if err := json.Unmarshal(v, &single); err == nil {
-		return []string{single}
+		return []string{single}, true
 	}
 	var rawList []json.RawMessage
 	if err := json.Unmarshal(v, &rawList); err != nil {
-		return nil
+		return nil, false
 	}
 	out := make([]string, 0, len(rawList))
 	for _, raw := range rawList {
@@ -193,23 +228,33 @@ func asStringList(v json.RawMessage) []string {
 			Label string `json:"label"`
 			Name  string `json:"name"`
 		}
-		if err := json.Unmarshal(raw, &object); err == nil {
-			if object.Label != "" {
-				out = append(out, object.Label)
-			} else if object.Name != "" {
-				out = append(out, object.Name)
-			}
+		if err := json.Unmarshal(raw, &object); err != nil {
+			return nil, false
+		}
+		switch {
+		case object.Label != "":
+			out = append(out, object.Label)
+		case object.Name != "":
+			out = append(out, object.Name)
+		default:
+			return nil, false
 		}
 	}
-	return out
+	return out, true
 }
 
 // repairAttempts bounds how many trailing entries unmarshalClassifications discards.
 const repairAttempts = 3
 
-// unmarshalClassifications decodes the verdict, keeping the entries a truncated
-// response did complete.
+// unmarshalClassifications decodes the verdict. A response the server cut off
+// mid-generation is salvaged, never repaired into data the model did not write:
+// only entries that closed before the cut are kept. The trailing entry — the
+// one holding an unterminated string, an open array, or an unfinished key — is
+// discarded whole, so a truncated label prefix cannot become a stored tag and
+// an open bracket cannot close into a fabricated empty list. The missing entry
+// then fails the one-entry-per-item check, and the caller retries the item.
 func unmarshalClassifications(s string) (rawClassifications, error) {
+	s = salvageCompleteEntries(s)
 	var firstErr error
 	for range repairAttempts {
 		var parsed rawClassifications
@@ -220,13 +265,89 @@ func unmarshalClassifications(s string) (rawClassifications, error) {
 		if firstErr == nil {
 			firstErr = err
 		}
-		open := strings.LastIndexByte(s, '{')
+		// Discard the trailing entry and retry. The cut is structural — the
+		// last `{` outside any string — so the remainder never ends inside a
+		// label and repairJSON cannot turn a prefix into a verdict.
+		open := lastStructuralObjectOpen(s)
 		if open <= 0 {
 			break
 		}
 		s = strings.TrimRight(s[:open], " \t\r\n,")
 	}
 	return rawClassifications{}, firstErr
+}
+
+// salvageCompleteEntries cuts a truncated fragment back to the last
+// classification entry that closed before the cut. Balanced input is returned
+// as-is. A fragment with no complete entry is emptied, so repairJSON has
+// nothing to fabricate from and the caller sees a parse failure.
+func salvageCompleteEntries(s string) string {
+	_, _, _, end := scanJSON(s)
+	if end >= 0 {
+		return s // the outer object closed; nothing was cut off
+	}
+	if cut := lastCompleteEntryEnd(s); cut > 0 {
+		return s[:cut]
+	}
+	return ""
+}
+
+// lastStructuralObjectOpen returns the offset of the last `{` that sits
+// outside any string, or -1 when there is none. Unlike strings.LastIndexByte
+// it cannot land inside a label, so cutting there leaves balanced strings.
+func lastStructuralObjectOpen(s string) int {
+	open, inString, escaped := -1, false, false
+	for i := range len(s) {
+		c := s[i]
+		switch {
+		case escaped:
+			escaped = false
+		case inString && c == '\\':
+			escaped = true
+		case c == '"':
+			inString = !inString
+		case inString:
+			// A `{` inside a string is content, not structure.
+		case c == '{':
+			open = i
+		}
+	}
+	return open
+}
+
+// lastCompleteEntryEnd returns the offset just past the last `}` that closed a
+// classification entry — an object sitting directly inside the classifications
+// array, which itself sits in the outer object, so an entry closes when the
+// stack shrinks from three brackets to two. String contents are skipped, so a
+// `{` inside a label never reads as structure. It returns -1 when no entry
+// completed.
+func lastCompleteEntryEnd(s string) int {
+	var stack []byte
+	inString, escaped := false, false
+	last := -1
+	for i := range len(s) {
+		c := s[i]
+		switch {
+		case escaped:
+			escaped = false
+		case inString && c == '\\':
+			escaped = true
+		case c == '"':
+			inString = !inString
+		case inString:
+			// Brackets inside a string are content, not structure.
+		case c == '{' || c == '[':
+			stack = append(stack, c)
+		case c == '}' || c == ']':
+			if len(stack) > 0 && stack[len(stack)-1] == '{' && len(stack) == 3 {
+				last = i + 1
+			}
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	return last
 }
 
 // extractJSONObject returns the outermost JSON object in raw, dropping prose or
@@ -242,8 +363,11 @@ func extractJSONObject(raw string) (string, error) {
 	return raw[start:], nil
 }
 
-// repairJSON closes a truncated fragment: it terminates an open string and
-// appends the brackets still on the stack. Balanced input is returned as-is.
+// repairJSON closes a truncated fragment by appending the brackets still on
+// the stack. Balanced input is returned as-is. salvageCompleteEntries has
+// already discarded any entry with an unterminated string, so the string
+// branch below is defense in depth for callers that skip salvage; the parse
+// path itself never turns a label prefix into a verdict.
 func repairJSON(s string) string {
 	stack, inString, escaped, _ := scanJSON(s)
 	if len(stack) == 0 && !inString {

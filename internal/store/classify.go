@@ -5,11 +5,14 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/DanielBlei/rabbithole/internal/feeds"
@@ -81,7 +84,9 @@ CREATE TABLE IF NOT EXISTS item_classification (
 	attempts           INTEGER NOT NULL DEFAULT 0,
 	next_attempt_at    TIMESTAMP,
 	last_error         TEXT NOT NULL DEFAULT '',
-	updated_at         TIMESTAMP NOT NULL
+	updated_at         TIMESTAMP NOT NULL,
+	claim_token        TEXT NOT NULL DEFAULT '',
+	claim_expires_at   TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_item_classification_queue
 	ON item_classification(status, classifier_version, next_attempt_at);`
@@ -94,7 +99,9 @@ CREATE TABLE IF NOT EXISTS item_classification (
 	attempts           INTEGER NOT NULL DEFAULT 0,
 	next_attempt_at    TIMESTAMPTZ,
 	last_error         TEXT NOT NULL DEFAULT '',
-	updated_at         TIMESTAMPTZ NOT NULL
+	updated_at         TIMESTAMPTZ NOT NULL,
+	claim_token        TEXT NOT NULL DEFAULT '',
+	claim_expires_at   TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_item_classification_queue
 	ON item_classification(status, classifier_version, next_attempt_at);`
@@ -124,6 +131,13 @@ const (
 // ErrInvalidFilter's caller-error shape for query inputs but stays distinct.
 var ErrInvalidTag = errors.New("invalid content tag")
 
+// ErrStaleClaim is returned when a completion or failure write carries a claim
+// token the queue no longer honours: another worker re-claimed the item, a
+// version change or manual enqueue reset it, or the item finished under a
+// different claim. The caller dropped a race it should not fight — the safe
+// move is to discard the verdict, not to overwrite the newer state.
+var ErrStaleClaim = errors.New("classification claim is no longer current")
+
 // ItemTag is one content tag applied to an item.
 type ItemTag struct {
 	Slug              string
@@ -146,10 +160,12 @@ type TagCount struct {
 	Count int
 }
 
-// ClassificationCandidate is one scored item the worker may classify.
+// ClassificationCandidate is one scored item the worker may classify, together
+// with the claim token that proves this worker owns it until it completes.
 type ClassificationCandidate struct {
-	Item     feeds.Item
-	Attempts int
+	Item       feeds.Item
+	Attempts   int
+	ClaimToken string
 }
 
 // ClassificationState is the queue row for one item.
@@ -161,6 +177,8 @@ type ClassificationState struct {
 	NextAttemptAt     *time.Time
 	LastError         string
 	UpdatedAt         time.Time
+	ClaimToken        string
+	ClaimExpiresAt    *time.Time
 }
 
 // TagWriteResult reports how many edges replaced an item's previous tags.
@@ -180,10 +198,17 @@ type Page struct {
 // classification as ok at version. Only classifier-owned rows are replaced:
 // feed tags, scores and user state are untouched. A missing item is ignored so
 // a concurrent prune cannot turn a valid classification into an error.
+//
+// claimToken is the ownership token ClaimClassification minted for this item.
+// A non-empty token must still be the current one when the write lands: the
+// tags and the ok state change in the same transaction, and a worker whose
+// claim was taken over sees ErrStaleClaim with nothing written. An empty token
+// is a manual write and skips the ownership check.
 func (s *Store) ReplaceItemTags(
 	ctx context.Context,
 	itemID string,
 	version int,
+	claimToken string,
 	keywords, assumptions []string,
 ) (TagWriteResult, error) {
 	if strings.TrimSpace(itemID) == "" {
@@ -214,6 +239,22 @@ func (s *Store) ReplaceItemTags(
 	}
 	if err != nil {
 		return TagWriteResult{}, fmt.Errorf("check item %s: %w", itemID, err)
+	}
+	if claimToken != "" {
+		// Fail fast, before any tag is written, when the claim is no longer
+		// ours. markClassifiedTx re-checks under the row lock at commit time:
+		// between the two checks a concurrent re-claim can only shrink the
+		// window, not slip through it.
+		var one int
+		err := s.txQueryRow(ctx, tx,
+			"SELECT 1 FROM item_classification WHERE item_id = ? AND claim_token = ?",
+			itemID, claimToken).Scan(&one)
+		if errors.Is(err, sql.ErrNoRows) {
+			return TagWriteResult{}, fmt.Errorf("%w: item %s", ErrStaleClaim, itemID)
+		}
+		if err != nil {
+			return TagWriteResult{}, fmt.Errorf("check claim for item %s: %w", itemID, err)
+		}
 	}
 
 	kindByTag := make(map[int64]string)
@@ -268,7 +309,7 @@ func (s *Store) ReplaceItemTags(
 			result.Assumptions++
 		}
 	}
-	if err := s.markClassifiedTx(ctx, tx, itemID, version, now); err != nil {
+	if err := s.markClassifiedTx(ctx, tx, itemID, version, now, claimToken); err != nil {
 		return TagWriteResult{}, err
 	}
 	if err := s.commitWrite(ctx, tx); err != nil {
@@ -277,20 +318,49 @@ func (s *Store) ReplaceItemTags(
 	return result, nil
 }
 
-// markClassifiedTx moves an item's queue row to ok at version.
-func (s *Store) markClassifiedTx(ctx context.Context, tx *sql.Tx, itemID string, version int, now string) error {
-	_, err := s.txExec(ctx, tx, `INSERT INTO item_classification
-		(item_id, classifier_version, status, attempts, next_attempt_at, last_error, updated_at)
-		VALUES (?, ?, 'ok', 0, NULL, '', ?)
+// markClassifiedTx moves an item's queue row to ok at version, releasing the
+// claim: a completed row holds no ownership. With a claimToken the update is
+// guarded by it, so a worker whose claim was taken over writes nothing and
+// learns so through ErrStaleClaim.
+func (s *Store) markClassifiedTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	itemID string,
+	version int,
+	now, claimToken string,
+) error {
+	upsert := `INSERT INTO item_classification
+		(item_id, classifier_version, status, attempts, next_attempt_at, last_error, updated_at,
+			claim_token, claim_expires_at)
+		VALUES (?, ?, 'ok', 0, NULL, '', ?, '', NULL)
 		ON CONFLICT (item_id) DO UPDATE SET
 			classifier_version = excluded.classifier_version,
 			status = 'ok',
 			attempts = 0,
 			next_attempt_at = NULL,
 			last_error = '',
-			updated_at = excluded.updated_at`, itemID, version, now)
+			updated_at = excluded.updated_at,
+			claim_token = '',
+			claim_expires_at = NULL`
+	args := []any{itemID, version, now}
+	if claimToken != "" {
+		upsert += `
+			WHERE item_classification.claim_token = ?`
+		args = append(args, claimToken)
+	}
+	res, err := s.txExec(ctx, tx, upsert, args...)
 	if err != nil {
 		return fmt.Errorf("record classification for item %s: %w", itemID, err)
+	}
+	if claimToken == "" {
+		return nil
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("record classification for item %s: %w", itemID, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: item %s was re-claimed or reset mid-write", ErrStaleClaim, itemID)
 	}
 	return nil
 }
@@ -302,12 +372,13 @@ type canonicalLabel struct {
 }
 
 // canonicalLabels normalizes and deduplicates labels, preserving the first
-// spelling seen for display. Invalid labels fail before anything is stored.
+// spelling seen for display. Labels are sanitized before anything is stored,
+// and invalid labels fail the write.
 func canonicalLabels(labels []string) ([]canonicalLabel, error) {
 	out := make([]canonicalLabel, 0, len(labels))
 	seen := make(map[string]struct{}, len(labels))
 	for _, raw := range labels {
-		label := strings.TrimSpace(raw)
+		label := sanitizeLabel(strings.TrimSpace(raw))
 		slug, err := tagspkg.Normalize(label)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidTag, err)
@@ -325,6 +396,50 @@ func canonicalLabels(labels []string) ([]canonicalLabel, error) {
 		out = append(out, canonicalLabel{Slug: slug, Label: label})
 	}
 	return out, nil
+}
+
+// sanitizeLabel strips the characters a model-authored label must never carry
+// into a terminal: C0 and C1 controls — including the ESC that opens ANSI and
+// OSC escape sequences — DEL, and Unicode format characters such as the bidi
+// overrides. The zero-width joiners legitimate text uses are content, not
+// formatting, and survive; ordinary UTF-8, including multilingual labels,
+// passes through untouched. This is the store's boundary check: everything
+// that persists a tag label goes through it, so no display path can replay a
+// control sequence a model emitted.
+func sanitizeLabel(s string) string {
+	clean := true
+	for _, r := range s {
+		if isControlRune(r) {
+			clean = false
+			break
+		}
+	}
+	if clean {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if !isControlRune(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// isControlRune reports whether r is stripped by sanitizeLabel.
+func isControlRune(r rune) bool {
+	switch {
+	case r == '‌' || r == '‍': // zero-width non-joiner / joiner
+		return false
+	case r < 0x20 || r == 0x7F: // C0 controls and DEL
+		return true
+	case r >= 0x80 && r <= 0x9F: // C1 controls
+		return true
+	case unicode.Is(unicode.Cf, r): // format characters (bidi overrides, tags)
+		return true
+	}
+	return false
 }
 
 // ensureTagTx resolves an alias first, then a canonical tag, then creates one.
@@ -357,7 +472,7 @@ func (s *Store) AddTagAlias(ctx context.Context, alias, canonical string) error 
 	if err != nil {
 		return fmt.Errorf("%w: alias %q: %v", ErrInvalidTag, alias, err)
 	}
-	canonicalText := strings.TrimSpace(canonical)
+	canonicalText := sanitizeLabel(strings.TrimSpace(canonical))
 	canonicalSlug, err := tagspkg.Normalize(canonicalText)
 	if err != nil {
 		return fmt.Errorf("%w: canonical %q: %v", ErrInvalidTag, canonical, err)
@@ -555,6 +670,7 @@ func (s *Store) EnqueueClassification(ctx context.Context, itemIDs []string, ver
 				attempts = 0,
 				next_attempt_at = NULL,
 				last_error = '',
+				claim_token = '', claim_expires_at = NULL,
 				updated_at = excluded.updated_at
 			WHERE item_classification.classifier_version <> excluded.classifier_version
 				OR item_classification.status <> 'ok'
@@ -622,15 +738,60 @@ func (s *Store) EnqueueBackfill(ctx context.Context, cutoff time.Time, limit, ve
 	return s.EnqueueClassification(ctx, ids, version, false)
 }
 
-// ClaimClassification returns up to limit scored items the worker may process
-// now: never classified, classified at an older version, pending, or failed
-// with retries still available and its backoff elapsed. Failed items that have
-// exhausted maxAttempts wait for a version bump or a manual retry.
+// classificationItemFilter returns the predicate a claimable item satisfies,
+// prefixed with the alias the caller joined items under.
+func classificationItemFilter(alias string) string {
+	return alias + ".llm_score IS NOT NULL" +
+		" AND trim(" + alias + ".id) <> ''" +
+		" AND trim(" + alias + ".source) <> ''" +
+		" AND trim(" + alias + ".title) <> ''" +
+		" AND trim(" + alias + ".link) <> ''"
+}
+
+// classificationQueueFilter returns the predicate that makes a queue row
+// claimable at version: never seen at this version (a version bump invalidates
+// any previous ownership), or pending or failed with retries left, its backoff
+// elapsed and no unexpired claim holding it. iAlias names the items alias the
+// caller joined under.
+func classificationQueueFilter(cAlias string) string {
+	return "(" + cAlias + ".classifier_version <> ?" +
+		" OR ((" + cAlias + ".status = 'pending'" +
+		" OR (" + cAlias + ".status = 'failed' AND " + cAlias + ".attempts < ?))" +
+		" AND (" + cAlias + ".claim_expires_at IS NULL OR " + cAlias + ".claim_expires_at <= ?)" +
+		" AND (" + cAlias + ".next_attempt_at IS NULL OR " + cAlias + ".next_attempt_at <= ?)))"
+}
+
+// newClaimToken mints a fresh ownership token. Randomness, not sequence: two
+// workers claiming around the same crash must never mint the same token, or
+// the loser's writes would look like the winner's.
+func newClaimToken() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+// ClaimClassification atomically claims up to limit scored items the worker
+// may process now: never classified, classified at an older version, pending,
+// or failed with retries still available and its backoff elapsed. Failed items
+// that have exhausted maxAttempts wait for a version bump or a manual retry.
+//
+// A claim installs a fresh, unguessable ownership token and a lease of lease
+// from now. A second worker — in this or another process — cannot claim the
+// same rows while the lease holds; after it expires the row is reclaimable,
+// which is how a crashed worker's items recover without operator action. The
+// token, not the lease, authorizes completion: a slow generation whose lease
+// expired still commits when nobody re-claimed the item, and a worker that
+// lost a re-claim sees ErrStaleClaim from its writes instead of overwriting
+// the newer verdict. Attempts restart at zero when the stored version differs
+// from the requested one, so a version bump restores the full retry budget.
 func (s *Store) ClaimClassification(
 	ctx context.Context,
 	version int,
 	now time.Time,
 	limit, maxAttempts int,
+	lease time.Duration,
 ) ([]ClassificationCandidate, error) {
 	if version < 1 {
 		return nil, fmt.Errorf("classifier version must be positive, got %d", version)
@@ -641,35 +802,109 @@ func (s *Store) ClaimClassification(
 	if maxAttempts <= 0 {
 		maxAttempts = 5
 	}
-	rows, err := s.query(ctx, `SELECT i.id, i.source, i.title, i.link,
-			COALESCE(i.summary, ''), i.published_at, COALESCE(i.tags, ''),
-			COALESCE(c.attempts, 0)
-		FROM items i LEFT JOIN item_classification c ON c.item_id = i.id
-		WHERE i.llm_score IS NOT NULL
-			AND trim(i.id) <> '' AND trim(i.source) <> '' AND trim(i.title) <> '' AND trim(i.link) <> ''
-			AND (
-				c.item_id IS NULL
-				OR c.classifier_version <> ?
-				OR (c.status = 'pending' AND (c.next_attempt_at IS NULL OR c.next_attempt_at <= ?))
-				OR (c.status = 'failed' AND c.attempts < ?
-					AND (c.next_attempt_at IS NULL OR c.next_attempt_at <= ?))
-			)
-		ORDER BY `+itemDate+` DESC, i.id ASC
-		LIMIT ?`, version, sqlTime(now), maxAttempts, sqlTime(now), limit)
+	if lease <= 0 {
+		return nil, fmt.Errorf("classification claim lease must be positive, got %s", lease)
+	}
+	token, err := newClaimToken()
 	if err != nil {
+		return nil, fmt.Errorf("mint classification claim: %w", err)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin classification claim: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	nowStr := sqlTime(now)
+	// 1. Queue rows for items never classified, bounded by limit, so step 2
+	//    can take them. Ordering matches the claim order: newest first. The
+	//    ON CONFLICT is not decoration: on Postgres two claims can both see a
+	//    missing row before either commits (read committed), and the loser's
+	//    insert must be a no-op, not a unique-violation error.
+	if _, err := s.txExec(ctx, tx, `INSERT INTO item_classification
+			(item_id, classifier_version, status, attempts, next_attempt_at, last_error, updated_at)
+		SELECT i.id, ?, 'pending', 0, NULL, '', ?
+		FROM items i LEFT JOIN item_classification c ON c.item_id = i.id
+		WHERE c.item_id IS NULL AND `+classificationItemFilter("i")+`
+		ORDER BY `+itemDate+` DESC, i.id ASC
+		LIMIT ?
+		ON CONFLICT (item_id) DO NOTHING`, version, nowStr, limit); err != nil {
+		return nil, fmt.Errorf("queue unclassified items: %w", err)
+	}
+
+	// 2. Pick the candidates, newest first.
+	rows, err := s.txQuery(ctx, tx, `SELECT c.item_id
+		FROM item_classification c JOIN items i ON i.id = c.item_id
+		WHERE `+classificationItemFilter("i")+`
+			AND `+classificationQueueFilter("c")+`
+		ORDER BY `+itemDate+` DESC, i.id ASC
+		LIMIT ?`, version, maxAttempts, nowStr, nowStr, limit)
+	if err != nil {
+		return nil, fmt.Errorf("pick classification candidates: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan classification candidate id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("read classification candidates: %w", err)
+	}
+	_ = rows.Close()
+	if len(ids) == 0 {
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit classification claim: %w", err)
+		}
+		return nil, nil
+	}
+
+	// 3. Take ownership. The eligibility predicate is repeated in the UPDATE —
+	//    not just baked into the id list — because on Postgres a concurrent
+	//    worker's claim can commit between step 2 and this statement; the
+	//    re-checked predicate, evaluated under the row lock, makes the loser's
+	//    UPDATE a no-op instead of a steal. Claiming also clears the failure
+	//    backoff: the lease, not next_attempt_at, now bounds crash recovery.
+	claimArgs := append([]any{token, sqlTimeOrNull(now.Add(lease)), version, version, nowStr},
+		toAnySlice(ids)...)
+	claimArgs = append(claimArgs, version, maxAttempts, nowStr, nowStr)
+	if _, err := s.txExec(ctx, tx, `UPDATE item_classification SET
+			claim_token = ?, claim_expires_at = ?, classifier_version = ?,
+			attempts = CASE WHEN classifier_version = ? THEN attempts ELSE 0 END,
+			next_attempt_at = NULL, updated_at = ?,
+			status = 'pending', last_error = ''
+		WHERE item_id IN (`+placeholders(len(ids))+`)
+			AND EXISTS (SELECT 1 FROM items i WHERE i.id = item_classification.item_id
+				AND `+classificationItemFilter("i")+`)
+			AND `+classificationQueueFilter("item_classification"),
+		claimArgs...); err != nil {
 		return nil, fmt.Errorf("claim classification items: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
 
+	// 4. Return exactly what this claim owns.
+	items, err := s.txQuery(ctx, tx, `SELECT i.id, i.source, i.title, i.link,
+			COALESCE(i.summary, ''), i.published_at, COALESCE(i.tags, ''),
+			COALESCE(c.attempts, 0)
+		FROM items i JOIN item_classification c ON c.item_id = i.id
+		WHERE c.claim_token = ?`, token)
+	if err != nil {
+		return nil, fmt.Errorf("read claimed items: %w", err)
+	}
+	defer func() { _ = items.Close() }()
 	var out []ClassificationCandidate
-	for rows.Next() {
+	for items.Next() {
 		var (
 			item      feeds.Item
 			published *time.Time
 			tags      string
 			attempts  int
 		)
-		if err := rows.Scan(&item.ID, &item.Source, &item.Title, &item.Link,
+		if err := items.Scan(&item.ID, &item.Source, &item.Title, &item.Link,
 			&item.Summary, &published, &tags, &attempts); err != nil {
 			return nil, fmt.Errorf("scan classification candidate: %w", err)
 		}
@@ -679,19 +914,44 @@ func (s *Store) ClaimClassification(
 		if tags != "" {
 			item.Tags = strings.Split(tags, ",")
 		}
-		out = append(out, ClassificationCandidate{Item: item, Attempts: attempts})
+		out = append(out, ClassificationCandidate{Item: item, Attempts: attempts, ClaimToken: token})
 	}
-	return out, rows.Err()
+	if err := items.Err(); err != nil {
+		return nil, fmt.Errorf("read claimed items: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit classification claim: %w", err)
+	}
+	return out, nil
+}
+
+// toAnySlice saves the caller an explicit loop when spreading ids into
+// placeholders.
+func toAnySlice(ids []string) []any {
+	out := make([]any, len(ids))
+	for i, id := range ids {
+		out[i] = id
+	}
+	return out
 }
 
 // MarkClassificationFailed records a failed attempt and schedules its next
 // try. A missing item is ignored, as with tag replacement.
+// MarkClassificationFailed records a failed attempt. An empty claimToken is an
+// unguarded write for manual and tooling paths; a non-empty one must match the
+// token the worker claimed, and a mismatch — the item was re-claimed, reset or
+// enqueued after this worker's claim — returns an error wrapping
+// ErrStaleClaim instead of overwriting the newer state. Both paths release the
+// claim, so a failure never leaves a lease to expire. A missing item is not an
+// error: pruning an item abandons its classification, and no row exists to
+// update.
 func (s *Store) MarkClassificationFailed(
 	ctx context.Context,
 	itemID string,
 	version, attempts int,
 	lastError string,
 	next time.Time,
+	claimToken string,
 ) error {
 	if version < 1 {
 		return fmt.Errorf("classifier version must be positive, got %d", version)
@@ -699,19 +959,44 @@ func (s *Store) MarkClassificationFailed(
 	if attempts < 0 {
 		return fmt.Errorf("attempts cannot be negative, got %d", attempts)
 	}
-	_, err := s.exec(ctx, `INSERT INTO item_classification
-		(item_id, classifier_version, status, attempts, next_attempt_at, last_error, updated_at)
-		SELECT id, ?, 'failed', ?, ?, ?, ? FROM items WHERE id = ?
-		ON CONFLICT (item_id) DO UPDATE SET
-			classifier_version = excluded.classifier_version,
-			status = 'failed',
-			attempts = excluded.attempts,
-			next_attempt_at = excluded.next_attempt_at,
-			last_error = excluded.last_error,
-			updated_at = excluded.updated_at`,
-		version, attempts, sqlTimeOrNull(next), lastError, sqlTime(time.Now()), itemID)
+	if claimToken == "" {
+		_, err := s.exec(ctx, `INSERT INTO item_classification
+			(item_id, classifier_version, status, attempts, next_attempt_at, last_error, updated_at)
+			SELECT id, ?, 'failed', ?, ?, ?, ? FROM items WHERE id = ?
+			ON CONFLICT (item_id) DO UPDATE SET
+				classifier_version = excluded.classifier_version,
+				status = 'failed',
+				attempts = excluded.attempts,
+				next_attempt_at = excluded.next_attempt_at,
+				last_error = excluded.last_error,
+				claim_token = '', claim_expires_at = NULL,
+				updated_at = excluded.updated_at`,
+			version, attempts, sqlTimeOrNull(next), lastError, sqlTime(time.Now()), itemID)
+		if err != nil {
+			return fmt.Errorf("record classification failure for item %s: %w", itemID, err)
+		}
+		return nil
+	}
+	res, err := s.exec(ctx, `UPDATE item_classification SET
+			classifier_version = ?, status = 'failed', attempts = ?,
+			next_attempt_at = ?, last_error = ?,
+			claim_token = '', claim_expires_at = NULL, updated_at = ?
+		WHERE item_id = ? AND claim_token = ?`,
+		version, attempts, sqlTimeOrNull(next), lastError, sqlTime(time.Now()), itemID, claimToken)
 	if err != nil {
 		return fmt.Errorf("record classification failure for item %s: %w", itemID, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("record classification failure for item %s: %w", itemID, err)
+	} else if n == 0 {
+		var one int
+		switch err := s.queryRow(ctx, `SELECT 1 FROM items WHERE id = ?`, itemID).Scan(&one); {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil // pruned while we held the claim; nothing to record
+		case err != nil:
+			return fmt.Errorf("record classification failure for item %s: %w", itemID, err)
+		}
+		return fmt.Errorf("record classification failure for item %s: %w", itemID, ErrStaleClaim)
 	}
 	return nil
 }
@@ -719,15 +1004,16 @@ func (s *Store) MarkClassificationFailed(
 // ClassificationState returns the queue row for item, and false when none exists.
 func (s *Store) ClassificationState(ctx context.Context, itemID string) (ClassificationState, bool, error) {
 	var (
-		state ClassificationState
-		next  sql.NullTime
-		upd   time.Time
+		state   ClassificationState
+		next    sql.NullTime
+		expires sql.NullTime
+		upd     time.Time
 	)
 	err := s.queryRow(ctx, `SELECT item_id, classifier_version, status, attempts,
-			next_attempt_at, last_error, updated_at
+			next_attempt_at, last_error, updated_at, claim_token, claim_expires_at
 		FROM item_classification WHERE item_id = ?`, itemID).
 		Scan(&state.ItemID, &state.ClassifierVersion, &state.Status, &state.Attempts,
-			&next, &state.LastError, &upd)
+			&next, &state.LastError, &upd, &state.ClaimToken, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ClassificationState{}, false, nil
 	}
@@ -735,6 +1021,7 @@ func (s *Store) ClassificationState(ctx context.Context, itemID string) (Classif
 		return ClassificationState{}, false, fmt.Errorf("read classification state: %w", err)
 	}
 	state.NextAttemptAt = utcTimePtr(next)
+	state.ClaimExpiresAt = utcTimePtr(expires)
 	state.UpdatedAt = utcTime(upd)
 	return state, true, nil
 }

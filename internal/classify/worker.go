@@ -5,6 +5,7 @@ package classify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -29,6 +30,19 @@ const (
 	defaultMaxAttempts   = 5
 	defaultSlowRetry     = 30 * time.Minute
 	defaultRetryAttempts = 3
+	// defaultClaimLease is how long a claimed wave stays owned by a worker
+	// that never reports back. Claims are just-in-time — one wave of
+	// batchSize × maxParallel items at a time, reserved immediately before it
+	// runs — so the lease only has to outlive the slowest legitimate wave: a
+	// batch whose every item needs retryAttempts classifier calls, each
+	// bounded by the provider's chat timeout (5 minutes for ollama, 3 for
+	// vLLM), plus the database writes. 30 minutes covers 3 × 5 minutes with
+	// headroom. A wave that somehow outlives the lease stays correct rather
+	// than silent: writes are guarded by the claim token, and the first
+	// ErrStaleClaim abandons the wave's remaining items, so an expired lease
+	// costs at most one wave of duplicate model work while it recovers a
+	// crashed worker's items without operator action.
+	defaultClaimLease = 30 * time.Minute
 )
 
 // Stats summarises one classification pass.
@@ -55,6 +69,7 @@ type Worker struct {
 	slowRetry     time.Duration
 	retryAttempts int
 	retryBackoff  time.Duration
+	claimLease    time.Duration
 
 	mu      sync.Mutex
 	running bool
@@ -80,6 +95,7 @@ func NewWorker(db *store.Store, src config.Source, factory ClassifierFactory) *W
 		slowRetry:     defaultSlowRetry,
 		retryAttempts: defaultRetryAttempts,
 		retryBackoff:  time.Second,
+		claimLease:    defaultClaimLease,
 	}
 }
 
@@ -149,7 +165,8 @@ func (w *Worker) notify(queue bool) {
 
 	go func() {
 		defer w.wg.Done()
-		w.logStats(w.run(ctx))
+		stats, err := w.run(ctx)
+		w.logResult(ctx, stats, err)
 		w.finishPass()
 	}()
 }
@@ -176,18 +193,21 @@ func (w *Worker) finishPass() {
 }
 
 // RunOnce drains the claimable queue synchronously. It is the CLI backfill's
-// engine and the seam tests use.
-func (w *Worker) RunOnce(ctx context.Context) Stats {
+// engine and the seam tests use. The error is non-nil when a database failure
+// stopped the pass — outcomes could not be persisted, and a caller that exits
+// zero on it would report work that was never recorded. Model failures are not
+// errors: they are recorded against the item and retried on a later pass.
+func (w *Worker) RunOnce(ctx context.Context) (Stats, error) {
 	w.mu.Lock()
 	if w.running {
 		w.mu.Unlock()
-		return Stats{Skipped: true, Reason: "a classification pass is already running"}
+		return Stats{Skipped: true, Reason: "a classification pass is already running"}, nil
 	}
 	w.running = true
 	w.mu.Unlock()
-	stats := w.run(ctx)
+	stats, err := w.run(ctx)
 	w.finishPass()
-	return stats
+	return stats, err
 }
 
 // Shutdown stops the loop and cancels the in-flight pass, waiting for it or for
@@ -211,41 +231,140 @@ func (w *Worker) Shutdown(ctx context.Context) {
 	}
 }
 
-func (w *Worker) run(ctx context.Context) Stats {
+// batchRunner carries the mutable state one pass shares across concurrent
+// batch processors: the running totals, the flag that a required database
+// write failed — which stops the pass and reaches the caller as an error —
+// and the flag that the wave's claim was taken over, which abandons the
+// claim's remaining items without further model requests.
+type batchRunner struct {
+	mu        sync.Mutex
+	stats     Stats
+	stopped   bool
+	fatalErr  error
+	lostClaim bool
+}
+
+func (r *batchRunner) addCandidates(n int) {
+	r.mu.Lock()
+	r.stats.Candidates += n
+	r.mu.Unlock()
+}
+
+func (r *batchRunner) record(classified, failed int) {
+	r.mu.Lock()
+	r.stats.Classified += classified
+	r.stats.Failed += failed
+	r.mu.Unlock()
+}
+
+func (r *batchRunner) progress() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stats.Classified + r.stats.Failed
+}
+
+func (r *batchRunner) snapshot() Stats {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stats
+}
+
+// stop marks the pass as unwinnable: a required write failed and continuing
+// would claim items the pass cannot record outcomes for. err is the failure
+// that ended the pass; it is what RunOnce reports, so a caller — the CLI's
+// --wait above all — can tell a completed pass from a broken one. The first
+// failure wins: later ones only add detail to the log.
+func (r *batchRunner) stop(err error) {
+	r.mu.Lock()
+	if !r.stopped {
+		r.stopped = true
+		r.fatalErr = err
+	}
+	r.mu.Unlock()
+}
+
+// failure returns the error that stopped the pass, if one did.
+func (r *batchRunner) failure() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.fatalErr
+}
+
+func (r *batchRunner) done() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stopped
+}
+
+// loseClaim records that the wave's claim token was rejected: another worker
+// owns the items now. The claim's remaining candidates must not consume
+// further model requests — their verdicts could only be discarded.
+func (r *batchRunner) loseClaim() {
+	r.mu.Lock()
+	r.lostClaim = true
+	r.mu.Unlock()
+}
+
+func (r *batchRunner) claimLost() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lostClaim
+}
+
+// beginWave resets the per-claim state for a freshly claimed wave: a new
+// claim is new ownership, untouched by the previous wave losing its own.
+func (r *batchRunner) beginWave() {
+	r.mu.Lock()
+	r.lostClaim = false
+	r.mu.Unlock()
+}
+
+func (w *Worker) run(ctx context.Context) (Stats, error) {
 	logger := zerolog.Ctx(ctx)
 	cfg, _, err := w.src.Active(ctx)
 	if err != nil {
 		logger.Warn().Err(err).Msg("classification: config unavailable, skipping pass")
-		return Stats{Skipped: true, Reason: "config unavailable"}
+		return Stats{Skipped: true, Reason: "config unavailable"}, nil
 	}
 	cl := cfg.Classification
 	if cl.Enabled != nil && !*cl.Enabled {
-		return Stats{Skipped: true, Reason: "classification disabled"}
+		return Stats{Skipped: true, Reason: "classification disabled"}, nil
 	}
 	if cl.Provider == config.ProviderHeuristic {
-		return Stats{Skipped: true, Reason: "heuristic classifier is a no-op"}
+		return Stats{Skipped: true, Reason: "heuristic classifier is a no-op"}, nil
 	}
 	if w.factory == nil {
-		return Stats{Skipped: true, Reason: "no classifier factory configured"}
+		return Stats{Skipped: true, Reason: "no classifier factory configured"}, nil
 	}
 
 	var classifier Classifier
-	stats := Stats{}
+	r := &batchRunner{}
+	batchSize := max(cl.BatchSize, 1)
+	maxParallel := max(cl.MaxParallel, 1)
+	// Just-in-time claiming: one wave of at most batchSize × maxParallel items
+	// is reserved immediately before it runs, never a whole claimLimit-sized
+	// backlog. The lease therefore covers work that is about to happen, and a
+	// lease that expires mid-pass can strand at most one wave's worth of
+	// duplicate model work — the token check and the stale-claim abandon below
+	// keep even that bounded.
+	wave := min(w.claimLimit, batchSize*maxParallel)
 	for {
 		if err := ctx.Err(); err != nil {
 			break
 		}
-		candidates, err := w.db.ClaimClassification(
-			ctx, w.version, time.Now(), w.claimLimit, w.maxAttempts)
+		// Probe before claiming. A claim installs an ownership lease, and an
+		// unavailable backend must not leave claimed items stranded behind
+		// one. The probe is a read, so an idle install still never resolves —
+		// let alone dials — the model on every tick.
+		eligible, err := w.db.EligibleClassificationItems(ctx, time.Time{}, 1, w.version)
 		if err != nil {
-			logger.Warn().Err(err).Msg("classification: claiming items failed")
+			logger.Warn().Err(err).Msg("classification: probing the queue failed")
+			r.stop(err)
 			break
 		}
-		if len(candidates) == 0 {
+		if len(eligible) == 0 {
 			break
 		}
-		// Resolve the backend lazily: an idle install must not dial the model
-		// on every tick just to find an empty queue.
 		if classifier == nil {
 			var vocabulary []string
 			if cl.VocabularyHint != nil && *cl.VocabularyHint {
@@ -262,22 +381,35 @@ func (w *Worker) run(ctx context.Context) Stats {
 			classifier, err = w.factory(ctx, cfg, vocabulary)
 			if err != nil {
 				logger.Warn().Err(err).Msg("classification: backend unavailable, items stay pending")
-				return Stats{Skipped: true, Reason: "backend unavailable"}
+				return Stats{Skipped: true, Reason: "backend unavailable"}, nil
 			}
 		}
-		stats.Candidates += len(candidates)
-		before := stats.Classified + stats.Failed
-		batchSize := max(cl.BatchSize, 1)
-		for start := 0; start < len(candidates); start += batchSize {
-			end := min(start+batchSize, len(candidates))
-			w.processBatch(ctx, classifier, candidates[start:end], &stats)
+		candidates, err := w.db.ClaimClassification(
+			ctx, w.version, time.Now(), wave, w.maxAttempts, w.claimLease)
+		if err != nil {
+			logger.Warn().Err(err).Msg("classification: claiming items failed")
+			r.stop(err)
+			break
 		}
-		if stats.Classified+stats.Failed == before {
+		if len(candidates) == 0 {
+			break
+		}
+		r.addCandidates(len(candidates))
+		before := r.progress()
+		r.beginWave()
+		w.processCandidates(ctx, classifier, candidates, cl, r)
+		if r.done() {
+			// A required write failed. Stop instead of looping over items the
+			// pass cannot record outcomes for.
+			break
+		}
+		if r.progress() == before {
 			logger.Warn().Int("candidates", len(candidates)).
 				Msg("classification: pass made no progress, stopping to avoid a loop")
 			break
 		}
 	}
+	stats := r.snapshot()
 	event := logger.Info()
 	if stats.Candidates == 0 {
 		event = logger.Debug()
@@ -287,25 +419,75 @@ func (w *Worker) run(ctx context.Context) Stats {
 		Int("classified", stats.Classified).
 		Int("failed", stats.Failed).
 		Msg("classification pass complete")
-	return stats
+	return stats, r.failure()
+}
+
+// processCandidates classifies the claimed items with at most
+// max_parallel batches in flight. A max_parallel of one keeps the sequential
+// path — one batch at a time, in claim order — that a single-request install
+// expects; anything higher fans batches out while the semaphore holds the
+// number of concurrent model requests at exactly the configured bound.
+func (w *Worker) processCandidates(
+	ctx context.Context,
+	classifier Classifier,
+	candidates []store.ClassificationCandidate,
+	cl config.ClassificationConfig,
+	r *batchRunner,
+) {
+	batchSize := max(cl.BatchSize, 1)
+	maxParallel := max(cl.MaxParallel, 1)
+	if maxParallel == 1 {
+		for start := 0; start < len(candidates); start += batchSize {
+			if ctx.Err() != nil || r.done() || r.claimLost() {
+				return
+			}
+			w.processBatch(ctx, classifier,
+				candidates[start:min(start+batchSize, len(candidates))], r)
+		}
+		return
+	}
+	sem := make(chan struct{}, maxParallel)
+	var wg sync.WaitGroup
+feed:
+	for start := 0; start < len(candidates); start += batchSize {
+		// Acquire before spawning: both the in-flight requests and the
+		// goroutines stay bounded, and a cancelled context stops the feed
+		// instead of queueing behind the semaphore.
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			break feed
+		}
+		if r.done() || r.claimLost() {
+			<-sem
+			break feed
+		}
+		batch := candidates[start:min(start+batchSize, len(candidates))]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			w.processBatch(ctx, classifier, batch, r)
+		}()
+	}
+	wg.Wait()
 }
 
 func (w *Worker) processBatch(
 	ctx context.Context,
 	classifier Classifier,
 	candidates []store.ClassificationCandidate,
-	stats *Stats,
+	r *batchRunner,
 ) {
 	logger := zerolog.Ctx(ctx)
 	if len(candidates) == 1 {
 		candidate := candidates[0]
 		verdict, err := w.classifyOne(ctx, classifier, candidate.Item)
 		if err != nil {
-			w.recordFailure(ctx, candidate, err)
-			stats.Failed++
+			w.recordFailure(ctx, candidate, err, r)
 			return
 		}
-		w.storeVerdict(ctx, candidate, verdict, stats)
+		w.storeVerdict(ctx, candidate, verdict, r)
 		return
 	}
 
@@ -320,32 +502,64 @@ func (w *Worker) processBatch(
 		byID[verdict.ID] = verdict
 	}
 	for _, candidate := range candidates {
+		if ctx.Err() != nil || r.done() || r.claimLost() {
+			return
+		}
 		verdict, ok := byID[candidate.Item.ID]
 		if !ok {
 			verdict, err = w.classifyOne(ctx, classifier, candidate.Item)
 			if err != nil {
-				w.recordFailure(ctx, candidate, err)
-				stats.Failed++
+				w.recordFailure(ctx, candidate, err, r)
 				continue
 			}
 		}
-		w.storeVerdict(ctx, candidate, verdict, stats)
+		w.storeVerdict(ctx, candidate, verdict, r)
 	}
 }
 
+// storeVerdict persists one verdict under the claim that produced it, with the
+// response chosen by the error's origin:
+//
+//   - store.ErrStaleClaim: ownership was lost. The verdict is discarded —
+//     another worker owns the item and its result stands — without counting it
+//     either way, and the claim's remaining items are abandoned.
+//   - store.ErrInvalidTag: the model produced a tag the store refuses. An
+//     ordinary model failure: recorded per item, retried on a later pass.
+//   - context.Canceled / context.DeadlineExceeded: the pass was cut short
+//     mid-write. Not a model failure and not counted; stopping is the response.
+//   - anything else: a persistence failure. The verdict exists but cannot be
+//     recorded, and recording that as an ordinary model failure — which a
+//     still-working failure mark would happily do — would let a broken
+//     database pass as a completed pass. The pass stops and the error reaches
+//     the caller; classifications already committed stand.
 func (w *Worker) storeVerdict(
 	ctx context.Context,
 	candidate store.ClassificationCandidate,
 	verdict ItemVerdict,
-	stats *Stats,
+	r *batchRunner,
 ) {
-	if _, err := w.db.ReplaceItemTags(
-		ctx, candidate.Item.ID, w.version, verdict.Keywords, verdict.Assumptions); err != nil {
-		w.recordFailure(ctx, candidate, err)
-		stats.Failed++
-		return
+	logger := zerolog.Ctx(ctx)
+	_, err := w.db.ReplaceItemTags(
+		ctx, candidate.Item.ID, w.version, candidate.ClaimToken,
+		verdict.Keywords, verdict.Assumptions)
+	switch {
+	case err == nil:
+		r.record(1, 0)
+	case errors.Is(err, store.ErrStaleClaim):
+		logger.Debug().Str("item", candidate.Item.ID).
+			Msg("classification: claim lost before the verdict was stored, discarding it")
+		r.loseClaim()
+	case errors.Is(err, store.ErrInvalidTag):
+		w.recordFailure(ctx, candidate, err, r)
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		logger.Debug().Str("item", candidate.Item.ID).Err(err).
+			Msg("classification: verdict write cut short by the pass ending")
+		r.stop(err)
+	default:
+		logger.Error().Err(err).Str("item", candidate.Item.ID).
+			Msg("classification: storing the verdict failed, stopping the pass")
+		r.stop(err)
 	}
-	stats.Classified++
 }
 
 // classifyBatch asks for a whole batch and accepts it only when every item has
@@ -405,7 +619,17 @@ func (w *Worker) classifyOne(
 	return verdict, err
 }
 
-func (w *Worker) recordFailure(ctx context.Context, candidate store.ClassificationCandidate, err error) {
+// recordFailure persists one item's failure under the claim that produced it.
+// The item only counts as failed once the write lands: an unpersisted failure
+// is not progress, or a pass against a broken database would claim the same
+// items forever. A stale claim discards the failure the same way a stale
+// verdict is discarded, and abandons the claim's remaining items.
+func (w *Worker) recordFailure(
+	ctx context.Context,
+	candidate store.ClassificationCandidate,
+	err error,
+	r *batchRunner,
+) {
 	logger := zerolog.Ctx(ctx)
 	attempts := candidate.Attempts + 1
 	next := time.Now().Add(w.slowRetry)
@@ -413,18 +637,34 @@ func (w *Worker) recordFailure(ctx context.Context, candidate store.Classificati
 		// Terminal for the queue: only a version bump or a manual retry resets it.
 		next = time.Now().Add(365 * 24 * time.Hour)
 	}
-	if markErr := w.db.MarkClassificationFailed(
-		ctx, candidate.Item.ID, w.version, attempts, err.Error(), next); markErr != nil {
-		logger.Warn().Err(markErr).Str("item", candidate.Item.ID).
-			Msg("classification: recording failure failed")
+	markErr := w.db.MarkClassificationFailed(
+		ctx, candidate.Item.ID, w.version, attempts, err.Error(), next, candidate.ClaimToken)
+	switch {
+	case markErr == nil:
+		logger.Warn().Str("item", truncate(candidate.Item.Title, 80)).Int("attempts", attempts).
+			Err(err).Msg("classification failed after retries")
+		r.record(0, 1)
+	case errors.Is(markErr, store.ErrStaleClaim):
+		logger.Debug().Str("item", candidate.Item.ID).
+			Msg("classification: claim lost before the failure was recorded, discarding it")
+		r.loseClaim()
+	default:
+		logger.Error().Err(markErr).Str("item", candidate.Item.ID).
+			Msg("classification: recording the failure failed, stopping the pass")
+		r.stop(markErr)
 	}
-	logger.Warn().Str("item", truncate(candidate.Item.Title, 80)).Int("attempts", attempts).
-		Err(err).Msg("classification failed after retries")
 }
 
-func (w *Worker) logStats(stats Stats) {
+// logResult reports a background pass's outcome. A pass stopped by a database
+// failure is an error worth an operator's attention — its items are still
+// queued, but nothing is classifying them — while a skipped pass is routine.
+func (w *Worker) logResult(ctx context.Context, stats Stats, err error) {
+	logger := zerolog.Ctx(ctx)
+	if err != nil {
+		logger.Error().Err(err).Msg("classification pass stopped by a failure")
+		return
+	}
 	if stats.Skipped {
-		zerolog.Ctx(context.Background()).Debug().Str("reason", stats.Reason).
-			Msg("classification pass skipped")
+		logger.Debug().Str("reason", stats.Reason).Msg("classification pass skipped")
 	}
 }

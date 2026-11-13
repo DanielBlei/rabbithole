@@ -110,7 +110,10 @@ func TestWorkerClassifiesAndStores(t *testing.T) {
 	}}
 	w := newTestWorker(t, db, preparedConfig(t, nil), fake)
 
-	stats := w.RunOnce(t.Context())
+	stats, err := w.RunOnce(t.Context())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
 	if stats.Classified != 1 || stats.Failed != 0 {
 		t.Fatalf("stats = %+v", stats)
 	}
@@ -139,7 +142,10 @@ func TestWorkerFailureIsolation(t *testing.T) {
 	w := newTestWorker(t, db, preparedConfig(t, nil), fake)
 	w.retryBackoff = time.Millisecond
 
-	stats := w.RunOnce(t.Context())
+	stats, err := w.RunOnce(t.Context())
+	if err != nil {
+		t.Fatalf("a model failure must not fail the pass: %v", err)
+	}
 	if stats.Classified != 1 || stats.Failed != 1 {
 		t.Fatalf("stats = %+v", stats)
 	}
@@ -166,7 +172,10 @@ func TestWorkerRetriesOneItem(t *testing.T) {
 	w := newTestWorker(t, db, preparedConfig(t, nil), fake)
 	w.retryBackoff = time.Millisecond
 
-	stats := w.RunOnce(t.Context())
+	stats, err := w.RunOnce(t.Context())
+	if err != nil {
+		t.Fatalf("a model failure must not fail the pass: %v", err)
+	}
 	if stats.Failed != 1 {
 		t.Fatalf("stats = %+v", stats)
 	}
@@ -182,7 +191,7 @@ func TestWorkerSkipsHeuristic(t *testing.T) {
 		c.Classification.Provider = config.ProviderHeuristic
 	})
 	w := newTestWorker(t, db, cfg, &fakeClassifier{})
-	stats := w.RunOnce(t.Context())
+	stats, _ := w.RunOnce(t.Context())
 	if !stats.Skipped || stats.Reason == "" {
 		t.Fatalf("stats = %+v, want a skipped pass", stats)
 	}
@@ -199,7 +208,7 @@ func TestWorkerHonoursDisabled(t *testing.T) {
 		c.Classification.Enabled = &off
 	})
 	w := newTestWorker(t, db, cfg, &fakeClassifier{})
-	stats := w.RunOnce(t.Context())
+	stats, _ := w.RunOnce(t.Context())
 	if !stats.Skipped || stats.Reason != "classification disabled" {
 		t.Fatalf("stats = %+v", stats)
 	}
@@ -218,7 +227,10 @@ func TestWorkerBatchesMultipleItems(t *testing.T) {
 	})
 	w := newTestWorker(t, db, cfg, fake)
 
-	stats := w.RunOnce(t.Context())
+	stats, err := w.RunOnce(t.Context())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
 	if stats.Classified != 2 || stats.Failed != 0 {
 		t.Fatalf("stats = %+v", stats)
 	}
@@ -268,7 +280,7 @@ func TestWorkerIdleDoesNotResolveBackend(t *testing.T) {
 		resolved++
 		return nil, errors.New("must not be called on an idle queue")
 	})
-	stats := w.RunOnce(t.Context())
+	stats, _ := w.RunOnce(t.Context())
 	if stats.Candidates != 0 || stats.Skipped {
 		t.Fatalf("stats = %+v", stats)
 	}
@@ -285,14 +297,14 @@ func TestWorkerLeavesItemsPendingWhenBackendUnavailable(t *testing.T) {
 	) (Classifier, error) {
 		return nil, errors.New("model down")
 	})
-	stats := w.RunOnce(t.Context())
+	stats, _ := w.RunOnce(t.Context())
 	if !stats.Skipped || stats.Reason != "backend unavailable" {
 		t.Fatalf("stats = %+v", stats)
 	}
 	if _, ok, err := db.ClassificationState(t.Context(), "a"); err != nil || ok {
 		t.Fatalf("backend failure recorded state: ok=%v err=%v", ok, err)
 	}
-	claims, err := db.ClaimClassification(t.Context(), Version, time.Now(), 10, 5)
+	claims, err := db.ClaimClassification(t.Context(), Version, time.Now(), 10, 5, 30*time.Minute)
 	if err != nil || len(claims) != 1 {
 		t.Fatalf("item should still be claimable: %+v, %v", claims, err)
 	}
@@ -304,16 +316,16 @@ func TestWorkerVersionBumpReclaims(t *testing.T) {
 	fake := &fakeClassifier{verdict: map[string]ItemVerdict{"a": {Keywords: []string{"go"}}}}
 	w := newTestWorker(t, db, preparedConfig(t, nil), fake)
 
-	if stats := w.RunOnce(t.Context()); stats.Classified != 1 {
+	if stats, _ := w.RunOnce(t.Context()); stats.Classified != 1 {
 		t.Fatalf("first pass stats = %+v", stats)
 	}
-	if stats := w.RunOnce(t.Context()); stats.Candidates != 0 {
+	if stats, _ := w.RunOnce(t.Context()); stats.Candidates != 0 {
 		t.Fatalf("second pass reclaimed an ok item: %+v", stats)
 	}
 
 	w.version = 2
 	fake.verdict["a"] = ItemVerdict{Keywords: []string{"rust"}}
-	if stats := w.RunOnce(t.Context()); stats.Classified != 1 {
+	if stats, _ := w.RunOnce(t.Context()); stats.Classified != 1 {
 		t.Fatalf("version-bump pass stats = %+v", stats)
 	}
 	tags, err := db.TagsForItem(t.Context(), "a")

@@ -54,14 +54,103 @@ func TestParseClassificationsProseAndCodeFence(t *testing.T) {
 	}
 }
 
-func TestParseClassificationsRepairsTruncatedTail(t *testing.T) {
+// A response cut off mid-label must fail, not store the truncated prefix as a
+// tag: the incomplete entry is discarded, which fails the one-entry-per-item
+// check and sends the item back through the retry path.
+func TestParseClassificationsRejectsTruncatedLabel(t *testing.T) {
 	raw := `{"classifications":[{"index":1,"keywords":["go"],"assumptions":[]},{"index":2,"keywords":["rus`
-	got, err := ParseClassifications(raw, testItems(2))
+	_, err := ParseClassifications(raw, testItems(2))
+	if err == nil || !strings.Contains(err.Error(), "missing classification") {
+		t.Fatalf("error = %v, want a missing-entry error for the truncated item", err)
+	}
+}
+
+// The same rule holds when the cut lands mid-key or mid-array: a bracket the
+// model never closed must not repair into a valid empty list.
+func TestParseClassificationsRejectsStructuralTruncation(t *testing.T) {
+	for name, raw := range map[string]string{
+		"cut inside keywords array": `{"classifications":[{"index":1,"keywords":[`,
+		"cut after keywords colon":  `{"classifications":[{"index":1,"keywords":`,
+		"cut inside a key":          `{"classifications":[{"index":1,"keywords":["go"],"assum`,
+	} {
+		_, err := ParseClassifications(raw, testItems(1))
+		if err == nil {
+			t.Errorf("%s: truncated response was accepted: %s", name, raw)
+		}
+	}
+	// With two items the complete first entry survives, and only the truncated
+	// second one is reported missing.
+	raw := `{"classifications":[{"index":1,"keywords":["go"],"assumptions":[]},{"index":2,"keywords":[`
+	_, err := ParseClassifications(raw, testItems(2))
+	if err == nil || !strings.Contains(err.Error(), "missing classification for item 2") {
+		t.Fatalf("error = %v, want item 2 reported missing", err)
+	}
+}
+
+// Entries that closed before the cut are still salvageable — the response
+// fails only because the truncated tail leaves an item unclassified, and the
+// error names that item so the caller can retry it alone.
+func TestParseClassificationsSalvagesCompleteEntriesOnly(t *testing.T) {
+	raw := `{"classifications":[{"index":1,"keywords":["go"],"assumptions":[]},{"index":2,"keywords":["rust`
+	_, err := ParseClassifications(raw, testItems(2))
+	if err == nil || !strings.Contains(err.Error(), "missing classification for item 2") {
+		t.Fatalf("error = %v, want item 2 reported missing", err)
+	}
+}
+
+// A `{` inside a label must not confuse the structural cut: the salvaged
+// prefix still keeps the entry the label belongs to.
+func TestParseClassificationsToleratesBraceInsideLabel(t *testing.T) {
+	raw := `{"classifications":[{"index":1,"keywords":["a{b"],"assumptions":[]},{"index":2,"keywords":["rus`
+	_, err := ParseClassifications(raw, testItems(2))
+	if err == nil || !strings.Contains(err.Error(), "missing classification") {
+		t.Fatalf("error = %v, want a missing-entry error", err)
+	}
+}
+
+// Both list fields are required. An entry without them is malformed model
+// output, not an empty classification: storing it would mark the item ok with
+// fabricated-empty data the worker would never revisit.
+func TestParseClassificationsRejectsMissingListFields(t *testing.T) {
+	for name, raw := range map[string]string{
+		"no lists at all":     `{"classifications":[{"index":1}]}`,
+		"missing keywords":    `{"classifications":[{"index":1,"assumptions":["gpu"]}]}`,
+		"missing assumptions": `{"classifications":[{"index":1,"keywords":["go"]}]}`,
+		"missing index":       `{"classifications":[{"keywords":["go"],"assumptions":[]}]}`,
+	} {
+		if _, err := ParseClassifications(raw, testItems(1)); err == nil {
+			t.Errorf("%s: entry with missing fields was accepted", name)
+		}
+	}
+}
+
+// Field values that are not usable lists are rejected, not silently emptied.
+func TestParseClassificationsRejectsMalformedListValues(t *testing.T) {
+	for name, raw := range map[string]string{
+		"number":         `{"classifications":[{"index":1,"keywords":42,"assumptions":[]}]}`,
+		"null":           `{"classifications":[{"index":1,"keywords":null,"assumptions":[]}]}`,
+		"object":         `{"classifications":[{"index":1,"keywords":{},"assumptions":[]}]}`,
+		"nested array":   `{"classifications":[{"index":1,"keywords":[["go"]],"assumptions":[]}]}`,
+		"number element": `{"classifications":[{"index":1,"keywords":[42],"assumptions":[]}]}`,
+		"bare element":   `{"classifications":[{"index":1,"keywords":[{}],"assumptions":[]}]}`,
+		"bad index":      `{"classifications":[{"index":"one","keywords":["go"],"assumptions":[]}]}`,
+	} {
+		if _, err := ParseClassifications(raw, testItems(1)); err == nil {
+			t.Errorf("%s: malformed list value was accepted", name)
+		}
+	}
+}
+
+// Explicitly empty arrays stay valid: "no keywords" is an answer the model may
+// legitimately give, unlike a missing or malformed field.
+func TestParseClassificationsAcceptsExplicitEmptyArrays(t *testing.T) {
+	raw := `{"classifications":[{"index":1,"keywords":[],"assumptions":[]}]}`
+	got, err := ParseClassifications(raw, testItems(1))
 	if err != nil {
 		t.Fatalf("ParseClassifications: %v", err)
 	}
-	if len(got) != 2 || got[0].Keywords[0] != "go" {
-		t.Fatalf("verdicts = %+v", got)
+	if len(got[0].Keywords) != 0 || len(got[0].Assumptions) != 0 {
+		t.Fatalf("verdict = %+v, want empty lists", got[0])
 	}
 }
 

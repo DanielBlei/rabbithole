@@ -78,7 +78,15 @@ func runClassifyBackfill(cmd *cobra.Command, _ []string) error {
 	) (classify.Classifier, error) {
 		return inference.ResolveClassifier(ctx, cfg.Classification, hints)
 	})
-	stats := worker.RunOnce(cmd.Context())
+	return waitBackfill(cmd.Context(), worker)
+}
+
+// waitBackfill drains the queue in this process and reports the outcome. A
+// pass that could not persist its outcomes fails the command: a backfill that
+// exits zero has actually been recorded. Model failures are not command
+// failures — they are counted, and the items retry on a later pass.
+func waitBackfill(ctx context.Context, worker *classify.Worker) error {
+	stats, err := worker.RunOnce(ctx)
 	switch {
 	case stats.Skipped:
 		fmt.Printf("Classification did not run: %s.\n", stats.Reason)
@@ -86,6 +94,9 @@ func runClassifyBackfill(cmd *cobra.Command, _ []string) error {
 		fmt.Println("Nothing to classify.")
 	default:
 		fmt.Printf("Classified %d item(s); %d failed.\n", stats.Classified, stats.Failed)
+	}
+	if err != nil {
+		return fmt.Errorf("classification did not complete: %w", err)
 	}
 	return nil
 }
