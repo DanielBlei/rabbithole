@@ -118,6 +118,64 @@ func TestSettingsSaveAdaptiveRankingToggle(t *testing.T) {
 	}
 }
 
+func TestSettingsGroupStoriesRowSitsUnderTheFeedsRow(t *testing.T) {
+	w, _ := configTestWeb(t)
+	body := get(t, w, "/settings/general")
+	feeds := strings.Index(body, "data-stp-sources")
+	row := strings.Index(body, `data-fld="group_stories"`)
+	if feeds < 0 || row < feeds {
+		t.Fatalf("group stories row at %d, feeds row at %d: want it after the feeds row", row, feeds)
+	}
+	if end := strings.Index(body[feeds:], `data-fld="`); end < 0 || feeds+end != row {
+		t.Error("another field sits between the feeds row and the group stories row")
+	}
+	if !strings.Contains(body, `aria-label="Group stories"`) ||
+		!strings.Contains(body, "Show items covering the same story together.") {
+		t.Error("group stories switch or help missing")
+	}
+	if !strings.Contains(body, `id="f-group_stories" role="switch" aria-checked="true"`) {
+		t.Error("an unset setting must show the switch on")
+	}
+}
+
+func TestSettingsSaveGroupStoriesRoundTripsAndDefaultIsNotStored(t *testing.T) {
+	w, db := configTestWeb(t)
+	if code, r := sendJSON(
+		t,
+		w,
+		"/settings/save",
+		formFor(t, db, "group_stories", "false"),
+	); code != http.StatusOK ||
+		!r.OK {
+		t.Fatalf("save = %d %+v", code, r)
+	}
+	if got := activeContent(t, db); !strings.Contains(got, "group_stories: false") {
+		t.Errorf("stored config lacks the off setting:\n%s", got)
+	}
+	if body := get(
+		t,
+		w,
+		"/settings/general",
+	); !strings.Contains(
+		body,
+		`id="f-group_stories" role="switch" aria-checked="false"`,
+	) {
+		t.Error("saved off setting not shown off")
+	}
+	// Use default unpins it.
+	form := formFor(t, db, "group_stories", "true", "group_stories__reset", "1")
+	if code, r := sendJSON(t, w, "/settings/save", form); code != http.StatusOK || !r.OK {
+		t.Fatalf("save = %d %+v", code, r)
+	}
+	if got := activeContent(t, db); strings.Contains(got, "group_stories") {
+		t.Errorf("group_stories still stored after Use default:\n%s", got)
+	}
+	// The shown default on a never-set field is not stored.
+	if _, r := sendJSON(t, w, "/settings/save", formFor(t, db, "group_stories", "true")); !r.NoOp {
+		t.Errorf("saving the shown default = %+v, want a no-op", r)
+	}
+}
+
 func TestSettingsSaveIdenticalToTheActiveConfigWritesNothing(t *testing.T) {
 	w, db := configTestWeb(t)
 	saveConfig(t, db, "inference:\n  provider: vllm\n  model: m\n", store.ConfigSourceUI, 0)
@@ -1170,7 +1228,7 @@ inference:
 		t.Fatalf("version = %d, want %d", got, before+1)
 	}
 	got := activeContent(t, db)
-	for _, key := range []string{"user", "adaptive_ranking", "provider", "host", "model", "api_key", "think", "effort",
+	for _, key := range []string{"user", "adaptive_ranking", "group_stories", "provider", "host", "model", "api_key", "think", "effort",
 		"batch_size", "max_parallel", "structured_output", "system_prompt", "reason_max_chars"} {
 		if strings.Contains(got, key) {
 			t.Errorf("stored config still pins %s: %q", key, got)

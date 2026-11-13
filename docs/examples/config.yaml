@@ -20,6 +20,7 @@
 # import with a warning.
 
 # user: rabbit                    # name in the web UI shell prompt; unset uses your OS login name
+group_stories: true              # show items covering the same story together; false lists every item on its own
 adaptive_ranking: true            # use recent explicit ratings as extra scoring context; false is profile-only
 
 inference:

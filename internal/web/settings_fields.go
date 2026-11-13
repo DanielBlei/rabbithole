@@ -35,6 +35,7 @@ const (
 const (
 	keyUser     = "user"
 	keyAdaptive = "adaptive_ranking"
+	keyGroup    = "group_stories"
 	keyProvider = "inference.provider"
 	keyHost     = "inference.host"
 	keyAPIKey   = "inference.api_key"
@@ -133,6 +134,8 @@ var fieldSpecs = []fieldSpec{
 		kChoice, "", func(c *config.Config) *string { return &c.Inference.Provider }),
 	strSpec(keyUser, "Prompt name", "The name in the shell prompt at the top of each page.",
 		kText, "", func(c *config.Config) *string { return &c.User }),
+	boolSpec(keyGroup, "Group stories", "Show items covering the same story together.",
+		"", func(c *config.Config) **bool { return &c.GroupStories }),
 	boolSpec(keyAdaptive, "Adaptive ranking",
 		"Let your thumbs-up and thumbs-down ratings guide future scores.",
 		"", func(c *config.Config) **bool { return &c.AdaptiveRanking }),
