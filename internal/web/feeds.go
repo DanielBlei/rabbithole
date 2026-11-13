@@ -563,24 +563,6 @@ func toFeedGroups(rows []rowData, clusters []store.StoryCluster) []feedGroup {
 	return groups
 }
 
-// feedGroupToggleURL copies the current query and flips the grouped flag, so
-// the toggle keeps every other filter applied.
-func feedGroupToggleURL(q url.Values, grouped bool) string {
-	v := make(url.Values, len(q))
-	for key, values := range q {
-		v[key] = append([]string(nil), values...)
-	}
-	if grouped {
-		v.Del("grouped")
-	} else {
-		v.Set("grouped", "1")
-	}
-	if encoded := v.Encode(); encoded != "" {
-		return "/feed?" + encoded
-	}
-	return "/feed"
-}
-
 // exactStoryClusters is the no-store fallback for a grouped view: it groups
 // the rendered rows by exact duplicate only, with no model calls. A build
 // failure yields no clusters rather than an ungrouped page.
