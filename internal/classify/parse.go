@@ -246,15 +246,29 @@ func asStringList(v json.RawMessage) ([]string, bool) {
 // repairAttempts bounds how many trailing entries unmarshalClassifications discards.
 const repairAttempts = 3
 
-// unmarshalClassifications decodes the verdict. A response the server cut off
-// mid-generation is salvaged, never repaired into data the model did not write:
-// only entries that closed before the cut are kept. The trailing entry — the
-// one holding an unterminated string, an open array, or an unfinished key — is
-// discarded whole, so a truncated label prefix cannot become a stored tag and
-// an open bracket cannot close into a fabricated empty list. The missing entry
-// then fails the one-entry-per-item check, and the caller retries the item.
+// unmarshalClassifications decodes the verdict. Completeness decides the
+// policy. A complete, balanced response is validated strictly: a parse or
+// validation failure is the model's error, returned as-is — salvage machinery
+// must never rewrite an answer the model finished writing, because cutting at
+// an invalid value and closing the brackets would turn it into data the model
+// never produced (an invalid list member becoming a valid empty array).
+//
+// A response the server cut off mid-generation is salvaged instead, never
+// repaired into data the model did not write: only entries that closed before
+// the cut are kept, and an entry that closed but fails validation is
+// discarded whole, at an entry boundary, so a truncated label prefix cannot
+// become a stored tag and an open bracket cannot close into a fabricated
+// empty list. The dropped entries then fail the one-entry-per-item check, and
+// the caller retries the item.
 func unmarshalClassifications(s string) (rawClassifications, error) {
 	s = salvageCompleteEntries(s)
+	if jsonComplete(s) {
+		var parsed rawClassifications
+		if err := json.Unmarshal([]byte(s), &parsed); err != nil {
+			return rawClassifications{}, err
+		}
+		return parsed, nil
+	}
 	var firstErr error
 	for range repairAttempts {
 		var parsed rawClassifications
@@ -265,16 +279,28 @@ func unmarshalClassifications(s string) (rawClassifications, error) {
 		if firstErr == nil {
 			firstErr = err
 		}
-		// Discard the trailing entry and retry. The cut is structural — the
-		// last `{` outside any string — so the remainder never ends inside a
-		// label and repairJSON cannot turn a prefix into a verdict.
-		open := lastStructuralObjectOpen(s)
-		if open <= 0 {
+		// Discard the trailing entry and retry. The cut is at an entry
+		// boundary — the `{` of the last object sitting directly in the
+		// classifications array — so every surviving entry stays intact and
+		// repairJSON only closes the brackets the truncation left open.
+		start := lastEntryStart(s)
+		if start <= 0 {
 			break
 		}
-		s = strings.TrimRight(s[:open], " \t\r\n,")
+		s = strings.TrimRight(s[:start], " \t\r\n,")
 	}
 	return rawClassifications{}, firstErr
+}
+
+// jsonComplete reports whether s is exactly one syntactically complete JSON
+// value: the outer value closes at the very end of s, leaving no bracket
+// open, no string unterminated, and no content after it — a second document
+// or trailing garbage makes the input incomplete, never salvageable. The scan
+// is string- and escape-aware, so braces, brackets and quotes inside labels
+// never read as structure.
+func jsonComplete(s string) bool {
+	stack, inString, _, end := scanJSON(s)
+	return end == len(s) && !inString && len(stack) == 0
 }
 
 // salvageCompleteEntries cuts a truncated fragment back to the last
@@ -292,11 +318,16 @@ func salvageCompleteEntries(s string) string {
 	return ""
 }
 
-// lastStructuralObjectOpen returns the offset of the last `{` that sits
-// outside any string, or -1 when there is none. Unlike strings.LastIndexByte
-// it cannot land inside a label, so cutting there leaves balanced strings.
-func lastStructuralObjectOpen(s string) int {
-	open, inString, escaped := -1, false, false
+// lastEntryStart returns the offset of the `{` that opens the last object
+// sitting directly inside the classifications array — the outer object and
+// that array are the two brackets below it — or -1 when there is none. String
+// contents are skipped, so a `{` inside a label never reads as structure.
+// Cutting at an entry boundary discards a trailing entry whole; it can never
+// land inside one and leave repairJSON to close a half-written value.
+func lastEntryStart(s string) int {
+	var stack []byte
+	inString, escaped := false, false
+	start := -1
 	for i := range len(s) {
 		c := s[i]
 		switch {
@@ -307,12 +338,19 @@ func lastStructuralObjectOpen(s string) int {
 		case c == '"':
 			inString = !inString
 		case inString:
-			// A `{` inside a string is content, not structure.
-		case c == '{':
-			open = i
+			// Brackets inside a string are content, not structure.
+		case c == '{' || c == '[':
+			if c == '{' && len(stack) == 2 {
+				start = i
+			}
+			stack = append(stack, c)
+		case c == '}' || c == ']':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
 		}
 	}
-	return open
+	return start
 }
 
 // lastCompleteEntryEnd returns the offset just past the last `}` that closed a
@@ -350,17 +388,28 @@ func lastCompleteEntryEnd(s string) int {
 	return last
 }
 
-// extractJSONObject returns the outermost JSON object in raw, dropping prose or
-// code fences around it. A truncated one is returned for repairJSON.
+// extractJSONObject returns the response's single JSON object, dropping the
+// model-output wrappers around it: leading prose and a code-fence opener
+// before the object, and trailing whitespace with an optional closing fence
+// after it. Anything else after the object closes — prose, garbage, or a
+// second JSON document — is an error: the model's answer includes that extra
+// material, and silently dropping it could accept a response whose real
+// verdict was never read. A truncated object is returned as-is for the
+// salvage path.
 func extractJSONObject(raw string) (string, error) {
 	start := strings.IndexByte(raw, '{')
 	if start < 0 {
 		return "", fmt.Errorf("no JSON object found in response")
 	}
-	if _, _, _, end := scanJSON(raw[start:]); end >= 0 {
-		return raw[start : start+end], nil
+	rest := raw[start:]
+	_, _, _, end := scanJSON(rest)
+	if end < 0 {
+		return rest, nil // truncated; the salvage path handles the rest
 	}
-	return raw[start:], nil
+	if tail := strings.TrimSpace(rest[end:]); tail != "" && tail != "```" {
+		return "", fmt.Errorf("unexpected content after the JSON object: %s", truncate(tail, 40))
+	}
+	return rest[:end], nil
 }
 
 // repairJSON closes a truncated fragment by appending the brackets still on
