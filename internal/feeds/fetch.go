@@ -82,6 +82,12 @@ func NewClient(version string) *http.Client {
 // NewClient. Individual feed failures are logged and carried on the Result
 // rather than failing the run.
 func FetchAll(ctx context.Context, client *http.Client, sources []Source) []Result {
+	return fetchAll(ctx, client, sources, MaxFeedBytes)
+}
+
+// fetchAll is FetchAll with an explicit feed cap, so tests exercise the
+// over-cap path without moving production-sized bodies under a deadline.
+func fetchAll(ctx context.Context, client *http.Client, sources []Source, maxFeed int64) []Result {
 	if client == nil {
 		client = NewClient("")
 	}
@@ -102,7 +108,7 @@ func FetchAll(ctx context.Context, client *http.Client, sources []Source) []Resu
 			start := time.Now()
 			// gofeed.Parser lazily initializes internal state on first use and
 			// is not goroutine-safe, so each fetch gets its own (cheap) parser.
-			items, site, err := fetchOne(ctx, newParser(client), src)
+			items, site, err := fetchOne(ctx, newParser(client, maxFeed), src)
 			res := Result{Source: src, Items: items, Site: site, Err: err, Elapsed: time.Since(start), At: time.Now()}
 			if err != nil {
 				logger.Warn().Str("feed", src.Name).Err(err).Msg("skipping feed")
@@ -118,12 +124,12 @@ func FetchAll(ctx context.Context, client *http.Client, sources []Source) []Resu
 }
 
 // newParser returns a parser bound to client. The User-Agent is left empty so
-// the client's own applies, and a body past MaxFeedBytes fails the parse.
-func newParser(client *http.Client) *gofeed.Parser {
+// the client's own applies, and a body past maxFeed fails the parse.
+func newParser(client *http.Client, maxFeed int64) *gofeed.Parser {
 	p := gofeed.NewParser()
 	p.Client = client
 	p.UserAgent = ""
-	p.MaxByteSize = MaxFeedBytes
+	p.MaxByteSize = maxFeed
 	return p
 }
 
@@ -134,7 +140,7 @@ func fetchOne(ctx context.Context, parser *gofeed.Parser, src Source) ([]Item, s
 
 	feed, err := parser.ParseURLWithContext(src.URL, ctx)
 	if errors.Is(err, gofeed.ErrResponseTooLarge) {
-		return nil, "", fmt.Errorf("%w: over %d bytes", httpclient.ErrTooLarge, MaxFeedBytes)
+		return nil, "", fmt.Errorf("%w: over %d bytes", httpclient.ErrTooLarge, parser.MaxByteSize)
 	}
 	if err != nil {
 		return nil, "", err
