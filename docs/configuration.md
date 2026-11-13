@@ -162,8 +162,9 @@ It is never an error, so an old file keeps importing after you switch provider.
 - `ollama`: a local Ollama server. The default.
 - `openai`: OpenAI, or any hosted gateway that speaks its chat-completions API.
 - `vllm`: a vLLM server.
-- `heuristic`: keyword matching with no model. Good for offline use and for testing feed
-  changes without waiting on a model.
+- `heuristic`: keyword matching with no model. It reads the words under your interested
+  headings (not the ones under "not for me"), counts a title match above a summary match, and
+  needs no server. Good for offline use and for testing feed changes without waiting on a model.
 
 ### Thinking
 
