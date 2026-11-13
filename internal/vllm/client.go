@@ -348,12 +348,53 @@ func (c *Client) ScoreContext(
 	scoringContext rank.ScoringContext,
 	items []feeds.Item,
 ) ([]rank.ItemScore, error) {
+	userPrompt := rank.BuildUserPromptContext(scoringContext, items)
+	budget := c.tuning.Budget(len(items), c.think)
+	content, finishReason, completionTokens, err := c.complete(
+		ctx, userPrompt, "scores", c.tuning.Schema(), budget, "scoring")
+	if err != nil {
+		return nil, err
+	}
+
+	scores, err := rank.ParseScores(content, items)
+	if err != nil {
+		// finish_reason "length" means the server cut generation off at the token
+		// budget mid-answer; "stop" means the model emitted its own stop
+		// token and still produced unparseable output. Distinguishing the two
+		// tells us whether to raise the token budget or suspect the model.
+		return nil, fmt.Errorf(
+			"%w (finish_reason=%q, completion_tokens=%d)",
+			err,
+			finishReason,
+			completionTokens,
+		)
+	}
+	return scores, nil
+}
+
+// Complete sends one structured-output completion and returns the raw content.
+// Classification uses it to share the scoring transport: same timeout, schema
+// handling, reasoning controls and credential plumbing.
+func (c *Client) Complete(
+	ctx context.Context,
+	userPrompt, schemaName, schema string,
+	budget int,
+) (string, error) {
+	content, _, _, err := c.complete(ctx, userPrompt, schemaName, schema, budget, "classification")
+	return content, err
+}
+
+// complete is the shared OpenAI-compatible chat transport for scoring and
+// classification.
+func (c *Client) complete(
+	ctx context.Context,
+	userPrompt, schemaName, schema string,
+	budget int,
+	op string,
+) (string, string, int, error) {
 	logger := zerolog.Ctx(ctx)
 	ctx, cancel := context.WithTimeout(ctx, chatTimeout)
 	defer cancel()
-
-	userPrompt := rank.BuildUserPromptContext(scoringContext, items)
-	budget := c.tuning.Budget(len(items), c.think)
 
 	var messages []chatMessage
 	// Omitted rather than sent empty: a served model's own default system prompt only kicks
@@ -373,9 +414,9 @@ func (c *Client) ScoreContext(
 		reqBody.ResponseFormat = &responseFormat{
 			Type: "json_schema",
 			JSONSchema: &jsonSchema{
-				Name:   "scores",
+				Name:   schemaName,
 				Strict: true,
-				Schema: json.RawMessage(c.tuning.Schema()),
+				Schema: json.RawMessage(schema),
 			},
 		}
 	}
@@ -388,34 +429,33 @@ func (c *Client) ScoreContext(
 	}
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("marshal chat request: %w", err)
+		return "", "", 0, fmt.Errorf("marshal chat request: %w", err)
 	}
 
 	logger.Debug().
 		Str("model", c.model).
-		Int("items", len(items)).
 		Bool("think", c.think).
 		Str("reasoning_effort", reqBody.ReasoningEffort).
 		Int("max_tokens", budget).
-		Msg(c.flavor.String() + ": sending scoring request")
+		Msg(c.flavor.String() + ": sending " + op + " request")
 	logger.Trace().Str("prompt", userPrompt).Msg(c.flavor.String() + ": prompt sent")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.host+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("build chat request: %w", err)
+		return "", "", 0, fmt.Errorf("build chat request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	start := time.Now()
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s chat: %w", c.flavor, err)
+		return "", "", 0, fmt.Errorf("%s chat: %w", c.flavor, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, fmt.Errorf("%s chat returned %d: %s", c.flavor, resp.StatusCode, bytes.TrimSpace(msg))
+		return "", "", 0, fmt.Errorf("%s chat returned %d: %s", c.flavor, resp.StatusCode, bytes.TrimSpace(msg))
 	}
 
 	var completion struct {
@@ -430,10 +470,10 @@ func (c *Client) ScoreContext(
 		} `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&completion); err != nil {
-		return nil, fmt.Errorf("decode chat response: %w", err)
+		return "", "", 0, fmt.Errorf("decode chat response: %w", err)
 	}
 	if len(completion.Choices) == 0 {
-		return nil, fmt.Errorf("%s returned no choices", c.flavor)
+		return "", "", 0, fmt.Errorf("%s returned no choices", c.flavor)
 	}
 
 	content := completion.Choices[0].Message.Content
@@ -443,21 +483,7 @@ func (c *Client) ScoreContext(
 		Int("response_bytes", len(content)).
 		Str("finish_reason", finishReason).
 		Int("completion_tokens", completion.Usage.CompletionTokens).
-		Msg(c.flavor.String() + ": scoring response received")
+		Msg(c.flavor.String() + ": " + op + " response received")
 	logger.Trace().Str("response", content).Msg(c.flavor.String() + ": raw response")
-
-	scores, err := rank.ParseScores(content, items)
-	if err != nil {
-		// finish_reason "length" means the server cut generation off at the token
-		// budget mid-answer; "stop" means the model emitted its own stop
-		// token and still produced unparseable output. Distinguishing the two
-		// tells us whether to raise the token budget or suspect the model.
-		return nil, fmt.Errorf(
-			"%w (finish_reason=%q, completion_tokens=%d)",
-			err,
-			finishReason,
-			completion.Usage.CompletionTokens,
-		)
-	}
-	return scores, nil
+	return content, finishReason, completion.Usage.CompletionTokens, nil
 }

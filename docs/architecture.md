@@ -105,6 +105,45 @@ scored on that teaser, and academic sources are scored on the metadata or summar
 their provider. Full-text page retrieval is not part of the scoring path. Direct ingestion of
 ordinary pages without a feed remains on the roadmap below.
 
+## Classification flow
+
+After an item has a score, a second, separate pass labels it with **keywords** (facts the
+content states) and **assumptions** (relations it implies but does not name). Classification
+never touches the scoring path and never runs inside ingest's single-flight slot.
+
+```mermaid
+flowchart LR
+    A[ingest records scored items] --> B[notify worker]
+    B --> C[claim: scored, not ok<br/>at this classifier version]
+    C --> D[classifier request<br/>title + summary]
+    D --> E[strict JSON parse<br/>caps, normalize, keyword wins]
+    E -->|valid| F[(replace item_tags<br/>mark ok, one transaction)]
+    E -->|invalid| G[decompose to per-item<br/>retry with backoff]
+    G -->|still failing| H[(mark failed<br/>attempts + next attempt)]
+    T[10-minute tick] --> C
+```
+
+- **Wake sources.** Ingest completion notifies the worker. A periodic scan (`classification.interval`,
+  10 minutes by default) repairs anything a crash or CLI-recorded item missed. An explicit
+  `rabbithole classify backfill` queues history.
+- **Failure isolation.** A failing item is marked `failed` with its last error and a backoff;
+  the pass moves on. A batch whose reply fails validation is decomposed to one item per request,
+  which isolates the article the model chokes on.
+- **Idempotency.** The classifier version is stored on every tag edge and on the queue row. An
+  item already `ok` at the current version is never re-sent; bumping the version makes older
+  rows claimable again. Storing an item's tags is one transaction, so a re-run cannot leave a
+  half-old/half-new set.
+- **Canonicalization.** Labels are normalized to slugs, aliases resolve first, and a new tag is
+  created only when neither exists. A label in both lists stays a keyword. The vocabulary is
+  open; aliases are curated with the `tags` CLI, never inferred.
+- **Display rule.** Assumptions are guesses and must never be shown without keywords. Config
+  validation rejects the combination, and the display shaping/API/UI gates are enforced where
+  those layers are implemented.
+
+The model interface is `internal/classify`'s `Classifier`, deliberately shaped like
+`rank.Scorer`. It is injected with a factory, so the package stays backend-agnostic; the
+provider wiring lives in `internal/inference`.
+
 ## Provider startup checks
 
 Not every model has a reasoning mode. On Ollama, `think: true` is probed once at startup: a model
@@ -134,13 +173,15 @@ request succeeds, so startup cannot tell.
 ## Layout
 
 ```
-cmd/                  cobra CLI (root, serve, ingest, config, sources, store, auth, items, eval)
+cmd/                  cobra CLI (root, serve, ingest, classify, tags, config, sources, store, auth, items, eval)
 internal/config       typed settings, the per-provider field table, secret references, .env loading, feeds-file parsing
 internal/profile      built-in Default, profile text validation/editor format and hashing
 internal/profilemgr   built-in + stored composition, legacy bootstrap and active resolution
 internal/ingest       source dispatch -> fetch -> filter -> score -> record cycle, plus the background run manager
 internal/feeds        RSS/Atom normalization plus academic providers (arXiv, Crossref, Semantic Scholar)
 internal/rank         Scorer interface, prompt/JSON parsing, batching, selection, heuristic
+internal/classify     Classifier interface, classification prompt/schema, strict parser, background worker
+internal/tags         content-tag slug normalization, validation and keyword-wins deduplication
 internal/inference    provider factory (ollama | openai | vllm | heuristic)
 internal/ollama       Ollama JSON-mode client
 internal/vllm         OpenAI-compatible JSON-mode client, in openai and vllm flavors

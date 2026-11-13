@@ -20,9 +20,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/DanielBlei/rabbithole/internal/classify"
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/httpclient"
+	"github.com/DanielBlei/rabbithole/internal/inference"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/library"
 	"github.com/DanielBlei/rabbithole/internal/server"
@@ -290,6 +292,17 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	feedClient := feeds.NewClient(buildVersion())
 	mgr.SetClient(feedClient)
 
+	// The classification worker owns its own slot, separate from ingest: a
+	// slow backfill must never block feed fetching, and one failed item must
+	// not stall the rest of the queue.
+	classWorker := classify.NewWorker(db, src, func(
+		ctx context.Context, cfg config.Config, hints []string,
+	) (classify.Classifier, error) {
+		return inference.ResolveClassifier(ctx, cfg.Classification, hints)
+	})
+	mgr.SetOnRunComplete(classWorker.Notify)
+	classWorker.Start()
+
 	srv := server.New(db, src, serveAddr, mgr, log)
 	srv.FeedClient = feedClient
 	srv.TrustProxies(proxies)
@@ -346,6 +359,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		mgrShutdownCtx, mgrCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer mgrCancel()
 		mgr.Shutdown(mgrShutdownCtx)
+		classWorker.Shutdown(mgrShutdownCtx)
 
 		if httpErr != nil {
 			return fmt.Errorf("shutdown: %w", httpErr)

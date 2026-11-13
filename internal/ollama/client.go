@@ -163,13 +163,49 @@ func (c *Client) ScoreContext(
 	scoringContext rank.ScoringContext,
 	items []feeds.Item,
 ) ([]rank.ItemScore, error) {
+	userPrompt := rank.BuildUserPromptContext(scoringContext, items)
+	budget := c.tuning.Budget(len(items), c.think)
+	content, doneReason, evalCount, err := c.complete(ctx, userPrompt, c.tuning.Schema(), budget, "scoring")
+	if err != nil {
+		return nil, err
+	}
+
+	scores, err := rank.ParseScores(content, items)
+	if err != nil {
+		// done_reason "length" means Ollama cut generation off at num_predict/
+		// num_ctx mid-answer; "stop" means the model emitted its own stop
+		// token and still produced unparseable output. Distinguishing the two
+		// tells us whether to raise the token budget or suspect the model.
+		return nil, fmt.Errorf("%w (done_reason=%q, completion_tokens=%d)", err, doneReason, evalCount)
+	}
+	return scores, nil
+}
+
+// Complete sends one structured-output chat request and returns the raw content.
+// Classification uses it to share the scoring transport: same timeout, schema
+// handling, think mode and credential plumbing. Ollama's schema field has no
+// separate name, so schemaName is accepted for parity with the OpenAI client.
+func (c *Client) Complete(
+	ctx context.Context,
+	userPrompt, schemaName, schema string,
+	budget int,
+) (string, error) {
+	content, _, _, err := c.complete(ctx, userPrompt, schema, budget, "classification")
+	return content, err
+}
+
+// complete is the shared Ollama chat transport for scoring and classification.
+func (c *Client) complete(
+	ctx context.Context,
+	userPrompt, schema string,
+	budget int,
+	op string,
+) (string, string, int, error) {
 	logger := zerolog.Ctx(ctx)
 	ctx, cancel := context.WithTimeout(ctx, chatTimeout)
 	defer cancel()
 
-	userPrompt := rank.BuildUserPromptContext(scoringContext, items)
 	stream := false
-	budget := c.tuning.Budget(len(items), c.think)
 	opts := map[string]any{"num_predict": budget}
 	// Left unset, Ollama silently drops the front of an over-long prompt.
 	if c.tuning.NumCtx > 0 {
@@ -191,7 +227,7 @@ func (c *Client) ScoreContext(
 	}
 	if !c.tuning.Unconstrained {
 		// A schema rather than bare "json": Ollama compiles it to a grammar and samples only conforming tokens
-		req.Format = json.RawMessage(c.tuning.Schema())
+		req.Format = json.RawMessage(schema)
 	}
 
 	// Set the model's reasoning mode explicitly. Ignored by models without a
@@ -207,10 +243,9 @@ func (c *Client) ScoreContext(
 
 	logger.Debug().
 		Str("model", c.model).
-		Int("items", len(items)).
 		Bool("think", c.think).
 		Int("num_predict", budget).
-		Msg("ollama: sending scoring request")
+		Msg("ollama: sending " + op + " request")
 	logger.Trace().Str("prompt", userPrompt).Msg("ollama: prompt sent")
 
 	start := time.Now()
@@ -228,13 +263,13 @@ func (c *Client) ScoreContext(
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("ollama chat: %w", err)
+		return "", "", 0, fmt.Errorf("ollama chat: %w", err)
 	}
 	if !sawDone {
 		// The stream closed without a done chunk at all (not a "length"/"stop"
 		// done_reason, which would mean Ollama did report a reason) - distinct
 		// from the zero value so logs don't read as a reported-but-empty reason.
-		// The response is incomplete but not worthless: ParseScores repairs the
+		// The response is incomplete but not worthless: the parser repairs the
 		// truncated tail, so the entries that did arrive still count. Warned
 		// either way, since a server cutting off mid-answer is worth knowing
 		// about even when the salvage works.
@@ -249,18 +284,9 @@ func (c *Client) ScoreContext(
 		Int("response_bytes", sb.Len()).
 		Str("done_reason", doneReason).
 		Int("completion_tokens", evalCount).
-		Msg("ollama: scoring response received")
+		Msg("ollama: " + op + " response received")
 	logger.Trace().Str("response", sb.String()).Msg("ollama: raw response")
-
-	scores, err := rank.ParseScores(sb.String(), items)
-	if err != nil {
-		// done_reason "length" means Ollama cut generation off at num_predict/
-		// num_ctx mid-answer; "stop" means the model emitted its own stop
-		// token and still produced unparseable output. Distinguishing the two
-		// tells us whether to raise the token budget or suspect the model.
-		return nil, fmt.Errorf("%w (done_reason=%q, completion_tokens=%d)", err, doneReason, evalCount)
-	}
-	return scores, nil
+	return sb.String(), doneReason, evalCount, nil
 }
 
 func normalize(m string) string {
