@@ -288,40 +288,36 @@ func TestLibraryRowStates(t *testing.T) {
 	}
 }
 
-func TestLibraryPlanPreviewsPickedKeys(t *testing.T) {
+func TestLibraryApplyBarAddsPickedKeys(t *testing.T) {
 	w, db := libraryTestWeb(t, config.FeedsDoc{})
-	out := postLibrary(t, w, "/sources/library/plan", url.Values{
+	out := postLibrary(t, w, "/sources/library/apply", url.Values{
 		"pick": {libKey(libK8sURL), libKey(libKVURL), "https://nowhere.test/feed"},
 		// A document from the client is never read.
 		"yaml": {"feeds:\n  - name: Evil\n    url: https://evil.test/feed\n"},
 	}, nil)
 
-	if n := strings.Count(out, `data-status="new"`); n != 2 {
-		t.Errorf("new rows = %d, want 2; body=%s", n, out)
-	}
-	if n := strings.Count(out, ` data-plan-pick checked`); n != 2 {
-		t.Errorf("ticked rows = %d, want 2", n)
-	}
 	for _, want := range []string{
-		">Add from the library<", ">Add 2<", `hx-post="/sources/library/apply"`, `hx-target="#libBody"`,
-		"data-plan-cancel", "Back to the Library", `data-lib-list hidden`, `id="libMeta" hx-swap-oob="true"`,
-		libK8sName, libKVName,
+		"Added 2 sources", `id="libBody"`, `id="libMeta" hx-swap-oob="true"`, ", 2 added",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("missing %q", want)
+			t.Errorf("missing %q; body=%s", want, out)
 		}
 	}
-	if strings.Contains(out, "Evil") || strings.Contains(out, "hx-get") {
-		t.Error("plan took the client document or a server cancel")
+	if strings.Contains(out, "data-plan") || strings.Contains(out, "Evil") {
+		t.Error("apply showed a plan or took the client document")
 	}
 	doc, err := db.FeedsDoc(t.Context())
-	if err != nil || len(doc.Feeds) != 0 {
-		t.Errorf("plan wrote feeds = %v, %v", doc.Feeds, err)
+	if err != nil || len(doc.Feeds) != 2 {
+		t.Errorf("feeds = %v, %v; want the two known picks", doc.Feeds, err)
 	}
 
-	empty := postLibrary(t, w, "/sources/library/plan", url.Values{"pick": {"https://nowhere.test/feed"}}, nil)
-	if !strings.Contains(empty, "Nothing selected.") || strings.Contains(empty, "data-plan") {
-		t.Errorf("plan of an unknown key = %s", empty)
+	empty := postLibrary(t, w, "/sources/library/apply", url.Values{"pick": {"https://nowhere.test/feed"}}, nil)
+	if !strings.Contains(empty, "sdet__err") || strings.Contains(empty, "data-plan-pick") {
+		t.Errorf("apply of an unknown key = %s", empty)
+	}
+	none := postLibrary(t, w, "/sources/library/apply", url.Values{}, nil)
+	if !strings.Contains(none, "sdet__err") || strings.Contains(none, "data-plan-pick") {
+		t.Errorf("apply with nothing selected = %s", none)
 	}
 }
 
@@ -629,18 +625,21 @@ func TestLibraryApplySkipsRemovedPicks(t *testing.T) {
 	}
 }
 
-func TestLibraryPlanCannotSelectRemoved(t *testing.T) {
+func TestLibraryApplyFailureShowsPlanWithError(t *testing.T) {
 	w, db := libraryTestWeb(t, config.FeedsDoc{Feeds: []config.Feed{{Name: libGoName, URL: libGoURL}}})
 	if err := db.SoftDeleteFeed(t.Context(), feedID(t, db, libGoName)); err != nil {
 		t.Fatalf("SoftDeleteFeed: %v", err)
 	}
-	out := postLibrary(t, w, "/sources/library/plan", url.Values{
-		"pick": {libKey(libGoURL), libKey(libK8sURL)},
-	}, nil)
+	out := postLibrary(t, w, "/sources/library/apply", url.Values{"pick": {libKey(libGoURL)}}, nil)
 	if !strings.Contains(out, `data-status="removed"`) {
 		t.Fatalf("plan lacks the removed row; body=%s", out)
 	}
-	if n := strings.Count(out, "data-plan-pick"); n != 1 {
-		t.Errorf("selectable rows = %d, want only the new one", n)
+	for _, want := range []string{"data-plan-cancel", "sdet__err", `data-lib-list hidden`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if n := strings.Count(out, "data-plan-pick"); n != 0 {
+		t.Errorf("selectable rows = %d, want none", n)
 	}
 }

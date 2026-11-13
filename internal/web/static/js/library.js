@@ -1,5 +1,5 @@
 // The Sources Library page: instant client-side filtering of the list, the
-// ticks on entries, and the bar that acts on them: Add previews the picked
+// ticks on entries, and the bar that acts on them: Add adds the picked
 // entries, Hide and Unhide change what the Library shows.
 //
 // Client-side because the whole Library is already on the page, a few hundred
@@ -8,9 +8,9 @@
 // the list leaves them alone; this file re-applies the filter and the ticks
 // after every swap. The ticked keys are kept here, not in the rows, so they
 // survive those swaps; the bar carries them to the server as hidden fields,
-// and the server builds the plan from its own copy of the Library. The plan
-// replaces the list in #libBody and the list stays in the page, hidden:
-// Cancel and "Back to the Library" bring it back without a request. The plan's
+// and the server builds the doc from its own copy of the Library. A failed Add
+// shows the plan in place of the list in #libBody and the list stays in the
+// page, hidden: Cancel and "Back to the Library" bring it back without a request. The plan's
 // own ticks and label are sources.js's.
 //
 // Hidden entries stay in the page, flagged data-hidden, and show only in the
@@ -211,6 +211,9 @@
       }
     });
     bar.hidden = planOpen() || keys.length === 0;
+    // A new pick starts the next action: the last result gives the bar its place.
+    var note = document.querySelector('#libBody > .src__import');
+    if (note && keys.length > 0) note.hidden = true;
     var text = bar.querySelector('[data-lib-bar-text]');
     if (text) text.textContent = keys.length + ' selected';
 

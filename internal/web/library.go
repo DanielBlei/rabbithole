@@ -467,26 +467,6 @@ func newLibraryPlan() *importPlan {
 	return &importPlan{Title: libraryTitle, ApplyTo: libraryApplyTo, ApplyTarget: libraryTarget, AddOnly: true}
 }
 
-// handleLibraryPlan previews adding the picked entries. The doc is built here
-// from the cached library, never taken from the request.
-func (s *Web) handleLibraryPlan(w http.ResponseWriter, r *http.Request) {
-	if !libraryForm(w, r) {
-		return
-	}
-	snap := s.library.Get(r.Context())
-	doc := libraryDoc(snap, pickedKeys(r))
-	if len(doc.Feeds) == 0 {
-		s.writeLibraryBody(w, r, snap, nil, &importStatus{Err: "Nothing selected."})
-		return
-	}
-	p, err := s.planDoc(r.Context(), newLibraryPlan(), doc)
-	if err != nil {
-		httpFeedError(w, err)
-		return
-	}
-	s.writeLibraryBody(w, r, snap, p, nil)
-}
-
 // newPicks keeps the picks whose entry is still new. The Library only adds: a
 // removed entry comes back through Restore, which keeps the user's edits, never
 // through an apply that would overwrite them. dropped counts the rest.
@@ -512,7 +492,8 @@ func (s *Web) newPicks(
 }
 
 // handleLibraryApply adds the picked entries. The whole library is planned
-// again, so a pick that changed since the preview is skipped, not applied blind.
+// again, so a pick that is no longer new is skipped, not applied blind. A failed
+// apply answers with the plan of the picks and the error.
 func (s *Web) handleLibraryApply(w http.ResponseWriter, r *http.Request) {
 	if !libraryForm(w, r) {
 		return
