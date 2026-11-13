@@ -437,12 +437,13 @@ type pageData struct {
 	// Args is the same narrowing as the arguments of the line the pane's title
 	// bar reads, each carrying the URL that drops it. Built from the fields
 	// above, so the bar and the zero-state can't say different things.
-	Args      []cmdArg
-	ListLimit int // listLimit, so the pager can say when the set below is truncated
-	Rows      []rowData
-	Groups    []feedGroup
-	Grouped   bool
-	Empty     emptyData // the zero-state, filled only when Rows is empty
+	Args          []cmdArg
+	ListLimit     int // listLimit, so the pager can say when the set below is truncated
+	Rows          []rowData
+	Groups        []feedGroup
+	Grouped       bool
+	FilterGrouped string
+	Empty         emptyData // the zero-state, filled only when Rows is empty
 }
 
 // pickChip is one option in a multi-select filter menu.
@@ -688,6 +689,7 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		Rows:               items,
 		Groups:             groups,
 		Grouped:            grouped,
+		FilterGrouped:      q.Get("grouped"),
 	}
 	data.ViewPick = wornView(showUnread, showSeen, showHidden, onlyBookmark)
 	// Sort always has exactly one value, so it wears it plainly, spelled the way

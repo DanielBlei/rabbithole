@@ -5,9 +5,12 @@ package web
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/net/html"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
@@ -171,5 +174,54 @@ func TestFeedGroupedUnderFilterKeepsOnlyVisibleMembers(t *testing.T) {
 	}
 	if strings.Contains(narrowed, `data-source="S1"`) {
 		t.Errorf("filtered grouped feed leaked the filtered-out member: %s", narrowed)
+	}
+}
+
+func TestFeedPreservesGroupedFilter(t *testing.T) {
+	w := newTestWeb(t)
+	seedCluster(t, w)
+	for _, route := range []string{"/", "/feed"} {
+		for _, grouped := range []string{"", "0", "1"} {
+			t.Run(route+"grouped="+grouped, func(t *testing.T) {
+				query := url.Values{}
+				if grouped != "" {
+					query.Set("grouped", grouped)
+				}
+				body := get(t, w, route+"?"+query.Encode())
+				doc, err := html.Parse(strings.NewReader(body))
+				if err != nil {
+					t.Fatal(err)
+				}
+				found := false
+				var visit func(*html.Node)
+				visit = func(n *html.Node) {
+					if n.Type == html.ElementNode && n.Data == "input" {
+						attrs := map[string]string{}
+						for _, a := range n.Attr {
+							attrs[a.Key] = a.Val
+						}
+						if attrs["name"] == "grouped" {
+							found = true
+							if attrs["type"] != "hidden" || attrs["value"] != grouped {
+								t.Errorf("grouped input = %v", attrs)
+							}
+							query.Set("grouped", attrs["value"])
+						}
+					}
+					for c := n.FirstChild; c != nil; c = c.NextSibling {
+						visit(c)
+					}
+				}
+				visit(doc)
+				if found != (grouped != "") {
+					t.Errorf("grouped input present = %v", found)
+				}
+				query.Set("sort", "oldest")
+				filtered := get(t, w, "/feed?"+query.Encode())
+				if grouped == "0" && strings.Contains(filtered, `class="story-group`) {
+					t.Error("filter submission restored grouping")
+				}
+			})
+		}
 	}
 }

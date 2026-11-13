@@ -96,6 +96,7 @@ func headingKind(text string, level int) sectionKind {
 func profileTerms(profile string) map[string]int {
 	pos := make(map[string]int)
 	kind := sectionWeak
+	excludedLevel := 0
 	for _, line := range strings.Split(profile, "\n") {
 		t := strings.TrimSpace(line)
 		if level := len(
@@ -104,7 +105,14 @@ func profileTerms(profile string) map[string]int {
 			strings.TrimLeft(t, "#"),
 		); level >= 1 && level <= 3 &&
 			(len(t) == level || t[level] == ' ') {
+			if excludedLevel > 0 && level > excludedLevel {
+				continue
+			}
+			excludedLevel = 0
 			kind = headingKind(t[level:], level)
+			if kind == sectionNegative {
+				excludedLevel = level
+			}
 			continue
 		}
 		if kind == sectionNeutral || kind == sectionNegative {
@@ -260,6 +268,8 @@ func singular(w string) string {
 	switch {
 	case strings.HasSuffix(w, "ies") && !strings.HasSuffix(w, "eies") && !strings.HasSuffix(w, "aies"):
 		return w[:len(w)-3] + "y"
+	case strings.HasSuffix(w, "sses"):
+		return w[:len(w)-2]
 	case strings.HasSuffix(w, "es") && !hasAnySuffix(w, "aes", "ees", "oes"):
 		return w[:len(w)-1]
 	case strings.HasSuffix(w, "s") && !hasAnySuffix(w, "us", "ss", "is"):

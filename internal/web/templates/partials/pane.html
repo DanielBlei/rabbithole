@@ -23,6 +23,7 @@
        now that the key words are gone. */}}
   <form class="pane__filters" method="get" action="/feed">
     <input type="hidden" name="view" value="1">
+    {{if .FilterGrouped}}<input type="hidden" name="grouped" value="{{.FilterGrouped}}">{{end}}
     <div class="seg">
       {{/* Source: multi-select chips in a popmenu rather than a native select, so
            it reads as the bar's own vocabulary and several feeds can be on at

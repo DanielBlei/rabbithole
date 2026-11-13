@@ -192,6 +192,7 @@ func TestHeuristicShortWords(t *testing.T) {
 func TestNormalize(t *testing.T) {
 	same := [][]string{
 		{"release", "releases"}, {"use", "uses"}, {"cache", "caches"}, {"model", "models"},
+		{"class", "classes"}, {"process", "processes"},
 		{"scheduler", "schedulers"}, {"promise", "promises"},
 		{"quantised", "quantized"}, {"quantising", "quantizing"}, {"quantisation", "quantization"},
 		{"optimiser", "optimizer"}, {"policy", "policies"},
@@ -295,5 +296,44 @@ func TestHeuristicIntroUnderTheTitleSuppliesKeywords(t *testing.T) {
 	got := profileTerms(profile.DefaultContent)
 	if got["ai"] != 1 {
 		t.Fatalf("ai weight = %d, want 1 from the introduction", got["ai"])
+	}
+}
+
+func TestHeuristicNestedNegativeHeadings(t *testing.T) {
+	prof := `# Avoid
+## Topics
+- gardening
+## Never
+### Interests
+- baking
+# Interests
+- rust
+## Not for me
+### Topics
+- marketing
+## Interested
+- compilers`
+	for _, word := range []string{"gardening", "baking", "marketing"} {
+		if got := heuristicScore(t, prof, word, ""); got.Score != 0 {
+			t.Errorf("excluded descendant %q scored %d", word, got.Score)
+		}
+	}
+	for _, word := range []string{"rust", "compilers"} {
+		if got := heuristicScore(t, prof, word, ""); got.Score == 0 {
+			t.Errorf("new section %q did not score", word)
+		}
+	}
+}
+
+func TestHeuristicSingularPluralScores(t *testing.T) {
+	for _, pair := range [][2]string{{"class", "classes"}, {"process", "processes"}, {"cache", "caches"}} {
+		for _, forms := range [][2]string{pair, {pair[1], pair[0]}} {
+			prof := "## Interested\n- " + forms[0]
+			got := heuristicScore(t, prof, forms[1], "")
+			want := heuristicScore(t, prof, forms[0], "")
+			if got.Score == 0 || got.Score != want.Score {
+				t.Errorf("%q matching %q: score %d, want %d", forms[0], forms[1], got.Score, want.Score)
+			}
+		}
 	}
 }
