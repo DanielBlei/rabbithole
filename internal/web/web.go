@@ -240,7 +240,6 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /sources/libfill", s.handleLibraryFill)
 	mux.HandleFunc("GET /sources/library", s.handleLibrary)
 	mux.HandleFunc("GET /sources/library/{group}", s.handleLibraryGroup)
-	mux.HandleFunc("POST /sources/library/plan", s.handleLibraryPlan)
 	mux.HandleFunc("POST /sources/library/apply", s.handleLibraryApply)
 	mux.HandleFunc("POST /sources/library/restore", s.handleLibraryRestore)
 	mux.HandleFunc("POST /sources/library/hide", s.handleLibraryHide)

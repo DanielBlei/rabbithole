@@ -819,7 +819,6 @@ func TestRoutesRegister(t *testing.T) {
 		{"GET", "/sources/libfill", "GET /sources/libfill"},
 		{"GET", "/sources/library", "GET /sources/library"},
 		{"GET", "/sources/library/blogs", "GET /sources/library/{group}"},
-		{"POST", "/sources/library/plan", "POST /sources/library/plan"},
 		{"POST", "/sources/library/apply", "POST /sources/library/apply"},
 		{"POST", "/sources/library/restore", "POST /sources/library/restore"},
 		{"POST", "/sources/library/refresh", "POST /sources/library/refresh"},

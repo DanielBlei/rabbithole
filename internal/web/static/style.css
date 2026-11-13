@@ -2481,6 +2481,12 @@ summary.sh-nav__h:focus-visible{outline:1px solid var(--accent);outline-offset:1
   margin:0 0 12px;padding:8px 12px;border-radius:var(--r-md);background:var(--card);
   border:1px solid var(--hairline-strong);box-shadow:var(--card-shadow),0 10px 24px rgba(0,0,0,.28);}
 .li-bar[hidden],.li-bar [hidden]{display:none;}
+/* the result of an add or hide takes the bar's place under the top bar, so it shows wherever the list is scrolled to */
+.li-body>.src__import{position:sticky;top:calc(var(--topbar-h) + 8px);z-index:12;margin:0 0 12px;
+  padding:8px 12px;border:1px solid var(--hairline-strong);border-radius:var(--r-md);
+  box-shadow:var(--card-shadow),0 10px 24px rgba(0,0,0,.28);}
+.li-body>.sdet__ok{background:linear-gradient(var(--tint),var(--tint)),var(--card);}
+.li-body>.sdet__err{background:linear-gradient(rgba(255,83,112,.12),rgba(255,83,112,.12)),var(--card);}
 .li-bar__t{margin-right:auto;min-width:0;color:var(--title);font-size:1.3rem;font-variant-numeric:tabular-nums;}
 .li-bar__f{display:contents;}
 
