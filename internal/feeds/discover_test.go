@@ -689,3 +689,45 @@ func TestDedupeKeyMatchesConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoverFallbackUnderTheTypedSection(t *testing.T) {
+	s := newSite(t, map[string]resp{
+		"/blog":      head(""),
+		"/blog/feed": {ctype: typeRSS, body: rssDoc("Section", 1)},
+		"/feed":      {ctype: typeRSS, body: rssDoc("Root", 1)},
+	})
+	got, err := feeds.Discover(context.Background(), s.Client(), s.URL+"/blog")
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if want := []string{s.URL + "/blog/feed"}; !equalStrings(urls(got), want) {
+		t.Fatalf("urls = %v, want %v", urls(got), want)
+	}
+}
+
+func TestDiscoverFallbackBlogPathsFromTheRoot(t *testing.T) {
+	s := newSite(t, map[string]resp{
+		"/":             head(""),
+		"/blog/rss.xml": {ctype: typeRSS, body: rssDoc("Blog", 1)},
+	})
+	got, err := feeds.Discover(context.Background(), s.Client(), s.URL)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if want := []string{s.URL + "/blog/rss.xml"}; !equalStrings(urls(got), want) {
+		t.Fatalf("urls = %v, want %v", urls(got), want)
+	}
+}
+
+func TestDiscoverFallbackStopsAfterTheFirstBatchWithAFeed(t *testing.T) {
+	s := newSite(t, map[string]resp{
+		"/":     head(""),
+		"/feed": {ctype: typeRSS, body: rssDoc("Root", 1)},
+	})
+	if _, err := feeds.Discover(context.Background(), s.Client(), s.URL); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if n := s.count("/blog/feed"); n != 0 {
+		t.Errorf("a later fallback batch was tried after a hit (%d requests)", n)
+	}
+}

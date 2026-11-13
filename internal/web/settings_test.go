@@ -420,7 +420,7 @@ func TestSettingsFieldHelpFitsOneLine(t *testing.T) {
 
 func TestSettingsKeywordsNoteFollowsTheProvider(t *testing.T) {
 	w, db := configTestWeb(t)
-	const note = "Keywords scores by counting your profile"
+	const note = "Keywords scores by matching the words under your profile"
 	body := get(t, w, "/settings/scoring")
 	if !strings.Contains(body, note) || !strings.Contains(body, `stp-callout--kw is-off`) {
 		t.Error("the Keywords note should be on the page but hidden for the default provider")

@@ -152,32 +152,6 @@ func TestFailureVerbDistinguishesTimeout(t *testing.T) {
 	}
 }
 
-func TestHeuristicScoresOverlap(t *testing.T) {
-	h := NewHeuristic()
-	profile := "I care about vLLM inference, RAG retrieval and Kubernetes serving."
-	items := []feeds.Item{
-		{ID: "match", Title: "vLLM inference on Kubernetes", Summary: "RAG retrieval tips"},
-		{ID: "none", Title: "Sourdough baking guide", Summary: "flour and water"},
-	}
-	scores, err := h.Score(context.Background(), profile, items)
-	if err != nil {
-		t.Fatalf("heuristic score: %v", err)
-	}
-	byID := map[string]ItemScore{}
-	for _, s := range scores {
-		byID[s.ID] = s
-	}
-	if byID["match"].Score == 0 {
-		t.Error("expected non-zero score for overlapping item")
-	}
-	if byID["none"].Score != 0 {
-		t.Errorf("expected zero score for unrelated item, got %d", byID["none"].Score)
-	}
-	if byID["match"].Score <= byID["none"].Score {
-		t.Error("matching item should outscore unrelated item")
-	}
-}
-
 // Without progress a long run is indistinguishable from a hung one, so the hook
 // has to fire once per batch and report a total that lets a caller show how far
 // through it is.

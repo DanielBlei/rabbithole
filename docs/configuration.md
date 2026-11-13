@@ -118,6 +118,7 @@ Every field is optional. A setting you leave out takes its default, now and in l
 | Field | Description | Default |
 |---|---|---|
 | `user` | Name shown in the web UI's shell prompt | OS login name |
+| `group_stories` | Show feed items that cover the same story together. `false` lists every item on its own. A `?grouped=1` or `?grouped=0` in the feed address overrides it for that view | `true` |
 | `adaptive_ranking` | Add a bounded set of recent explicit thumbs-up/thumbs-down ratings to the scoring prompt. `false` keeps scoring profile-only | `true` |
 | `inference.provider` | `ollama` \| `vllm` \| `openai` \| `heuristic` | `ollama` |
 | `inference.host` | Inference server URL | `http://localhost:11434` |
@@ -155,15 +156,16 @@ It is never an error, so an old file keeps importing after you switch provider.
 | `model_tuning.num_ctx` | yes | | | |
 | other `model_tuning.*` | yes | yes | yes | |
 
-`user`, `adaptive_ranking` and `ingest.digest_dir` apply whatever the provider.
+`user`, `group_stories`, `adaptive_ranking` and `ingest.digest_dir` apply whatever the provider.
 
 ### Providers
 
 - `ollama`: a local Ollama server. The default.
 - `openai`: OpenAI, or any hosted gateway that speaks its chat-completions API.
 - `vllm`: a vLLM server.
-- `heuristic`: keyword matching with no model. Good for offline use and for testing feed
-  changes without waiting on a model.
+- `heuristic`: keyword matching with no model. It reads the words under your interested
+  headings (not the ones under "not for me"), counts a title match above a summary match, and
+  needs no server. Good for offline use and for testing feed changes without waiting on a model.
 
 ### Thinking
 

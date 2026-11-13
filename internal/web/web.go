@@ -162,6 +162,24 @@ func (s *Web) pagePromptUser(ctx context.Context) string {
 	return promptUser(cfg.User)
 }
 
+// groupedView resolves whether the feed groups items by story: an explicit
+// grouped=1 or grouped=0 wins, otherwise the configured default applies (on
+// when unset or when the config cannot be read).
+func (s *Web) groupedView(ctx context.Context, param string) bool {
+	switch param {
+	case "1":
+		return true
+	case "0":
+		return false
+	}
+	cfg, _, err := s.src.Active(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("run config unreadable; grouping stories by default")
+		return true
+	}
+	return cfg.GroupStoriesEnabled()
+}
+
 // promptUser picks the shell-prompt name: the configured user, or the OS login
 // name when config leaves it blank. If even that can't be read, it stays empty
 // and the prompt renders as just "@rabbithole".
@@ -222,7 +240,6 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /sources/libfill", s.handleLibraryFill)
 	mux.HandleFunc("GET /sources/library", s.handleLibrary)
 	mux.HandleFunc("GET /sources/library/{group}", s.handleLibraryGroup)
-	mux.HandleFunc("POST /sources/library/plan", s.handleLibraryPlan)
 	mux.HandleFunc("POST /sources/library/apply", s.handleLibraryApply)
 	mux.HandleFunc("POST /sources/library/restore", s.handleLibraryRestore)
 	mux.HandleFunc("POST /sources/library/hide", s.handleLibraryHide)
@@ -420,13 +437,13 @@ type pageData struct {
 	// Args is the same narrowing as the arguments of the line the pane's title
 	// bar reads, each carrying the URL that drops it. Built from the fields
 	// above, so the bar and the zero-state can't say different things.
-	Args           []cmdArg
-	ListLimit      int // listLimit, so the pager can say when the set below is truncated
-	Rows           []rowData
-	Groups         []feedGroup
-	Grouped        bool
-	GroupToggleURL string
-	Empty          emptyData // the zero-state, filled only when Rows is empty
+	Args          []cmdArg
+	ListLimit     int // listLimit, so the pager can say when the set below is truncated
+	Rows          []rowData
+	Groups        []feedGroup
+	Grouped       bool
+	FilterGrouped string
+	Empty         emptyData // the zero-state, filled only when Rows is empty
 }
 
 // pickChip is one option in a multi-select filter menu.
@@ -612,7 +629,7 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := toRows(rows)
-	grouped := q.Get("grouped") == "1"
+	grouped := s.groupedView(r.Context(), q.Get("grouped"))
 	groups := []feedGroup(nil)
 	if grouped {
 		clusters, cerr := s.db.StoryClustersForItems(r.Context(), rowIDs(items))
@@ -672,7 +689,7 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		Rows:               items,
 		Groups:             groups,
 		Grouped:            grouped,
-		GroupToggleURL:     feedGroupToggleURL(q, grouped),
+		FilterGrouped:      q.Get("grouped"),
 	}
 	data.ViewPick = wornView(showUnread, showSeen, showHidden, onlyBookmark)
 	// Sort always has exactly one value, so it wears it plainly, spelled the way
