@@ -437,6 +437,7 @@ type inferenceYAML struct {
 	Provider         string              `yaml:"provider,omitempty"`
 	Host             string              `yaml:"host,omitempty"`
 	Model            string              `yaml:"model,omitempty"`
+	EmbeddingModel   string              `yaml:"embedding_model,omitempty"`
 	APIKey           string              `yaml:"api_key,omitempty"`
 	Think            *bool               `yaml:"think,omitempty"`
 	Effort           string              `yaml:"effort,omitempty"`
@@ -450,8 +451,8 @@ type inferenceYAML struct {
 // MarshalYAML renders the minimal form: unset optional fields are omitted.
 func (c InferenceConfig) MarshalYAML() (any, error) {
 	out := inferenceYAML{
-		Provider: c.Provider, Host: c.Host, Model: c.Model, APIKey: c.APIKey,
-		Think: c.Think, Effort: c.Effort, StructuredOutput: c.StructuredOutput,
+		Provider: c.Provider, Host: c.Host, Model: c.Model, EmbeddingModel: c.EmbeddingModel,
+		APIKey: c.APIKey, Think: c.Think, Effort: c.Effort, StructuredOutput: c.StructuredOutput,
 		SystemPrompt: c.SystemPrompt, BatchSize: c.BatchSize, MaxParallel: c.MaxParallel,
 	}
 	t := tuningYAML{

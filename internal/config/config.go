@@ -97,9 +97,12 @@ type InferenceConfig struct {
 	Provider string `yaml:"provider"` // ollama | openai | vllm | heuristic
 	Host     string `yaml:"host"`     // inference server URL
 	Model    string `yaml:"model"`    // chat model name
-	APIKey   string `yaml:"api_key"`  // optional bearer token
-	Think    *bool  `yaml:"think"`    // model reasoning during scoring; defaults true when not set in the config
-	Effort   string `yaml:"effort"`   // openai reasoning_effort while thinking: low | medium | high | xhigh
+	// EmbeddingModel enables optional story-clustering embeddings. Empty leaves
+	// embeddings off and clustering falls back to conservative grouping.
+	EmbeddingModel string `yaml:"embedding_model"`
+	APIKey         string `yaml:"api_key"` // optional bearer token
+	Think          *bool  `yaml:"think"`   // model reasoning during scoring; defaults true when not set in the config
+	Effort         string `yaml:"effort"`  // openai reasoning_effort while thinking: low | medium | high | xhigh
 
 	// StructuredOutput sends the verdict schema for the server to enforce; defaults true.
 	// false leaves the shape to the system prompt, for endpoints whose guided decoding garbles it.
