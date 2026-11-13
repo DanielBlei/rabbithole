@@ -14,7 +14,6 @@
     <span class="pane__ps"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~/feed</span><span class="sh">$&nbsp;</span><span class="pane__cmd">feed</span></span>
     {{range .Args}}{{if .Drop}}<a class="cmd__arg" href="{{.Drop}}" title="Show this feed without {{.Flag}}{{if .Value}} {{.Value}}{{end}}"><i>{{.Flag}}</i>{{if .Value}}<span{{if .Quote}} data-q{{end}}>{{.Value}}</span>{{end}}</a>{{else}}<span class="cmd__arg cmd__arg--note"><i>{{.Flag}}</i>{{if .Value}}<span>{{.Value}}</span>{{end}}</span>{{end}}{{end}}
     <span class="blink">_</span>
-    {{template "groupToggle" .}}
     {{if .Narrowed}}{{template "filterReset" .}}{{end}}
   </div>
 
@@ -218,7 +217,6 @@
          one. Both are rendered and CSS shows the one this look uses: nothing
          moves an element between two rows. */}}
     {{if .Narrowed}}{{template "filterReset" .}}{{end}}
-    {{template "groupToggle" .}}
   </form>
 
   {{/* Nothing to page through on an empty feed — the pager JS null-guards every
@@ -308,10 +306,3 @@
 <a class="filter filter__clear" href="/feed" title="Back to the unfiltered feed"><span class="filter__clear-x">&times;</span>Reset</a>
 {{end}}
 
-{{/* The Grouped/Individual view toggle, another argument on the feed command.
-     Rendered twice for the same reason as the reset: the line that carries it
-     in Default is retired in Minimal, and an element can't sit in two rows.
-     CSS shows the copy the layout uses — see .pane__filters .feed-view. */}}
-{{define "groupToggle"}}
-{{if .Rows}}<a class="feed-view" href="{{.GroupToggleURL}}" title="{{if .Grouped}}Show every item separately{{else}}Group items that cover the same story{{end}}">{{if .Grouped}}individual{{else}}grouped{{end}}</a>{{end}}
-{{end}}

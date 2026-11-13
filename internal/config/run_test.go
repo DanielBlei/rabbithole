@@ -141,6 +141,53 @@ func TestAdaptiveRankingDefaultsOn(t *testing.T) {
 	}
 }
 
+func TestGroupStoriesDefaultsOn(t *testing.T) {
+	d := RunDefaults()
+	if d.GroupStories == nil || !*d.GroupStories || !d.GroupStoriesEnabled() {
+		t.Fatalf("default group_stories = %v, want on", d.GroupStories)
+	}
+	if !(Config{}).GroupStoriesEnabled() {
+		t.Error("an unset setting must mean on")
+	}
+	if eff := DefaultsFor("ollama"); eff.GroupStories == nil || !*eff.GroupStories {
+		t.Errorf("effective group_stories = %v, want on", eff.GroupStories)
+	}
+}
+
+func TestGroupStoriesFalseRoundTrips(t *testing.T) {
+	cfg := Config{GroupStories: boolp(false)}
+	raw, err := cfg.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), "group_stories: false") {
+		t.Fatalf("canonical YAML lost the setting:\n%s", raw)
+	}
+	back, err := ParseStored(raw, RunSchemaVersion)
+	if err != nil {
+		t.Fatalf("ParseStored: %v", err)
+	}
+	if back.GroupStoriesEnabled() || back.GroupStories == nil || *back.GroupStories {
+		t.Fatalf("round trip = %v, want off", back.GroupStories)
+	}
+	clone := cfg.Clone()
+	*clone.GroupStories = true
+	if *cfg.GroupStories {
+		t.Error("Clone shares the group_stories pointer")
+	}
+}
+
+func TestGroupStoriesImportKeepsTheSetting(t *testing.T) {
+	f, err := ParseFile([]byte("group_stories: false\n"))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	run, _, _, _ := f.Split()
+	if run.GroupStoriesEnabled() {
+		t.Error("imported group_stories: false was lost")
+	}
+}
+
 func TestAdaptiveRankingFalseRoundTrips(t *testing.T) {
 	cfg := Config{AdaptiveRanking: boolp(false)}
 	raw, err := cfg.Marshal()
@@ -570,6 +617,10 @@ func TestDropDefaults(t *testing.T) {
 			[]string{"inference.batch_size"}, Config{Inference: InferenceConfig{Think: boolp(false)}}},
 		{"adaptive ranking default is not stored",
 			Config{AdaptiveRanking: boolp(true)}, []string{"adaptive_ranking"}, Config{}},
+		{"group stories default is not stored",
+			Config{GroupStories: boolp(true)}, []string{"group_stories"}, Config{}},
+		{"group stories off stays",
+			Config{GroupStories: boolp(false)}, nil, Config{GroupStories: boolp(false)}},
 		{"adaptive ranking off stays",
 			Config{AdaptiveRanking: boolp(false)}, nil, Config{AdaptiveRanking: boolp(false)}},
 		{
