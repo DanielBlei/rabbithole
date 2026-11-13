@@ -61,10 +61,14 @@ type dialect interface {
 	// two callers past it and fails the loser at commit.
 	uniqueViolation(err error) string
 
-	// migrateV3 upgrades a version 3 database in place to schemaVersion. Only
-	// SQLite has a version 3 to upgrade: Postgres joined at the current number,
-	// so a Postgres database reporting 3 was not written by this build.
+	// migrateV3 upgrades a version 3 database in place to version 4. Only
+	// SQLite has a version 3 to upgrade: Postgres joined at version 4, so a
+	// Postgres database reporting 3 was not written by this build.
 	migrateV3(ctx context.Context, db *sql.DB) error
+
+	// migrateV4 upgrades a version 4 database in place to version 5 by adding
+	// adaptive feedback provenance columns to items.
+	migrateV4(ctx context.Context, db *sql.DB) error
 
 	// readVersion reads the stamped schema version, and stampVersion writes
 	// it. SQLite keeps it in PRAGMA user_version, which Postgres has no
@@ -143,21 +147,38 @@ func (sqliteDialect) additiveTables() []additive {
 	}
 }
 
-// migrateV3 adds local profiles and nullable provenance columns. It is one
-// transaction so an interrupted upgrade cannot expose a half-migrated store.
+// migrateV3 adds local profiles and nullable profile provenance columns. It is
+// one transaction so an interrupted upgrade cannot expose a half-migrated store.
 func (sqliteDialect) migrateV3(ctx context.Context, db *sql.DB) error {
+	return execMigration(ctx, db, []string{
+		"ALTER TABLE items ADD COLUMN llm_profile_id TEXT",
+		"ALTER TABLE items ADD COLUMN llm_profile_name TEXT",
+		"ALTER TABLE items ADD COLUMN llm_profile_hash TEXT",
+		profileSchema,
+		fmt.Sprintf("PRAGMA user_version = %d", schemaVersionProfiles),
+	})
+}
+
+// migrateV4 adds nullable adaptive feedback provenance columns. They are
+// separate from the profile columns because feedback can be used with any
+// profile, and a score's provenance has to say which of the two shaped it.
+func (sqliteDialect) migrateV4(ctx context.Context, db *sql.DB) error {
+	return execMigration(ctx, db, []string{
+		"ALTER TABLE items ADD COLUMN llm_feedback_positive INTEGER",
+		"ALTER TABLE items ADD COLUMN llm_feedback_negative INTEGER",
+		"ALTER TABLE items ADD COLUMN llm_feedback_hash TEXT",
+		fmt.Sprintf("PRAGMA user_version = %d", schemaVersionFeedback),
+	})
+}
+
+// execMigration runs one upgrade's statements in a single transaction.
+func execMigration(ctx context.Context, db *sql.DB, stmts []string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin migration: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	for _, stmt := range []string{
-		"ALTER TABLE items ADD COLUMN llm_profile_id TEXT",
-		"ALTER TABLE items ADD COLUMN llm_profile_name TEXT",
-		"ALTER TABLE items ADD COLUMN llm_profile_hash TEXT",
-		profileSchema,
-		fmt.Sprintf("PRAGMA user_version = %d", schemaVersion),
-	} {
+	for _, stmt := range stmts {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return err
 		}
@@ -296,12 +317,23 @@ func (postgresDialect) additiveTables() []additive {
 	}
 }
 
-// migrateV3 refuses rather than translating: Postgres arrived with the current
-// schema version, so a version 3 database under this engine is a database this
-// application never wrote.
+// migrateV3 refuses rather than translating: Postgres arrived at version 4, so
+// a version 3 database under this engine is a database this application never
+// wrote.
 func (postgresDialect) migrateV3(context.Context, *sql.DB) error {
 	return fmt.Errorf("no Postgres database was ever version 3; a new one is created at version %d",
 		schemaVersion)
+}
+
+// migrateV4 adds the adaptive feedback provenance columns. Postgres took part
+// in version 4, so these are the only upgrade statements it needs.
+func (postgresDialect) migrateV4(ctx context.Context, db *sql.DB) error {
+	return execMigration(ctx, db, []string{
+		"ALTER TABLE items ADD COLUMN llm_feedback_positive INTEGER",
+		"ALTER TABLE items ADD COLUMN llm_feedback_negative INTEGER",
+		"ALTER TABLE items ADD COLUMN llm_feedback_hash TEXT",
+		fmt.Sprintf("UPDATE schema_version SET version = %d WHERE id = 1", schemaVersionFeedback),
+	})
 }
 
 // uniqueViolation matches SQLSTATE 23505 and reports the constraint that

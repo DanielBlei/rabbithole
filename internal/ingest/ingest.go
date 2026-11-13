@@ -183,7 +183,9 @@ func Run(
 
 	scoringContext := rank.ProfileContext(activeProfile.Content)
 	if len(candidates) > 0 {
-		scoringContext, err = loadScoringContext(ctx, db, activeProfile, candidates)
+		scoringContext, err = loadScoringContext(
+			ctx, db, activeProfile, candidates, cfg.AdaptiveRankingEnabled(),
+		)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -439,14 +441,17 @@ func record(
 			continue
 		}
 		entries = append(entries, store.DigestEntry{
-			Item:        it,
-			Score:       sc.Score,
-			Reason:      sc.Reason,
-			Model:       model,
-			ProfileID:   activeProfile.ID,
-			ProfileName: activeProfile.Name,
-			ProfileHash: activeProfile.Hash,
-			Digested:    true,
+			Item:             it,
+			Score:            sc.Score,
+			Reason:           sc.Reason,
+			Model:            model,
+			ProfileID:        activeProfile.ID,
+			ProfileName:      activeProfile.Name,
+			ProfileHash:      activeProfile.Hash,
+			FeedbackPositive: sc.Feedback.Positive,
+			FeedbackNegative: sc.Feedback.Negative,
+			FeedbackHash:     sc.Feedback.Hash,
+			Digested:         true,
 		})
 	}
 	return db.Record(ctx, all, entries, day)

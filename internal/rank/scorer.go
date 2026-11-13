@@ -22,6 +22,9 @@ type ItemScore struct {
 	ID     string
 	Score  int    // 0..10
 	Reason string // short rationale
+	// Feedback identifies the adaptive context used for this verdict, empty
+	// for profile-only scoring.
+	Feedback FeedbackProvenance
 }
 
 // Scorer evaluates feed items against an interest profile.

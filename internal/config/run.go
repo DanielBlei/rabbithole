@@ -48,6 +48,11 @@ type Config struct {
 	Inference      InferenceConfig      `yaml:"inference,omitempty"`
 	Classification ClassificationConfig `yaml:"classification,omitempty"`
 	Ingest         IngestConfig         `yaml:"ingest,omitempty"`
+
+	// AdaptiveRanking adds bounded explicit reader feedback to the scoring
+	// prompt. Unset means on, preserving profile-plus-feedback behavior for
+	// configs saved before the toggle existed; false pins profile-only scoring.
+	AdaptiveRanking *bool `yaml:"adaptive_ranking,omitempty"`
 }
 
 // IngestConfig is the stored part of the ingest block.
@@ -223,6 +228,9 @@ func (r *Config) DropDefaults() (dropped []string) {
 	if r.User != "" {
 		try("user", func(c *Config) { c.User = "" })
 	}
+	if r.AdaptiveRanking != nil {
+		try("adaptive_ranking", func(c *Config) { c.AdaptiveRanking = nil })
+	}
 	if in.Provider != "" {
 		try("inference.provider", func(c *Config) { c.Inference.Provider = "" })
 	}
@@ -298,6 +306,7 @@ func (r Config) Clone() Config {
 	c.Classification.ShowKeywords = cloneBool(r.Classification.ShowKeywords)
 	c.Classification.ShowAssumptions = cloneBool(r.Classification.ShowAssumptions)
 	c.Classification.VocabularyHint = cloneBool(r.Classification.VocabularyHint)
+	c.AdaptiveRanking = cloneBool(r.AdaptiveRanking)
 	return c
 }
 
@@ -368,6 +377,10 @@ func absClean(p string) string {
 // applyDefaults fills unset fields that apply to the provider.
 func (r *Config) applyDefaults() {
 	in := &r.Inference
+	if r.AdaptiveRanking == nil {
+		t := true
+		r.AdaptiveRanking = &t
+	}
 	if in.Provider == "" {
 		in.Provider = defaultProvider
 	}
@@ -479,6 +492,13 @@ func (r *Config) validate() error {
 // ThinkEnabled reports whether reasoning is on. Unset means off; Prepare sets it
 // for every provider where it applies.
 func (c InferenceConfig) ThinkEnabled() bool { return c.Think != nil && *c.Think }
+
+// AdaptiveRankingEnabled reports whether explicit feedback may be added to the
+// scoring prompt. Unset means on, preserving the behavior of configs saved
+// before the toggle existed.
+func (c Config) AdaptiveRankingEnabled() bool {
+	return c.AdaptiveRanking == nil || *c.AdaptiveRanking
+}
 
 // MarshalYAML writes the setting back as it was written: false when disabled,
 // the text when set.

@@ -20,6 +20,7 @@
 # import with a warning.
 
 # user: rabbit                    # name in the web UI shell prompt; unset uses your OS login name
+adaptive_ranking: true            # use recent explicit ratings as extra scoring context; false is profile-only
 
 inference:
   provider: ollama                # ollama | vllm | openai | heuristic (keywords, no model)
