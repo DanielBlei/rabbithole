@@ -48,6 +48,11 @@ type Config struct {
 	Inference     InferenceConfig     `yaml:"inference,omitempty"`
 	Ingest        IngestConfig        `yaml:"ingest,omitempty"`
 	DecisionBrief DecisionBriefConfig `yaml:"decision_brief,omitempty"`
+
+	// AdaptiveRanking adds bounded explicit reader feedback to the scoring
+	// prompt. Unset means on, preserving profile-plus-feedback behavior for
+	// configs saved before the toggle existed; false pins profile-only scoring.
+	AdaptiveRanking *bool `yaml:"adaptive_ranking,omitempty"`
 }
 
 // IngestConfig is the stored part of the ingest block.
@@ -223,6 +228,9 @@ func (r *Config) DropDefaults() (dropped []string) {
 	if r.User != "" {
 		try("user", func(c *Config) { c.User = "" })
 	}
+	if r.AdaptiveRanking != nil {
+		try("adaptive_ranking", func(c *Config) { c.AdaptiveRanking = nil })
+	}
 	if in.Provider != "" {
 		try("inference.provider", func(c *Config) { c.Inference.Provider = "" })
 	}
@@ -245,6 +253,7 @@ func (r Config) Clone() Config {
 	c := r
 	c.Inference.Think = cloneBool(r.Inference.Think)
 	c.Inference.StructuredOutput = cloneBool(r.Inference.StructuredOutput)
+	c.AdaptiveRanking = cloneBool(r.AdaptiveRanking)
 	return c
 }
 
@@ -318,6 +327,10 @@ func absClean(p string) string {
 // applyDefaults fills unset fields that apply to the provider.
 func (r *Config) applyDefaults() {
 	in := &r.Inference
+	if r.AdaptiveRanking == nil {
+		t := true
+		r.AdaptiveRanking = &t
+	}
 	if in.Provider == "" {
 		in.Provider = defaultProvider
 	}
@@ -408,6 +421,13 @@ func (r *Config) validate() error {
 // for every provider where it applies.
 func (c InferenceConfig) ThinkEnabled() bool { return c.Think != nil && *c.Think }
 
+// AdaptiveRankingEnabled reports whether explicit feedback may be added to the
+// scoring prompt. Unset means on, preserving the behavior of configs saved
+// before the toggle existed.
+func (c Config) AdaptiveRankingEnabled() bool {
+	return c.AdaptiveRanking == nil || *c.AdaptiveRanking
+}
+
 // MarshalYAML writes the setting back as it was written: false when disabled,
 // the text when set.
 func (s SystemPromptSetting) MarshalYAML() (any, error) {
@@ -433,6 +453,7 @@ type inferenceYAML struct {
 	Provider         string              `yaml:"provider,omitempty"`
 	Host             string              `yaml:"host,omitempty"`
 	Model            string              `yaml:"model,omitempty"`
+	EmbeddingModel   string              `yaml:"embedding_model,omitempty"`
 	APIKey           string              `yaml:"api_key,omitempty"`
 	Think            *bool               `yaml:"think,omitempty"`
 	Effort           string              `yaml:"effort,omitempty"`
@@ -446,8 +467,8 @@ type inferenceYAML struct {
 // MarshalYAML renders the minimal form: unset optional fields are omitted.
 func (c InferenceConfig) MarshalYAML() (any, error) {
 	out := inferenceYAML{
-		Provider: c.Provider, Host: c.Host, Model: c.Model, APIKey: c.APIKey,
-		Think: c.Think, Effort: c.Effort, StructuredOutput: c.StructuredOutput,
+		Provider: c.Provider, Host: c.Host, Model: c.Model, EmbeddingModel: c.EmbeddingModel,
+		APIKey: c.APIKey, Think: c.Think, Effort: c.Effort, StructuredOutput: c.StructuredOutput,
 		SystemPrompt: c.SystemPrompt, BatchSize: c.BatchSize, MaxParallel: c.MaxParallel,
 	}
 	t := tuningYAML{

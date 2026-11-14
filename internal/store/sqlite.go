@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS items (
 	llm_profile_id   TEXT,
 	llm_profile_name TEXT,
 	llm_profile_hash TEXT,
+	llm_feedback_positive INTEGER,
+	llm_feedback_negative INTEGER,
+	llm_feedback_hash TEXT,
 	digested_on      DATE,
 	status           TEXT NOT NULL DEFAULT 'unread',
 	user_score       INTEGER,
@@ -71,6 +74,9 @@ CREATE TABLE IF NOT EXISTS items (
 	llm_profile_id   TEXT,
 	llm_profile_name TEXT,
 	llm_profile_hash TEXT,
+	llm_feedback_positive INTEGER,
+	llm_feedback_negative INTEGER,
+	llm_feedback_hash TEXT,
 	digested_on      DATE,
 	status           TEXT NOT NULL DEFAULT 'unread',
 	user_score       INTEGER,
@@ -96,9 +102,14 @@ CREATE TABLE IF NOT EXISTS schema_version (
 `
 
 // schemaVersion stamps the database via PRAGMA user_version. Version 2 moved
-// configured feeds into SQLite; version 3 added feeds.type; version 4 adds
-// interest profiles and score provenance. Version 3 upgrades in place.
-const schemaVersion = 4
+// configured feeds into SQLite; version 3 added feeds.type; version 4 added
+// interest profiles and profile score provenance; version 5 adds adaptive
+// feedback provenance. Versions 3 and 4 upgrade in place.
+const (
+	schemaVersionProfiles = 4
+	schemaVersionFeedback = 5
+	schemaVersion         = schemaVersionFeedback
+)
 
 // Each engine's DDL is listed in its dialect: schemas() for a new database, and
 // additiveTables() for tables added since schemaVersion last moved, which are
@@ -278,15 +289,25 @@ func initSchema(ctx context.Context, db *sql.DB, d dialect, label string) error 
 		if err != nil {
 			return err
 		}
-		switch version {
-		case schemaVersion:
-		case 3:
-			if err := d.migrateV3(ctx, db); err != nil {
-				return fmt.Errorf("migrate database %s from version 3 to 4: %w", label, err)
-			}
-		default:
+		if version < 3 || version > schemaVersion {
 			return fmt.Errorf("%w: %s is version %d, this build expects %d — delete it and run ingest again",
 				ErrSchemaVersion, label, version, schemaVersion)
+		}
+		for version < schemaVersion {
+			switch version {
+			case 3:
+				if err := d.migrateV3(ctx, db); err != nil {
+					return fmt.Errorf("migrate database %s from version 3 to 4: %w", label, err)
+				}
+			case 4:
+				if err := d.migrateV4(ctx, db); err != nil {
+					return fmt.Errorf("migrate database %s from version 4 to 5: %w", label, err)
+				}
+			default:
+				return fmt.Errorf("%w: %s is version %d, this build expects %d",
+					ErrSchemaVersion, label, version, schemaVersion)
+			}
+			version++
 		}
 	} else {
 		for _, stmt := range d.schemas() {
@@ -380,14 +401,17 @@ func (s *Store) scoredChunk(ctx context.Context, links []string, scored map[stri
 // provenance so later config or profile edits do not misattribute an older
 // score. Digested stamps the entry with the run day (digested_on).
 type DigestEntry struct {
-	Item        feeds.Item
-	Score       int
-	Reason      string
-	Model       string
-	ProfileID   string
-	ProfileName string
-	ProfileHash string
-	Digested    bool
+	Item             feeds.Item
+	Score            int
+	Reason           string
+	Model            string
+	ProfileID        string
+	ProfileName      string
+	ProfileHash      string
+	FeedbackPositive int
+	FeedbackNegative int
+	FeedbackHash     string
+	Digested         bool
 }
 
 // Record writes items in one transaction, keyed on link (the canonical UNIQUE
@@ -414,8 +438,8 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEnt
 	defer func() { _ = tx.Rollback() }()
 
 	const q = `INSERT INTO items
-		(id, source, title, link, summary, published_at, created_at, updated_at, llm_score, llm_score_reason, llm_score_model, llm_profile_id, llm_profile_name, llm_profile_hash, digested_on, tags)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(id, source, title, link, summary, published_at, created_at, updated_at, llm_score, llm_score_reason, llm_score_model, llm_profile_id, llm_profile_name, llm_profile_hash, llm_feedback_positive, llm_feedback_negative, llm_feedback_hash, digested_on, tags)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(link) DO UPDATE SET
 			llm_score        = excluded.llm_score,
 			llm_score_reason = excluded.llm_score_reason,
@@ -423,6 +447,9 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEnt
 			llm_profile_id   = excluded.llm_profile_id,
 			llm_profile_name = excluded.llm_profile_name,
 			llm_profile_hash = excluded.llm_profile_hash,
+			llm_feedback_positive = excluded.llm_feedback_positive,
+			llm_feedback_negative = excluded.llm_feedback_negative,
+			llm_feedback_hash = excluded.llm_feedback_hash,
 			digested_on      = COALESCE(excluded.digested_on, items.digested_on),
 			updated_at       = excluded.updated_at,
 			tags             = excluded.tags
@@ -443,6 +470,9 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEnt
 			profileID      any
 			profileName    any
 			profileHash    any
+			feedbackPos    any
+			feedbackNeg    any
+			feedbackHash   any
 			digestDay      any
 		)
 		if d, ok := byID[it.ID]; ok {
@@ -460,6 +490,11 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEnt
 			if d.ProfileHash != "" {
 				profileHash = d.ProfileHash
 			}
+			if d.FeedbackHash != "" {
+				feedbackPos = d.FeedbackPositive
+				feedbackNeg = d.FeedbackNegative
+				feedbackHash = d.FeedbackHash
+			}
 			if d.Digested {
 				digestDay = dayStr
 			}
@@ -472,7 +507,8 @@ func (s *Store) Record(ctx context.Context, all []feeds.Item, scored []DigestEnt
 		}
 		if _, err := stmt.ExecContext(ctx, it.ID, it.Source, it.Title, it.Link,
 			it.Summary, publishedAt, now, now, llmScore, llmScoreReason, llmScoreModel,
-			profileID, profileName, profileHash, digestDay, tags); err != nil {
+			profileID, profileName, profileHash, feedbackPos, feedbackNeg, feedbackHash,
+			digestDay, tags); err != nil {
 			return fmt.Errorf("insert item %s: %w", it.ID, err)
 		}
 	}
@@ -563,27 +599,30 @@ func (s *Store) UpdateUserState(ctx context.Context, identifier string, patch Us
 // ItemRow is a compact, read-only view of an item for display (e.g. the
 // `items list` CLI command).
 type ItemRow struct {
-	ID             string
-	Source         string
-	Title          string
-	Link           string
-	Status         string
-	LLMScore       *int
-	LLMScoreReason *string
-	LLMScoreModel  *string
-	LLMProfileID   *string
-	LLMProfileName *string
-	LLMProfileHash *string
-	UserScore      *int
-	UserNote       *string
-	PublishedAt    *time.Time
-	Bookmarked     bool
-	Tags           []string
+	ID                  string
+	Source              string
+	Title               string
+	Link                string
+	Status              string
+	LLMScore            *int
+	LLMScoreReason      *string
+	LLMScoreModel       *string
+	LLMProfileID        *string
+	LLMProfileName      *string
+	LLMProfileHash      *string
+	LLMFeedbackPositive *int
+	LLMFeedbackNegative *int
+	LLMFeedbackHash     *string
+	UserScore           *int
+	UserNote            *string
+	PublishedAt         *time.Time
+	Bookmarked          bool
+	Tags                []string
 }
 
 // itemRowColumns is the SELECT list backing both List and Get, kept in one place
 // so the column order stays in lockstep with scanItemRow's destinations.
-const itemRowColumns = "id, source, title, link, status, llm_score, llm_score_reason, llm_score_model, llm_profile_id, llm_profile_name, llm_profile_hash, user_score, user_note, published_at, bookmarked, tags"
+const itemRowColumns = "id, source, title, link, status, llm_score, llm_score_reason, llm_score_model, llm_profile_id, llm_profile_name, llm_profile_hash, llm_feedback_positive, llm_feedback_negative, llm_feedback_hash, user_score, user_note, published_at, bookmarked, tags"
 
 // rowScanner is satisfied by both *sql.Row (Get) and *sql.Rows (List), letting
 // scanItemRow serve the single-row and multi-row reads from one mapping.
@@ -596,20 +635,24 @@ type rowScanner interface {
 // itemRowColumns exactly.
 func scanItemRow(sc rowScanner) (ItemRow, error) {
 	var (
-		r           ItemRow
-		llmScore    sql.NullInt64
-		llmReason   sql.NullString
-		llmModel    sql.NullString
-		profileID   sql.NullString
-		profileName sql.NullString
-		profileHash sql.NullString
-		userScore   sql.NullInt64
-		userNote    sql.NullString
-		publishedAt sql.NullTime
-		tags        sql.NullString
+		r            ItemRow
+		llmScore     sql.NullInt64
+		llmReason    sql.NullString
+		llmModel     sql.NullString
+		profileID    sql.NullString
+		profileName  sql.NullString
+		profileHash  sql.NullString
+		feedbackPos  sql.NullInt64
+		feedbackNeg  sql.NullInt64
+		feedbackHash sql.NullString
+		userScore    sql.NullInt64
+		userNote     sql.NullString
+		publishedAt  sql.NullTime
+		tags         sql.NullString
 	)
 	if err := sc.Scan(&r.ID, &r.Source, &r.Title, &r.Link, &r.Status,
 		&llmScore, &llmReason, &llmModel, &profileID, &profileName, &profileHash,
+		&feedbackPos, &feedbackNeg, &feedbackHash,
 		&userScore, &userNote, &publishedAt, &r.Bookmarked, &tags); err != nil {
 		return ItemRow{}, err
 	}
@@ -634,6 +677,17 @@ func scanItemRow(sc rowScanner) (ItemRow, error) {
 	}
 	if profileHash.Valid {
 		r.LLMProfileHash = &profileHash.String
+	}
+	if feedbackPos.Valid {
+		v := int(feedbackPos.Int64)
+		r.LLMFeedbackPositive = &v
+	}
+	if feedbackNeg.Valid {
+		v := int(feedbackNeg.Int64)
+		r.LLMFeedbackNegative = &v
+	}
+	if feedbackHash.Valid {
+		r.LLMFeedbackHash = &feedbackHash.String
 	}
 	if userScore.Valid {
 		v := int(userScore.Int64)

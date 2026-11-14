@@ -6,6 +6,9 @@
 package feedback
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"sort"
 	"time"
 )
@@ -42,6 +45,33 @@ type Selection struct {
 // used as adaptive scoring context.
 func (s Selection) Active() bool {
 	return len(s.Positive)+len(s.Negative) >= MinExamples
+}
+
+// Hash is a stable SHA-256 over the selected example IDs and their polarity,
+// used as score provenance. It identifies which adaptive context influenced a
+// score without storing the examples again. IDs are sorted within each
+// polarity, so the same set hashes the same however it was ordered; polarity is
+// part of the input, so the same item rated up and down hashes differently.
+// An inactive selection has no hash.
+func (s Selection) Hash() string {
+	if !s.Active() {
+		return ""
+	}
+	h := sha256.New()
+	_, _ = h.Write([]byte("rabbithole-feedback-v1\n"))
+	writePolarity := func(prefix byte, examples []Example) {
+		ids := make([]string, 0, len(examples))
+		for _, example := range examples {
+			ids = append(ids, example.ItemID)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			_, _ = fmt.Fprintf(h, "%c:%s\n", prefix, id)
+		}
+	}
+	writePolarity('P', s.Positive)
+	writePolarity('N', s.Negative)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Select returns at most MaxExamples for each polarity, newest item first.

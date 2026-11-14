@@ -44,6 +44,34 @@ type ScoringContext struct {
 	Feedback feedback.Selection
 }
 
+// FeedbackProvenance identifies the adaptive context that influenced a score.
+// An empty Hash means no feedback was used, which is how a profile-only score is
+// distinguished from one produced with examples.
+type FeedbackProvenance struct {
+	Positive int
+	Negative int
+	Hash     string
+}
+
+// Used reports whether the score was produced with adaptive feedback.
+func (p FeedbackProvenance) Used() bool { return p.Hash != "" }
+
+// Count returns the number of examples represented by the provenance.
+func (p FeedbackProvenance) Count() int { return p.Positive + p.Negative }
+
+// Provenance returns the adaptive context this scoring context will pass to the
+// model. It is empty when the selection is below the activation threshold.
+func (c ScoringContext) Provenance() FeedbackProvenance {
+	if !c.Feedback.Active() {
+		return FeedbackProvenance{}
+	}
+	return FeedbackProvenance{
+		Positive: len(c.Feedback.Positive),
+		Negative: len(c.Feedback.Negative),
+		Hash:     c.Feedback.Hash(),
+	}
+}
+
 // ProfileContext returns a scoring context with no explicit feedback.
 func ProfileContext(profile string) ScoringContext {
 	return ScoringContext{Profile: profile}

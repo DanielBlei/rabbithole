@@ -53,36 +53,42 @@ func (s *API) Routes() http.Handler {
 // Item is the JSON shape of a store.ItemRow. Kept separate from ItemRow so
 // internal/store stays free of HTTP/JSON concerns.
 type Item struct {
-	ID             string     `json:"id"`
-	Source         string     `json:"source"`
-	Title          string     `json:"title"`
-	Link           string     `json:"link"`
-	Status         string     `json:"status"`
-	LLMScore       *int       `json:"llm_score,omitempty"`
-	LLMScoreReason *string    `json:"llm_score_reason,omitempty"`
-	LLMScoreModel  *string    `json:"llm_score_model,omitempty"`
-	LLMProfileID   *string    `json:"llm_profile_id,omitempty"`
-	LLMProfileName *string    `json:"llm_profile_name,omitempty"`
-	LLMProfileHash *string    `json:"llm_profile_hash,omitempty"`
-	UserScore      *int       `json:"user_score,omitempty"`
-	PublishedAt    *time.Time `json:"published_at,omitempty"`
+	ID                  string     `json:"id"`
+	Source              string     `json:"source"`
+	Title               string     `json:"title"`
+	Link                string     `json:"link"`
+	Status              string     `json:"status"`
+	LLMScore            *int       `json:"llm_score,omitempty"`
+	LLMScoreReason      *string    `json:"llm_score_reason,omitempty"`
+	LLMScoreModel       *string    `json:"llm_score_model,omitempty"`
+	LLMProfileID        *string    `json:"llm_profile_id,omitempty"`
+	LLMProfileName      *string    `json:"llm_profile_name,omitempty"`
+	LLMProfileHash      *string    `json:"llm_profile_hash,omitempty"`
+	LLMFeedbackPositive *int       `json:"llm_feedback_positive,omitempty"`
+	LLMFeedbackNegative *int       `json:"llm_feedback_negative,omitempty"`
+	LLMFeedbackHash     *string    `json:"llm_feedback_hash,omitempty"`
+	UserScore           *int       `json:"user_score,omitempty"`
+	PublishedAt         *time.Time `json:"published_at,omitempty"`
 }
 
 func fromItemRow(r store.ItemRow) Item {
 	return Item{
-		ID:             r.ID,
-		Source:         r.Source,
-		Title:          r.Title,
-		Link:           r.Link,
-		Status:         r.Status,
-		LLMScore:       r.LLMScore,
-		LLMScoreReason: r.LLMScoreReason,
-		LLMScoreModel:  r.LLMScoreModel,
-		LLMProfileID:   r.LLMProfileID,
-		LLMProfileName: r.LLMProfileName,
-		LLMProfileHash: r.LLMProfileHash,
-		UserScore:      r.UserScore,
-		PublishedAt:    r.PublishedAt,
+		ID:                  r.ID,
+		Source:              r.Source,
+		Title:               r.Title,
+		Link:                r.Link,
+		Status:              r.Status,
+		LLMScore:            r.LLMScore,
+		LLMScoreReason:      r.LLMScoreReason,
+		LLMScoreModel:       r.LLMScoreModel,
+		LLMProfileID:        r.LLMProfileID,
+		LLMProfileName:      r.LLMProfileName,
+		LLMProfileHash:      r.LLMProfileHash,
+		LLMFeedbackPositive: r.LLMFeedbackPositive,
+		LLMFeedbackNegative: r.LLMFeedbackNegative,
+		LLMFeedbackHash:     r.LLMFeedbackHash,
+		UserScore:           r.UserScore,
+		PublishedAt:         r.PublishedAt,
 	}
 }
 

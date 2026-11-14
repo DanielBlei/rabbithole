@@ -17,6 +17,16 @@
                   hx-get="/profiles/rescore" hx-target="#modalTop" hx-swap="innerHTML">Rescore recent articles</button>
         </div>
       </div>
+      <div class="stp-row" data-adaptive-ranking>
+        <div class="stp-row__l">
+          <div class="stp-row__nl"><span class="stp-row__n">Adaptive ranking <span class="stp-chip stp-chip--{{.Adaptive.Tone}}">{{.Adaptive.State}}</span></span></div>
+          <p class="stp-row__h">{{.Adaptive.Detail}}</p>
+        </div>
+        <div class="stp-row__c">
+          <span class="stp-row__v">{{.Adaptive.Count}}</span>
+          <span class="stp-row__h">explicit ratings</span>
+        </div>
+      </div>
     </div>
   </section>
 

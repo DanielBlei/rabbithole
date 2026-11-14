@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"html"
 	"html/template"
 	"io/fs"
@@ -447,10 +448,13 @@ type pageData struct {
 	// Args is the same narrowing as the arguments of the line the pane's title
 	// bar reads, each carrying the URL that drops it. Built from the fields
 	// above, so the bar and the zero-state can't say different things.
-	Args      []cmdArg
-	ListLimit int // listLimit, so the pager can say when the set below is truncated
-	Rows      []rowData
-	Empty     emptyData // the zero-state, filled only when Rows is empty
+	Args           []cmdArg
+	ListLimit      int // listLimit, so the pager can say when the set below is truncated
+	Rows           []rowData
+	Groups         []feedGroup
+	Grouped        bool
+	GroupToggleURL string
+	Empty          emptyData // the zero-state, filled only when Rows is empty
 }
 
 // pickChip is one option in a multi-select filter menu.
@@ -514,6 +518,7 @@ type rowData struct {
 	ScoreModel       string
 	ScoreProfile     string
 	ScoreProfileHash string
+	ScoreFeedback    string
 	// The user's own rating. It lights a thumb; when adaptive feedback is
 	// active, explicit ratings may also inform future scores. Either one
 	// re-posted clears it.
@@ -637,6 +642,20 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := s.toRows(r.Context(), rows)
+	grouped := q.Get("grouped") == "1"
+	groups := []feedGroup(nil)
+	if grouped {
+		clusters, cerr := s.db.StoryClustersForItems(r.Context(), rowIDs(items))
+		if cerr != nil {
+			log.Warn().Err(cerr).Msg("loading story clusters for the feed")
+			grouped = false
+		} else {
+			if len(clusters) == 0 && len(items) > 1 {
+				clusters = exactStoryClusters(items)
+			}
+			groups = toFeedGroups(items, clusters)
+		}
+	}
 	chrome := s.chrome(r.Context())
 	data := pageData{
 		Title:      "The Rabbit Hole",
@@ -681,6 +700,9 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		TagsPick:           worn(pickedTags, "All"),
 		ListLimit:          listLimit,
 		Rows:               items,
+		Groups:             groups,
+		Grouped:            grouped,
+		GroupToggleURL:     feedGroupToggleURL(q, grouped),
 	}
 	data.ViewPick = wornView(showUnread, showSeen, showHidden, onlyBookmark)
 	// Sort always has exactly one value, so it wears it plainly, spelled the way
@@ -1217,6 +1239,7 @@ func wornView(unread, seen, hidden, bookmarked bool) pickState {
 	return st
 }
 
+// toRows builds the view models for a page of item rows.
 func toRows(rows []store.ItemRow) []rowData {
 	out := make([]rowData, len(rows))
 	for i, row := range rows {
@@ -1283,6 +1306,7 @@ func toRow(row store.ItemRow) rowData {
 		rd.ScoreModel = strOf(row.LLMScoreModel)
 		rd.ScoreProfile = strOf(row.LLMProfileName)
 		rd.ScoreProfileHash = shortHash(strOf(row.LLMProfileHash))
+		rd.ScoreFeedback = feedbackProvenance(row)
 	}
 	if row.UserScore != nil {
 		rd.RatedUp = *row.UserScore == rateUp
@@ -1296,6 +1320,23 @@ func toRow(row store.ItemRow) rowData {
 		rd.NoteHTML = renderMarkdown(rd.Note)
 	}
 	return rd
+}
+
+// feedbackProvenance renders the adaptive context a score used, empty for a
+// profile-only score. The same counts and hash are available over the API.
+func feedbackProvenance(row store.ItemRow) string {
+	hash := strOf(row.LLMFeedbackHash)
+	if hash == "" {
+		return ""
+	}
+	positive, negative := 0, 0
+	if row.LLMFeedbackPositive != nil {
+		positive = *row.LLMFeedbackPositive
+	}
+	if row.LLMFeedbackNegative != nil {
+		negative = *row.LLMFeedbackNegative
+	}
+	return fmt.Sprintf("feedback %dP/%dN @%s", positive, negative, shortHash(hash))
 }
 
 func shortHash(hash string) string {

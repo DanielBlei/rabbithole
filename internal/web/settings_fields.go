@@ -34,6 +34,7 @@ const (
 
 const (
 	keyUser     = "user"
+	keyAdaptive = "adaptive_ranking"
 	keyProvider = "inference.provider"
 	keyHost     = "inference.host"
 	keyAPIKey   = "inference.api_key"
@@ -132,6 +133,9 @@ var fieldSpecs = []fieldSpec{
 		kChoice, "", func(c *config.Config) *string { return &c.Inference.Provider }),
 	strSpec(keyUser, "Prompt name", "The name in the shell prompt at the top of each page.",
 		kText, "", func(c *config.Config) *string { return &c.User }),
+	boolSpec(keyAdaptive, "Adaptive ranking",
+		"Let your thumbs-up and thumbs-down ratings guide future scores.",
+		"", func(c *config.Config) **bool { return &c.AdaptiveRanking }),
 	strSpec(keyHost, "Server address", "Where your model server listens, for example http://localhost:11434.",
 		kText, "host", func(c *config.Config) *string { return &c.Inference.Host }),
 	strSpec("inference.model", "Model", "The chat model, named exactly as your server knows it.",
@@ -230,6 +234,9 @@ var tips = map[string]string{
 		"Hosted APIs may start refusing requests at their rate limit, and a local server can run out of memory.",
 	"inference.model_tuning.num_ctx": "How much text the model reads at once. The server's own window is often small " +
 		"and silently drops the start of long batches. Raise it if scores ignore your profile or the first articles.",
+	keyAdaptive: "Uses a small, recent set of your explicit ratings as examples in the scoring prompt. " +
+		"Your interest profile stays in charge. Off gives deterministic profile-only scores, and the change " +
+		"applies to the next ingest or rescore, not to scores already recorded.",
 	"inference.structured_output": "On, the server forces the reply into the exact JSON shape. " +
 		"Off, the model writes freely and the app digs the JSON out of the text, " +
 		"repairing cut-off replies where it can. Turn it off only if scores come back as junk.",
