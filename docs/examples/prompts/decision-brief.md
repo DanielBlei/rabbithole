@@ -14,7 +14,10 @@ Ground every claim in the supplied article. Do not invent facts, numbers, quotes
 
 Score the article 0-10 for this reader, choose read, skim, or skip, and explain why it matters to them. List the key ideas, what is actually new, the limitations or caveats, and what to focus on while reading.
 
-Respond with ONLY a valid JSON object matching the supplied schema. No prose, no code fences.
+Return exactly these keys, with no others:
+"score" (integer 0-10), "recommendation" ("read", "skim", or "skip"), "why" (string, at most 600 characters), "key_points" (array of 1-6 strings, each at most 200 characters), "novelty" (string, at most 400 characters), "caveats" (string, at most 400 characters), "focus" (string, at most 400 characters). Always include "score", including when it is 0.
+
+Respond with ONLY a valid JSON object matching that field contract (and the supplied schema when the provider enforces one). No prose, no code fences.
 ```
 
 ## User prompt layout
@@ -37,7 +40,7 @@ Feed score: <n>/10 (based on the RSS summary, not the full text)
 FULL TEXT:
 <prepared plain text>
 
-Respond with a single JSON object matching the supplied schema. Use only what the article supports.
+Respond with a single JSON object matching the field contract above. Use only what the article supports.
 ```
 
 ## Output shape
@@ -56,3 +59,7 @@ Respond with a single JSON object matching the supplied schema. Use only what th
 
 Reading time is not model-generated: it is computed deterministically from the extracted word
 count by `internal/articletext`.
+
+The provider schema is strict (`additionalProperties: false`, every key required). When
+structured output is disabled, the same contract is carried by the system prompt and no
+provider-specific `response_format`/`format` field is sent.

@@ -44,6 +44,8 @@ var (
 // Client scores items using an Ollama chat model in JSON mode.
 type Client struct {
 	api          *api.Client
+	host         string // normalized endpoint, part of the capability cache key
+	credential   string // non-reversible API credential discriminator
 	model        string
 	think        bool
 	tuning       rank.ModelTuning
@@ -69,14 +71,24 @@ func New(host, model, apiKey string, think bool, tuning rank.ModelTuning, system
 	hc := &http.Client{
 		Transport: &httpclient.BearerTransport{Token: apiKey, Base: http.DefaultTransport},
 	}
-	return &Client{
+	c := &Client{
 		api:          api.NewClient(u, hc),
+		host:         u.String(),
+		credential:   httpclient.CredentialID(apiKey),
 		model:        model,
 		think:        think,
 		tuning:       tuning.Normalize(),
 		systemPrompt: systemPrompt,
 		validator:    retry.NewValidator("ollama", validateAttempts, validateBackoff),
-	}, nil
+	}
+	// A scoring client may already have learned that this model rejects think
+	// mode. Honor that answer instead of sending a request Ollama will 400.
+	if c.think {
+		if supported, ok := lookupThinkCapability(thinkKey{c.host, c.model, c.credential}); ok && !supported {
+			c.think = false
+		}
+	}
+	return c, nil
 }
 
 // Validate confirms Ollama is reachable and the chat model is available.
@@ -93,20 +105,89 @@ func (c *Client) Validate(ctx context.Context) error {
 	}
 	c.thinkOnce.Do(func() {
 		if c.think {
-			c.checkThinkSupport(ctx)
+			c.NegotiateThink(ctx)
 		}
 	})
 	return nil
 }
 
-// checkThinkSupport sends a minimal think-enabled request to confirm the model
-// has a reasoning mode. On the specific "does not support thinking" rejection it
-// disables think (a warning, not a hard failure). Any other error is treated as
-// inconclusive — think stays on and the real scoring request will surface and
-// retry the problem. The write to c.think is safe: Validate runs to completion
-// before any concurrent Score call (inference.Resolve validates, then scoring
-// fans out).
-func (c *Client) checkThinkSupport(ctx context.Context) {
+// NegotiateThink ensures the model's think capability is known, probing at
+// most once per endpoint and model for the process. A scoring client may have
+// learned the answer already; a cached unsupported result turns think off on c
+// so the brief path does not send a request Ollama will reject. An inconclusive
+// probe leaves think enabled, matching Validate's behavior.
+func (c *Client) NegotiateThink(ctx context.Context) {
+	if !c.think {
+		return
+	}
+	key := thinkKey{c.host, c.model, c.credential}
+	capability := thinkCapabilityFor(key)
+	capability.mu.Lock()
+	defer capability.mu.Unlock()
+	if capability.known {
+		if !capability.supported {
+			c.think = false
+		}
+		return
+	}
+	supported, conclusive := c.probeThinkSupport(ctx)
+	if !conclusive {
+		return
+	}
+	capability.known = true
+	capability.supported = supported
+	if supported {
+		zerolog.Ctx(ctx).Debug().Str("model", c.model).
+			Msg("ollama: model accepts thinking")
+		return
+	}
+	c.think = false
+	zerolog.Ctx(ctx).Warn().Str("model", c.model).
+		Msg("ollama: model does not support thinking, disabling think mode")
+}
+
+// thinkKey identifies one endpoint, model and credential. Think support can
+// differ per credential on a gateway, so the discriminator is part of the key;
+// it is a hash, never the credential itself.
+type thinkKey struct {
+	host, model string
+	credential  string
+}
+
+// thinkCapability is the negotiated answer for one thinkKey. Its mutex
+// serializes probes so concurrent dives share one negotiation.
+type thinkCapability struct {
+	mu        sync.Mutex
+	known     bool
+	supported bool
+}
+
+var thinkCapabilities sync.Map // thinkKey -> *thinkCapability
+
+func thinkCapabilityFor(k thinkKey) *thinkCapability {
+	v, _ := thinkCapabilities.LoadOrStore(k, &thinkCapability{})
+	return v.(*thinkCapability)
+}
+
+func lookupThinkCapability(k thinkKey) (bool, bool) {
+	capability := thinkCapabilityFor(k)
+	capability.mu.Lock()
+	defer capability.mu.Unlock()
+	return capability.supported, capability.known
+}
+
+// resetThinkCapabilities clears the process-wide cache for tests.
+func resetThinkCapabilities() {
+	thinkCapabilities.Range(func(k, _ any) bool {
+		thinkCapabilities.Delete(k)
+		return true
+	})
+}
+
+// probeThinkSupport sends a minimal think-enabled request. conclusive is false
+// for any error other than Ollama's explicit "does not support thinking"
+// rejection, matching the scoring probe's fallback.
+func (c *Client) probeThinkSupport(ctx context.Context) (supported, conclusive bool) {
 	logger := zerolog.Ctx(ctx)
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -114,7 +195,7 @@ func (c *Client) checkThinkSupport(ctx context.Context) {
 	stream := false
 	think := &api.ThinkValue{}
 	if err := think.UnmarshalJSON([]byte("true")); err != nil {
-		return
+		return false, false
 	}
 	req := &api.ChatRequest{
 		Model:    c.model,
@@ -127,14 +208,13 @@ func (c *Client) checkThinkSupport(ctx context.Context) {
 	err := c.api.Chat(ctx, req, func(api.ChatResponse) error { return nil })
 	switch {
 	case err == nil:
-		// Model accepts think — leave it on.
+		return true, true
 	case strings.Contains(err.Error(), thinkUnsupported):
-		c.think = false
-		logger.Warn().Str("model", c.model).
-			Msg("ollama: model does not support thinking, disabling think mode for scoring")
+		return false, true
 	default:
 		logger.Debug().Err(err).Str("model", c.model).
 			Msg("ollama: think-support probe inconclusive, leaving think enabled")
+		return false, false
 	}
 }
 
@@ -283,7 +363,9 @@ func (c *Client) ChatJSON(
 		Options:  opts,
 		Messages: messages,
 	}
-	if len(schema) > 0 {
+	// An empty schema means structured output is disabled; the prompt carries
+	// the field contract instead.
+	if len(schema) > 0 && !c.tuning.Unconstrained {
 		req.Format = schema
 	}
 	c.setThink(req)

@@ -4,10 +4,12 @@
 package decisionbrief
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/DanielBlei/rabbithole/internal/articlefetch"
 	"github.com/DanielBlei/rabbithole/internal/articletext"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/store"
@@ -23,18 +25,22 @@ Ground every claim in the supplied article. Do not invent facts, numbers, quotes
 
 Score the article 0-10 for this reader, choose read, skim, or skip, and explain why it matters to them. List the key ideas, what is actually new, the limitations or caveats, and what to focus on while reading.
 
-Respond with ONLY a valid JSON object matching the supplied schema. No prose, no code fences.`
+Return exactly these keys, with no others:
+"score" (integer 0-10), "recommendation" ("read", "skim", or "skip"), "why" (string, at most 600 characters), "key_points" (array of 1-6 strings, each at most 200 characters), "novelty" (string, at most 400 characters), "caveats" (string, at most 400 characters), "focus" (string, at most 400 characters). Always include "score", including when it is 0.
+
+Respond with ONLY a valid JSON object matching that field contract (and the supplied schema when the provider enforces one). No prose, no code fences.`
 
 // Schema is the provider-enforced structured output shape.
 func Schema() json.RawMessage {
 	return json.RawMessage(`{
   "type": "object",
+  "additionalProperties": false,
   "required": ["score", "recommendation", "why", "key_points", "novelty", "caveats", "focus"],
   "properties": {
     "score": {"type": "integer", "minimum": 0, "maximum": 10},
     "recommendation": {"type": "string", "enum": ["read", "skim", "skip"]},
     "why": {"type": "string", "maxLength": 600},
-    "key_points": {"type": "array", "items": {"type": "string", "maxLength": 200}, "maxItems": 6},
+    "key_points": {"type": "array", "items": {"type": "string", "maxLength": 200}, "minItems": 1, "maxItems": 6},
     "novelty": {"type": "string", "maxLength": 400},
     "caveats": {"type": "string", "maxLength": 400},
     "focus": {"type": "string", "maxLength": 400}
@@ -59,9 +65,9 @@ func BuildUserPrompt(
 	)
 	fmt.Fprintf(&b, "Source: %s\n", feeds.CollapseWhitespace(item.Source))
 	fmt.Fprintf(&b, "Title: %s\n", feeds.CollapseWhitespace(item.Title))
-	link := finalURL
+	link := articlefetch.WithoutUserinfo(finalURL)
 	if link == "" {
-		link = item.Link
+		link = articlefetch.WithoutUserinfo(item.Link)
 	}
 	fmt.Fprintf(&b, "Final link: %s\n", feeds.CollapseWhitespace(link))
 	if feedScore == nil {
@@ -77,7 +83,7 @@ func BuildUserPrompt(
 	b.WriteString("\nFULL TEXT:\n")
 	b.WriteString(prepared.Text)
 	b.WriteString(
-		"\n\nRespond with a single JSON object matching the supplied schema. Use only what the article supports.",
+		"\n\nRespond with a single JSON object matching the field contract above. Use only what the article supports.",
 	)
 	return b.String()
 }
@@ -93,10 +99,20 @@ type Brief struct {
 	Focus          string   `json:"focus"`
 }
 
+// requiredBriefFields is the schema's required list. ParseBrief checks these
+// keys before decoding so a provider that ignores the schema cannot turn a
+// missing required field into a zero value.
+var requiredBriefFields = []string{
+	"score", "recommendation", "why", "key_points", "novelty", "caveats", "focus",
+}
+
 // ParseBrief strictly decodes and validates one model reply.
 func ParseBrief(raw string) (Brief, error) {
 	body, err := extractJSON(raw)
 	if err != nil {
+		return Brief{}, err
+	}
+	if err := requireBriefFields(body); err != nil {
 		return Brief{}, err
 	}
 	var b Brief
@@ -110,6 +126,25 @@ func ParseBrief(raw string) (Brief, error) {
 	}
 	b.sanitize()
 	return b, nil
+}
+
+// requireBriefFields checks that every required key is present and is not
+// JSON null. An explicit zero is a value, not an omission.
+func requireBriefFields(body string) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &fields); err != nil {
+		return fmt.Errorf("decode decision brief JSON: %w", err)
+	}
+	for _, key := range requiredBriefFields {
+		raw, ok := fields[key]
+		if !ok {
+			return fmt.Errorf("required field %q is missing", key)
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("required field %q is null", key)
+		}
+	}
+	return nil
 }
 
 func (b Brief) validate() error {

@@ -103,8 +103,6 @@ func (s *Web) briefOptions(ctx context.Context) decisionbrief.Options {
 		MaxArticleBytes: eff.DecisionBrief.MaxArticleBytes,
 		MaxTextBytes:    eff.DecisionBrief.MaxTextBytes,
 		MaxOutputTokens: eff.DecisionBrief.MaxOutputTokens,
-		Provider:        eff.Inference.Provider,
-		Model:           eff.Inference.Model,
 	}
 }
 

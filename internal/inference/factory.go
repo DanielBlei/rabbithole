@@ -6,7 +6,6 @@ package inference
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/rs/zerolog"
@@ -38,63 +37,68 @@ func Resolve(ctx context.Context, cfg config.InferenceConfig, think bool, system
 }
 
 // ResolveBrief constructs the Decision Brief generator for the configured
-// provider. The heuristic scorer cannot read full text, so it returns
-// decisionbrief.ErrBriefUnavailable for the UI to render as a product state.
-// No probe request is made: a dive is exactly one synthesis call (plus a retry).
+// provider and reports the provider/model of the client it built, from that one
+// configuration snapshot. The heuristic scorer cannot read full text, so it
+// returns decisionbrief.ErrBriefUnavailable for the UI to render as a product
+// state.
+//
+// Capability negotiation is shared with the scoring client: an unsupported
+// Ollama think mode or an OpenAI reasoning_effort the model rejects is learned
+// once and reused by later dives. The negotiation is cached, so a dive does not
+// repeat a model probe.
 func ResolveBrief(
 	ctx context.Context,
 	cfg config.InferenceConfig,
 	think bool,
-) (decisionbrief.Generator, error) {
+) (decisionbrief.Generator, decisionbrief.Provenance, error) {
 	key, err := cfg.ResolvedAPIKey()
 	if err != nil {
-		return nil, err
+		return nil, decisionbrief.Provenance{}, err
 	}
 	main := cfg
 	main.APIKey = key
-	var g decisionbrief.Generator
-	switch main.Provider {
-	case "ollama":
-		g, err = ollama.New(main.Host, main.Model, main.APIKey, think, main.ModelTuning, "")
-	case "openai":
-		g, err = vllm.New(vllm.OpenAI, main.Host, main.Model, main.APIKey,
-			think, main.Effort, main.ModelTuning, "")
-	case "vllm":
-		g, err = vllm.New(vllm.VLLM, main.Host, main.Model, main.APIKey,
-			think, main.Effort, main.ModelTuning, "")
-	case "heuristic":
-		return nil, decisionbrief.ErrBriefUnavailable
-	default:
-		return nil, fmt.Errorf("unknown provider %q, must be ollama, openai, vllm or heuristic", main.Provider)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("backend init: %w", err)
-	}
+	tuning := main.ModelTuning
 	structured := main.StructuredOutput == nil || *main.StructuredOutput
 	if !structured {
+		// The same escape hatch scoring uses: the client omits the provider's
+		// schema field, and the prompt carries the field contract instead.
+		tuning.Unconstrained = true
 		zerolog.Ctx(ctx).Debug().Str("provider", main.Provider).
-			Msg("structured output off: the system prompt sets the decision brief JSON shape")
+			Msg("structured output off: the system prompt supplies the decision brief field contract")
 	}
-	return &briefGenerator{Generator: g, structured: structured}, nil
-}
-
-// briefGenerator drops the provider-enforced schema when structured output is
-// disabled, leaving the system prompt's JSON instruction as the shape.
-type briefGenerator struct {
-	decisionbrief.Generator
-	structured bool
-}
-
-func (g *briefGenerator) ChatJSON(
-	ctx context.Context,
-	system, user string,
-	schema json.RawMessage,
-	maxTokens int,
-) (string, error) {
-	if !g.structured {
-		schema = nil
+	prov := decisionbrief.Provenance{Provider: main.Provider, Model: main.Model}
+	switch main.Provider {
+	case "ollama":
+		gen, err := ollama.New(main.Host, main.Model, main.APIKey, think, tuning, "")
+		if err != nil {
+			return nil, decisionbrief.Provenance{}, fmt.Errorf("backend init: %w", err)
+		}
+		if think {
+			gen.NegotiateThink(ctx)
+		}
+		return gen, prov, nil
+	case "openai", "vllm":
+		flavor := vllm.OpenAI
+		if main.Provider == "vllm" {
+			flavor = vllm.VLLM
+		}
+		gen, err := vllm.New(flavor, main.Host, main.Model, main.APIKey,
+			think, main.Effort, tuning, "")
+		if err != nil {
+			return nil, decisionbrief.Provenance{}, fmt.Errorf("backend init: %w", err)
+		}
+		if flavor == vllm.OpenAI {
+			if err := gen.NegotiateEffort(ctx); err != nil {
+				return nil, decisionbrief.Provenance{}, fmt.Errorf("backend negotiation: %w", err)
+			}
+		}
+		return gen, prov, nil
+	case "heuristic":
+		return nil, decisionbrief.Provenance{}, decisionbrief.ErrBriefUnavailable
+	default:
+		return nil, decisionbrief.Provenance{}, fmt.Errorf(
+			"unknown provider %q, must be ollama, openai, vllm or heuristic", main.Provider)
 	}
-	return g.Generator.ChatJSON(ctx, system, user, schema, maxTokens)
 }
 
 // build constructs and validates the Scorer described by cfg, whose APIKey is already resolved.

@@ -111,14 +111,14 @@ func waitTerminal(t *testing.T, svc *Service, id string) Snapshot {
 func TestGenerateReady(t *testing.T) {
 	db := testStore(t, item("a"))
 	var calls int
-	svc := New(db, testProfile(), func(context.Context) (Generator, error) {
+	svc := New(db, testProfile(), func(context.Context) (Generator, Provenance, error) {
 		return genFunc(func(_ context.Context, _, _ string, _ json.RawMessage, _ int) (string, error) {
 			calls++
 			return validJSON, nil
-		}), nil
+		}), Provenance{Provider: "ollama", Model: "llama:latest"}, nil
 	})
 	svc.SetFetcher(stubFetcher(validBody(), nil))
-	opts := Options{MaxTextBytes: 900, Provider: "ollama", Model: "llama:latest"}
+	opts := Options{MaxTextBytes: 900}
 	if _, err := svc.Start(context.Background(), "a", false, opts); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -157,11 +157,11 @@ func TestStartReturnsStoredReadyWithoutCalling(t *testing.T) {
 		t.Fatalf("SaveItemBrief: %v", err)
 	}
 	var calls int
-	svc := New(db, testProfile(), func(context.Context) (Generator, error) {
+	svc := New(db, testProfile(), func(context.Context) (Generator, Provenance, error) {
 		return genFunc(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			calls++
 			return validJSON, nil
-		}), nil
+		}), Provenance{}, nil
 	})
 	snap, err := svc.Start(context.Background(), "a", false, Options{})
 	if err != nil {
@@ -173,10 +173,57 @@ func TestStartReturnsStoredReadyWithoutCalling(t *testing.T) {
 }
 
 func TestStartUnknownItem(t *testing.T) {
-	svc := New(testStore(t), testProfile(), func(context.Context) (Generator, error) { return nil, nil })
+	svc := New(testStore(t), testProfile(), func(context.Context) (Generator, Provenance, error) {
+		return nil, Provenance{}, nil
+	})
 	_, err := svc.Start(context.Background(), "missing", false, Options{})
 	if !errors.Is(err, store.ErrItemNotFound) {
 		t.Fatalf("err = %v, want ErrItemNotFound", err)
+	}
+}
+
+// TestGenerationProvenanceFollowsQueuedConfig pins finding 18: a dive that
+// waits behind the concurrency limit must store the provider/model of the
+// generator resolved after the wait, not a value captured when it was queued.
+func TestGenerationProvenanceFollowsQueuedConfig(t *testing.T) {
+	db := testStore(t, item("a"))
+	var mu sync.Mutex
+	current := Provenance{Provider: "old", Model: "old-model"}
+	svc := New(db, testProfile(), func(context.Context) (Generator, Provenance, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return genFunc(func(context.Context, string, string, json.RawMessage, int) (string, error) {
+			return validJSON, nil
+		}), current, nil
+	})
+	svc.SetFetcher(stubFetcher(validBody(), nil))
+
+	// Occupy both generation slots so the dive queues before resolving a
+	// generator.
+	svc.sem <- struct{}{}
+	svc.sem <- struct{}{}
+	if _, err := svc.Start(context.Background(), "a", false, Options{}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// The configuration changes while the dive is queued.
+	mu.Lock()
+	current = Provenance{Provider: "new", Model: "new-model"}
+	mu.Unlock()
+
+	<-svc.sem
+	<-svc.sem
+
+	snap := waitTerminal(t, svc, "a")
+	if snap.Status != StatusReady {
+		t.Fatalf("status = %s (%s: %s)", snap.Status, snap.ErrorCode, snap.ErrorDetail)
+	}
+	stored, err := db.ItemBrief(context.Background(), "a")
+	if err != nil {
+		t.Fatalf("ItemBrief: %v", err)
+	}
+	if stored.Provider != "new" || stored.Model != "new-model" {
+		t.Fatalf("stored provenance = %s/%s, want new/new-model", stored.Provider, stored.Model)
 	}
 }
 
@@ -185,13 +232,13 @@ func TestSingleFlight(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var calls int
-	svc := New(db, testProfile(), func(context.Context) (Generator, error) {
+	svc := New(db, testProfile(), func(context.Context) (Generator, Provenance, error) {
 		return genFunc(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			calls++
 			close(started)
 			<-release
 			return validJSON, nil
-		}), nil
+		}), Provenance{}, nil
 	})
 	svc.SetFetcher(stubFetcher(validBody(), nil))
 	ctx := context.Background()
@@ -212,14 +259,14 @@ func TestSingleFlight(t *testing.T) {
 func TestRetryOnceOnInvalidOutput(t *testing.T) {
 	db := testStore(t, item("a"))
 	var calls int
-	svc := New(db, testProfile(), func(context.Context) (Generator, error) {
+	svc := New(db, testProfile(), func(context.Context) (Generator, Provenance, error) {
 		return genFunc(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			calls++
 			if calls == 1 {
 				return `{"score":99,"recommendation":"maybe"}`, nil
 			}
 			return validJSON, nil
-		}), nil
+		}), Provenance{}, nil
 	})
 	svc.SetFetcher(stubFetcher(validBody(), nil))
 	if _, err := svc.Start(context.Background(), "a", false, Options{}); err != nil {
@@ -234,11 +281,11 @@ func TestRetryOnceOnInvalidOutput(t *testing.T) {
 func TestInvalidOutputAfterRetry(t *testing.T) {
 	db := testStore(t, item("a"))
 	var calls int
-	svc := New(db, testProfile(), func(context.Context) (Generator, error) {
+	svc := New(db, testProfile(), func(context.Context) (Generator, Provenance, error) {
 		return genFunc(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			calls++
 			return `not json`, nil
-		}), nil
+		}), Provenance{}, nil
 	})
 	svc.SetFetcher(stubFetcher(validBody(), nil))
 	if _, err := svc.Start(context.Background(), "a", false, Options{}); err != nil {
@@ -256,8 +303,8 @@ func TestInvalidOutputAfterRetry(t *testing.T) {
 
 func TestProviderUnavailable(t *testing.T) {
 	db := testStore(t, item("a"))
-	svc := New(db, testProfile(), func(context.Context) (Generator, error) {
-		return nil, ErrBriefUnavailable
+	svc := New(db, testProfile(), func(context.Context) (Generator, Provenance, error) {
+		return nil, Provenance{}, ErrBriefUnavailable
 	})
 	svc.SetFetcher(stubFetcher(validBody(), nil))
 	if _, err := svc.Start(context.Background(), "a", false, Options{}); err != nil {
@@ -272,14 +319,14 @@ func TestProviderUnavailable(t *testing.T) {
 func TestFailedRefreshPreservesReadyBrief(t *testing.T) {
 	db := testStore(t, item("a"))
 	var calls int
-	svc := New(db, testProfile(), func(context.Context) (Generator, error) {
+	svc := New(db, testProfile(), func(context.Context) (Generator, Provenance, error) {
 		return genFunc(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			calls++
 			if calls == 1 {
 				return validJSON, nil
 			}
 			return "", errors.New("provider down")
-		}), nil
+		}), Provenance{}, nil
 	})
 	svc.SetFetcher(stubFetcher(validBody(), nil))
 	ctx := context.Background()
@@ -321,11 +368,11 @@ func TestFetchFailureCodes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.code, func(t *testing.T) {
 			db := testStore(t, item("a"))
-			svc := New(db, testProfile(), func(context.Context) (Generator, error) {
+			svc := New(db, testProfile(), func(context.Context) (Generator, Provenance, error) {
 				return genFunc(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 					t.Errorf("model must not be called after a fetch failure")
 					return "", errors.New("unexpected model call")
-				}), nil
+				}), Provenance{}, nil
 			})
 			svc.SetFetcher(stubFetcher("", tc.err))
 			if _, err := svc.Start(context.Background(), "a", false, Options{}); err != nil {
@@ -341,10 +388,10 @@ func TestFetchFailureCodes(t *testing.T) {
 
 func TestExtractFailureCodes(t *testing.T) {
 	db := testStore(t, item("a"))
-	svc := New(db, testProfile(), func(context.Context) (Generator, error) {
+	svc := New(db, testProfile(), func(context.Context) (Generator, Provenance, error) {
 		return genFunc(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			return validJSON, nil
-		}), nil
+		}), Provenance{}, nil
 	})
 	svc.SetFetcher(stubFetcher("<html><body><p>short</p></body></html>", nil))
 	if _, err := svc.Start(context.Background(), "a", false, Options{}); err != nil {
@@ -363,7 +410,7 @@ func TestSemaphoreCapsConcurrentGenerations(t *testing.T) {
 	release := make(chan struct{})
 	var calls int
 	var mu sync.Mutex
-	svc := New(db, testProfile(), func(context.Context) (Generator, error) {
+	svc := New(db, testProfile(), func(context.Context) (Generator, Provenance, error) {
 		return genFunc(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			mu.Lock()
 			calls++
@@ -371,7 +418,7 @@ func TestSemaphoreCapsConcurrentGenerations(t *testing.T) {
 			started <- struct{}{}
 			<-release
 			return validJSON, nil
-		}), nil
+		}), Provenance{}, nil
 	})
 	svc.SetFetcher(stubFetcher(validBody(), nil))
 	for _, it := range items {
@@ -443,15 +490,56 @@ func TestSchemaFields(t *testing.T) {
 	if err := json.Unmarshal(Schema(), &schema); err != nil {
 		t.Fatalf("Schema: %v", err)
 	}
+	if schema["additionalProperties"] != false {
+		t.Errorf("additionalProperties = %v, want false for strict OpenAI output", schema["additionalProperties"])
+	}
 	required, _ := schema["required"].([]any)
-	want := []string{"score", "recommendation", "why", "key_points", "novelty", "caveats", "focus"}
-	if len(required) != len(want) {
+	if len(required) != len(requiredBriefFields) {
 		t.Fatalf("required = %v", required)
 	}
-	for i, w := range want {
-		if required[i] != w {
-			t.Errorf("required[%d] = %v, want %s", i, required[i], w)
+	for i, want := range requiredBriefFields {
+		if required[i] != want {
+			t.Errorf("required[%d] = %v, want %s", i, required[i], want)
 		}
+	}
+}
+
+// TestPromptNamesTheOutputContract pins finding 12: with provider-side schema
+// enforcement disabled the model still receives the complete field contract.
+func TestPromptNamesTheOutputContract(t *testing.T) {
+	for _, key := range requiredBriefFields {
+		if !strings.Contains(SystemPrompt, `"`+key+`"`) {
+			t.Errorf("SystemPrompt does not name required key %q", key)
+		}
+	}
+	user := BuildUserPrompt(
+		"profile",
+		store.ItemRow{Source: "S", Title: "T"},
+		articletext.Prepared{Text: "body"},
+		"",
+		nil,
+	)
+	if !strings.Contains(user, "field contract") {
+		t.Errorf("BuildUserPrompt does not refer to the field contract: %s", user)
+	}
+}
+
+func TestParseBriefRequiresScore(t *testing.T) {
+	noScore := `{"recommendation":"read","why":"good words here","key_points":["point"],"novelty":"new","caveats":"small","focus":"setup"}`
+	if _, err := ParseBrief(noScore); err == nil || !strings.Contains(err.Error(), `"score"`) {
+		t.Fatalf("missing score err = %v, want it to name score", err)
+	}
+	nullScore := strings.Replace(noScore, `"recommendation"`, `"score":null,"recommendation"`, 1)
+	if _, err := ParseBrief(nullScore); err == nil {
+		t.Fatal("null score accepted")
+	}
+	zero := strings.Replace(noScore, `"recommendation"`, `"score":0,"recommendation"`, 1)
+	brief, err := ParseBrief(zero)
+	if err != nil {
+		t.Fatalf("explicit zero score rejected: %v", err)
+	}
+	if brief.Score != 0 {
+		t.Fatalf("score = %d, want 0", brief.Score)
 	}
 }
 
@@ -510,14 +598,14 @@ func TestParseBriefTruncatesOversizedFields(t *testing.T) {
 func TestRetryAfterFailedRefreshStartsAgain(t *testing.T) {
 	db := testStore(t, item("a"))
 	var calls int
-	svc := New(db, testProfile(), func(context.Context) (Generator, error) {
+	svc := New(db, testProfile(), func(context.Context) (Generator, Provenance, error) {
 		return genFunc(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			calls++
 			if calls == 2 || calls == 3 {
 				return "", errors.New("provider down")
 			}
 			return validJSON, nil
-		}), nil
+		}), Provenance{}, nil
 	})
 	svc.SetFetcher(stubFetcher(validBody(), nil))
 	ctx := context.Background()

@@ -150,14 +150,18 @@ func New(db *store.Store, src config.Source, ing *ingest.Manager) *Web {
 		sessions:    newSessionStore(), limiter: newLoginLimiter(),
 		hashing: make(chan struct{}, hashSlots), trusted: DefaultTrustedProxies,
 	}
-	w.briefs = decisionbrief.New(db, w.profiles, func(ctx context.Context) (decisionbrief.Generator, error) {
-		cfg, _, err := src.Active(ctx)
-		if err != nil {
-			return nil, err
-		}
-		eff := cfg.Effective()
-		return inference.ResolveBrief(ctx, eff.Inference, eff.Inference.ThinkEnabled())
-	})
+	w.briefs = decisionbrief.New(
+		db,
+		w.profiles,
+		func(ctx context.Context) (decisionbrief.Generator, decisionbrief.Provenance, error) {
+			cfg, _, err := src.Active(ctx)
+			if err != nil {
+				return nil, decisionbrief.Provenance{}, err
+			}
+			eff := cfg.Effective()
+			return inference.ResolveBrief(ctx, eff.Inference, eff.Inference.ThinkEnabled())
+		},
+	)
 	return w
 }
 
