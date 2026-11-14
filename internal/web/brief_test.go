@@ -110,11 +110,11 @@ func waitBriefBody(t *testing.T, w *Web, id string, contains ...string) string {
 
 func TestBriefEndToEndReady(t *testing.T) {
 	var fetchCalls, genCalls int
-	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, error) {
+	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, decisionbrief.Provenance, error) {
 		return briefGen(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			genCalls++
 			return briefJSON, nil
-		}), nil
+		}), decisionbrief.Provenance{}, nil
 	}, briefFetcher(&fetchCalls))
 
 	rec := post(t, w, "/items/a/brief")
@@ -126,11 +126,15 @@ func TestBriefEndToEndReady(t *testing.T) {
 		"Feed score 4/10", "Full-text 8/10", "min read", "Read in full",
 		"WHY THIS MATTERS TO YOU", "KEY IDEAS", "A new benchmark",
 		"WHAT IS ACTUALLY NEW", "LIMITATIONS / CAVEATS", "FOCUS ON",
-		"based on the RSS summary", "Fetched from https://x/a",
+		"A feed score was recorded", "computed from the fetched article",
+		"Fetched from https://x/a",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("ready panel missing %q:\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, "RSS") {
+		t.Errorf("ready panel invents RSS provenance: %s", body)
 	}
 	if strings.Contains(body, `hx-trigger="every 2s`) {
 		t.Errorf("terminal panel still polls: %s", body)
@@ -162,11 +166,11 @@ func TestBriefEndToEndReady(t *testing.T) {
 
 func TestBriefRunningPollsThenTerminates(t *testing.T) {
 	release := make(chan struct{})
-	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, error) {
+	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, decisionbrief.Provenance, error) {
 		return briefGen(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			<-release
 			return briefJSON, nil
-		}), nil
+		}), decisionbrief.Provenance{}, nil
 	}, briefFetcher(new(int)))
 	rec := post(t, w, "/items/a/brief")
 	if !strings.Contains(rec.Body.String(), `hx-trigger="every 2s`) {
@@ -183,14 +187,14 @@ func TestBriefDoublePostSingleGeneration(t *testing.T) {
 	var genCalls int
 	var mu sync.Mutex
 	release := make(chan struct{})
-	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, error) {
+	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, decisionbrief.Provenance, error) {
 		return briefGen(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			mu.Lock()
 			genCalls++
 			mu.Unlock()
 			<-release
 			return briefJSON, nil
-		}), nil
+		}), decisionbrief.Provenance{}, nil
 	}, briefFetcher(new(int)))
 	post(t, w, "/items/a/brief")
 	post(t, w, "/items/a/brief")
@@ -205,14 +209,14 @@ func TestBriefDoublePostSingleGeneration(t *testing.T) {
 
 func TestBriefRefreshReplacesStoredBrief(t *testing.T) {
 	var genCalls int
-	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, error) {
+	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, decisionbrief.Provenance, error) {
 		return briefGen(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			genCalls++
 			if genCalls == 1 {
 				return briefJSON, nil
 			}
 			return strings.Replace(briefJSON, "A new benchmark", "A changed benchmark", 1), nil
-		}), nil
+		}), decisionbrief.Provenance{}, nil
 	}, briefFetcher(new(int)))
 	post(t, w, "/items/a/brief")
 	waitBriefBody(t, w, "a", "Full-text 8/10")
@@ -233,7 +237,7 @@ func TestBriefFailureStatesRenderMessages(t *testing.T) {
 		decisionbrief.CodeTooLarge, decisionbrief.CodeUnsupportedContentType,
 		decisionbrief.CodeEncoding, decisionbrief.CodeInsufficientContent,
 		decisionbrief.CodeProviderUnavailable, decisionbrief.CodeAnalysisFailed,
-		decisionbrief.CodeInvalidOutput,
+		decisionbrief.CodeInvalidOutput, decisionbrief.CodeStorageFailed,
 	}
 	for i, code := range codes {
 		id := fmt.Sprintf("fail%d", i)
@@ -264,9 +268,45 @@ func TestBriefFailureStatesRenderMessages(t *testing.T) {
 	}
 }
 
+// TestStorageFailureHidesDatabaseDetail pins the user-facing contract: a stored
+// storage failure renders the product message and never the raw database error,
+// even if an old or externally written row carries detail.
+func TestStorageFailureHidesDatabaseDetail(t *testing.T) {
+	w := newBriefWeb(t, nil, nil)
+	ctx := context.Background()
+	if err := w.db.Record(
+		ctx,
+		[]feeds.Item{{ID: "storage", Source: "S", Title: "storage", Link: "https://x/storage"}},
+		nil,
+		time.Now(),
+	); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if err := w.db.SaveItemBrief(ctx, store.ItemBrief{
+		ItemID:      "storage",
+		Status:      store.ItemBriefFailed,
+		ErrorCode:   decisionbrief.CodeStorageFailed,
+		ErrorDetail: "pq: password authentication failed for user rabbit",
+	}); err != nil {
+		t.Fatalf("Save failed brief: %v", err)
+	}
+
+	body := briefStatusBody(t, w, "storage")
+	message := html.EscapeString(decisionbrief.ProductMessage(decisionbrief.CodeStorageFailed))
+	if !strings.Contains(body, message) {
+		t.Errorf("storage panel missing message %q:\n%s", message, body)
+	}
+	if strings.Contains(body, "password authentication") || strings.Contains(body, "pq:") {
+		t.Errorf("storage panel exposed a database error:\n%s", body)
+	}
+	if !strings.Contains(body, "[ retry ]") {
+		t.Errorf("storage panel missing retry: %s", body)
+	}
+}
+
 func TestBriefHeuristicUnavailable(t *testing.T) {
-	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, error) {
-		return nil, decisionbrief.ErrBriefUnavailable
+	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, decisionbrief.Provenance, error) {
+		return nil, decisionbrief.Provenance{}, decisionbrief.ErrBriefUnavailable
 	}, briefFetcher(new(int)))
 	post(t, w, "/items/a/brief")
 	body := waitBriefBody(t, w, "a", decisionbrief.ProductMessage(decisionbrief.CodeProviderUnavailable))
@@ -279,11 +319,11 @@ func TestBriefFetchFailurePersistedAsFailed(t *testing.T) {
 	fetch := func(_ context.Context, _ string, _ articlefetch.Limits) (articlefetch.Result, error) {
 		return articlefetch.Result{}, articlefetch.ErrBlocked
 	}
-	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, error) {
+	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, decisionbrief.Provenance, error) {
 		return briefGen(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			t.Errorf("model called after a fetch failure")
 			return briefJSON, nil
-		}), nil
+		}), decisionbrief.Provenance{}, nil
 	}, fetch)
 	post(t, w, "/items/a/brief")
 	waitBriefBody(t, w, "a", decisionbrief.ProductMessage(decisionbrief.CodeFetchBlocked))
@@ -296,10 +336,10 @@ func TestBriefFetchFailurePersistedAsFailed(t *testing.T) {
 func TestBriefEscapesModelOutput(t *testing.T) {
 	malicious := strings.Replace(briefJSON, "It matches your interest in databases.",
 		"<script>alert(1)</script> It matches your interest.", 1)
-	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, error) {
+	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, decisionbrief.Provenance, error) {
 		return briefGen(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			return malicious, nil
-		}), nil
+		}), decisionbrief.Provenance{}, nil
 	}, briefFetcher(new(int)))
 	post(t, w, "/items/a/brief")
 	body := waitBriefBody(t, w, "a", "Full-text 8/10")
@@ -308,6 +348,36 @@ func TestBriefEscapesModelOutput(t *testing.T) {
 	}
 	if !strings.Contains(body, "&lt;script&gt;") {
 		t.Errorf("escaped output missing: %s", body)
+	}
+}
+
+// Additional D: an older or externally written stored row may still carry
+// userinfo, but the panel must never render it.
+func TestBriefDataFromSanitizesFinalURL(t *testing.T) {
+	d := briefDataFrom("a", store.ItemBrief{
+		FinalURL: "https://storeduser:storedsecret@example.com/article",
+	})
+	if d.FinalURL != "https://example.com/article" {
+		t.Fatalf("FinalURL = %q, want credentials removed", d.FinalURL)
+	}
+	if strings.Contains(d.FinalURL, "storedsecret") || strings.Contains(d.FinalURL, "storeduser") {
+		t.Fatalf("panel data leaked credentials: %q", d.FinalURL)
+	}
+}
+
+// Additional E: a full generation queue is a retryable 429 with a fixed
+// message, not a generic 500.
+func TestBriefStartErrorMapsBusyTo429(t *testing.T) {
+	rec := httptest.NewRecorder()
+	httpBriefStartError(rec, decisionbrief.ErrBriefBusy, "a", "brief_start")
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", rec.Code)
+	}
+	if got := rec.Header().Get("Retry-After"); got != "1" {
+		t.Errorf("Retry-After = %q, want 1", got)
+	}
+	if body := strings.TrimSpace(rec.Body.String()); body != briefBusyMessage {
+		t.Errorf("body = %q, want %q", body, briefBusyMessage)
 	}
 }
 
@@ -327,10 +397,10 @@ func TestBriefUnknownItem(t *testing.T) {
 }
 
 func TestBriefTruncatedIndicator(t *testing.T) {
-	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, error) {
+	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, decisionbrief.Provenance, error) {
 		return briefGen(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			return briefJSON, nil
-		}), nil
+		}), decisionbrief.Provenance{}, nil
 	}, briefFetcher(new(int)))
 	w.src = config.Static(config.Config{DecisionBrief: config.DecisionBriefConfig{MaxTextBytes: 800}})
 	post(t, w, "/items/a/brief")
@@ -342,20 +412,26 @@ func TestBriefTruncatedIndicator(t *testing.T) {
 
 func TestBriefFailedRefreshKeepsPreviousPanel(t *testing.T) {
 	var calls int
-	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, error) {
+	w := newBriefWeb(t, func(context.Context) (decisionbrief.Generator, decisionbrief.Provenance, error) {
 		return briefGen(func(context.Context, string, string, json.RawMessage, int) (string, error) {
 			calls++
 			if calls == 1 {
 				return briefJSON, nil
 			}
 			return "", errors.New("provider down")
-		}), nil
+		}), decisionbrief.Provenance{}, nil
 	}, briefFetcher(new(int)))
 	post(t, w, "/items/a/brief")
 	waitBriefBody(t, w, "a", "Full-text 8/10")
 	post(t, w, "/items/a/brief/refresh")
 	body := waitBriefBody(t, w, "a", decisionbrief.ProductMessage(decisionbrief.CodeAnalysisFailed))
-	if !strings.Contains(body, "view last brief") || !strings.Contains(body, "Full-text 8/10") {
+	if !strings.Contains(body, "Last successful brief") || !strings.Contains(body, "Full-text 8/10") {
 		t.Errorf("previous brief not offered: %s", body)
+	}
+	if !strings.Contains(body, "It matches your interest in databases.") {
+		t.Errorf("previous brief content hidden: %s", body)
+	}
+	if strings.Contains(body, "RSS") {
+		t.Errorf("previous brief invents RSS provenance: %s", body)
 	}
 }

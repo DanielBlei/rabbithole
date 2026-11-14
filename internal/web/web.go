@@ -1234,11 +1234,9 @@ func (s *Web) toRows(ctx context.Context, rows []store.ItemRow) []rowData {
 	}
 	snaps, err := s.briefs.Statuses(ctx, ids)
 	if err != nil {
-		log.Warn().Err(err).Msg("loading brief states")
+		logBriefStorageFailure(err, "brief_statuses", "", false)
 	}
-	for i := range out {
-		out[i].Brief = briefViewFor(snaps[out[i].ID])
-	}
+	applyBriefViews(out, snaps, err)
 	return out
 }
 
@@ -1248,9 +1246,11 @@ func (s *Web) toRow(ctx context.Context, row store.ItemRow) rowData {
 	rd := toRow(row)
 	snap, err := s.briefs.Status(ctx, row.ID)
 	if err != nil {
-		log.Warn().Err(err).Str("item", row.ID).Msg("loading brief state")
+		logBriefStorageFailure(err, "brief_row", row.ID, false)
+		rd.Brief = unavailableView(row.ID)
+		return rd
 	}
-	rd.Brief = briefViewFor(snap)
+	rd.Brief = briefViewFor(row.ID, snap, true)
 	return rd
 }
 

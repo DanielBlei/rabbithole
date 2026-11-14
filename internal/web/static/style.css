@@ -5442,11 +5442,12 @@ a.welcome__step{text-decoration:none;}
 .brief__loading{display:flex;align-items:center;gap:8px;margin:0;color:var(--text-dim);}
 .brief__dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:brief-pulse 1.2s ease-in-out infinite;}
 @keyframes brief-pulse{0%,100%{opacity:.25}50%{opacity:1}}
+@media (prefers-reduced-motion: reduce){ .brief__dot{animation:none;opacity:1;} }
 .brief__error{margin:0 0 6px;color:var(--warn);}
 .brief__detail{margin:0 0 6px;color:var(--text-dim);font-size:.82em;overflow-wrap:anywhere;}
 .brief__acts{display:flex;gap:10px;margin-top:8px;}
 .brief__previous{margin-top:10px;border-top:1px dashed var(--line);padding-top:8px;}
-.brief__previous summary{cursor:pointer;color:var(--text-dim);font-size:.85em;}
+.brief__previous-title{margin:0 0 8px;color:var(--text-dim);font-size:.8em;letter-spacing:.04em;text-transform:uppercase;font-weight:600;}
 .brief__compare{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;}
 .brief__scores{color:var(--title);font-weight:600;}
 .brief__read{color:var(--text-dim);font-size:.85em;}

@@ -1,41 +1,63 @@
 {{/* The on-demand Decision Brief panel. Every state swaps in place through
-     htmx: the root carries the id the row targets, and the running state
-     re-fetches itself every 2s until a terminal panel removes the attribute. */}}
+     htmx: the root carries an id safe for arbitrary item ids, and the running
+     state re-fetches itself every 2s until a terminal panel removes the
+     attribute. URLID is the path-escaped item id used in URLs and DOM ids;
+     actions replace the nearest .brief panel. */}}
 {{define "brief_panel"}}
-<div class="brief brief--{{.Status}}" id="brief-{{.ID}}"
-  {{- if or (eq .Status "queued") (eq .Status "running")}} hx-get="/items/{{.ID}}/brief/status" hx-trigger="every 2s [!document.hidden]" hx-target="this" hx-swap="outerHTML"{{end}}>
+<div class="brief brief--{{.Status}}" id="brief-{{.URLID}}"
+  {{- if or (eq .Status "queued") (eq .Status "running")}} hx-get="/items/{{.URLID}}/brief/status" hx-trigger="every 2s [!document.hidden]" hx-target="this" hx-swap="outerHTML"{{end}}>
   {{- if eq .Status "idle"}}
   <p class="brief__empty">No deep dive yet.</p>
   <p class="brief__hint">Fetch this article and judge it against your profile.</p>
   <button type="button" class="brief__btn brief__btn--go"
-    hx-post="/items/{{.ID}}/brief" hx-target="#brief-{{.ID}}" hx-swap="outerHTML">[ deep dive ]</button>
+    hx-post="/items/{{.URLID}}/brief" hx-target="closest .brief" hx-swap="outerHTML"
+    hx-disabled-elt="this">[ deep dive ]</button>
   {{- else if or (eq .Status "queued") (eq .Status "running")}}
-  <p class="brief__loading" role="status"><span class="brief__dot"></span>{{.PhaseText}}</p>
+  <p class="brief__loading" role="status"><span class="brief__dot" aria-hidden="true"></span>{{.PhaseText}}{{if .Current}} — showing the last brief until the update finishes{{end}}</p>
+  {{- if .Current}}{{template "brief_ready_body" .Current}}{{end}}
   {{- else if eq .Status "ready"}}
-  {{template "brief_ready" .Current}}
+  {{- if .Current}}{{template "brief_ready" .Current}}{{else}}<p class="brief__empty">No brief is available.</p>{{end}}
   {{- else if eq .Status "failed"}}
   <p class="brief__error">{{.ErrorMessage}}</p>
   {{- if .ErrorDetail}}<p class="brief__detail">{{.ErrorDetail}}</p>{{end}}
   <div class="brief__acts">
     <button type="button" class="brief__btn brief__btn--go"
-      hx-post="/items/{{.ID}}/brief" hx-target="#brief-{{.ID}}" hx-swap="outerHTML">[ retry ]</button>
+      hx-post="/items/{{.URLID}}/brief" hx-target="closest .brief" hx-swap="outerHTML"
+      hx-disabled-elt="this">[ retry ]</button>
   </div>
   {{- if .Previous}}
-  <details class="brief__previous">
-    <summary>view last brief</summary>
-    {{template "brief_ready" .Previous}}
-  </details>
+  <section class="brief__previous" aria-label="Last successful brief">
+    <p class="brief__previous-title">Last successful brief</p>
+    {{template "brief_ready_body" .Previous}}
+  </section>
   {{- end}}
+  {{- else if eq .Status "unavailable"}}
+  <p class="brief__error" role="status">Decision Brief status is temporarily unavailable.</p>
+  <p class="brief__hint">Reload the page to try again.</p>
   {{- end}}
 </div>
 {{end}}
 
 {{define "brief_ready"}}
+{{template "brief_ready_body" .}}
+<div class="brief__acts">
+  <button type="button" class="brief__btn"
+    hx-post="/items/{{.URLID}}/brief/refresh" hx-target="closest .brief" hx-swap="outerHTML"
+    hx-disabled-elt="this">refresh</button>
+</div>
+{{end}}
+
+{{define "brief_ready_body"}}
 <div class="brief__compare">
-  <span class="brief__scores">{{if .HasFeedScore}}Feed score {{.FeedScore}}/10 &middot; {{end}}Full-text {{.Score}}/10</span>
+  <span class="brief__scores">
+    {{- if .HasFeedScore}}Feed score {{.FeedScore}}/10{{end -}}
+    {{- if and .HasFeedScore .HasScore}} &middot; {{end -}}
+    {{- if .HasScore}}Full-text {{.Score}}/10{{end -}}
+    {{- if and (not .HasFeedScore) (not .HasScore)}}No score recorded{{end -}}
+  </span>
   <span class="brief__read">~{{.ReadingMinutes}} min read</span>
 </div>
-<p class="brief__explain">The original score was based on the RSS summary, not the full article.</p>
+<p class="brief__explain">{{.ScoreNote}}</p>
 <p class="brief__rec brief__rec--{{.Recommendation}}">{{.RecommendationLabel}}</p>
 <div class="brief__section">
   <h4>WHY THIS MATTERS TO YOU</h4>
@@ -62,8 +84,4 @@
 {{- end}}
 <p class="brief__prov">{{.Provenance}}</p>
 {{- if .FinalURL}}<p class="brief__url">Fetched from {{.FinalURL}}</p>{{end}}
-<div class="brief__acts">
-  <button type="button" class="brief__btn"
-    hx-post="/items/{{.ID}}/brief/refresh" hx-target="#brief-{{.ID}}" hx-swap="outerHTML">refresh</button>
-</div>
 {{end}}
