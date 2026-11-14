@@ -40,8 +40,21 @@ func briefFixture(itemID string) ItemBrief {
 	}
 }
 
+// recordBriefItems gives the briefs' foreign key real items to reference.
+func recordBriefItems(t *testing.T, s *Store, ids ...string) {
+	t.Helper()
+	items := make([]feeds.Item, len(ids))
+	for i, id := range ids {
+		items[i] = feeds.Item{ID: id, Source: "S", Title: id, Link: "https://x/" + id}
+	}
+	if err := s.Record(context.Background(), items, nil, time.Now()); err != nil {
+		t.Fatalf("Record items: %v", err)
+	}
+}
+
 func TestItemBriefRoundTrip(t *testing.T) {
 	s := openTestStore(t)
+	recordBriefItems(t, s, "a")
 	want := briefFixture("a")
 	if err := s.SaveItemBrief(t.Context(), want); err != nil {
 		t.Fatalf("SaveItemBrief: %v", err)
@@ -64,6 +77,7 @@ func TestItemBriefRoundTrip(t *testing.T) {
 
 func TestItemBriefReplace(t *testing.T) {
 	s := openTestStore(t)
+	recordBriefItems(t, s, "a")
 	first := briefFixture("a")
 	if err := s.SaveItemBrief(t.Context(), first); err != nil {
 		t.Fatalf("save first: %v", err)
@@ -96,8 +110,52 @@ func TestItemBriefNotFound(t *testing.T) {
 	}
 }
 
+// TestSaveItemBriefRequiresLiveItem pins the foreign key: a brief cannot exist
+// without its item, which is what stops an in-flight dive from recreating one
+// after a prune.
+func TestSaveItemBriefRequiresLiveItem(t *testing.T) {
+	s := openTestStore(t)
+	err := s.SaveItemBrief(t.Context(), briefFixture("missing"))
+	if err == nil {
+		t.Fatal("SaveItemBrief accepted a brief for a missing item")
+	}
+	if _, err := s.ItemBrief(t.Context(), "missing"); !errors.Is(err, ErrItemBriefNotFound) {
+		t.Fatalf("brief row = %v, want ErrItemBriefNotFound", err)
+	}
+}
+
+// TestPruneThenInflightSaveCannotRecreateBrief is the prune-versus-save race:
+// a dive that started before the prune saves after it commits. The write must
+// fail, and re-ingesting the same stable ID must not expose the old brief.
+func TestPruneThenInflightSaveCannotRecreateBrief(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	recordBriefItems(t, s, "a")
+	if err := s.SaveItemBrief(ctx, briefFixture("a")); err != nil {
+		t.Fatalf("SaveItemBrief before prune: %v", err)
+	}
+	if _, err := s.PruneItems(ctx, PruneFilter{All: true}); err != nil {
+		t.Fatalf("PruneItems: %v", err)
+	}
+
+	if err := s.SaveItemBrief(ctx, briefFixture("a")); err == nil {
+		t.Fatal("in-flight save recreated a brief for a pruned item")
+	}
+	if _, err := s.ItemBrief(ctx, "a"); !errors.Is(err, ErrItemBriefNotFound) {
+		t.Fatalf("brief after in-flight save = %v, want ErrItemBriefNotFound", err)
+	}
+
+	// Re-ingesting the same stable ID is a new record; it must not inherit the
+	// brief from the deleted one.
+	recordBriefItems(t, s, "a")
+	if _, err := s.ItemBrief(ctx, "a"); !errors.Is(err, ErrItemBriefNotFound) {
+		t.Fatalf("re-ingested item exposed stale brief: %v", err)
+	}
+}
+
 func TestItemBriefsByItemIDs(t *testing.T) {
 	s := openTestStore(t)
+	recordBriefItems(t, s, "a", "b", "c")
 	for _, id := range []string{"a", "b", "c"} {
 		if err := s.SaveItemBrief(t.Context(), briefFixture(id)); err != nil {
 			t.Fatalf("save %s: %v", id, err)

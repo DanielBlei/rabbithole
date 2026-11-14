@@ -314,6 +314,12 @@ func initSchema(ctx context.Context, db *sql.DB, d dialect, label string) error 
 			return err
 		}
 	}
+	// A database created by the published PR #73 schema already has
+	// item_briefs, but without the foreign key Phase 1 relies on. The additive
+	// pass skips it because the table exists, so upgrade it here.
+	if err := migrateItemBriefs(ctx, db, d); err != nil {
+		return fmt.Errorf("migrate item briefs: %w", err)
+	}
 	return nil
 }
 

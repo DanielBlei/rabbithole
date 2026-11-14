@@ -54,7 +54,7 @@ type ItemBrief struct {
 
 const itemBriefSchema = `
 CREATE TABLE IF NOT EXISTS item_briefs (
-	item_id         TEXT PRIMARY KEY,
+	item_id         TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
 	status          TEXT NOT NULL,
 	error_code      TEXT NOT NULL DEFAULT '',
 	error_detail    TEXT NOT NULL DEFAULT '',
@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS item_briefs (
 
 const itemBriefSchemaPG = `
 CREATE TABLE IF NOT EXISTS item_briefs (
-	item_id         TEXT PRIMARY KEY,
+	item_id         TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
 	status          TEXT NOT NULL,
 	error_code      TEXT NOT NULL DEFAULT '',
 	error_detail    TEXT NOT NULL DEFAULT '',
@@ -116,7 +116,10 @@ const itemBriefColumns = `item_id, status, error_code, error_detail, score,
 	profile_name, profile_hash, provider, model, created_at, updated_at`
 
 // SaveItemBrief inserts or replaces the brief for one item in a single
-// statement, so a refresh never accumulates rows or exposes a partial one.
+// statement, so a refresh never accumulates rows or exposes a partial one. The
+// foreign key on item_id makes item existence atomic with this write: a dive
+// that finishes after its item was pruned cannot recreate the brief, and a
+// re-ingested item cannot inherit one from the deleted record.
 func (s *Store) SaveItemBrief(ctx context.Context, b ItemBrief) error {
 	if strings.TrimSpace(b.ItemID) == "" {
 		return errors.New("item brief item_id is required")
