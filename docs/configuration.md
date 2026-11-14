@@ -145,6 +145,12 @@ decision_brief:
   max_output_tokens: 1024
 ```
 
+A value above an upper cap is clamped to the cap. Zero or omitted values take their defaults;
+negative values are rejected. `max_text_bytes` is a byte budget and must be at least 1600 when
+set: the extractor needs 400 Unicode characters, and one UTF-8 character can occupy up to 4
+bytes. That floor keeps ordinary multibyte articles usable but does not guarantee that every
+article succeeds.
+
 A file may also carry `ingest.since`, which is not a stored setting. It is an import-only alias for the
 [feed defaults](#feeds) `since`: importing the file sets it there. See [Deprecated keys](#deprecated-keys).
 

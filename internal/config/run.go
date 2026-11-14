@@ -256,24 +256,28 @@ func cloneBool(b *bool) *bool {
 	return &v
 }
 
-// Prepare normalizes, applies defaults and validates, in that order. Normalizing
-// comes first because defaults would otherwise fill fields the provider ignores.
+// Prepare normalizes, validates raw values, applies defaults and validates the
+// effective config, in that order. Normalizing comes first because defaults
+// would otherwise fill fields the provider ignores; raw validation comes before
+// defaulting so a negative value cannot be silently replaced by a default.
 // dropped lists the non-applicable keys that were set and removed.
 func (r *Config) Prepare() (dropped []string, err error) {
 	dropped = r.Normalize()
+	rawErr := r.DecisionBrief.validateRaw()
 	r.applyDefaults()
-	return dropped, r.validate()
+	return dropped, errors.Join(rawErr, r.validate())
 }
 
 // Canonical is the form that is stored, marshaled and hashed: normalized but
 // not defaulted, so it holds only what the user set and a later release's new
-// defaults still reach them. It validates a defaulted copy, so the errors match
-// Prepare's.
+// defaults still reach them. It validates raw values and a defaulted copy, so
+// the errors match Prepare's.
 func (r *Config) Canonical() (dropped []string, err error) {
 	dropped = r.Normalize()
+	rawErr := r.DecisionBrief.validateRaw()
 	eff := *r
 	eff.applyDefaults()
-	return dropped, eff.validate()
+	return dropped, errors.Join(rawErr, eff.validate())
 }
 
 // Normalize clears inference fields the provider does not read and makes the
@@ -394,20 +398,9 @@ func (r *Config) validate() error {
 			add(inferenceKeyField, "%s: %s", inferenceKeyField, err)
 		}
 	}
-	if r.DecisionBrief.MaxArticleBytes > MaxDecisionBriefMaxArticleBytes {
-		add("decision_brief.max_article_bytes",
-			"decision_brief.max_article_bytes must be at most %d", MaxDecisionBriefMaxArticleBytes)
-	}
-	if r.DecisionBrief.MaxTextBytes > MaxDecisionBriefMaxTextBytes {
-		add("decision_brief.max_text_bytes",
-			"decision_brief.max_text_bytes must be at most %d", MaxDecisionBriefMaxTextBytes)
-	}
-	if r.DecisionBrief.MaxOutputTokens > MaxDecisionBriefMaxOutputTokens ||
-		r.DecisionBrief.MaxOutputTokens < MinDecisionBriefMaxOutputTokens {
-		add("decision_brief.max_output_tokens",
-			"decision_brief.max_output_tokens must be between %d and %d",
-			MinDecisionBriefMaxOutputTokens, MaxDecisionBriefMaxOutputTokens)
-	}
+	// Decision Brief raw values are checked by validateRaw before defaulting.
+	// WithDefaults intentionally clamps upper bounds and floors the output-token
+	// minimum, so the effective values need no range checks here.
 	return errors.Join(errs...)
 }
 
