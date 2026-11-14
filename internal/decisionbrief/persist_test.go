@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -72,6 +73,21 @@ type storageFailureStore struct {
 	*store.Store
 	err     error
 	failAll bool
+}
+
+// deadlineStorageFailureStore fails a ready write with an error that wraps a
+// deadline while carrying database connection text, the shape that can leak
+// into a stored ErrorDetail or a log line.
+type deadlineStorageFailureStore struct {
+	*store.Store
+	err error
+}
+
+func (s *deadlineStorageFailureStore) SaveItemBrief(ctx context.Context, b store.ItemBrief) error {
+	if b.Status == store.ItemBriefReady {
+		return s.err
+	}
+	return s.Store.SaveItemBrief(ctx, b)
 }
 
 func (s *storageFailureStore) SaveItemBrief(ctx context.Context, b store.ItemBrief) error {
@@ -163,6 +179,42 @@ func TestResultPersistenceFailureFallsBackToTimeout(t *testing.T) {
 	}
 	if again.Status != StatusFailed || again.ErrorCode != CodeTimeout {
 		t.Fatalf("restarted snapshot = %+v, want failed/timeout", again)
+	}
+}
+
+// TestStorageTimeoutDetailIsRedacted keeps the timeout product code while
+// preventing a deadline-wrapped database error from reaching logs or the panel.
+func TestStorageTimeoutDetailIsRedacted(t *testing.T) {
+	const secret = "postgres://admin:super-secret@db:5432/rabbithole"
+	db := testStore(t, item("a"))
+	h := &deadlineStorageFailureStore{
+		Store: db,
+		err:   fmt.Errorf("write item brief: %s: %w", secret, context.DeadlineExceeded),
+	}
+	var logs bytes.Buffer
+	ctx := zerolog.New(&logs).Level(zerolog.DebugLevel).WithContext(context.Background())
+	svc := New(h, testProfile(), readyGenerator())
+	svc.SetFetcher(stubFetcher(validBody(), nil))
+
+	if _, err := svc.Start(ctx, "a", false, Options{}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	snap := waitTerminal(t, svc, "a")
+	if snap.Status != StatusFailed || snap.ErrorCode != CodeTimeout {
+		t.Fatalf("snapshot = %+v, want failed/timeout", snap)
+	}
+	stored, err := db.ItemBrief(context.Background(), "a")
+	if err != nil || stored.Status != store.ItemBriefFailed || stored.ErrorCode != CodeTimeout {
+		t.Fatalf("stored failure = %+v, %v; want failed/timeout", stored, err)
+	}
+	if strings.Contains(stored.ErrorDetail, secret) || strings.Contains(stored.ErrorDetail, "super-secret") {
+		t.Fatalf("stored detail leaked database credentials: %q", stored.ErrorDetail)
+	}
+	if strings.Contains(snap.ErrorDetail, "super-secret") {
+		t.Fatalf("snapshot detail leaked database credentials: %q", snap.ErrorDetail)
+	}
+	if strings.Contains(logs.String(), "super-secret") {
+		t.Fatalf("log leaked database credentials: %s", logs.String())
 	}
 }
 

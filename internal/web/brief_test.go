@@ -381,6 +381,30 @@ func TestBriefStartErrorMapsBusyTo429(t *testing.T) {
 	}
 }
 
+// A canonical row ID must address that item even when another item's link is
+// the same string. The status route uses the exact-ID path.
+func TestBriefStatusCanonicalIDWinsOverCollidingLink(t *testing.T) {
+	w := newTestWeb(t)
+	ctx := context.Background()
+	items := []feeds.Item{
+		{ID: "alias-item", Source: "S1", Title: "A", Link: "x"},
+		{ID: "x", Source: "S1", Title: "B", Link: "https://example.com/x"},
+	}
+	if err := w.db.Record(ctx, items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if err := w.db.SaveItemBrief(ctx, store.ItemBrief{
+		ItemID: "x", Status: store.ItemBriefReady, Why: "canonical item B brief",
+		Recommendation: "skim",
+	}); err != nil {
+		t.Fatalf("SaveItemBrief: %v", err)
+	}
+	body := briefStatusBody(t, w, "x")
+	if !strings.Contains(body, "canonical item B brief") {
+		t.Fatalf("status for canonical ID x did not render item B: %s", body)
+	}
+}
+
 func TestBriefUnknownItem(t *testing.T) {
 	w := newBriefWeb(t, nil, nil)
 	for _, req := range []*http.Request{

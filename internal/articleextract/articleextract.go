@@ -369,7 +369,7 @@ func walkMixed(n *html.Node, emit func(string) bool, firstPrefix string, listDep
 			if !flush() {
 				return false
 			}
-			if !emit(quote(gatherText(c))) {
+			if !emit(quote(gatherBlockText(c))) {
 				return false
 			}
 		case "li":
@@ -453,6 +453,58 @@ func gatherText(n *html.Node) string {
 		}
 	}
 	rec(n)
+	return b.String()
+}
+
+// gatherBlockText concatenates a blockquote's inline text while keeping its
+// block children on separate lines, so <p>one</p><p>two</p> does not collapse
+// into "onetwo". Inline text stays contiguous, matching HTML's lack of implied
+// whitespace at tags.
+func gatherBlockText(n *html.Node) string {
+	var b strings.Builder
+	var last byte
+	write := func(s string) {
+		if s == "" {
+			return
+		}
+		b.WriteString(s)
+		last = s[len(s)-1]
+	}
+	sep := func() {
+		if b.Len() > 0 && last != '\n' {
+			b.WriteByte('\n')
+			last = '\n'
+		}
+	}
+	var rec func(*html.Node)
+	rec = func(n *html.Node) {
+		if n.Type == html.ElementNode {
+			if skipElement(n) {
+				return
+			}
+			if n.Data == "br" {
+				sep()
+				return
+			}
+		}
+		if n.Type == html.TextNode {
+			write(n.Data)
+			return
+		}
+		block := n.Type == html.ElementNode && blockTags[n.Data]
+		if block {
+			sep()
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			rec(c)
+		}
+		if block {
+			sep()
+		}
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		rec(c)
+	}
 	return b.String()
 }
 

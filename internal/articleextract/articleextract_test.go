@@ -67,6 +67,22 @@ code line two</code></pre>` +
 	}
 }
 
+func TestExtractBlockquoteParagraphBoundaries(t *testing.T) {
+	page := `<html><body><article><blockquote><p>First quoted paragraph.</p>` +
+		`<p>Second quoted paragraph.</p></blockquote>` +
+		longText("Padding") + `</article></body></html>`
+	art, err := Extract(strings.NewReader(page), "text/html", 0)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if !strings.Contains(art.Text, "> First quoted paragraph.\n> Second quoted paragraph.") {
+		t.Fatalf("blockquote paragraphs were merged:\n%s", art.Text)
+	}
+	if strings.Contains(art.Text, "paragraph.Second") {
+		t.Fatalf("missing block boundary:\n%s", art.Text)
+	}
+}
+
 func TestExtractPrefersArticleOverBody(t *testing.T) {
 	page := `<html><body><div>OUTSIDETEXT</div><main><p>` + longText("Main") +
 		`</p></main><article><p>` + longText("Article") + `</p></article></body></html>`

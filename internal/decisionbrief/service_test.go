@@ -149,6 +149,30 @@ func TestGenerateReady(t *testing.T) {
 	}
 }
 
+func TestWordCountCoversFullExtractedArticle(t *testing.T) {
+	db := testStore(t, item("a"))
+	svc := New(db, testProfile(), readyGenerator())
+	svc.SetFetcher(stubFetcher(validBody(), nil))
+
+	if _, err := svc.Start(context.Background(), "a", false, Options{MaxTextBytes: 900}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	snap := waitTerminal(t, svc, "a")
+	if snap.Status != StatusReady {
+		t.Fatalf("status = %s (%s: %s)", snap.Status, snap.ErrorCode, snap.ErrorDetail)
+	}
+	if !snap.Brief.Truncated {
+		t.Fatal("brief was not marked truncated at a 900-byte analysis limit")
+	}
+	if snap.Brief.WordCount <= 500 {
+		t.Fatalf("word count = %d, want the full article count rather than the truncated prefix",
+			snap.Brief.WordCount)
+	}
+	if snap.Brief.ReadingMinutes < 2 {
+		t.Fatalf("reading time = %d, want it computed from the full article", snap.Brief.ReadingMinutes)
+	}
+}
+
 func TestStartReturnsStoredReadyWithoutCalling(t *testing.T) {
 	db := testStore(t, item("a"))
 	if err := db.SaveItemBrief(context.Background(), store.ItemBrief{
@@ -565,6 +589,68 @@ func TestParseBriefValidationMatrix(t *testing.T) {
 	}
 	if brief.Score != 8 || brief.Recommendation != "read" {
 		t.Fatalf("parsed = %+v", brief)
+	}
+}
+
+func TestParseBriefAcceptsUnicodeLetters(t *testing.T) {
+	tests := map[string]string{
+		"russian": `{"score":6,"recommendation":"skim","why":"Статья полезна для читателя.","key_points":["Первый пункт"],"novelty":"Новый результат.","caveats":"Один случай.","focus":"Смотрите метод."}`,
+		"arabic":  `{"score":6,"recommendation":"skim","why":"هذه المقالة مفيدة للقارئ.","key_points":["النقطة الأولى"],"novelty":"نتيجة جديدة.","caveats":"حالة واحدة.","focus":"انظر إلى الطريقة."}`,
+	}
+	for name, raw := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseBrief(raw); err != nil {
+				t.Fatalf("ParseBrief rejected valid %s text: %v", name, err)
+			}
+		})
+	}
+}
+
+func TestParseBriefResponseEnvelope(t *testing.T) {
+	if _, err := ParseBrief("\n\t" + validJSON + "\n"); err != nil {
+		t.Fatalf("valid object with surrounding whitespace rejected: %v", err)
+	}
+	if _, err := ParseBrief("```json\n" + validJSON + "\n```\n\t"); err != nil {
+		t.Fatalf("valid fenced object with trailing whitespace rejected: %v", err)
+	}
+	if _, err := ParseBrief("```\n" + validJSON + "\n```"); err != nil {
+		t.Fatalf("valid fenced object without a language rejected: %v", err)
+	}
+	rejected := map[string]string{
+		"codex trailing text":         validJSON + "\nunexpected trailing text",
+		"leading prose":               "Here is the brief:\n" + validJSON,
+		"multiple objects":            validJSON + "\n" + validJSON,
+		"object embedded in text":     "prefix " + validJSON + " suffix",
+		"fenced trailing text":        "```json\n" + validJSON + "\n```\nextra",
+		"fenced trailing same line":   "```json\n" + validJSON + "\n``` extra",
+		"unterminated fence":          "```json\n" + validJSON,
+		"malformed closing fence":     "```json\n" + validJSON + "\n``",
+		"fence with leading prose":    "Here:\n```json\n" + validJSON + "\n```",
+		"second object after fence":   "```json\n" + validJSON + "\n```\n" + validJSON,
+		"fence missing opening line":  "```\n" + validJSON,
+		"unrecognized fence language": "```javascript\n" + validJSON + "\n```",
+		"fence info with extra text":  "```json extra\n" + validJSON + "\n```",
+	}
+	for name, raw := range rejected {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseBrief(raw); err == nil {
+				t.Fatalf("ParseBrief accepted an invalid response envelope: %q", raw)
+			}
+		})
+	}
+}
+
+func TestParseBriefKeepsBackticksInsideJSON(t *testing.T) {
+	raw := `{"score":5,"recommendation":"read","why":"It explains the idea clearly.","key_points":["A useful point"],"novelty":"A new result.","caveats":"One workload.","focus":"Inspect the ` + "```go```" + ` examples."}`
+	brief, err := ParseBrief(raw)
+	if err != nil {
+		t.Fatalf("ParseBrief with embedded backticks: %v", err)
+	}
+	if !strings.Contains(brief.Focus, "```go```") {
+		t.Fatalf("focus lost its code example: %q", brief.Focus)
+	}
+	if _, err := ParseBrief("```json\n" + raw + "\n```"); err != nil {
+		t.Fatalf("ParseBrief with an outer fence and embedded backticks: %v", err)
 	}
 }
 

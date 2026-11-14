@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -49,6 +50,91 @@ func recordBriefItems(t *testing.T, s *Store, ids ...string) {
 	}
 	if err := s.Record(context.Background(), items, nil, time.Now()); err != nil {
 		t.Fatalf("Record items: %v", err)
+	}
+}
+
+func TestIdentifierPrecedenceMatchesGet(t *testing.T) {
+	s := openTestStore(t)
+	items := []feeds.Item{
+		{ID: "alias-item", Source: "S", Title: "A", Link: "x"},
+		{ID: "x", Source: "S", Title: "B", Link: "https://example.com/x"},
+	}
+	if err := s.Record(context.Background(), items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	got, err := s.Get(context.Background(), "x")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.ID != "alias-item" {
+		t.Fatalf("Get(x) = %q, want the link owner alias-item", got.ID)
+	}
+	byID, err := s.GetByID(context.Background(), "x")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if byID.ID != "x" {
+		t.Fatalf("GetByID(x) = %q, want exact id x", byID.ID)
+	}
+	resolved, err := s.ItemIDsByIdentifiers(context.Background(), []string{"x"})
+	if err != nil {
+		t.Fatalf("ItemIDsByIdentifiers: %v", err)
+	}
+	if resolved["x"] != "alias-item" {
+		t.Fatalf("resolver(x) = %q, want the link owner alias-item", resolved["x"])
+	}
+
+	// Ordinary ID and link lookups remain unambiguous.
+	if got, err := s.Get(context.Background(), "https://example.com/x"); err != nil || got.ID != "x" {
+		t.Fatalf("Get(link B) = %+v, %v; want x", got, err)
+	}
+	if got, err := s.Get(context.Background(), "alias-item"); err != nil || got.ID != "alias-item" {
+		t.Fatalf("Get(id A) = %+v, %v; want alias-item", got, err)
+	}
+	if _, ok := resolved["unknown"]; ok {
+		t.Fatalf("unknown identifier resolved: %#v", resolved)
+	}
+}
+
+func TestItemIDsByIdentifiersChunkBoundary(t *testing.T) {
+	s := openTestStore(t)
+	recordBriefItems(t, s, "a")
+	ids := make([]string, 0, identifierChunkSize+2)
+	for i := 0; i < identifierChunkSize; i++ {
+		ids = append(ids, fmt.Sprintf("missing-%d", i))
+	}
+	ids = append(ids, "https://x/a")
+	got, err := s.ItemIDsByIdentifiers(context.Background(), ids)
+	if err != nil {
+		t.Fatalf("ItemIDsByIdentifiers: %v", err)
+	}
+	if got["https://x/a"] != "a" {
+		t.Fatalf("link across chunk boundary = %q, want a", got["https://x/a"])
+	}
+}
+
+func TestItemIDsByIdentifiers(t *testing.T) {
+	s := openTestStore(t)
+	recordBriefItems(t, s, "a", "b")
+	got, err := s.ItemIDsByIdentifiers(t.Context(), []string{
+		"a", "https://x/b", "missing", "a", "",
+	})
+	if err != nil {
+		t.Fatalf("ItemIDsByIdentifiers: %v", err)
+	}
+	if got["a"] != "a" || got["https://x/b"] != "b" {
+		t.Fatalf("resolved = %#v", got)
+	}
+	if _, ok := got["missing"]; ok {
+		t.Fatalf("unknown identifier was resolved: %#v", got)
+	}
+	if _, ok := got[""]; ok {
+		t.Fatalf("empty identifier was resolved: %#v", got)
+	}
+	empty, err := s.ItemIDsByIdentifiers(t.Context(), nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty input = %#v, %v", empty, err)
 	}
 }
 

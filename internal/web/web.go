@@ -943,12 +943,12 @@ func (s *Web) handleNote(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	note := r.FormValue("note")
 
-	if err := s.db.UpdateUserState(r.Context(), id, store.UserPatch{UserNote: &note}); err != nil {
+	if err := s.db.UpdateUserStateByID(r.Context(), id, store.UserPatch{UserNote: &note}); err != nil {
 		httpStoreError(w, err)
 		return
 	}
 
-	row, err := s.db.Get(r.Context(), id)
+	row, err := s.db.GetByID(r.Context(), id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -979,7 +979,7 @@ func (s *Web) handleHide(w http.ResponseWriter, r *http.Request) {
 func (s *Web) toggleStatus(w http.ResponseWriter, r *http.Request, target string) {
 	id := r.PathValue("id")
 
-	cur, err := s.db.Get(r.Context(), id)
+	cur, err := s.db.GetByID(r.Context(), id)
 	if err != nil {
 		httpStoreError(w, err)
 		return
@@ -989,7 +989,7 @@ func (s *Web) toggleStatus(w http.ResponseWriter, r *http.Request, target string
 	if cur.Status == target {
 		next = store.StatusUnread
 	}
-	if err := s.db.UpdateUserState(r.Context(), id, store.UserPatch{Status: &next}); err != nil {
+	if err := s.db.UpdateUserStateByID(r.Context(), id, store.UserPatch{Status: &next}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -1010,14 +1010,14 @@ func (s *Web) toggleStatus(w http.ResponseWriter, r *http.Request, target string
 func (s *Web) handleBookmark(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	cur, err := s.db.Get(r.Context(), id)
+	cur, err := s.db.GetByID(r.Context(), id)
 	if err != nil {
 		httpStoreError(w, err)
 		return
 	}
 
 	next := !cur.Bookmarked
-	if err := s.db.UpdateUserState(r.Context(), id, store.UserPatch{Bookmarked: &next}); err != nil {
+	if err := s.db.UpdateUserStateByID(r.Context(), id, store.UserPatch{Bookmarked: &next}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -1045,7 +1045,7 @@ func (s *Web) handleRate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cur, err := s.db.Get(r.Context(), id)
+	cur, err := s.db.GetByID(r.Context(), id)
 	if err != nil {
 		httpStoreError(w, err)
 		return
@@ -1056,7 +1056,7 @@ func (s *Web) handleRate(w http.ResponseWriter, r *http.Request) {
 	if cur.UserScore != nil && *cur.UserScore == n {
 		patch, next = store.UserPatch{ClearUserScore: true}, nil
 	}
-	if err := s.db.UpdateUserState(r.Context(), id, patch); err != nil {
+	if err := s.db.UpdateUserStateByID(r.Context(), id, patch); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -1255,7 +1255,7 @@ func (s *Web) toRows(ctx context.Context, rows []store.ItemRow) []rowData {
 	for i, row := range rows {
 		ids[i] = row.ID
 	}
-	snaps, err := s.briefs.Statuses(ctx, ids)
+	snaps, err := s.briefs.StatusesByIDs(ctx, ids)
 	if err != nil {
 		logBriefStorageFailure(err, "brief_statuses", "", false)
 	}
@@ -1267,7 +1267,7 @@ func (s *Web) toRows(ctx context.Context, rows []store.ItemRow) []rowData {
 // fragments mutation handlers swap back in place.
 func (s *Web) toRow(ctx context.Context, row store.ItemRow) rowData {
 	rd := toRow(row)
-	snap, err := s.briefs.Status(ctx, row.ID)
+	snap, err := s.briefs.StatusByID(ctx, row.ID)
 	if err != nil {
 		logBriefStorageFailure(err, "brief_row", row.ID, false)
 		rd.Brief = unavailableView(row.ID)

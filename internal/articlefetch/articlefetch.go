@@ -248,6 +248,12 @@ func classify(err error) error {
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		return fmt.Errorf("%w: %v", ErrTimeout, err)
 	}
+	// net/http parses Location before CheckRedirect runs. Its parse error
+	// embeds the raw header, which may contain userinfo, so replace the whole
+	// diagnostic instead of wrapping it.
+	if strings.Contains(err.Error(), "failed to parse Location header") {
+		return fmt.Errorf("%w: redirect location could not be parsed", ErrBlocked)
+	}
 	var ne net.Error
 	if errors.As(err, &ne) && ne.Timeout() {
 		return fmt.Errorf("%w: %v", ErrTimeout, err)

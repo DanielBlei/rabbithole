@@ -237,6 +237,91 @@ func TestDuplicateStartWhileQueuedDoesNotConsumeAdmission(t *testing.T) {
 	})
 }
 
+func TestStartCanonicalizesLinkAlias(t *testing.T) {
+	db := testStore(t, item("a"))
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var calls int32
+	svc := New(db, testProfile(), func(context.Context) (Generator, Provenance, error) {
+		return genFunc(func(context.Context, string, string, json.RawMessage, int) (string, error) {
+			atomic.AddInt32(&calls, 1)
+			started <- struct{}{}
+			<-release
+			return validJSON, nil
+		}), Provenance{}, nil
+	})
+	svc.SetFetcher(stubFetcher(validBody(), nil))
+
+	alias := item("a").Link
+	snap, err := svc.Start(context.Background(), alias, false, Options{})
+	if err != nil {
+		t.Fatalf("Start by link: %v", err)
+	}
+	if snap.ItemID != "a" {
+		t.Fatalf("snapshot item = %q, want canonical item ID", snap.ItemID)
+	}
+	<-started
+	snap, err = svc.Start(context.Background(), "a", false, Options{})
+	if err != nil {
+		t.Fatalf("Start by ID while alias is running: %v", err)
+	}
+	if snap.Status != StatusRunning {
+		t.Fatalf("status = %s, want running; alias started a second run", snap.Status)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("calls = %d, want 1", got)
+	}
+	if _, _, running := schedulerCounts(svc); running != 1 {
+		t.Fatalf("running entries = %d, want 1", running)
+	}
+	close(release)
+	waitTerminal(t, svc, "a")
+}
+
+// Run with -race: Start must copy r.phase under s.mu before releasing it.
+func TestStartSnapshotReadsPhaseUnderLock(t *testing.T) {
+	db := testStore(t, item("a"))
+	svc := New(db, testProfile(), nil)
+	r := &run{phase: PhaseQueued}
+	svc.mu.Lock()
+	svc.running["a"] = r
+	svc.mu.Unlock()
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				svc.setPhase(r, PhaseAnalyzing)
+				svc.setPhase(r, PhaseQueued)
+			}
+		}
+	}()
+	for i := 0; i < 2000; i++ {
+		snap, err := svc.Start(context.Background(), "a", false, Options{})
+		if err != nil {
+			close(stop)
+			wg.Wait()
+			t.Fatalf("Start: %v", err)
+		}
+		if snap.ItemID != "a" || (snap.Status != StatusQueued && snap.Status != StatusRunning) {
+			close(stop)
+			wg.Wait()
+			t.Fatalf("inconsistent snapshot: %+v", snap)
+		}
+	}
+	close(stop)
+	wg.Wait()
+	svc.mu.Lock()
+	delete(svc.running, "a")
+	svc.mu.Unlock()
+}
+
 func TestQueueTimeoutWhileWaitingReleasesTokens(t *testing.T) {
 	db := testStore(t, item("a"))
 	var calls int32

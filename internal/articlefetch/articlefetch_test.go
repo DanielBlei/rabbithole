@@ -333,6 +333,25 @@ func TestFetchRejectsCredentialedRedirect(t *testing.T) {
 	}
 }
 
+// A malformed Location is parsed by net/http before CheckRedirect runs. Its
+// error text includes the raw header, so classify must not pass it through.
+func TestFetchRejectsMalformedCredentialedRedirect(t *testing.T) {
+	const secret = "s3cr3t-malformed-location"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://malformeduser:"+secret+"@%zz/")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+
+	_, err := fetchTest(t, srv.URL+"/start", Limits{})
+	if !errors.Is(err, ErrBlocked) {
+		t.Fatalf("err = %v, want ErrBlocked", err)
+	}
+	if strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "malformeduser") {
+		t.Fatalf("error leaked malformed redirect credentials: %v", err)
+	}
+}
+
 // A multi-hop chain that ends in a credentialed URL is rejected before the
 // final hop, even though earlier hops are legitimate.
 func TestFetchRejectsCredentialedFinalHop(t *testing.T) {

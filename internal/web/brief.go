@@ -80,7 +80,13 @@ func (s *Web) handleBriefRefresh(w http.ResponseWriter, r *http.Request) {
 
 func (s *Web) briefAction(w http.ResponseWriter, r *http.Request, refresh bool) {
 	id := r.PathValue("id")
-	snap, err := s.briefs.Start(r.Context(), id, refresh, s.briefOptions(r.Context()))
+	// Row IDs are canonical. Try that exact path first so a canonical ID that
+	// equals another item's link cannot be reinterpreted; fall back to the
+	// alias-aware lookup for a link-shaped route.
+	snap, err := s.briefs.StartByID(r.Context(), id, refresh, s.briefOptions(r.Context()))
+	if errors.Is(err, store.ErrItemNotFound) {
+		snap, err = s.briefs.Start(r.Context(), id, refresh, s.briefOptions(r.Context()))
+	}
 	if err != nil {
 		op := "brief_start"
 		if refresh {
@@ -89,7 +95,13 @@ func (s *Web) briefAction(w http.ResponseWriter, r *http.Request, refresh bool) 
 		httpBriefStartError(w, err, id, op)
 		return
 	}
-	s.renderBrief(w, id, snap)
+	// Start resolves a link alias to the canonical item ID; render under that
+	// identity so the panel's targets and the snapshot agree.
+	renderID := snap.ItemID
+	if renderID == "" {
+		renderID = id
+	}
+	s.renderBrief(w, renderID, snap)
 }
 
 // httpBriefStartError keeps a full queue a distinct, retryable product state
@@ -109,16 +121,21 @@ func httpBriefStartError(w http.ResponseWriter, err error, itemID, op string) {
 func (s *Web) handleBriefStatus(w http.ResponseWriter, r *http.Request) {
 	httplog.Quiet(r)
 	id := r.PathValue("id")
-	if _, err := s.db.Get(r.Context(), id); err != nil {
+	item, err := s.db.GetByID(r.Context(), id)
+	if errors.Is(err, store.ErrItemNotFound) {
+		// A link-shaped route keeps working through the alias-aware path.
+		item, err = s.db.Get(r.Context(), id)
+	}
+	if err != nil {
 		httpBriefStoreError(w, err, id, "brief_status_item", briefStatusFailureMessage)
 		return
 	}
-	snap, err := s.briefs.Status(r.Context(), id)
+	snap, err := s.briefs.StatusByID(r.Context(), item.ID)
 	if err != nil {
-		httpBriefStoreError(w, err, id, "brief_status", briefStatusFailureMessage)
+		httpBriefStoreError(w, err, item.ID, "brief_status", briefStatusFailureMessage)
 		return
 	}
-	s.renderBrief(w, id, snap)
+	s.renderBrief(w, item.ID, snap)
 }
 
 // httpBriefStoreError answers a Decision Brief storage failure without echoing

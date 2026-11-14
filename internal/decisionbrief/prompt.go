@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/DanielBlei/rabbithole/internal/articlefetch"
 	"github.com/DanielBlei/rabbithole/internal/articletext"
@@ -210,7 +211,7 @@ func degenerate(text string) string {
 		switch {
 		case r >= 0x3040 && r <= 0x30ff, r >= 0x3400 && r <= 0x9fff, r >= 0xac00 && r <= 0xd7af:
 			letters += 2
-		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+		case unicode.IsLetter(r):
 			letters++
 		}
 	}
@@ -225,21 +226,57 @@ func degenerate(text string) string {
 
 func extractJSON(raw string) (string, error) {
 	s := strings.TrimSpace(raw)
-	if i := strings.Index(s, "```"); i >= 0 {
-		s = s[i+3:]
-		if j := strings.IndexByte(s, '\n'); j >= 0 {
-			s = s[j+1:]
-		}
-		if j := strings.Index(s, "```"); j >= 0 {
-			s = s[:j]
-		}
+	// A complete JSON object is the response, with at most surrounding
+	// whitespace. A valid object can legitimately contain backticks, for
+	// example a focus string quoting a fenced code block.
+	if isJSONObject(s) {
+		return s, nil
 	}
-	start := strings.IndexByte(s, '{')
-	end := strings.LastIndexByte(s, '}')
-	if start < 0 || end < start {
-		return "", fmt.Errorf("model reply contains no JSON object")
+	if obj, ok := fencedJSONObject(s); ok {
+		return obj, nil
 	}
-	return s[start : end+1], nil
+	return "", fmt.Errorf("model reply contains no JSON object")
+}
+
+// fencedJSONObject accepts one Markdown code fence whose entire body is a JSON
+// object and whose closing fence is the end of the response apart from
+// whitespace. Anything else — leading/trailing prose, multiple objects,
+// trailing text after the fence, or an unterminated fence — is rejected.
+func fencedJSONObject(s string) (string, bool) {
+	if !strings.HasPrefix(s, "```") {
+		return "", false
+	}
+	lineEnd := strings.IndexByte(s, '\n')
+	if lineEnd < 0 {
+		return "", false
+	}
+	// The opening line is ``` optionally followed by json as the info string.
+	// Anything else is not a recognized JSON fence.
+	info := strings.TrimSpace(s[3:lineEnd])
+	if info != "" && !strings.EqualFold(info, "json") {
+		return "", false
+	}
+	lines := strings.Split(s[lineEnd+1:], "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "```" {
+			continue
+		}
+		for _, tail := range lines[i+1:] {
+			if strings.TrimSpace(tail) != "" {
+				return "", false
+			}
+		}
+		body := strings.TrimSpace(strings.Join(lines[:i], "\n"))
+		if isJSONObject(body) {
+			return body, true
+		}
+		return "", false
+	}
+	return "", false
+}
+
+func isJSONObject(s string) bool {
+	return strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}") && json.Valid([]byte(s))
 }
 
 func truncateRunes(s string, maxRunes int) string {

@@ -171,7 +171,7 @@ func TestRecordIgnoresDuplicateLink(t *testing.T) {
 	ctx := context.Background()
 
 	// Different IDs (e.g. distinct guids) can still resolve to the same link.
-	// The UNIQUE constraint must keep UpdateUserState's WHERE link = ? targeting
+	// The UNIQUE constraint must keep link-based item resolution targeting
 	// exactly one row.
 	first := feeds.Item{ID: "a", Source: "S", Title: "A", Link: "https://x/dup"}
 	second := feeds.Item{ID: "b", Source: "S", Title: "B", Link: "https://x/dup"}

@@ -117,6 +117,8 @@ type Fetcher func(ctx context.Context, rawURL string, limits articlefetch.Limits
 // Store is the persistence surface a Service needs.
 type Store interface {
 	Get(ctx context.Context, identifier string) (store.ItemRow, error)
+	GetByID(ctx context.Context, id string) (store.ItemRow, error)
+	ItemIDsByIdentifiers(ctx context.Context, identifiers []string) (map[string]string, error)
 	SaveItemBrief(ctx context.Context, b store.ItemBrief) error
 	ItemBrief(ctx context.Context, itemID string) (store.ItemBrief, error)
 	ItemBriefsByItemIDs(ctx context.Context, ids []string) (map[string]store.ItemBrief, error)
@@ -209,12 +211,32 @@ func New(st Store, profiles ProfileResolver, generator GeneratorFunc) *Service {
 func (s *Service) SetFetcher(f Fetcher) { s.fetch = f }
 
 // Start begins a dive unless refresh is false and a ready brief is already
-// stored. It returns immediately; Status or Statuses reports progress.
+// stored. The identifier may be an item ID or a link; link precedence matches
+// Store.Get. It returns immediately; Status or Statuses reports progress.
 func (s *Service) Start(ctx context.Context, itemID string, refresh bool, opts Options) (Snapshot, error) {
 	item, err := s.store.Get(ctx, itemID)
 	if err != nil {
 		return Snapshot{}, err
 	}
+	return s.startItem(ctx, item, refresh, opts)
+}
+
+// StartByID begins a dive for an already-canonical item ID. Unlike Start, it
+// never reinterprets the ID as another item's link; web callers holding a row
+// ID use this path so an unrelated link value cannot change the target.
+func (s *Service) StartByID(ctx context.Context, itemID string, refresh bool, opts Options) (Snapshot, error) {
+	item, err := s.store.GetByID(ctx, itemID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return s.startItem(ctx, item, refresh, opts)
+}
+
+func (s *Service) startItem(ctx context.Context, item store.ItemRow, refresh bool, opts Options) (Snapshot, error) {
+	// Lifecycle keys and every snapshot use the canonical item ID so a link
+	// alias cannot create a second run or leave a run keyed by the alias after
+	// completion.
+	itemID := item.ID
 
 	// The running check, the persisted read and the run insertion share one
 	// critical section. A generation removes its run only after its result has
@@ -223,16 +245,17 @@ func (s *Service) Start(ctx context.Context, itemID string, refresh bool, opts O
 	// lookup, not a network or model call.
 	s.mu.Lock()
 	if r, ok := s.running[itemID]; ok {
-		s.mu.Unlock()
-		snap := Snapshot{ItemID: itemID, Status: r.phase, Phase: r.phase}
+		// Copy the phase and previous brief while the lock that setPhase and
+		// run removal use is still held; reading them after unlocking races
+		// with a worker moving to the next phase.
+		snap := Snapshot{ItemID: itemID, Status: StatusRunning, Phase: r.phase}
 		if r.phase == PhaseQueued {
 			snap.Status = StatusQueued
-		} else {
-			snap.Status = StatusRunning
 		}
 		if r.previous != nil {
 			snap.Brief = *r.previous
 		}
+		s.mu.Unlock()
 		return snap, nil
 	}
 	previous, err := s.store.ItemBrief(ctx, itemID)
@@ -280,18 +303,99 @@ func (s *Service) timeout() time.Duration {
 	return GenerationTimeout
 }
 
-// Status reports one item's current state.
+// Status reports one item's current state. An item link is accepted as an
+// alias and resolved to the canonical item ID before the running/failed/read
+// lookups, so an alias cannot report idle while its canonical item is running.
 func (s *Service) Status(ctx context.Context, itemID string) (Snapshot, error) {
-	got, err := s.Statuses(ctx, []string{itemID})
+	ids, err := s.canonicalize(ctx, []string{itemID})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	got, err := s.statuses(ctx, ids)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if len(ids) == 0 {
+		return Snapshot{ItemID: itemID, Status: StatusIdle}, nil
+	}
+	return got[ids[0]], nil
+}
+
+// StatusByID reports an already-canonical item ID without alias resolution.
+// Web row callers use this so an ID cannot be reinterpreted as another item's
+// link when the two collide.
+func (s *Service) StatusByID(ctx context.Context, itemID string) (Snapshot, error) {
+	got, err := s.statuses(ctx, []string{itemID})
 	if err != nil {
 		return Snapshot{}, err
 	}
 	return got[itemID], nil
 }
 
+// StatusesByIDs batch-loads already-canonical item IDs without alias
+// resolution. The result map is keyed by the same canonical IDs.
+func (s *Service) StatusesByIDs(ctx context.Context, itemIDs []string) (map[string]Snapshot, error) {
+	return s.statuses(ctx, dedupeIDs(itemIDs))
+}
+
+func dedupeIDs(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
 // Statuses batch-loads stored briefs and overlays in-memory running and failed
-// states, so a feed page costs one query rather than one per row.
+// states. It resolves aliases before taking the service lock, then uses one
+// brief query and one in-memory overlay for the whole page.
+//
+// The result map is keyed by canonical item ID for every identifier that
+// resolved to an item. An unknown or deleted identifier has no canonical ID and
+// is keyed by the identifier as supplied, with an idle snapshot. Duplicate
+// aliases for the same item collapse to one canonical entry. Existing web
+// callers pass canonical row IDs and continue to index the result the same way.
 func (s *Service) Statuses(ctx context.Context, itemIDs []string) (map[string]Snapshot, error) {
+	ids, err := s.canonicalize(ctx, itemIDs)
+	if err != nil {
+		return nil, err
+	}
+	return s.statuses(ctx, ids)
+}
+
+// canonicalize resolves request identifiers before the service lock is taken.
+// It preserves first-seen order and removes duplicates after resolution, so
+// mixed alias/canonical input cannot produce duplicate work or entries.
+func (s *Service) canonicalize(ctx context.Context, itemIDs []string) ([]string, error) {
+	if len(itemIDs) == 0 {
+		return nil, nil
+	}
+	resolved, err := s.store.ItemIDsByIdentifiers(ctx, itemIDs)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(itemIDs))
+	seen := make(map[string]struct{}, len(itemIDs))
+	for _, raw := range itemIDs {
+		id := raw
+		if canonical, ok := resolved[raw]; ok {
+			id = canonical
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func (s *Service) statuses(ctx context.Context, ids []string) (map[string]Snapshot, error) {
 	// The persisted read and the in-memory overlay are one critical section. A
 	// generation saves its result before it removes its run, and removal needs
 	// this same lock; therefore a terminal snapshot can never be built from a
@@ -299,12 +403,12 @@ func (s *Service) Statuses(ctx context.Context, itemIDs []string) (map[string]Sn
 	// single-table read, not a network or model call.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	briefs, err := s.store.ItemBriefsByItemIDs(ctx, itemIDs)
+	briefs, err := s.store.ItemBriefsByItemIDs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]Snapshot, len(itemIDs))
-	for _, id := range itemIDs {
+	out := make(map[string]Snapshot, len(ids))
+	for _, id := range ids {
 		snap := Snapshot{ItemID: id, Status: StatusIdle}
 		if b, ok := briefs[id]; ok {
 			snap = snapshotFromBrief(b)
@@ -420,7 +524,10 @@ func (s *Service) generate(ctx context.Context, item store.ItemRow, r *run, opts
 		logger.Debug().Err(closeErr).Msg("decision brief: closing article body")
 	}
 
-	art, err := articleextract.Extract(bytes.NewReader(body), res.ContentType, opts.MaxTextBytes)
+	// Extract the complete page up to the fetched-article bound so word count
+	// and reading time describe the article, not the analysis prefix. Prepare
+	// applies MaxTextBytes to what the model receives.
+	art, err := articleextract.Extract(bytes.NewReader(body), res.ContentType, opts.MaxArticleBytes)
 	if err != nil {
 		code := CodeAnalysisFailed
 		switch {
@@ -525,7 +632,14 @@ func (s *Service) persistResult(
 			Str("error_class", storageErrorClass(err)).
 			Str("error_type", fmt.Sprintf("%T", err)).
 			Msg("decision brief: storing result failed; recording terminal failure")
-		s.fail(ctx, item, r, opts, prov, code, err)
+		cause := err
+		if code == CodeTimeout {
+			// The timeout code keeps its product meaning, but the cause is still
+			// a database error that can carry connection details. Do not let
+			// fail log or persist its raw text.
+			cause = errors.New("storage write deadline exceeded")
+		}
+		s.fail(ctx, item, r, opts, prov, code, cause)
 		return false
 	}
 	return true
