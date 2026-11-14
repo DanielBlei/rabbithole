@@ -12,6 +12,7 @@ import (
 	"io"
 	"mime"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/net/html"
@@ -24,11 +25,19 @@ const (
 	DefaultMaxTextBytes = 32 << 10
 	// MinContentChars is the fewest characters a usable article must yield.
 	MinContentChars = 400
-	// maxInputBytes bounds the raw page read before parsing. Fetching already
-	// caps the body; this is a second bound for callers that stream something else.
-	maxInputBytes = 8 << 20
+	// MaxInputBytes bounds the raw HTML the extractor accepts. It matches the
+	// largest page the configurable article fetch cap permits; input beyond it
+	// is rejected rather than silently truncated.
+	MaxInputBytes = 16 << 20
 	// maxTitleRunes caps the extracted title.
 	maxTitleRunes = 500
+	// maxRootCandidates bounds the candidate nesting the root scan tracks. Text
+	// is counted once per active candidate, so work is O(text × depth) even with
+	// thousands of sibling candidates, and only the active stack plus the two
+	// best candidates are retained.
+	maxRootCandidates = 32
+	// maxListIndentDepth bounds nested-list indentation.
+	maxListIndentDepth = 8
 )
 
 var (
@@ -36,10 +45,14 @@ var (
 	ErrEncoding = errors.New("article encoding could not be handled")
 	// ErrInsufficientContent marks a page that yielded too little text.
 	ErrInsufficientContent = errors.New("could not extract enough article text")
+	// ErrInputTooLarge marks raw HTML beyond MaxInputBytes. It is distinct from
+	// text truncation: the input is rejected, never parsed partially.
+	ErrInputTooLarge = errors.New("article HTML exceeds the extractor input limit")
 )
 
 // Article is the readable content extracted from one page. Truncated reports
-// that Text stopped at the caller's byte cap.
+// that Text stopped at the caller's byte cap; it never reports raw HTML
+// truncation, which is rejected with ErrInputTooLarge instead.
 type Article struct {
 	Title     string
 	Text      string
@@ -47,14 +60,18 @@ type Article struct {
 }
 
 // Extract decodes and parses r. contentType supplies the declared charset;
-// maxBytes caps the extracted plain text.
+// maxBytes caps the extracted plain text. Raw HTML beyond MaxInputBytes is
+// rejected, never parsed as a truncated prefix.
 func Extract(r io.Reader, contentType string, maxBytes int) (Article, error) {
 	if maxBytes <= 0 {
 		maxBytes = DefaultMaxTextBytes
 	}
-	raw, err := io.ReadAll(io.LimitReader(r, maxInputBytes))
+	raw, err := io.ReadAll(io.LimitReader(r, MaxInputBytes+1))
 	if err != nil {
 		return Article{}, fmt.Errorf("read article: %w", err)
+	}
+	if len(raw) > MaxInputBytes {
+		return Article{}, fmt.Errorf("%w: %d bytes", ErrInputTooLarge, len(raw))
 	}
 	decoded, err := decode(raw, contentType)
 	if err != nil {
@@ -72,8 +89,9 @@ func Extract(r io.Reader, contentType string, maxBytes int) (Article, error) {
 	var size int
 	truncated := false
 	walk(root, func(block string) bool {
-		block = strings.TrimSpace(block)
-		if block == "" {
+		// Trim block edges but keep intentional leading list indentation.
+		block = strings.TrimRight(block, " \t\r\n")
+		if strings.TrimSpace(block) == "" {
 			return true
 		}
 		if size > 0 {
@@ -87,7 +105,7 @@ func Extract(r io.Reader, contentType string, maxBytes int) (Article, error) {
 		}
 		return true
 	})
-	text := strings.TrimSpace(strings.Join(blocks, "\n\n"))
+	text := strings.TrimRight(strings.Join(blocks, "\n\n"), " \t\r\n")
 	if bounded := truncateBytes(text, maxBytes); bounded != text {
 		text = bounded
 		truncated = true
@@ -101,12 +119,25 @@ func Extract(r io.Reader, contentType string, maxBytes int) (Article, error) {
 
 // decode converts raw to UTF-8 using the declared or detected charset. A
 // declared UTF-8 page with invalid bytes is an encoding failure rather than a
-// silent windows-1252 guess.
+// silent windows-1252 guess. A declared charset that HTML does not support is
+// rejected instead of being ignored in favor of detection.
 func decode(raw []byte, contentType string) ([]byte, error) {
-	if declaredUTF8(contentType) && !utf8.Valid(raw) {
-		return nil, fmt.Errorf("%w: invalid UTF-8 for declared charset", ErrEncoding)
+	if label := declaredCharset(contentType); label != "" {
+		enc, name := charset.Lookup(label)
+		if enc == nil || strings.EqualFold(name, "replacement") {
+			return nil, fmt.Errorf("%w: unsupported charset %q", ErrEncoding, label)
+		}
+		if strings.EqualFold(name, "utf-8") && !utf8.Valid(raw) {
+			return nil, fmt.Errorf("%w: invalid UTF-8 for declared charset", ErrEncoding)
+		}
 	}
-	enc, _, _ := charset.DetermineEncoding(raw, contentType)
+	enc, name, _ := charset.DetermineEncoding(raw, contentType)
+	// The HTML "replacement" encoding decodes every byte to U+FFFD; treating it
+	// as success would analyze corrupted text. It can arrive from the header or
+	// a meta tag, so guard the determined encoding too.
+	if enc == nil || strings.EqualFold(name, "replacement") {
+		return nil, fmt.Errorf("%w: unsupported charset %q", ErrEncoding, name)
+	}
 	decoded, err := io.ReadAll(transform.NewReader(bytes.NewReader(raw), enc.NewDecoder()))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrEncoding, err)
@@ -117,75 +148,256 @@ func decode(raw []byte, contentType string) ([]byte, error) {
 	return decoded, nil
 }
 
-func declaredUTF8(contentType string) bool {
+func declaredCharset(contentType string) string {
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		return false
+		return ""
 	}
-	return strings.EqualFold(strings.TrimSpace(params["charset"]), "utf-8")
+	return strings.TrimSpace(params["charset"])
 }
 
-// contentRoot prefers the page's main article container.
+// contentRoot prefers a substantive visible article, then a substantive main,
+// and otherwise falls back to the body. Candidates inside skipped or hidden
+// containers are never visited, so they cannot capture the root.
 func contentRoot(doc *html.Node) *html.Node {
-	for _, tag := range []string{"article", "main"} {
-		if n := findElement(doc, func(n *html.Node) bool { return n.Data == tag }); n != nil {
-			return n
+	var bestArticle, bestMain *rootCandidate
+	stack := make([]*rootCandidate, 0, 8)
+	order := 0
+
+	var visit func(*html.Node)
+	visit = func(n *html.Node) {
+		if n.Type == html.ElementNode && skipElement(n) {
+			return
+		}
+		var cand *rootCandidate
+		if n.Type == html.ElementNode && len(stack) < maxRootCandidates {
+			switch {
+			case n.Data == "article":
+				cand = &rootCandidate{node: n, rank: 0, order: order}
+			case n.Data == "main":
+				cand = &rootCandidate{node: n, rank: 1, order: order}
+			case n.Data == "div" && strings.EqualFold(strings.TrimSpace(attr(n, "role")), "main"):
+				cand = &rootCandidate{node: n, rank: 2, order: order}
+			}
+			if cand != nil {
+				order++
+				stack = append(stack, cand)
+			}
+		}
+		if n.Type == html.TextNode {
+			count := contentRuneCount(n.Data)
+			for _, c := range stack {
+				c.runes += count
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			visit(c)
+		}
+		if cand != nil {
+			stack = stack[:len(stack)-1]
+			if cand.rank == 0 {
+				bestArticle = betterRoot(bestArticle, cand)
+			} else {
+				bestMain = betterRoot(bestMain, cand)
+			}
 		}
 	}
-	if n := findElement(doc, func(n *html.Node) bool {
-		return n.Data == "div" && attr(n, "role") == "main"
-	}); n != nil {
-		return n
+	visit(doc)
+
+	// A candidate must clear the same minimum the extractor enforces, so a
+	// short teaser or card does not shadow substantive content elsewhere.
+	if bestArticle != nil && bestArticle.runes >= MinContentChars {
+		return bestArticle.node
 	}
-	if n := findElement(doc, func(n *html.Node) bool { return n.Data == "body" }); n != nil {
-		return n
+	if bestMain != nil && bestMain.runes >= MinContentChars {
+		return bestMain.node
+	}
+	if body := findElement(doc, func(n *html.Node) bool { return n.Data == "body" }); body != nil &&
+		!skipElement(body) {
+		return body
 	}
 	return doc
 }
 
-func articleTitle(doc, root *html.Node) string {
-	if h1 := findElement(root, func(n *html.Node) bool { return n.Data == "h1" }); h1 != nil {
-		if text := collapse(gatherText(h1)); text != "" {
-			return truncateRunes(text, maxTitleRunes)
+type rootCandidate struct {
+	node  *html.Node
+	rank  int // article 0, main 1, div[role=main] 2
+	order int
+	runes int // visible non-whitespace runes
+}
+
+// contentRuneCount measures actual content, so indentation and formatting
+// whitespace cannot make an empty container look substantive.
+func contentRuneCount(s string) int {
+	n := 0
+	for _, r := range s {
+		if !unicode.IsSpace(r) {
+			n++
 		}
 	}
-	if title := findElement(doc, func(n *html.Node) bool { return n.Data == "title" }); title != nil {
-		return truncateRunes(collapse(gatherText(title)), maxTitleRunes)
+	return n
+}
+
+// betterRoot ranks by visible rune count, then tag specificity, then document
+// order. The result is deterministic for equal candidates.
+func betterRoot(best, cand *rootCandidate) *rootCandidate {
+	if best == nil {
+		return cand
 	}
-	return ""
+	switch {
+	case cand.runes > best.runes:
+		return cand
+	case cand.runes < best.runes:
+		return best
+	case cand.rank < best.rank:
+		return cand
+	case cand.rank > best.rank:
+		return best
+	case cand.order < best.order:
+		return cand
+	default:
+		return best
+	}
+}
+
+func articleTitle(doc, root *html.Node) string {
+	if title := headingTitle(root); title != "" {
+		return title
+	}
+	if title := findTitleElement(doc); title != nil {
+		if text := truncateRunes(collapse(gatherText(title)), maxTitleRunes); text != "" {
+			return text
+		}
+	}
+	// A hidden metadata title must not beat a visible heading outside the
+	// chosen root; this is the last eligible fallback.
+	return headingTitle(doc)
+}
+
+func headingTitle(root *html.Node) string {
+	h1 := findVisibleElement(root, func(n *html.Node) bool { return n.Data == "h1" })
+	if h1 == nil {
+		return ""
+	}
+	return truncateRunes(collapse(gatherText(h1)), maxTitleRunes)
+}
+
+// findTitleElement accepts a title under a normal head, unlike the body-content
+// skip rule which rejects head entirely. Hidden, aria-hidden, template and
+// other skipped ancestors still disqualify the title.
+func findTitleElement(n *html.Node) *html.Node {
+	if n.Type == html.ElementNode {
+		if hiddenElement(n) {
+			return nil
+		}
+		if n.Data == "title" {
+			return n
+		}
+		if n.Data != "head" && skipTags[n.Data] {
+			return nil
+		}
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if found := findTitleElement(c); found != nil {
+			return found
+		}
+	}
+	return nil
 }
 
 // walk emits blocks in document order. The callback returns false to stop.
 func walk(n *html.Node, emit func(string) bool) bool {
-	if n.Type == html.ElementNode {
-		if skipElement(n) {
+	return walkMixed(n, emit, "", 0)
+}
+
+// walkMixed emits a container's direct prose and its nested blocks in document
+// order. Inline markup stays text; block children are emitted once by their own
+// handler. firstPrefix marks the first paragraph block, such as a list item's
+// indented "- ". listDepth is the number of enclosing lists.
+func walkMixed(n *html.Node, emit func(string) bool, firstPrefix string, listDepth int) bool {
+	var prose strings.Builder
+	pending := firstPrefix
+	emitBlock := func(block string) bool {
+		if pending != "" {
+			block = pending + block
+			pending = ""
+		}
+		return emit(block)
+	}
+	flush := func() bool {
+		block := collapse(prose.String())
+		prose.Reset()
+		if block == "" {
 			return true
 		}
-		switch n.Data {
-		case "h1", "h2", "h3", "h4", "h5", "h6":
-			return emit("## " + collapse(gatherText(n)))
-		case "p":
-			return emit(collapse(gatherText(n)))
-		case "li":
-			return emit("- " + collapse(gatherText(n)))
-		case "pre":
-			return emit("```\n" + strings.TrimSpace(gatherRawText(n)) + "\n```")
-		case "blockquote":
-			return emit(quote(gatherText(n)))
-		}
-		// Many pages use unstyled divs for prose. Treat a container with no
-		// block-level descendants as one paragraph, but recurse otherwise so
-		// its real paragraphs are not duplicated.
-		if (n.Data == "div" || n.Data == "section") && !hasBlockDescendant(n) {
-			return emit(collapse(gatherText(n)))
-		}
+		return emitBlock(block)
 	}
+
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if !walk(c, emit) {
-			return false
+		if c.Type == html.TextNode {
+			prose.WriteString(c.Data)
+			continue
+		}
+		if c.Type != html.ElementNode || skipElement(c) {
+			continue
+		}
+		switch c.Data {
+		case "br":
+			prose.WriteString(" ")
+		case "h1", "h2", "h3", "h4", "h5", "h6":
+			if !flush() {
+				return false
+			}
+			if !emit("## " + collapse(gatherText(c))) {
+				return false
+			}
+		case "p":
+			if !flush() {
+				return false
+			}
+			if !emitBlock(collapse(gatherText(c))) {
+				return false
+			}
+		case "pre":
+			if !flush() {
+				return false
+			}
+			if !emit("```\n" + strings.TrimSpace(gatherRawText(c)) + "\n```") {
+				return false
+			}
+		case "blockquote":
+			if !flush() {
+				return false
+			}
+			if !emit(quote(gatherText(c))) {
+				return false
+			}
+		case "li":
+			if !flush() {
+				return false
+			}
+			indent := strings.Repeat("  ", max(listDepth-1, 0))
+			if !walkMixed(c, emit, indent+"- ", listDepth) {
+				return false
+			}
+		default:
+			if blockTags[c.Data] {
+				if !flush() {
+					return false
+				}
+				depth := listDepth
+				if c.Data == "ul" || c.Data == "ol" {
+					depth = min(listDepth+1, maxListIndentDepth)
+				}
+				if !walkMixed(c, emit, "", depth) {
+					return false
+				}
+				continue
+			}
+			prose.WriteString(gatherText(c))
 		}
 	}
-	return true
+	return flush()
 }
 
 var skipTags = map[string]bool{
@@ -199,13 +411,14 @@ func skipElement(n *html.Node) bool {
 	if skipTags[n.Data] {
 		return true
 	}
+	return hiddenElement(n)
+}
+
+func hiddenElement(n *html.Node) bool {
 	if _, ok := attrValue(n, "hidden"); ok {
 		return true
 	}
-	if strings.EqualFold(strings.TrimSpace(attr(n, "aria-hidden")), "true") {
-		return true
-	}
-	return false
+	return strings.EqualFold(strings.TrimSpace(attr(n, "aria-hidden")), "true")
 }
 
 var blockTags = map[string]bool{
@@ -216,30 +429,23 @@ var blockTags = map[string]bool{
 	"figure": true, "figcaption": true,
 }
 
-func hasBlockDescendant(n *html.Node) bool {
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if c.Type == html.ElementNode {
-			if blockTags[c.Data] {
-				return true
-			}
-			if hasBlockDescendant(c) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func gatherText(n *html.Node) string {
 	var b strings.Builder
 	var rec func(*html.Node)
 	rec = func(n *html.Node) {
-		if n.Type == html.ElementNode && skipElement(n) {
-			return
+		if n.Type == html.ElementNode {
+			if skipElement(n) {
+				return
+			}
+			if n.Data == "br" {
+				b.WriteByte(' ')
+				return
+			}
 		}
 		if n.Type == html.TextNode {
+			// Inline markup splits prose into adjacent text nodes. Concatenate
+			// them exactly: HTML does not imply whitespace at a tag boundary.
 			b.WriteString(n.Data)
-			b.WriteByte(' ')
 			return
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -254,8 +460,14 @@ func gatherRawText(n *html.Node) string {
 	var b strings.Builder
 	var rec func(*html.Node)
 	rec = func(n *html.Node) {
-		if n.Type == html.ElementNode && skipElement(n) {
-			return
+		if n.Type == html.ElementNode {
+			if skipElement(n) {
+				return
+			}
+			if n.Data == "br" {
+				b.WriteByte('\n')
+				return
+			}
 		}
 		if n.Type == html.TextNode {
 			b.WriteString(n.Data)
@@ -290,6 +502,23 @@ func findElement(n *html.Node, match func(*html.Node) bool) *html.Node {
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		if found := findElement(c, match); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+// findVisibleElement is findElement that prunes skipped and hidden subtrees, so
+// a hidden heading cannot supply the title.
+func findVisibleElement(n *html.Node, match func(*html.Node) bool) *html.Node {
+	if n.Type == html.ElementNode && skipElement(n) {
+		return nil
+	}
+	if n.Type == html.ElementNode && match(n) {
+		return n
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if found := findVisibleElement(c, match); found != nil {
 			return found
 		}
 	}
