@@ -88,7 +88,8 @@ func DefaultUserAgent() string {
 }
 
 // Result is one fetched page. Body is already bounded by Limits.MaxArticleBytes;
-// callers must close it.
+// callers must close it. ContentType is the validated media type with its
+// declared charset, when one was given, so extraction can decode correctly.
 type Result struct {
 	Body        io.ReadCloser
 	ContentType string
@@ -96,29 +97,41 @@ type Result struct {
 	Elapsed     time.Duration
 }
 
-// Fetch retrieves rawURL under the article fetch policy.
+// Fetch retrieves rawURL under the article fetch policy. It is the only
+// exported way to fetch an article, so every request goes through the hardened
+// client built by newFetchClient; no caller can substitute an arbitrary client
+// or transport and bypass the scheme, port, address, redirect or userinfo
+// policy.
 func Fetch(ctx context.Context, rawURL string, limits Limits) (Result, error) {
-	return fetch(ctx, rawURL, limits, nil)
+	return fetch(ctx, rawURL, limits)
 }
 
-// fetch is Fetch with an optional client override for tests. Production always
-// passes nil and gets the hardened client built here.
-func fetch(ctx context.Context, rawURL string, limits Limits, client *http.Client) (Result, error) {
+// newFetchClient builds the fetcher's HTTP client. It is a package variable
+// only so tests can allow the loopback interface and the ephemeral port of an
+// httptest server; it is unexported, so production code and external packages
+// cannot replace it. Tests must still return a client from NewSafe with
+// RejectUserinfo set, preserving the policy under test.
+var newFetchClient = buildFetchClient
+
+func buildFetchClient(limits Limits) *http.Client {
+	return httpclient.NewSafe(httpclient.Options{
+		Timeout:        limits.Timeout,
+		AnyPort:        false,
+		MaxRedirects:   limits.MaxRedirects,
+		UserAgent:      limits.UserAgent,
+		AllowPrivate:   false,
+		Proxy:          nil,
+		RejectUserinfo: true,
+	})
+}
+
+func fetch(ctx context.Context, rawURL string, limits Limits) (Result, error) {
 	limits = limits.withDefaults()
 	target, err := validateURL(rawURL)
 	if err != nil {
 		return Result{}, err
 	}
-	if client == nil {
-		client = httpclient.NewSafe(httpclient.Options{
-			Timeout:      limits.Timeout,
-			AnyPort:      false,
-			MaxRedirects: limits.MaxRedirects,
-			UserAgent:    limits.UserAgent,
-			AllowPrivate: false,
-			Proxy:        nil,
-		})
-	}
+	client := newFetchClient(limits)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
@@ -142,9 +155,9 @@ func fetch(ctx context.Context, rawURL string, limits Limits, client *http.Clien
 		_ = resp.Body.Close()
 		return Result{}, err
 	}
-	finalURL := target.String()
+	finalURL := WithoutUserinfo(target.String())
 	if resp.Request != nil && resp.Request.URL != nil {
-		finalURL = resp.Request.URL.String()
+		finalURL = WithoutUserinfo(resp.Request.URL.String())
 	}
 	return Result{
 		Body:        &limitedBody{Reader: httpclient.LimitBody(resp.Body, limits.MaxArticleBytes), Closer: resp.Body},
@@ -154,7 +167,9 @@ func fetch(ctx context.Context, rawURL string, limits Limits, client *http.Clien
 	}, nil
 }
 
-// validateURL accepts only absolute http(s) URLs with a host.
+// validateURL accepts only absolute http(s) URLs with a host and without
+// userinfo. It never echoes the raw URL in an error: a rejected link can carry
+// a password, and those errors are persisted as the brief's failure detail.
 func validateURL(raw string) (*url.URL, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -162,27 +177,54 @@ func validateURL(raw string) (*url.URL, error) {
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %q", ErrNoLink, raw)
+		return nil, fmt.Errorf("%w: URL could not be parsed", ErrNoLink)
 	}
 	if u.Scheme == "" {
-		return nil, fmt.Errorf("%w: %q", ErrNoLink, raw)
+		return nil, fmt.Errorf("%w: URL has no scheme", ErrNoLink)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, fmt.Errorf("%w: %s", ErrBlocked, u.Scheme)
 	}
 	if u.Host == "" {
-		return nil, fmt.Errorf("%w: %q", ErrNoLink, raw)
+		return nil, fmt.Errorf("%w: URL has no host", ErrNoLink)
+	}
+	if u.User != nil {
+		return nil, fmt.Errorf("%w: URL credentials are not allowed", ErrBlocked)
 	}
 	return u, nil
 }
 
+// WithoutUserinfo returns raw with any userinfo removed. A URL that cannot be
+// parsed yields "", the safe choice for a value that may be displayed, logged or
+// stored: the raw text could be exactly the credential. A URL without userinfo
+// is returned unchanged.
+func WithoutUserinfo(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	if u.User == nil {
+		return raw
+	}
+	clean := *u
+	clean.User = nil
+	return clean.String()
+}
+
 func htmlContentType(header string) (string, error) {
-	mediaType, _, err := mime.ParseMediaType(header)
+	mediaType, params, err := mime.ParseMediaType(header)
 	if err != nil {
 		return "", fmt.Errorf("%w: %q", ErrUnsupportedContentType, header)
 	}
 	switch strings.ToLower(mediaType) {
 	case "text/html", "application/xhtml+xml":
+		// Keep the declared charset: discarding it makes extraction guess a
+		// different encoding. The media type itself stays restricted.
+		if cs := strings.TrimSpace(params["charset"]); cs != "" {
+			if formatted := mime.FormatMediaType(mediaType, map[string]string{"charset": cs}); formatted != "" {
+				return formatted, nil
+			}
+		}
 		return mediaType, nil
 	default:
 		return "", fmt.Errorf("%w: %s", ErrUnsupportedContentType, mediaType)
@@ -192,6 +234,10 @@ func htmlContentType(header string) (string, error) {
 // classify maps transport failures onto the stable product failure classes.
 func classify(err error) error {
 	switch {
+	case errors.Is(err, httpclient.ErrCredentialedURL):
+		// Do not wrap the transport error: it is a *url.Error whose text
+		// contains the credentialed URL.
+		return fmt.Errorf("%w: URL credentials are not allowed", ErrBlocked)
 	case errors.Is(err, httpclient.ErrTooManyRedirects):
 		return fmt.Errorf("%w: %v", ErrTooManyRedirects, err)
 	case errors.Is(err, httpclient.ErrUnsupportedScheme),

@@ -303,6 +303,45 @@ func TestSafeClientRedirectToBlockedAddress(t *testing.T) {
 	}
 }
 
+func TestSafeClientRejectsUserinfo(t *testing.T) {
+	srv := redirectServer(t)
+	withUserinfo := func(raw string) string {
+		return strings.Replace(raw, "http://", "http://feeduser:feedsecret@", 1)
+	}
+	credentialed := withUserinfo(srv.URL) + "/chain/0"
+	c := NewSafe(Options{AllowPrivate: true, AnyPort: true, MaxRedirects: 5, RejectUserinfo: true})
+
+	for _, tc := range []struct {
+		name   string
+		target string
+	}{
+		{"initial request", credentialed},
+		{"redirect hop", srv.URL + "/to?u=" + url.QueryEscape(credentialed)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := get(t, c, tc.target)
+			if !errors.Is(err, ErrCredentialedURL) {
+				t.Fatalf("err = %v, want ErrCredentialedURL", err)
+			}
+		})
+	}
+
+	// The credential check wins over the redirect-count check, so an over-limit
+	// chain cannot surface an error whose URL carries userinfo.
+	tight := NewSafe(Options{AllowPrivate: true, AnyPort: true, MaxRedirects: 0, RejectUserinfo: true})
+	_, err := get(t, tight, srv.URL+"/to?u="+url.QueryEscape(credentialed))
+	if !errors.Is(err, ErrCredentialedURL) {
+		t.Fatalf("over-limit credentialed redirect err = %v, want ErrCredentialedURL", err)
+	}
+
+	// The option is opt-in; an ordinary redirect still works with it set.
+	resp, err := get(t, c, srv.URL+"/chain/1")
+	if err != nil {
+		t.Fatalf("ordinary redirect: %v", err)
+	}
+	_ = resp.Body.Close()
+}
+
 func TestSafeClientUserAgent(t *testing.T) {
 	srv := redirectServer(t)
 	c := NewSafe(Options{AllowPrivate: true, AnyPort: true, MaxRedirects: 3, UserAgent: "rabbithole-test/1"})
