@@ -1,0 +1,87 @@
+{{/* The on-demand Decision Brief panel. Every state swaps in place through
+     htmx: the root carries an id safe for arbitrary item ids, and the running
+     state re-fetches itself every 2s until a terminal panel removes the
+     attribute. URLID is the path-escaped item id used in URLs and DOM ids;
+     actions replace the nearest .brief panel. */}}
+{{define "brief_panel"}}
+<div class="brief brief--{{.Status}}" id="brief-{{.URLID}}"
+  {{- if or (eq .Status "queued") (eq .Status "running")}} hx-get="/items/{{.URLID}}/brief/status" hx-trigger="every 2s [!document.hidden]" hx-target="this" hx-swap="outerHTML"{{end}}>
+  {{- if eq .Status "idle"}}
+  <p class="brief__empty">No deep dive yet.</p>
+  <p class="brief__hint">Fetch this article and judge it against your profile.</p>
+  <button type="button" class="brief__btn brief__btn--go"
+    hx-post="/items/{{.URLID}}/brief" hx-target="closest .brief" hx-swap="outerHTML"
+    hx-disabled-elt="this">[ deep dive ]</button>
+  {{- else if or (eq .Status "queued") (eq .Status "running")}}
+  <p class="brief__loading" role="status"><span class="brief__dot" aria-hidden="true"></span>{{.PhaseText}}{{if .Current}} — showing the last brief until the update finishes{{end}}</p>
+  {{- if .Current}}{{template "brief_ready_body" .Current}}{{end}}
+  {{- else if eq .Status "ready"}}
+  {{- if .Current}}{{template "brief_ready" .Current}}{{else}}<p class="brief__empty">No brief is available.</p>{{end}}
+  {{- else if eq .Status "failed"}}
+  <p class="brief__error">{{.ErrorMessage}}</p>
+  {{- if .ErrorDetail}}<p class="brief__detail">{{.ErrorDetail}}</p>{{end}}
+  <div class="brief__acts">
+    <button type="button" class="brief__btn brief__btn--go"
+      hx-post="/items/{{.URLID}}/brief" hx-target="closest .brief" hx-swap="outerHTML"
+      hx-disabled-elt="this">[ retry ]</button>
+  </div>
+  {{- if .Previous}}
+  <section class="brief__previous" aria-label="Last successful brief">
+    <p class="brief__previous-title">Last successful brief</p>
+    {{template "brief_ready_body" .Previous}}
+  </section>
+  {{- end}}
+  {{- else if eq .Status "unavailable"}}
+  <p class="brief__error" role="status">Decision Brief status is temporarily unavailable.</p>
+  <p class="brief__hint">Reload the page to try again.</p>
+  {{- end}}
+</div>
+{{end}}
+
+{{define "brief_ready"}}
+{{template "brief_ready_body" .}}
+<div class="brief__acts">
+  <button type="button" class="brief__btn"
+    hx-post="/items/{{.URLID}}/brief/refresh" hx-target="closest .brief" hx-swap="outerHTML"
+    hx-disabled-elt="this">refresh</button>
+</div>
+{{end}}
+
+{{define "brief_ready_body"}}
+<div class="brief__compare">
+  <span class="brief__scores">
+    {{- if .HasFeedScore}}Feed score {{.FeedScore}}/10{{end -}}
+    {{- if and .HasFeedScore .HasScore}} &middot; {{end -}}
+    {{- if .HasScore}}Full-text {{.Score}}/10{{end -}}
+    {{- if and (not .HasFeedScore) (not .HasScore)}}No score recorded{{end -}}
+  </span>
+  <span class="brief__read">~{{.ReadingMinutes}} min read</span>
+</div>
+<p class="brief__explain">{{.ScoreNote}}</p>
+<p class="brief__rec brief__rec--{{.Recommendation}}">{{.RecommendationLabel}}</p>
+<div class="brief__section">
+  <h4>WHY THIS MATTERS TO YOU</h4>
+  <p>{{.Why}}</p>
+</div>
+<div class="brief__section">
+  <h4>KEY IDEAS</h4>
+  <ul>{{range .KeyPoints}}<li>{{.}}</li>{{end}}</ul>
+</div>
+<div class="brief__section">
+  <h4>WHAT IS ACTUALLY NEW</h4>
+  <p>{{.Novelty}}</p>
+</div>
+<div class="brief__section">
+  <h4>LIMITATIONS / CAVEATS</h4>
+  <p>{{.Caveats}}</p>
+</div>
+<div class="brief__section">
+  <h4>FOCUS ON</h4>
+  <p>{{.Focus}}</p>
+</div>
+{{- if .Truncated}}
+<p class="brief__truncated">Part of the article was analyzed — the rest did not fit the configured limit.</p>
+{{- end}}
+<p class="brief__prov">{{.Provenance}}</p>
+{{- if .FinalURL}}<p class="brief__url">Fetched from {{.FinalURL}}</p>{{end}}
+{{end}}

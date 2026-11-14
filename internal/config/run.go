@@ -32,20 +32,22 @@ const RunSchemaVersion = 2
 // that are not stored (store, profile, ingest.feeds). It is decoded leniently,
 // so unknown keys are ignored.
 type File struct {
-	User      string        `yaml:"user"`
-	Profile   string        `yaml:"profile"`
-	Inference FileInference `yaml:"inference"`
-	Ingest    FileIngest    `yaml:"ingest"`
-	Store     StoreConfig   `yaml:"store"`
+	User          string              `yaml:"user"`
+	Profile       string              `yaml:"profile"`
+	Inference     FileInference       `yaml:"inference"`
+	Ingest        FileIngest          `yaml:"ingest"`
+	DecisionBrief DecisionBriefConfig `yaml:"decision_brief"`
+	Store         StoreConfig         `yaml:"store"`
 }
 
 // Config is the stored shape: what the config store keeps and what ingest
 // and the web UI read. The store block, profile and ingest.feeds are import
 // directives and live elsewhere.
 type Config struct {
-	User      string          `yaml:"user,omitempty"` // shell-prompt name on the web UI; blank falls back to the OS user
-	Inference InferenceConfig `yaml:"inference,omitempty"`
-	Ingest    IngestConfig    `yaml:"ingest,omitempty"`
+	User          string              `yaml:"user,omitempty"` // shell-prompt name on the web UI; blank falls back to the OS user
+	Inference     InferenceConfig     `yaml:"inference,omitempty"`
+	Ingest        IngestConfig        `yaml:"ingest,omitempty"`
+	DecisionBrief DecisionBriefConfig `yaml:"decision_brief,omitempty"`
 
 	// AdaptiveRanking adds bounded explicit reader feedback to the scoring
 	// prompt. Unset means on, preserving profile-plus-feedback behavior for
@@ -146,9 +148,10 @@ func ReadFile(path string) (File, error) {
 // normalization removed.
 func (f File) Split() (run Config, store StoreConfig, legacy Legacy, dropped []string) {
 	run = Config{
-		User:      f.User,
-		Inference: f.Inference.InferenceConfig,
-		Ingest:    IngestConfig{DigestDir: f.Ingest.DigestDir},
+		User:          f.User,
+		Inference:     f.Inference.InferenceConfig,
+		Ingest:        IngestConfig{DigestDir: f.Ingest.DigestDir},
+		DecisionBrief: f.DecisionBrief,
 	}
 	dropped = run.Normalize()
 	legacy.ProfilePath = f.Profile
@@ -236,6 +239,11 @@ func (r *Config) DropDefaults() (dropped []string) {
 			try("inference."+f.name, func(c *Config) { f.clear(&c.Inference) })
 		}
 	}
+	for _, f := range decisionBriefFields {
+		if f.isSet(&r.DecisionBrief) {
+			try("decision_brief."+f.name, func(c *Config) { f.clear(&c.DecisionBrief) })
+		}
+	}
 	return dropped
 }
 
@@ -257,24 +265,28 @@ func cloneBool(b *bool) *bool {
 	return &v
 }
 
-// Prepare normalizes, applies defaults and validates, in that order. Normalizing
-// comes first because defaults would otherwise fill fields the provider ignores.
+// Prepare normalizes, validates raw values, applies defaults and validates the
+// effective config, in that order. Normalizing comes first because defaults
+// would otherwise fill fields the provider ignores; raw validation comes before
+// defaulting so a negative value cannot be silently replaced by a default.
 // dropped lists the non-applicable keys that were set and removed.
 func (r *Config) Prepare() (dropped []string, err error) {
 	dropped = r.Normalize()
+	rawErr := r.DecisionBrief.validateRaw()
 	r.applyDefaults()
-	return dropped, r.validate()
+	return dropped, errors.Join(rawErr, r.validate())
 }
 
 // Canonical is the form that is stored, marshaled and hashed: normalized but
 // not defaulted, so it holds only what the user set and a later release's new
-// defaults still reach them. It validates a defaulted copy, so the errors match
-// Prepare's.
+// defaults still reach them. It validates raw values and a defaulted copy, so
+// the errors match Prepare's.
 func (r *Config) Canonical() (dropped []string, err error) {
 	dropped = r.Normalize()
+	rawErr := r.DecisionBrief.validateRaw()
 	eff := *r
 	eff.applyDefaults()
-	return dropped, eff.validate()
+	return dropped, errors.Join(rawErr, eff.validate())
 }
 
 // Normalize clears inference fields the provider does not read and makes the
@@ -345,6 +357,7 @@ func (r *Config) applyDefaults() {
 	if in.MaxParallel <= 0 {
 		in.MaxParallel = defaultMaxParallel
 	}
+	r.DecisionBrief = r.DecisionBrief.WithDefaults()
 }
 
 // FieldError is one validation failure, keyed by the dotted field name so a UI
@@ -398,6 +411,9 @@ func (r *Config) validate() error {
 			add(inferenceKeyField, "%s: %s", inferenceKeyField, err)
 		}
 	}
+	// Decision Brief raw values are checked by validateRaw before defaulting.
+	// WithDefaults intentionally clamps upper bounds and floors the output-token
+	// minimum, so the effective values need no range checks here.
 	return errors.Join(errs...)
 }
 
