@@ -24,6 +24,16 @@ import (
 // returns, and the page width when paging older via before.
 const defaultListWindow = 3 * 24 * time.Hour
 
+// internalErrorMessage is the only storage diagnostic a client may see. The
+// original error is logged with its operation instead; it can contain database
+// paths, connection details or other internal state.
+const internalErrorMessage = "internal server error"
+
+func writeInternalError(w http.ResponseWriter, op string, err error) {
+	log.Error().Err(err).Str("op", op).Msg("API storage request failed")
+	http.Error(w, internalErrorMessage, http.StatusInternalServerError)
+}
+
 // API wires the JSON HTTP handlers to a Store.
 type API struct {
 	db *store.Store
@@ -114,12 +124,12 @@ func (s *API) handleListItems(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.List(r.Context(), filter)
 	if err != nil {
 		// A bad status/sort is the client's fault (400); anything else is an
-		// execution failure on our side (500).
-		status := http.StatusInternalServerError
+		// execution failure on our side (500) and must not echo storage text.
 		if errors.Is(err, store.ErrInvalidFilter) {
-			status = http.StatusBadRequest
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
-		http.Error(w, err.Error(), status)
+		writeInternalError(w, "list_items", err)
 		return
 	}
 	items := make([]Item, len(rows))
@@ -149,7 +159,7 @@ type sourceCount struct {
 func (s *API) handleSources(w http.ResponseWriter, r *http.Request) {
 	counts, err := s.db.Sources(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "list_sources", err)
 		return
 	}
 	resp := make([]sourceCount, len(counts))
@@ -166,12 +176,14 @@ func (s *API) handleSetStatus(status string) http.HandlerFunc {
 		id := r.PathValue("id")
 		// status is fixed per route, so the only client error here is an
 		// unknown id (404); everything else is an execution failure (500).
-		if err := s.db.UpdateUserState(r.Context(), id, store.UserPatch{Status: &status}); err != nil {
+		// The API contract says {id} is the item's ID, not its link. Use the
+		// exact-ID mutation so a colliding link on another item cannot win.
+		if err := s.db.UpdateUserStateByID(r.Context(), id, store.UserPatch{Status: &status}); err != nil {
 			if errors.Is(err, store.ErrItemNotFound) {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, "set_status", err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

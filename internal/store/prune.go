@@ -143,6 +143,13 @@ func (s *Store) PruneItems(ctx context.Context, filter PruneFilter) (PruneResult
 	where, args := filter.whereClause()
 	var n int64
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		// Briefs exist only for the items they describe: delete them with the
+		// same selection in the same transaction, so a prune cannot orphan rows.
+		if _, err := s.txExec(ctx, tx,
+			"DELETE FROM item_briefs WHERE item_id IN (SELECT id FROM items WHERE "+where+")",
+			args...); err != nil {
+			return fmt.Errorf("prune item briefs: %w", err)
+		}
 		res, err := s.txExec(ctx, tx, "DELETE FROM items WHERE "+where, args...)
 		if err != nil {
 			return fmt.Errorf("prune items: %w", err)

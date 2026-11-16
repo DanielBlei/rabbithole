@@ -346,3 +346,47 @@ func TestScoreOmitsSystemMessageWhenPromptEmpty(t *testing.T) {
 		})
 	}
 }
+
+func TestChatJSONSendsSchemaAndCaps(t *testing.T) {
+	var got struct {
+		Format   json.RawMessage `json:"format"`
+		Options  map[string]any  `json:"options"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/api/chat") {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"{\"ok\":true}"},"done":true}` + "\n"))
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{NumCtx: 4096}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := c.ChatJSON(t.Context(), "system", "user",
+		json.RawMessage(`{"type":"object"}`), 1234)
+	if err != nil {
+		t.Fatalf("ChatJSON: %v", err)
+	}
+	if content != `{"ok":true}` {
+		t.Errorf("content = %q", content)
+	}
+	if string(got.Format) != `{"type":"object"}` {
+		t.Errorf("format = %s", got.Format)
+	}
+	if got.Options["num_predict"] != float64(1234) || got.Options["num_ctx"] != float64(4096) {
+		t.Errorf("options = %v", got.Options)
+	}
+	if len(got.Messages) != 2 || got.Messages[0].Role != "system" || got.Messages[1].Role != "user" {
+		t.Errorf("messages = %+v", got.Messages)
+	}
+}

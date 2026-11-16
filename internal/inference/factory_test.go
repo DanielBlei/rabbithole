@@ -5,12 +5,15 @@ package inference
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/decisionbrief"
 	"github.com/DanielBlei/rabbithole/internal/feeds"
 )
 
@@ -144,4 +147,83 @@ func TestResolveExpandsAPIKeyReferences(t *testing.T) {
 			t.Fatalf("Resolve() error = %v, want it to name inference.api_key", err)
 		}
 	})
+}
+
+func TestResolveBrief(t *testing.T) {
+	for _, tt := range []struct{ provider, model string }{{"ollama", "m:latest"}, {"openai", "m"}, {"vllm", "m"}} {
+		provider := tt.provider
+		t.Run(provider+" builds a generator and names its provenance", func(t *testing.T) {
+			cfg := config.InferenceConfig{Provider: provider, Host: "http://127.0.0.1:1", Model: tt.model}
+			gen, prov, err := ResolveBrief(t.Context(), cfg, false)
+			if err != nil {
+				t.Fatalf("ResolveBrief: %v", err)
+			}
+			if gen == nil {
+				t.Fatal("generator is nil")
+			}
+			if prov.Provider != provider || prov.Model != tt.model {
+				t.Fatalf("provenance = %+v, want %s/%s", prov, provider, tt.model)
+			}
+		})
+	}
+	t.Run("heuristic is unavailable", func(t *testing.T) {
+		gen, prov, err := ResolveBrief(t.Context(), config.InferenceConfig{Provider: "heuristic"}, false)
+		if gen != nil || prov != (decisionbrief.Provenance{}) || !errors.Is(err, decisionbrief.ErrBriefUnavailable) {
+			t.Fatalf("gen = %v, prov = %+v, err = %v; want ErrBriefUnavailable", gen, prov, err)
+		}
+	})
+	t.Run("unknown provider", func(t *testing.T) {
+		if _, _, err := ResolveBrief(t.Context(), config.InferenceConfig{Provider: "nope"}, false); err == nil {
+			t.Fatal("unknown provider accepted")
+		}
+	})
+}
+
+// TestResolveBriefStructuredOutput pins the factory's half of findings 12/14:
+// structured output off must remove the provider's schema field entirely, not
+// send a null schema, for both provider dialects.
+func TestResolveBriefStructuredOutput(t *testing.T) {
+	for _, provider := range []string{"ollama", "vllm"} {
+		for _, structured := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s structured=%v", provider, structured), func(t *testing.T) {
+				var sent map[string]any
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+						t.Errorf("decode request: %v", err)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					if provider == "ollama" {
+						w.Header().Set("Content-Type", "application/x-ndjson")
+						_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"{}"},"done":true}` + "\n"))
+						return
+					}
+					_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{}"},"finish_reason":"stop"}]}`))
+				}))
+				t.Cleanup(srv.Close)
+
+				cfg := config.InferenceConfig{
+					Provider: provider, Host: srv.URL, Model: "model",
+					StructuredOutput: &structured,
+				}
+				if provider == "ollama" {
+					cfg.Model = "model:latest"
+				}
+				gen, _, err := ResolveBrief(t.Context(), cfg, false)
+				if err != nil {
+					t.Fatalf("ResolveBrief: %v", err)
+				}
+				if _, err := gen.ChatJSON(t.Context(), "system", "user", decisionbrief.Schema(), 128); err != nil {
+					t.Fatalf("ChatJSON: %v", err)
+				}
+				schemaField := "response_format"
+				if provider == "ollama" {
+					schemaField = "format"
+				}
+				if _, sentSchema := sent[schemaField]; sentSchema != structured {
+					t.Errorf("%s = %v, want present=%v; request=%v",
+						schemaField, sent[schemaField], structured, sent)
+				}
+			})
+		}
+	}
 }

@@ -161,6 +161,7 @@ func (c *Client) probeModel(ctx context.Context, effort string) error {
 type Client struct {
 	flavor       Flavor
 	host         string
+	credential   string // non-reversible API credential discriminator
 	model        string
 	think        bool
 	effort       string // configured reasoning_effort while thinking (openai only)
@@ -190,6 +191,7 @@ func New(
 	c := &Client{
 		flavor:       flavor,
 		host:         strings.TrimRight(host, "/"),
+		credential:   httpclient.CredentialID(apiKey),
 		model:        model,
 		think:        think,
 		effort:       effort,
@@ -205,6 +207,12 @@ func New(
 		c.sendEffort = effort
 		if !think {
 			c.sendEffort = "low"
+		}
+		// A scoring client may already have negotiated this model's accepted
+		// effort. Reuse it so a brief does not repeat the probe.
+		if resolved, ok := lookupEffortCapability(c.effortKey()); ok {
+			c.sendEffort = resolved
+			c.effortResolved = true
 		}
 	}
 	return c, nil
@@ -231,19 +239,100 @@ func (c *Client) Validate(ctx context.Context) error {
 	if err != nil || c.flavor != OpenAI {
 		return err
 	}
-	return c.resolveEffort(ctx)
+	return c.negotiateEffort(ctx, c.probeModelWithRetry)
+}
+
+// NegotiateEffort resolves the reasoning_effort this OpenAI model accepts. It
+// is the brief path's capability check: one probe per candidate, no startup
+// retry backoff, and the answer is cached so later dives do not probe again.
+func (c *Client) NegotiateEffort(ctx context.Context) error {
+	if c.flavor != OpenAI {
+		return nil
+	}
+	return c.negotiateEffort(ctx, c.probeModel)
+}
+
+// effortKey identifies one endpoint, model, credential and reasoning
+// configuration. Capability can differ per credential on a gateway, so the
+// non-reversible credential discriminator is part of the key.
+type effortKey struct {
+	flavor      Flavor
+	host, model string
+	credential  string
+	think       bool
+	effort      string
+}
+
+func (c *Client) effortKey() effortKey {
+	return effortKey{c.flavor, c.host, c.model, c.credential, c.think, c.effort}
+}
+
+// effortCapability is the negotiated answer for one effortKey. Its mutex
+// serializes probes so concurrent dives share one negotiation.
+type effortCapability struct {
+	mu     sync.Mutex
+	known  bool
+	effort string
+}
+
+var effortCapabilities sync.Map // effortKey -> *effortCapability
+
+func effortCapabilityFor(k effortKey) *effortCapability {
+	v, _ := effortCapabilities.LoadOrStore(k, &effortCapability{})
+	return v.(*effortCapability)
+}
+
+func lookupEffortCapability(k effortKey) (string, bool) {
+	capability := effortCapabilityFor(k)
+	capability.mu.Lock()
+	defer capability.mu.Unlock()
+	return capability.effort, capability.known
+}
+
+// resetEffortCapabilities clears the process-wide cache for tests.
+func resetEffortCapabilities() {
+	effortCapabilities.Range(func(k, _ any) bool {
+		effortCapabilities.Delete(k)
+		return true
+	})
+}
+
+// negotiateEffort learns which reasoning_effort the model accepts. probe is
+// probeModelWithRetry at startup and probeModel for a dive, so a first dive
+// never pays the startup backoff. A cached answer is applied without a probe.
+func (c *Client) negotiateEffort(ctx context.Context, probe func(context.Context, string) error) error {
+	capability := effortCapabilityFor(c.effortKey())
+	capability.mu.Lock()
+	defer capability.mu.Unlock()
+	if capability.known {
+		c.effortMu.Lock()
+		c.sendEffort = capability.effort
+		c.effortResolved = true
+		c.effortMu.Unlock()
+		return nil
+	}
+	c.effortMu.Lock()
+	if c.effortResolved {
+		capability.known, capability.effort = true, c.sendEffort
+		c.effortMu.Unlock()
+		return nil
+	}
+	c.effortMu.Unlock()
+	if err := c.resolveEffort(ctx, probe); err != nil {
+		return err
+	}
+	c.effortMu.Lock()
+	if c.effortResolved {
+		capability.known, capability.effort = true, c.sendEffort
+	}
+	c.effortMu.Unlock()
+	return nil
 }
 
 // resolveEffort picks the reasoning_effort Score sends: the configured one
 // while thinking, otherwise the lowest the model accepts, and none at all when
-// the model takes no reasoning_effort. Validate finishes before any Score runs,
-// so the write to sendEffort needs no lock beyond the one guarding the probe.
-func (c *Client) resolveEffort(ctx context.Context) error {
-	c.effortMu.Lock()
-	defer c.effortMu.Unlock()
-	if c.effortResolved {
-		return nil
-	}
+// the model takes no reasoning_effort. probe decides one candidate.
+func (c *Client) resolveEffort(ctx context.Context, probe func(context.Context, string) error) error {
 	logger := zerolog.Ctx(ctx)
 	candidates := lowestEfforts
 	if c.think {
@@ -254,12 +343,14 @@ func (c *Client) resolveEffort(ctx context.Context) error {
 	}
 	var rejected error
 	for _, effort := range candidates {
-		err := c.probeModelWithRetry(ctx, effort)
+		err := probe(ctx, effort)
 		var p *probeError
 		switch {
 		case err == nil:
+			c.effortMu.Lock()
 			c.sendEffort = effort
 			c.effortResolved = true
+			c.effortMu.Unlock()
 			if effort == "" {
 				logger.Warn().Str("model", c.model).Err(rejected).
 					Msg("openai: model rejects reasoning_effort; sending none")
@@ -273,7 +364,10 @@ func (c *Client) resolveEffort(ctx context.Context) error {
 		case errors.As(err, &p) && !p.transient():
 			return fmt.Errorf("openai chat probe: %w", err) // auth or model, not an effort question
 		default:
-			logger.Debug().Err(err).Str("model", c.model).Str("reasoning_effort", c.sendEffort).
+			c.effortMu.Lock()
+			current := c.sendEffort
+			c.effortMu.Unlock()
+			logger.Debug().Err(err).Str("model", c.model).Str("reasoning_effort", current).
 				Msg("openai: reasoning_effort probe inconclusive, keeping the default")
 			return nil
 		}
@@ -335,6 +429,100 @@ type jsonSchema struct {
 	Name   string          `json:"name"`
 	Strict bool            `json:"strict"`
 	Schema json.RawMessage `json:"schema"`
+}
+
+// ChatJSON sends one JSON-mode completion with the caller's schema and output
+// cap. It is the Decision Brief's single synthesis call: timeouts, think
+// handling, auth and schema enforcement stay on the same client path as scoring.
+func (c *Client) ChatJSON(
+	ctx context.Context,
+	system, user string,
+	schema json.RawMessage,
+	maxTokens int,
+) (string, error) {
+	logger := zerolog.Ctx(ctx)
+	ctx, cancel := context.WithTimeout(ctx, chatTimeout)
+	defer cancel()
+
+	var messages []chatMessage
+	if system != "" {
+		messages = append(messages, chatMessage{Role: "system", Content: system})
+	}
+	messages = append(messages, chatMessage{Role: "user", Content: user})
+	reqBody := chatRequest{
+		Model:    c.model,
+		Stream:   false,
+		tokenCap: c.tokenCap(maxTokens),
+		Messages: messages,
+	}
+	// An empty schema means structured output is disabled (the factory sets
+	// tuning.Unconstrained and the prompt carries the field contract). Sending a
+	// json_schema response_format with a null schema is invalid, so omit it.
+	if len(schema) > 0 && !c.tuning.Unconstrained {
+		reqBody.ResponseFormat = &responseFormat{
+			Type: "json_schema",
+			JSONSchema: &jsonSchema{
+				Name:   "decision_brief",
+				Strict: true,
+				Schema: schema,
+			},
+		}
+	}
+	switch {
+	case c.flavor == OpenAI:
+		reqBody.ReasoningEffort = c.sendEffort
+	case !c.think:
+		reqBody.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal decision brief request: %w", err)
+	}
+
+	start := time.Now()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.host+"/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("build decision brief request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("%s chat: %w", c.flavor, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", fmt.Errorf("%s chat returned %d: %s", c.flavor, resp.StatusCode, bytes.TrimSpace(msg))
+	}
+
+	var completion struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+		Usage struct {
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&completion); err != nil {
+		return "", fmt.Errorf("decode decision brief response: %w", err)
+	}
+	if len(completion.Choices) == 0 {
+		return "", fmt.Errorf("%s returned no choices", c.flavor)
+	}
+	content := completion.Choices[0].Message.Content
+	logger.Debug().
+		Str("elapsed", time.Since(start).Round(time.Millisecond).String()).
+		Int("response_bytes", len(content)).
+		Str("finish_reason", completion.Choices[0].FinishReason).
+		Int("completion_tokens", completion.Usage.CompletionTokens).
+		Int("max_tokens", maxTokens).
+		Msg(c.flavor.String() + ": decision brief synthesis response received")
+	logger.Trace().Str("response", content).Msg(c.flavor.String() + ": raw decision brief response")
+	return content, nil
 }
 
 // Score sends one JSON-mode completion for the batch and parses the verdicts.

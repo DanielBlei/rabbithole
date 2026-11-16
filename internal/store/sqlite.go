@@ -335,6 +335,12 @@ func initSchema(ctx context.Context, db *sql.DB, d dialect, label string) error 
 			return err
 		}
 	}
+	// A database created by the published PR #73 schema already has
+	// item_briefs, but without the foreign key Phase 1 relies on. The additive
+	// pass skips it because the table exists, so upgrade it here.
+	if err := migrateItemBriefs(ctx, db, d); err != nil {
+		return fmt.Errorf("migrate item briefs: %w", err)
+	}
 	return nil
 }
 
@@ -535,11 +541,37 @@ func isValidStatus(status string) bool {
 	}
 }
 
-// UpdateUserState applies patch to the item identified by identifier, which
-// may be either an item's id or its link. It is the single mutation path for
-// user-owned state: CLI commands and any future API handler both call it
-// directly.
+// UpdateUserState applies patch to the single item identified by identifier,
+// which may be an item's id or its link. A link match wins over an id match,
+// matching Get. Resolution and the update share one transaction and the update
+// targets the resolved canonical id, so the two predicates can never touch two
+// rows.
 func (s *Store) UpdateUserState(ctx context.Context, identifier string, patch UserPatch) error {
+	if err := validateUserPatch(patch); err != nil {
+		return err
+	}
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		id, err := s.resolveItemIDTx(ctx, tx, identifier)
+		if err != nil {
+			return err
+		}
+		return s.updateUserStateTx(ctx, tx, id, patch)
+	})
+}
+
+// UpdateUserStateByID applies patch to an exact canonical item ID. Unlike
+// UpdateUserState, it never resolves the identifier as a link, so a canonical
+// row ID cannot mutate an unrelated item whose link is the same string.
+func (s *Store) UpdateUserStateByID(ctx context.Context, id string, patch UserPatch) error {
+	if err := validateUserPatch(patch); err != nil {
+		return err
+	}
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		return s.updateUserStateTx(ctx, tx, id, patch)
+	})
+}
+
+func validateUserPatch(patch UserPatch) error {
 	if patch.Status != nil && !isValidStatus(*patch.Status) {
 		return fmt.Errorf("invalid status %q", *patch.Status)
 	}
@@ -549,7 +581,24 @@ func (s *Store) UpdateUserState(ctx context.Context, identifier string, patch Us
 	if patch.ClearUserScore && patch.UserScore != nil {
 		return errors.New("user score cannot be set and cleared at once")
 	}
+	return nil
+}
 
+func (s *Store) resolveItemIDTx(ctx context.Context, tx *sql.Tx, identifier string) (string, error) {
+	q := "SELECT id FROM items WHERE link = ? OR id = ?" +
+		" ORDER BY CASE WHEN link = ? THEN 0 ELSE 1 END LIMIT 1"
+	var id string
+	err := s.txQueryRow(ctx, tx, q, identifier, identifier, identifier).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("%w: %s", ErrItemNotFound, identifier)
+		}
+		return "", fmt.Errorf("get item %s: %w", identifier, err)
+	}
+	return id, nil
+}
+
+func (s *Store) updateUserStateTx(ctx context.Context, tx *sql.Tx, id string, patch UserPatch) error {
 	sets := []string{"updated_at = ?"}
 	args := []any{sqlTime(time.Now())}
 	if patch.Status != nil {
@@ -571,23 +620,23 @@ func (s *Store) UpdateUserState(ctx context.Context, identifier string, patch Us
 		sets = append(sets, "bookmarked = ?")
 		args = append(args, *patch.Bookmarked)
 	}
-	args = append(args, identifier, identifier)
-
-	q := fmt.Sprintf("UPDATE items SET %s WHERE link = ? OR id = ?", strings.Join(sets, ", "))
-	return s.inTx(ctx, func(tx *sql.Tx) error {
-		res, err := s.txExec(ctx, tx, q, args...)
-		if err != nil {
-			return fmt.Errorf("update item %s: %w", identifier, err)
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("rows affected: %w", err)
-		}
-		if n == 0 {
-			return fmt.Errorf("%w: %s", ErrItemNotFound, identifier)
-		}
-		return s.bumpVersion(ctx, tx)
-	})
+	args = append(args, id)
+	q := fmt.Sprintf("UPDATE items SET %s WHERE id = ?", strings.Join(sets, ", "))
+	res, err := s.txExec(ctx, tx, q, args...)
+	if err != nil {
+		return fmt.Errorf("update item %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: %s", ErrItemNotFound, id)
+	}
+	if n != 1 {
+		return fmt.Errorf("update item %s: affected %d rows", id, n)
+	}
+	return s.bumpVersion(ctx, tx)
 }
 
 // ItemRow is a compact, read-only view of an item for display (e.g. the
@@ -694,17 +743,34 @@ func scanItemRow(sc rowScanner) (ItemRow, error) {
 	return r, nil
 }
 
-// Get returns the single item identified by identifier, which may be either an
-// item's id or its link (the same lookup UpdateUserState uses). It returns
-// ErrItemNotFound when nothing matches.
+// Get resolves an identifier, which may be an item ID or its link. A link match
+// wins over an ID match, matching the legacy link-first behavior and the batch
+// resolver; the CASE makes that precedence explicit instead of relying on row
+// order. Unknown identifiers return ErrItemNotFound.
 func (s *Store) Get(ctx context.Context, identifier string) (ItemRow, error) {
-	q := "SELECT " + itemRowColumns + " FROM items WHERE link = ? OR id = ?"
-	r, err := scanItemRow(s.queryRow(ctx, q, identifier, identifier))
+	q := "SELECT " + itemRowColumns + " FROM items WHERE link = ? OR id = ?" +
+		" ORDER BY CASE WHEN link = ? THEN 0 ELSE 1 END LIMIT 1"
+	r, err := scanItemRow(s.queryRow(ctx, q, identifier, identifier, identifier))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ItemRow{}, fmt.Errorf("%w: %s", ErrItemNotFound, identifier)
 		}
 		return ItemRow{}, fmt.Errorf("get item %s: %w", identifier, err)
+	}
+	return r, nil
+}
+
+// GetByID resolves only an exact canonical item ID. It never reinterprets an
+// ID as another item's link, which matters when callers already hold canonical
+// row IDs and an unrelated item happens to use that ID string as its link.
+func (s *Store) GetByID(ctx context.Context, id string) (ItemRow, error) {
+	q := "SELECT " + itemRowColumns + " FROM items WHERE id = ?"
+	r, err := scanItemRow(s.queryRow(ctx, q, id))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ItemRow{}, fmt.Errorf("%w: %s", ErrItemNotFound, id)
+		}
+		return ItemRow{}, fmt.Errorf("get item %s: %w", id, err)
 	}
 	return r, nil
 }
