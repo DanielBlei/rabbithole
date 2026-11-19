@@ -15,9 +15,11 @@
   <div class="toggles">
     <input type="radio" name="tg{{.ID}}" id="tg-why-{{.ID}}" class="tg-radio tg-radio-why">
     <input type="radio" name="tg{{.ID}}" id="tg-note-{{.ID}}" class="tg-radio tg-radio-note">
+    <input type="radio" name="tg{{.ID}}" id="tg-dive-{{.ID}}" class="tg-radio tg-radio-dive">
     <div class="tg-tabs">
       <label class="tg-tab tg-tab-why" for="tg-why-{{.ID}}">why</label>
       <label class="tg-tab tg-tab-note" for="tg-note-{{.ID}}">note</label>
+      <label class="tg-tab tg-tab-dive" for="tg-dive-{{.ID}}">dive</label>
     </div>
     <div class="tg-panel tg-panel-why">
       {{if .Reason}}<div class="md">{{.ReasonHTML}}</div>
@@ -56,6 +58,7 @@
         </div>
       </form>
     </div>
+    <div class="tg-panel tg-panel-dive">{{template "brief_panel" .Brief}}</div>
   </div>
   <button type="button" class="bookmark{{if .Bookmarked}} is-saved{{end}}"
     hx-post="/items/{{.ID}}/bookmark" hx-target="closest .row" hx-swap="outerHTML"

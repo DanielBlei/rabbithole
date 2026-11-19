@@ -344,18 +344,6 @@ func TestDiscoverCapsCandidates(t *testing.T) {
 	}
 }
 
-// bigRSS returns a valid feed of about size bytes.
-func bigRSS(size int) string {
-	pad := strings.Repeat("x", 1024)
-	var b strings.Builder
-	b.WriteString(`<?xml version="1.0"?><rss version="2.0"><channel><title>Big</title>`)
-	for i := 0; b.Len() < size; i++ {
-		fmt.Fprintf(&b, `<item><title>Item %d</title><description>%s</description></item>`, i, pad)
-	}
-	b.WriteString(`</channel></rss>`)
-	return b.String()
-}
-
 func TestDiscoverAddressIsAlreadyAFeed(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -369,8 +357,6 @@ func TestDiscoverAddressIsAlreadyAFeed(t *testing.T) {
 		{"generic xml type", "text/xml", rssDoc("Direct", 1), feeds.KindRSS},
 		{"mislabelled html type", typeHTML, "\n" + rssDoc("Direct", 1), feeds.KindRSS},
 		{"no type", "", rssDoc("Direct", 1), feeds.KindRSS},
-		{"3 MiB", typeRSS, bigRSS(3 << 20), feeds.KindRSS},
-		{"15 MiB", typeRSS, bigRSS(15 << 20), feeds.KindRSS},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -429,28 +415,6 @@ func TestDiscoverFeedKeepsTypedAddressAcrossRedirect(t *testing.T) {
 	got, err := feeds.Discover(context.Background(), s.Client(), s.URL+"/old")
 	if err != nil || len(got) != 1 || got[0].URL != s.URL+"/old" {
 		t.Fatalf("got %+v, %v, want the typed address", got, err)
-	}
-}
-
-// A page that starts like XML and is over the feed cap is still searched as a page.
-func TestDiscoverOversizeHTMLThatSniffsAsAFeed(t *testing.T) {
-	body := `<rss version="2.0"><head><link rel="alternate" type="application/rss+xml" href="/f.xml"/></head><body>` +
-		strings.Repeat("<p>filler</p>", (feeds.MaxFeedBytes+1<<20)/13)
-	s := newSite(t, map[string]resp{
-		"/":      {ctype: typeHTML, body: body},
-		"/f.xml": {ctype: typeRSS, body: rssDoc("F", 1)},
-	})
-	got, err := feeds.Discover(context.Background(), s.Client(), s.URL)
-	if err != nil || len(got) != 1 || got[0].URL != s.URL+"/f.xml" {
-		t.Fatalf("got %+v, %v, want the declared feed", got, err)
-	}
-}
-
-func TestDiscoverFeedOverCapFails(t *testing.T) {
-	s := newSite(t, map[string]resp{"/feed": {ctype: typeRSS, body: bigRSS(feeds.MaxFeedBytes + 1<<20)}})
-	_, err := feeds.Discover(context.Background(), s.Client(), s.URL+"/feed")
-	if !errors.Is(err, httpclient.ErrTooLarge) {
-		t.Fatalf("err = %v, want ErrTooLarge", err)
 	}
 }
 
@@ -658,7 +622,6 @@ func TestPreview(t *testing.T) {
 		"/feed":  {ctype: typeRSS, body: rssDoc("  Spaced \n Title ", 6)},
 		"/empty": {ctype: typeRSS, body: rssDoc("Empty", 0)},
 		"/json":  {ctype: typeJSON, body: jsonDoc},
-		"/big":   {ctype: typeRSS, body: bigRSS(feeds.MaxFeedBytes + 1<<20)},
 		"/page":  head(""),
 		"/err":   {ctype: typeRSS, status: 500, body: "boom"},
 	})
@@ -682,9 +645,6 @@ func TestPreview(t *testing.T) {
 		t.Errorf("json feed: %+v, %v", got, err)
 	}
 
-	if _, err = feeds.Preview(ctx, s.Client(), s.URL+"/big"); !errors.Is(err, httpclient.ErrTooLarge) {
-		t.Errorf("oversize: err = %v, want ErrTooLarge", err)
-	}
 	if _, err = feeds.Preview(ctx, s.Client(), s.URL+"/page"); err == nil {
 		t.Error("a web page previewed as a feed")
 	}

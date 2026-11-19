@@ -4,8 +4,10 @@
 package cmd
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -14,6 +16,7 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/config"
 	"github.com/DanielBlei/rabbithole/internal/httpclient"
 	"github.com/DanielBlei/rabbithole/internal/library"
+	"github.com/DanielBlei/rabbithole/internal/store"
 )
 
 func TestCheckListen(t *testing.T) {
@@ -212,4 +215,63 @@ func TestLibraryBase(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRecoverBriefings pins the serve boot step for interrupted briefings:
+// orphaned generating rows are failed before serving starts, and a failing
+// sweep is an error that aborts the boot instead of a log line the server
+// outlives.
+func TestRecoverBriefings(t *testing.T) {
+	t.Run("fails rows a previous process left generating", func(t *testing.T) {
+		db, err := store.Open(filepath.Join(t.TempDir(), "restart.db"))
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+		start := time.Date(2026, 1, 6, 0, 0, 0, 0, time.UTC)
+		seed := func(id string, offset int, status string) {
+			t.Helper()
+			s := start.AddDate(0, 0, offset)
+			if _, err := db.SaveBriefing(context.Background(), store.Briefing{
+				ID: id, PeriodKind: "daily", PeriodStart: s, PeriodEnd: s.AddDate(0, 0, 1),
+				Status: status,
+			}); err != nil {
+				t.Fatalf("SaveBriefing(%s): %v", id, err)
+			}
+		}
+		seed("briefing-generating", 0, store.BriefingGenerating)
+		seed("briefing-ready", 1, store.BriefingReady)
+
+		if err := recoverBriefings(context.Background(), db); err != nil {
+			t.Fatalf("recoverBriefings: %v", err)
+		}
+		recovered, err := db.BriefingForPeriod(context.Background(), "daily", start)
+		if err != nil {
+			t.Fatalf("BriefingForPeriod: %v", err)
+		}
+		if recovered.Status != store.BriefingFailed ||
+			!strings.Contains(recovered.Error, "generation was interrupted") {
+			t.Errorf("recovered row = %+v, want failed with the retry hint", recovered)
+		}
+		ready, err := db.BriefingForPeriod(context.Background(), "daily", start.AddDate(0, 0, 1))
+		if err != nil {
+			t.Fatalf("BriefingForPeriod(ready): %v", err)
+		}
+		if ready.Status != store.BriefingReady || ready.Error != "" {
+			t.Errorf("ready row was touched: %+v", ready)
+		}
+	})
+
+	t.Run("a failing sweep aborts the boot", func(t *testing.T) {
+		db, err := store.Open(filepath.Join(t.TempDir(), "closed.db"))
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if err := recoverBriefings(context.Background(), db); err == nil {
+			t.Fatal("recoverBriefings on a closed store = nil, want the boot to abort")
+		}
+	})
 }

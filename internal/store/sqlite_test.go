@@ -171,7 +171,7 @@ func TestRecordIgnoresDuplicateLink(t *testing.T) {
 	ctx := context.Background()
 
 	// Different IDs (e.g. distinct guids) can still resolve to the same link.
-	// The UNIQUE constraint must keep UpdateUserState's WHERE link = ? targeting
+	// The UNIQUE constraint must keep link-based item resolution targeting
 	// exactly one row.
 	first := feeds.Item{ID: "a", Source: "S", Title: "A", Link: "https://x/dup"}
 	second := feeds.Item{ID: "b", Source: "S", Title: "B", Link: "https://x/dup"}
@@ -798,6 +798,52 @@ func TestTags(t *testing.T) {
 	if want := []string{"AI", "Infra", "Research"}; !slices.Equal(got, want) {
 		t.Errorf("Tags() = %v, want %v", got, want)
 	}
+}
+
+func TestTagsKeepsFirstRecordedCase(t *testing.T) {
+	t.Run("same batch keeps the first item's case", func(t *testing.T) {
+		db := openTestStore(t)
+		ctx := t.Context()
+
+		items := []feeds.Item{
+			{ID: "a", Source: "S1", Title: "A", Link: "https://x/a", Tags: []string{"ai"}},
+			{ID: "b", Source: "S2", Title: "B", Link: "https://x/b", Tags: []string{"AI"}},
+		}
+		if err := db.Record(ctx, items, nil, time.Now()); err != nil {
+			t.Fatalf("Record: %v", err)
+		}
+		got, err := db.Tags(ctx)
+		if err != nil {
+			t.Fatalf("Tags: %v", err)
+		}
+		if want := []string{"ai"}; !slices.Equal(got, want) {
+			t.Errorf("Tags() = %v, want %v (first recorded case)", got, want)
+		}
+	})
+
+	t.Run("earlier record wins when a later id sorts first", func(t *testing.T) {
+		db := openTestStore(t)
+		ctx := t.Context()
+
+		first := feeds.Item{ID: "z", Source: "S1", Title: "Z", Link: "https://x/z", Tags: []string{"ai"}}
+		if err := db.Record(ctx, []feeds.Item{first}, nil, time.Now()); err != nil {
+			t.Fatalf("first Record: %v", err)
+		}
+		// created_at has microsecond precision on Postgres; a later Record call
+		// must sort after the first even though its id does not.
+		time.Sleep(2 * time.Millisecond)
+		second := feeds.Item{ID: "a", Source: "S2", Title: "A", Link: "https://x/a", Tags: []string{"AI"}}
+		if err := db.Record(ctx, []feeds.Item{second}, nil, time.Now()); err != nil {
+			t.Fatalf("second Record: %v", err)
+		}
+		got, err := db.Tags(ctx)
+		if err != nil {
+			t.Fatalf("Tags: %v", err)
+		}
+		if want := []string{"ai"}; !slices.Equal(got, want) {
+			t.Errorf("Tags() = %v, want %v (earlier record wins)", got, want)
+		}
+	})
 }
 
 func TestListLimitClamp(t *testing.T) {

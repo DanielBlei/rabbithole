@@ -87,6 +87,12 @@ type PreviewResult struct {
 // paths when it declares none, and each candidate is fetched and parsed before
 // it is returned. Candidates that fail to fetch or parse are dropped.
 func Discover(ctx context.Context, client *http.Client, rawURL string) ([]Candidate, error) {
+	return discover(ctx, client, rawURL, MaxFeedBytes)
+}
+
+// discover is Discover with an explicit feed cap, so tests exercise the
+// over-cap path without moving production-sized bodies under a deadline.
+func discover(ctx context.Context, client *http.Client, rawURL string, maxFeed int64) ([]Candidate, error) {
 	if client == nil {
 		client = NewClient("")
 	}
@@ -94,7 +100,7 @@ func Discover(ctx context.Context, client *http.Client, rawURL string) ([]Candid
 	defer cancel()
 
 	rawURL = strings.TrimSpace(rawURL)
-	pg, err := loadPage(ctx, client, rawURL)
+	pg, err := loadPage(ctx, client, rawURL, maxFeed)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +116,7 @@ func Discover(ctx context.Context, client *http.Client, rawURL string) ([]Candid
 		refs = refs[:MaxCandidates]
 	}
 
-	found := verifyAll(ctx, client, refs)
+	found := verifyAll(ctx, client, refs, maxFeed)
 	if len(found) == 0 {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -122,10 +128,15 @@ func Discover(ctx context.Context, client *http.Client, rawURL string) ([]Candid
 
 // Preview fetches one feed and returns its title, size and newest entries.
 func Preview(ctx context.Context, client *http.Client, rawURL string) (PreviewResult, error) {
+	return preview(ctx, client, rawURL, MaxFeedBytes)
+}
+
+// preview is Preview with an explicit feed cap, for the same reason as discover.
+func preview(ctx context.Context, client *http.Client, rawURL string, maxFeed int64) (PreviewResult, error) {
 	if client == nil {
 		client = NewClient("")
 	}
-	feed, err := parseFeedURL(ctx, newParser(client), strings.TrimSpace(rawURL))
+	feed, err := parseFeedURL(ctx, newParser(client, maxFeed), strings.TrimSpace(rawURL))
 	if err != nil {
 		return PreviewResult{}, err
 	}
@@ -144,7 +155,7 @@ type page struct {
 	head  []byte
 }
 
-func loadPage(ctx context.Context, client *http.Client, rawURL string) (page, error) {
+func loadPage(ctx context.Context, client *http.Client, rawURL string, maxFeed int64) (page, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
@@ -171,9 +182,10 @@ func loadPage(ctx context.Context, client *http.Client, rawURL string) (page, er
 	pg.head = read[:min(len(read), MaxPageBytes)]
 
 	mt, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	var parseErr error
 	if feedMediaType(mt) || sniffFeed(pg.head) {
 		// The first bytes are already read; the rest streams under the feed cap.
-		feed, err := parseStream(newParser(client), io.MultiReader(bytes.NewReader(read), resp.Body))
+		feed, err := parseStream(newParser(client, maxFeed), io.MultiReader(bytes.NewReader(read), resp.Body), maxFeed)
 		if err == nil {
 			pg.feed = feed
 			return pg, nil
@@ -182,8 +194,15 @@ func loadPage(ctx context.Context, client *http.Client, rawURL string) (page, er
 		if errors.Is(err, httpclient.ErrTooLarge) && !htmlMediaType(mt) {
 			return page{}, err
 		}
+		parseErr = err
 	}
 	if !pageMediaType(mt) {
+		// A parse that failed because the request was cut short reports that.
+		// An unrelated parse failure keeps its ErrNotPage verdict: the state of
+		// the clock at the moment of failure must not rewrite it.
+		if errors.Is(parseErr, context.Canceled) || errors.Is(parseErr, context.DeadlineExceeded) {
+			return page{}, fmt.Errorf("feed read interrupted: %w", parseErr)
+		}
 		return page{}, ErrNotPage
 	}
 	return pg, nil
@@ -256,16 +275,16 @@ func (t *errTrack) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// parseStream parses a feed from r, failing with httpclient.ErrTooLarge past MaxFeedBytes.
-func parseStream(parser *gofeed.Parser, r io.Reader) (*gofeed.Feed, error) {
-	tr := &errTrack{r: httpclient.LimitBody(r, MaxFeedBytes)}
+// parseStream parses a feed from r, failing with httpclient.ErrTooLarge past maxFeed.
+func parseStream(parser *gofeed.Parser, r io.Reader, maxFeed int64) (*gofeed.Feed, error) {
+	tr := &errTrack{r: httpclient.LimitBody(r, maxFeed)}
 	feed, err := parser.Parse(tr)
 	if err == nil {
 		// XML parsers stop at the root's closing tag; read the rest through the cap.
 		_, err = io.Copy(io.Discard, tr)
 	}
 	if errors.Is(tr.err, httpclient.ErrTooLarge) {
-		return nil, fmt.Errorf("%w: over %d bytes", httpclient.ErrTooLarge, MaxFeedBytes)
+		return nil, fmt.Errorf("%w: over %d bytes", httpclient.ErrTooLarge, maxFeed)
 	}
 	if err != nil {
 		return nil, err
@@ -273,13 +292,14 @@ func parseStream(parser *gofeed.Parser, r io.Reader) (*gofeed.Feed, error) {
 	return feed, nil
 }
 
-// parseFeedURL fetches and parses one feed within requestTimeout.
+// parseFeedURL fetches and parses one feed within requestTimeout. The feed cap
+// travels on the parser, set by newParser.
 func parseFeedURL(ctx context.Context, parser *gofeed.Parser, rawURL string) (*gofeed.Feed, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	feed, err := parser.ParseURLWithContext(rawURL, ctx)
 	if errors.Is(err, gofeed.ErrResponseTooLarge) {
-		return nil, fmt.Errorf("%w: over %d bytes", httpclient.ErrTooLarge, MaxFeedBytes)
+		return nil, fmt.Errorf("%w: over %d bytes", httpclient.ErrTooLarge, parser.MaxByteSize)
 	}
 	return feed, err
 }
@@ -420,7 +440,7 @@ func fallbackFeeds(final *url.URL) []feedRef {
 
 // verifyAll fetches and parses every ref, at most verifyParallel at a time,
 // and returns the ones that are feeds in their original order.
-func verifyAll(ctx context.Context, client *http.Client, refs []feedRef) []Candidate {
+func verifyAll(ctx context.Context, client *http.Client, refs []feedRef, maxFeed int64) []Candidate {
 	logger := zerolog.Ctx(ctx)
 	out := make([]*Candidate, len(refs))
 	sem := make(chan struct{}, verifyParallel)
@@ -433,7 +453,7 @@ func verifyAll(ctx context.Context, client *http.Client, refs []feedRef) []Candi
 			defer func() { <-sem }()
 
 			// gofeed.Parser is not goroutine-safe: one per goroutine.
-			feed, err := parseFeedURL(ctx, newParser(client), ref.url)
+			feed, err := parseFeedURL(ctx, newParser(client, maxFeed), ref.url)
 			if err != nil {
 				logger.Debug().Str("url", ref.url).Err(err).Msg("skipping feed candidate")
 				return

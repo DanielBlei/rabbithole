@@ -33,6 +33,10 @@ var (
 	ErrUnsupportedScheme = errors.New("unsupported url scheme")
 	// ErrInsecureRedirect marks a redirect from https to http.
 	ErrInsecureRedirect = errors.New("insecure redirect")
+	// ErrCredentialedURL marks a request or redirect whose URL carries
+	// userinfo (user:password@host). The sentinel deliberately carries no URL
+	// text so credentials cannot reach a log or an error message.
+	ErrCredentialedURL = errors.New("url userinfo is not allowed")
 	// ErrTooLarge marks a body longer than the limit given to LimitBody.
 	ErrTooLarge = errors.New("response body too large")
 	// ErrPrivateRedirect marks a redirect hop that would connect to a private
@@ -51,6 +55,10 @@ type Options struct {
 	MaxRedirects int
 	// UserAgent is set on every request and redirect that carries none.
 	UserAgent string
+	// RejectUserinfo refuses any request or redirect whose URL carries
+	// userinfo. Callers that fetch third-party pages should set it: userinfo
+	// can smuggle credentials into redirect chains, logs and stored URLs.
+	RejectUserinfo bool
 	// AllowPrivate opens the private ranges. The always-denied ranges stay closed.
 	// A chain that has touched a public address may not reach a private one, so
 	// only chains that stay private throughout may stay private.
@@ -258,9 +266,15 @@ func newSafe(o Options, isPublic func(netip.Addr) bool) *http.Client {
 		Transport: &safeTransport{
 			base: tr, strict: strict, isPublic: isPublic,
 			userAgent: o.UserAgent, proxy: o.Proxy, allowPrivate: o.AllowPrivate,
+			rejectUserinfo: o.RejectUserinfo,
 		},
 		Timeout: o.Timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// The credential check runs first: every other redirect error may be
+			// wrapped with the hop's URL, and that URL must never carry userinfo.
+			if o.RejectUserinfo && req.URL.User != nil {
+				return ErrCredentialedURL
+			}
 			if len(via) > o.MaxRedirects {
 				return fmt.Errorf("%w: stopped after %d", ErrTooManyRedirects, o.MaxRedirects)
 			}
@@ -341,12 +355,13 @@ func checkScheme(u *url.URL) error {
 // redirect hop. It also tracks the redirect chain: once any hop reached a
 // public address, later hops go to private or loopback addresses nowhere.
 type safeTransport struct {
-	base         http.RoundTripper
-	strict       http.RoundTripper
-	isPublic     func(netip.Addr) bool
-	userAgent    string
-	proxy        func(*http.Request) (*url.URL, error)
-	allowPrivate bool
+	base           http.RoundTripper
+	strict         http.RoundTripper
+	isPublic       func(netip.Addr) bool
+	userAgent      string
+	proxy          func(*http.Request) (*url.URL, error)
+	allowPrivate   bool
+	rejectUserinfo bool
 }
 
 func (t *safeTransport) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -358,6 +373,9 @@ func (t *safeTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	if err := checkScheme(r.URL); err != nil {
 		return fail(err)
+	}
+	if t.rejectUserinfo && r.URL.User != nil {
+		return fail(ErrCredentialedURL)
 	}
 	ctx := r.Context()
 	proxied := false
