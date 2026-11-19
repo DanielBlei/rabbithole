@@ -1075,13 +1075,22 @@ func (s *Store) Sources(ctx context.Context) ([]SourceCount, error) {
 }
 
 // Tags returns every distinct tag carried by stored items, sorted, case kept as
-// recorded. This is the domain of values ListFilter.Tags can match against. The
-// column holds them comma-joined, so the splitting happens here: the distinct
+// first recorded. The earliest item's capitalization wins; created_at then id
+// order the distinct tag groups so neither engine's row order can change it.
+// This is the domain of values ListFilter.Tags can match against. The column
+// holds them comma-joined, so the splitting happens here: the distinct
 // combinations are few (one per feed), which is a much smaller scan than it
 // looks.
 func (s *Store) Tags(ctx context.Context) ([]string, error) {
-	rows, err := s.query(ctx,
-		"SELECT DISTINCT tags FROM items WHERE tags IS NOT NULL AND tags != ''")
+	// GROUP BY gives the same distinct rows as DISTINCT while MIN() lets the
+	// ordering follow the first item that carried each combination. DISTINCT
+	// cannot be ordered by a column it does not return on both engines.
+	rows, err := s.query(ctx, `
+		SELECT tags
+		FROM items
+		WHERE tags IS NOT NULL AND tags != ''
+		GROUP BY tags
+		ORDER BY MIN(created_at) ASC, MIN(id) ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("query tags: %w", err)
 	}

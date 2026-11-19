@@ -390,3 +390,28 @@ func TestChatJSONSendsSchemaAndCaps(t *testing.T) {
 		t.Errorf("messages = %+v", got.Messages)
 	}
 }
+
+// TestChatJSONUnconstrainedSendsNoFormat pins the review fix: ChatJSON must
+// honor tuning.Unconstrained exactly like ScoreContext, so providers that
+// reject a compiled JSON-schema grammar keep working for synthesis calls.
+func TestChatJSONUnconstrainedSendsNoFormat(t *testing.T) {
+	var got map[string]json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"{\"ok\":true}"},"done":true}` + "\n"))
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{Unconstrained: true}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ChatJSON(t.Context(), "system", "user",
+		json.RawMessage(`{"type":"object"}`), 64); err != nil {
+		t.Fatalf("ChatJSON: %v", err)
+	}
+	if f, ok := got["format"]; ok && string(f) != "null" && string(f) != `""` {
+		t.Errorf("format = %s, want none when unconstrained", f)
+	}
+}

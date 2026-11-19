@@ -577,7 +577,7 @@ func TestScoreOmitsSystemMessageWhenPromptEmpty(t *testing.T) {
 	}
 }
 
-func TestChatJSONSendsDecisionBriefSchema(t *testing.T) {
+func TestChatJSONSendsSchema(t *testing.T) {
 	var got map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
@@ -621,5 +621,36 @@ func TestChatJSONSendsDecisionBriefSchema(t *testing.T) {
 	msgs := got["messages"].([]any)
 	if len(msgs) != 2 {
 		t.Errorf("messages = %v", msgs)
+	}
+}
+
+// TestChatJSONUnconstrainedSendsNoResponseFormat pins the review fix: ChatJSON
+// must honor tuning.Unconstrained exactly like ScoreContext, so providers that
+// reject strict json_schema mode keep working for synthesis calls.
+func TestChatJSONUnconstrainedSendsNoResponseFormat(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(
+			[]byte(
+				`{"choices":[{"message":{"content":"{\"ok\":true}"},"finish_reason":"stop"}],"usage":{"completion_tokens":3}}`,
+			),
+		)
+	}))
+	defer srv.Close()
+
+	for _, flavor := range []Flavor{OpenAI, VLLM} {
+		c, err := New(flavor, srv.URL, "model", "", false, "", rank.ModelTuning{Unconstrained: true}, "")
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		if _, err := c.ChatJSON(t.Context(), "system", "user",
+			json.RawMessage(`{"type":"object"}`), 900); err != nil {
+			t.Fatalf("%s ChatJSON: %v", flavor, err)
+		}
+		if _, ok := got["response_format"]; ok {
+			t.Errorf("%s request carries response_format, want none when unconstrained", flavor)
+		}
 	}
 }

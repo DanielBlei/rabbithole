@@ -432,8 +432,9 @@ type jsonSchema struct {
 }
 
 // ChatJSON sends one JSON-mode completion with the caller's schema and output
-// cap. It is the Decision Brief's single synthesis call: timeouts, think
-// handling, auth and schema enforcement stay on the same client path as scoring.
+// cap. It is the shared synthesis call for briefings and Decision Briefs:
+// timeouts, think handling, auth and schema enforcement stay on the same client
+// path as scoring.
 func (c *Client) ChatJSON(
 	ctx context.Context,
 	system, user string,
@@ -455,9 +456,9 @@ func (c *Client) ChatJSON(
 		tokenCap: c.tokenCap(maxTokens),
 		Messages: messages,
 	}
-	// An empty schema means structured output is disabled (the factory sets
-	// tuning.Unconstrained and the prompt carries the field contract). Sending a
-	// json_schema response_format with a null schema is invalid, so omit it.
+	// The same escape hatch as scoring: providers/models that reject strict
+	// json_schema mode get the shape from the system prompt alone. An empty
+	// schema also omits it, so the request never carries a null schema.
 	if len(schema) > 0 && !c.tuning.Unconstrained {
 		reqBody.ResponseFormat = &responseFormat{
 			Type: "json_schema",
@@ -476,14 +477,14 @@ func (c *Client) ChatJSON(
 	}
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("marshal decision brief request: %w", err)
+		return "", fmt.Errorf("marshal synthesis request: %w", err)
 	}
 
 	start := time.Now()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.host+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("build decision brief request: %w", err)
+		return "", fmt.Errorf("build synthesis request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.hc.Do(req)
@@ -508,7 +509,7 @@ func (c *Client) ChatJSON(
 		} `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&completion); err != nil {
-		return "", fmt.Errorf("decode decision brief response: %w", err)
+		return "", fmt.Errorf("decode synthesis response: %w", err)
 	}
 	if len(completion.Choices) == 0 {
 		return "", fmt.Errorf("%s returned no choices", c.flavor)
@@ -520,8 +521,8 @@ func (c *Client) ChatJSON(
 		Str("finish_reason", completion.Choices[0].FinishReason).
 		Int("completion_tokens", completion.Usage.CompletionTokens).
 		Int("max_tokens", maxTokens).
-		Msg(c.flavor.String() + ": decision brief synthesis response received")
-	logger.Trace().Str("response", content).Msg(c.flavor.String() + ": raw decision brief response")
+		Msg(c.flavor.String() + ": synthesis response received")
+	logger.Trace().Str("response", content).Msg(c.flavor.String() + ": raw synthesis response")
 	return content, nil
 }
 

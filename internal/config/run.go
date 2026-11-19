@@ -36,6 +36,7 @@ type File struct {
 	Profile       string              `yaml:"profile"`
 	Inference     FileInference       `yaml:"inference"`
 	Ingest        FileIngest          `yaml:"ingest"`
+	Briefing      BriefingConfig      `yaml:"briefing"`
 	DecisionBrief DecisionBriefConfig `yaml:"decision_brief"`
 	Store         StoreConfig         `yaml:"store"`
 }
@@ -47,6 +48,7 @@ type Config struct {
 	User          string              `yaml:"user,omitempty"` // shell-prompt name on the web UI; blank falls back to the OS user
 	Inference     InferenceConfig     `yaml:"inference,omitempty"`
 	Ingest        IngestConfig        `yaml:"ingest,omitempty"`
+	Briefing      BriefingConfig      `yaml:"briefing,omitempty"`
 	DecisionBrief DecisionBriefConfig `yaml:"decision_brief,omitempty"`
 
 	// AdaptiveRanking adds bounded explicit reader feedback to the scoring
@@ -151,6 +153,7 @@ func (f File) Split() (run Config, store StoreConfig, legacy Legacy, dropped []s
 		User:          f.User,
 		Inference:     f.Inference.InferenceConfig,
 		Ingest:        IngestConfig{DigestDir: f.Ingest.DigestDir},
+		Briefing:      f.Briefing,
 		DecisionBrief: f.DecisionBrief,
 	}
 	dropped = run.Normalize()
@@ -237,6 +240,11 @@ func (r *Config) DropDefaults() (dropped []string) {
 	for _, f := range inferenceFields {
 		if f.isSet(in) {
 			try("inference."+f.name, func(c *Config) { f.clear(&c.Inference) })
+		}
+	}
+	for _, f := range briefingFields {
+		if f.isSet(&r.Briefing) {
+			try("briefing."+f.name, func(c *Config) { f.clear(&c.Briefing) })
 		}
 	}
 	for _, f := range decisionBriefFields {
@@ -357,6 +365,7 @@ func (r *Config) applyDefaults() {
 	if in.MaxParallel <= 0 {
 		in.MaxParallel = defaultMaxParallel
 	}
+	r.Briefing = r.Briefing.WithDefaults()
 	r.DecisionBrief = r.DecisionBrief.WithDefaults()
 }
 
@@ -410,6 +419,15 @@ func (r *Config) validate() error {
 		if err := ValidRef(in.APIKey); err != nil {
 			add(inferenceKeyField, "%s: %s", inferenceKeyField, err)
 		}
+	}
+	if r.Briefing.MaxArticles > MaxBriefingArticles {
+		add("briefing.max_articles", "briefing.max_articles must be at most %d", MaxBriefingArticles)
+	}
+	if r.Briefing.MaxDevelopments > MaxBriefingDevelopments {
+		add("briefing.max_developments", "briefing.max_developments must be at most %d", MaxBriefingDevelopments)
+	}
+	if r.Briefing.RecommendedReads > MaxBriefingRecommendedReads {
+		add("briefing.recommended_reads", "briefing.recommended_reads must be at most %d", MaxBriefingRecommendedReads)
 	}
 	// Decision Brief raw values are checked by validateRaw before defaulting.
 	// WithDefaults intentionally clamps upper bounds and floors the output-token
