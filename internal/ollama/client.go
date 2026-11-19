@@ -335,10 +335,9 @@ func (c *Client) ScoreContext(
 }
 
 // ChatJSON sends one JSON-mode chat request with the caller's schema and output
-// cap. It is the briefing's single synthesis call: timeouts, think handling,
-// auth and schema enforcement stay on the same client path as scoring.
-// cap. It is the Decision Brief's single synthesis call: timeouts, think
-// handling, auth and schema enforcement stay on the same client path as scoring.
+// cap. It is the shared synthesis call for briefings and Decision Briefs:
+// timeouts, think handling, auth and schema enforcement stay on the same client
+// path as scoring.
 func (c *Client) ChatJSON(
 	ctx context.Context,
 	system, user string,
@@ -366,9 +365,9 @@ func (c *Client) ChatJSON(
 		Messages: messages,
 	}
 	// The same escape hatch as scoring: providers/models that reject a compiled
-	// JSON-schema grammar get the shape from the system prompt alone.
-	// An empty schema means structured output is disabled; the prompt carries
-	// the field contract instead.
+	// JSON-schema grammar get the shape from the system prompt alone. An empty
+	// schema means structured output is disabled; the prompt carries the field
+	// contract instead.
 	if len(schema) > 0 && !c.tuning.Unconstrained {
 		req.Format = schema
 	}
@@ -387,10 +386,8 @@ func (c *Client) ChatJSON(
 		Str("elapsed", time.Since(start).Round(time.Millisecond).String()).
 		Int("response_bytes", sb.Len()).
 		Int("max_tokens", maxTokens).
-		Msg("ollama: briefing synthesis response received")
-	logger.Trace().Str("response", sb.String()).Msg("ollama: raw briefing response")
-		Msg("ollama: decision brief synthesis response received")
-	logger.Trace().Str("response", sb.String()).Msg("ollama: raw decision brief response")
+		Msg("ollama: synthesis response received")
+	logger.Trace().Str("response", sb.String()).Msg("ollama: raw synthesis response")
 	return sb.String(), nil
 }
 

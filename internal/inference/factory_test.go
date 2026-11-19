@@ -165,14 +165,6 @@ func TestResolveBriefing(t *testing.T) {
 			gen, err := ResolveBriefing(t.Context(), cfg, false)
 			if err != nil {
 				t.Fatalf("ResolveBriefing: %v", err)
-func TestResolveBrief(t *testing.T) {
-	for _, tt := range []struct{ provider, model string }{{"ollama", "m:latest"}, {"openai", "m"}, {"vllm", "m"}} {
-		provider := tt.provider
-		t.Run(provider+" builds a generator and names its provenance", func(t *testing.T) {
-			cfg := config.InferenceConfig{Provider: provider, Host: "http://127.0.0.1:1", Model: tt.model}
-			gen, prov, err := ResolveBrief(t.Context(), cfg, false)
-			if err != nil {
-				t.Fatalf("ResolveBrief: %v", err)
 			}
 			if gen == nil {
 				t.Fatal("generator is nil")
@@ -200,19 +192,6 @@ func TestResolveBrief(t *testing.T) {
 	})
 	t.Run("unknown provider", func(t *testing.T) {
 		if _, err := ResolveBriefing(t.Context(), config.InferenceConfig{Provider: "nope"}, false); err == nil {
-			if prov.Provider != provider || prov.Model != tt.model {
-				t.Fatalf("provenance = %+v, want %s/%s", prov, provider, tt.model)
-			}
-		})
-	}
-	t.Run("heuristic is unavailable", func(t *testing.T) {
-		gen, prov, err := ResolveBrief(t.Context(), config.InferenceConfig{Provider: "heuristic"}, false)
-		if gen != nil || prov != (decisionbrief.Provenance{}) || !errors.Is(err, decisionbrief.ErrBriefUnavailable) {
-			t.Fatalf("gen = %v, prov = %+v, err = %v; want ErrBriefUnavailable", gen, prov, err)
-		}
-	})
-	t.Run("unknown provider", func(t *testing.T) {
-		if _, _, err := ResolveBrief(t.Context(), config.InferenceConfig{Provider: "nope"}, false); err == nil {
 			t.Fatal("unknown provider accepted")
 		}
 	})
@@ -249,6 +228,40 @@ func TestResolveBriefingHonoursStructuredOutput(t *testing.T) {
 		}
 		if _, sent := synthesis["response_format"]; sent != structured {
 			t.Errorf("structured_output=%v: response_format sent = %v", structured, sent)
+		}
+	}
+}
+
+func TestResolveBrief(t *testing.T) {
+	for _, tt := range []struct{ provider, model string }{{"ollama", "m:latest"}, {"openai", "m"}, {"vllm", "m"}} {
+		provider := tt.provider
+		t.Run(provider+" builds a generator and names its provenance", func(t *testing.T) {
+			cfg := config.InferenceConfig{Provider: provider, Host: "http://127.0.0.1:1", Model: tt.model}
+			gen, prov, err := ResolveBrief(t.Context(), cfg, false)
+			if err != nil {
+				t.Fatalf("ResolveBrief: %v", err)
+			}
+			if gen == nil {
+				t.Fatal("generator is nil")
+			}
+			if prov.Provider != provider || prov.Model != tt.model {
+				t.Fatalf("provenance = %+v, want %s/%s", prov, provider, tt.model)
+			}
+		})
+	}
+	t.Run("heuristic is unavailable", func(t *testing.T) {
+		gen, prov, err := ResolveBrief(t.Context(), config.InferenceConfig{Provider: "heuristic"}, false)
+		if gen != nil || prov != (decisionbrief.Provenance{}) || !errors.Is(err, decisionbrief.ErrBriefUnavailable) {
+			t.Fatalf("gen = %v, prov = %+v, err = %v; want ErrBriefUnavailable", gen, prov, err)
+		}
+	})
+	t.Run("unknown provider", func(t *testing.T) {
+		if _, _, err := ResolveBrief(t.Context(), config.InferenceConfig{Provider: "nope"}, false); err == nil {
+			t.Fatal("unknown provider accepted")
+		}
+	})
+}
+
 // TestResolveBriefStructuredOutput pins the factory's half of findings 12/14:
 // structured output off must remove the provider's schema field entirely, not
 // send a null schema, for both provider dialects.

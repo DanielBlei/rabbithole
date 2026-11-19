@@ -32,16 +32,11 @@ const RunSchemaVersion = 2
 // that are not stored (store, profile, ingest.feeds). It is decoded leniently,
 // so unknown keys are ignored.
 type File struct {
-	User      string         `yaml:"user"`
-	Profile   string         `yaml:"profile"`
-	Inference FileInference  `yaml:"inference"`
-	Ingest    FileIngest     `yaml:"ingest"`
-	Briefing  BriefingConfig `yaml:"briefing"`
-	Store     StoreConfig    `yaml:"store"`
 	User          string              `yaml:"user"`
 	Profile       string              `yaml:"profile"`
 	Inference     FileInference       `yaml:"inference"`
 	Ingest        FileIngest          `yaml:"ingest"`
+	Briefing      BriefingConfig      `yaml:"briefing"`
 	DecisionBrief DecisionBriefConfig `yaml:"decision_brief"`
 	Store         StoreConfig         `yaml:"store"`
 }
@@ -50,13 +45,10 @@ type File struct {
 // and the web UI read. The store block, profile and ingest.feeds are import
 // directives and live elsewhere.
 type Config struct {
-	User      string          `yaml:"user,omitempty"` // shell-prompt name on the web UI; blank falls back to the OS user
-	Inference InferenceConfig `yaml:"inference,omitempty"`
-	Ingest    IngestConfig    `yaml:"ingest,omitempty"`
-	Briefing  BriefingConfig  `yaml:"briefing,omitempty"`
 	User          string              `yaml:"user,omitempty"` // shell-prompt name on the web UI; blank falls back to the OS user
 	Inference     InferenceConfig     `yaml:"inference,omitempty"`
 	Ingest        IngestConfig        `yaml:"ingest,omitempty"`
+	Briefing      BriefingConfig      `yaml:"briefing,omitempty"`
 	DecisionBrief DecisionBriefConfig `yaml:"decision_brief,omitempty"`
 
 	// AdaptiveRanking adds bounded explicit reader feedback to the scoring
@@ -158,13 +150,10 @@ func ReadFile(path string) (File, error) {
 // normalization removed.
 func (f File) Split() (run Config, store StoreConfig, legacy Legacy, dropped []string) {
 	run = Config{
-		User:      f.User,
-		Inference: f.Inference.InferenceConfig,
-		Ingest:    IngestConfig{DigestDir: f.Ingest.DigestDir},
-		Briefing:  f.Briefing,
 		User:          f.User,
 		Inference:     f.Inference.InferenceConfig,
 		Ingest:        IngestConfig{DigestDir: f.Ingest.DigestDir},
+		Briefing:      f.Briefing,
 		DecisionBrief: f.DecisionBrief,
 	}
 	dropped = run.Normalize()
@@ -256,6 +245,8 @@ func (r *Config) DropDefaults() (dropped []string) {
 	for _, f := range briefingFields {
 		if f.isSet(&r.Briefing) {
 			try("briefing."+f.name, func(c *Config) { f.clear(&c.Briefing) })
+		}
+	}
 	for _, f := range decisionBriefFields {
 		if f.isSet(&r.DecisionBrief) {
 			try("decision_brief."+f.name, func(c *Config) { f.clear(&c.DecisionBrief) })

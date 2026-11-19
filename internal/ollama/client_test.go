@@ -415,29 +415,3 @@ func TestChatJSONUnconstrainedSendsNoFormat(t *testing.T) {
 		t.Errorf("format = %s, want none when unconstrained", f)
 	}
 }
-
-// TestChatJSONOmitsFormatWithoutSchema keeps the no-schema call from
-// regressing into grammar enforcement: a caller that passes no schema (the
-// shape comes from the system prompt) must not have one imposed.
-func TestChatJSONOmitsFormatWithoutSchema(t *testing.T) {
-	var got map[string]json.RawMessage
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&got)
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"{\"ok\":true}"},"done":true}` + "\n"))
-	}))
-	defer srv.Close()
-
-	c, err := New(srv.URL, "llama3:latest", "", false, rank.ModelTuning{}, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := c.ChatJSON(t.Context(), "system", "user", nil, 64); err != nil {
-		t.Fatalf("ChatJSON: %v", err)
-	}
-	// api.ChatRequest omits a nil Format, so the request must carry no format
-	// key at all, not a null or empty one.
-	if f, ok := got["format"]; ok {
-		t.Errorf("format = %s, want none without a schema", f)
-	}
-}

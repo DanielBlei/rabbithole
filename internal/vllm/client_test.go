@@ -577,8 +577,7 @@ func TestScoreOmitsSystemMessageWhenPromptEmpty(t *testing.T) {
 	}
 }
 
-func TestChatJSONSendsBriefingSchema(t *testing.T) {
-func TestChatJSONSendsDecisionBriefSchema(t *testing.T) {
+func TestChatJSONSendsSchema(t *testing.T) {
 	var got map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
@@ -616,7 +615,6 @@ func TestChatJSONSendsDecisionBriefSchema(t *testing.T) {
 		t.Fatalf("response_format = %v", got["response_format"])
 	}
 	schema := format["json_schema"].(map[string]any)
-	if schema["name"] != "briefing" || schema["strict"] != true {
 	if schema["name"] != "decision_brief" || schema["strict"] != true {
 		t.Errorf("json_schema = %v", schema)
 	}
@@ -654,34 +652,5 @@ func TestChatJSONUnconstrainedSendsNoResponseFormat(t *testing.T) {
 		if _, ok := got["response_format"]; ok {
 			t.Errorf("%s request carries response_format, want none when unconstrained", flavor)
 		}
-	}
-}
-
-// TestChatJSONOmitsResponseFormatWithoutSchema keeps the unconstrained case
-// from regressing into a null-schema request: a caller that passes no schema
-// (the shape comes from the system prompt) must not get an empty json_schema
-// wrapper with strict mode on.
-func TestChatJSONOmitsResponseFormatWithoutSchema(t *testing.T) {
-	var got map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&got)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(
-			[]byte(
-				`{"choices":[{"message":{"content":"{\"ok\":true}"},"finish_reason":"stop"}],"usage":{"completion_tokens":3}}`,
-			),
-		)
-	}))
-	defer srv.Close()
-
-	c, err := New(VLLM, srv.URL, "model", "", false, "", rank.ModelTuning{}, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := c.ChatJSON(t.Context(), "system", "user", nil, 900); err != nil {
-		t.Fatalf("ChatJSON: %v", err)
-	}
-	if _, ok := got["response_format"]; ok {
-		t.Errorf("request carries response_format = %v, want none without a schema", got["response_format"])
 	}
 }

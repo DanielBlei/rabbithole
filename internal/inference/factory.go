@@ -80,6 +80,16 @@ func ResolveBriefing(
 // escape hatch is active. Both scoring and briefing synthesis go through it,
 // so inference.structured_output: false behaves the same on either path.
 func deriveTuning(ctx context.Context, cfg config.InferenceConfig) (rank.ModelTuning, bool) {
+	tuning := cfg.ModelTuning
+	if cfg.StructuredOutput != nil && !*cfg.StructuredOutput && cfg.Provider != "heuristic" {
+		tuning.Unconstrained = true
+		zerolog.Ctx(ctx).Debug().Str("provider", cfg.Provider).
+			Msg("structured output off: the system prompt sets the JSON shape")
+		return tuning, true
+	}
+	return tuning, false
+}
+
 // ResolveBrief constructs the Decision Brief generator for the configured
 // provider and reports the provider/model of the client it built, from that one
 // configuration snapshot. The heuristic scorer cannot read full text, so it
@@ -143,22 +153,6 @@ func ResolveBrief(
 		return nil, decisionbrief.Provenance{}, fmt.Errorf(
 			"unknown provider %q, must be ollama, openai, vllm or heuristic", main.Provider)
 	}
-}
-
-// build constructs and validates the Scorer described by cfg, whose APIKey is already resolved.
-func build(ctx context.Context, cfg config.InferenceConfig, think bool, systemPrompt string) (rank.Scorer, error) {
-	var (
-		s   rank.Scorer
-		err error
-	)
-	tuning := cfg.ModelTuning
-	if cfg.StructuredOutput != nil && !*cfg.StructuredOutput && cfg.Provider != "heuristic" {
-		tuning.Unconstrained = true
-		zerolog.Ctx(ctx).Debug().Str("provider", cfg.Provider).
-			Msg("structured output off: the system prompt sets the JSON shape")
-		return tuning, true
-	}
-	return tuning, false
 }
 
 // newBackend constructs the provider client described by cfg, whose APIKey is
