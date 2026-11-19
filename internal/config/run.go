@@ -32,24 +32,26 @@ const RunSchemaVersion = 2
 // that are not stored (store, profile, ingest.feeds). It is decoded leniently,
 // so unknown keys are ignored.
 type File struct {
-	User          string              `yaml:"user"`
-	Profile       string              `yaml:"profile"`
-	Inference     FileInference       `yaml:"inference"`
-	Ingest        FileIngest          `yaml:"ingest"`
-	Briefing      BriefingConfig      `yaml:"briefing"`
-	DecisionBrief DecisionBriefConfig `yaml:"decision_brief"`
-	Store         StoreConfig         `yaml:"store"`
+	User           string               `yaml:"user"`
+	Profile        string               `yaml:"profile"`
+	Inference      FileInference        `yaml:"inference"`
+	Classification ClassificationConfig `yaml:"classification"`
+	Ingest         FileIngest           `yaml:"ingest"`
+	Briefing       BriefingConfig       `yaml:"briefing"`
+	DecisionBrief  DecisionBriefConfig  `yaml:"decision_brief"`
+	Store          StoreConfig          `yaml:"store"`
 }
 
 // Config is the stored shape: what the config store keeps and what ingest
 // and the web UI read. The store block, profile and ingest.feeds are import
 // directives and live elsewhere.
 type Config struct {
-	User          string              `yaml:"user,omitempty"` // shell-prompt name on the web UI; blank falls back to the OS user
-	Inference     InferenceConfig     `yaml:"inference,omitempty"`
-	Ingest        IngestConfig        `yaml:"ingest,omitempty"`
-	Briefing      BriefingConfig      `yaml:"briefing,omitempty"`
-	DecisionBrief DecisionBriefConfig `yaml:"decision_brief,omitempty"`
+	User           string               `yaml:"user,omitempty"` // shell-prompt name on the web UI; blank falls back to the OS user
+	Inference      InferenceConfig      `yaml:"inference,omitempty"`
+	Classification ClassificationConfig `yaml:"classification,omitempty"`
+	Ingest         IngestConfig         `yaml:"ingest,omitempty"`
+	Briefing       BriefingConfig       `yaml:"briefing,omitempty"`
+	DecisionBrief  DecisionBriefConfig  `yaml:"decision_brief,omitempty"`
 
 	// AdaptiveRanking adds bounded explicit reader feedback to the scoring
 	// prompt. Unset means on, preserving profile-plus-feedback behavior for
@@ -150,11 +152,12 @@ func ReadFile(path string) (File, error) {
 // normalization removed.
 func (f File) Split() (run Config, store StoreConfig, legacy Legacy, dropped []string) {
 	run = Config{
-		User:          f.User,
-		Inference:     f.Inference.InferenceConfig,
-		Ingest:        IngestConfig{DigestDir: f.Ingest.DigestDir},
-		Briefing:      f.Briefing,
-		DecisionBrief: f.DecisionBrief,
+		User:           f.User,
+		Inference:      f.Inference.InferenceConfig,
+		Classification: f.Classification,
+		Ingest:         IngestConfig{DigestDir: f.Ingest.DigestDir},
+		Briefing:       f.Briefing,
+		DecisionBrief:  f.DecisionBrief,
 	}
 	dropped = run.Normalize()
 	legacy.ProfilePath = f.Profile
@@ -242,6 +245,58 @@ func (r *Config) DropDefaults() (dropped []string) {
 			try("inference."+f.name, func(c *Config) { f.clear(&c.Inference) })
 		}
 	}
+	cl := &r.Classification
+	if cl.Enabled != nil {
+		try("classification.enabled", func(c *Config) { c.Classification.Enabled = nil })
+	}
+	if cl.ShowKeywords != nil {
+		try("classification.show_keywords", func(c *Config) { c.Classification.ShowKeywords = nil })
+	}
+	if cl.ShowAssumptions != nil {
+		try("classification.show_assumptions", func(c *Config) { c.Classification.ShowAssumptions = nil })
+	}
+	if cl.VocabularyHint != nil {
+		try("classification.vocabulary_hint", func(c *Config) { c.Classification.VocabularyHint = nil })
+	}
+	if cl.Interval != 0 {
+		try("classification.interval", func(c *Config) { c.Classification.Interval = 0 })
+	}
+	if cl.BatchSize != 0 {
+		try("classification.batch_size", func(c *Config) { c.Classification.BatchSize = 0 })
+	}
+	if cl.MaxParallel != 0 {
+		try("classification.max_parallel", func(c *Config) { c.Classification.MaxParallel = 0 })
+	}
+	if cl.Provider != "" {
+		try("classification.provider", func(c *Config) { c.Classification.Provider = "" })
+	}
+	clView := &r.Classification
+	view := InferenceConfig{
+		Provider: clView.Provider, Host: clView.Host, Model: clView.Model, APIKey: clView.APIKey,
+		Think: clView.Think, Effort: clView.Effort, StructuredOutput: clView.StructuredOutput,
+		BatchSize: clView.BatchSize, MaxParallel: clView.MaxParallel, ModelTuning: clView.ModelTuning,
+	}
+	for _, f := range inferenceFields {
+		if f.isSet(&view) {
+			try("classification."+f.name, func(c *Config) {
+				tmp := InferenceConfig{
+					Provider: c.Classification.Provider, Host: c.Classification.Host,
+					Model: c.Classification.Model, APIKey: c.Classification.APIKey,
+					Think: c.Classification.Think, Effort: c.Classification.Effort,
+					StructuredOutput: c.Classification.StructuredOutput,
+					BatchSize:        c.Classification.BatchSize, MaxParallel: c.Classification.MaxParallel,
+					ModelTuning: c.Classification.ModelTuning,
+				}
+				f.clear(&tmp)
+				c.Classification.Host, c.Classification.Model, c.Classification.APIKey =
+					tmp.Host, tmp.Model, tmp.APIKey
+				c.Classification.Think, c.Classification.Effort, c.Classification.StructuredOutput =
+					tmp.Think, tmp.Effort, tmp.StructuredOutput
+				c.Classification.BatchSize, c.Classification.MaxParallel, c.Classification.ModelTuning =
+					tmp.BatchSize, tmp.MaxParallel, tmp.ModelTuning
+			})
+		}
+	}
 	for _, f := range briefingFields {
 		if f.isSet(&r.Briefing) {
 			try("briefing."+f.name, func(c *Config) { f.clear(&c.Briefing) })
@@ -261,6 +316,12 @@ func (r Config) Clone() Config {
 	c := r
 	c.Inference.Think = cloneBool(r.Inference.Think)
 	c.Inference.StructuredOutput = cloneBool(r.Inference.StructuredOutput)
+	c.Classification.Enabled = cloneBool(r.Classification.Enabled)
+	c.Classification.Think = cloneBool(r.Classification.Think)
+	c.Classification.StructuredOutput = cloneBool(r.Classification.StructuredOutput)
+	c.Classification.ShowKeywords = cloneBool(r.Classification.ShowKeywords)
+	c.Classification.ShowAssumptions = cloneBool(r.Classification.ShowAssumptions)
+	c.Classification.VocabularyHint = cloneBool(r.Classification.VocabularyHint)
 	c.AdaptiveRanking = cloneBool(r.AdaptiveRanking)
 	return c
 }
@@ -316,6 +377,7 @@ func (r *Config) Normalize() (dropped []string) {
 		}
 	}
 	r.Ingest.DigestDir = absClean(r.Ingest.DigestDir)
+	r.normalizeClassification(&dropped)
 	return dropped
 }
 
@@ -365,6 +427,7 @@ func (r *Config) applyDefaults() {
 	if in.MaxParallel <= 0 {
 		in.MaxParallel = defaultMaxParallel
 	}
+	r.applyClassificationDefaults()
 	r.Briefing = r.Briefing.WithDefaults()
 	r.DecisionBrief = r.DecisionBrief.WithDefaults()
 }
@@ -419,6 +482,31 @@ func (r *Config) validate() error {
 		if err := ValidRef(in.APIKey); err != nil {
 			add(inferenceKeyField, "%s: %s", inferenceKeyField, err)
 		}
+	}
+	cl := r.Classification
+	// Skip an inherited value's duplicate error: inference already reports it,
+	// and pointing at two fields for one keystroke helps nobody.
+	if cl.Provider != in.Provider && !slices.Contains(Providers, cl.Provider) {
+		add("classification.provider", "invalid provider %q, must be ollama, openai, vllm or heuristic", cl.Provider)
+	}
+	if cl.Effort != in.Effort && cl.Effort != "" && !slices.Contains(efforts, cl.Effort) {
+		add("classification.effort", "classification.effort %q, must be one of %s",
+			cl.Effort, strings.Join(efforts, ", "))
+	}
+	if cl.APIKey != in.APIKey && cl.APIKey != "" {
+		if err := ValidRef(cl.APIKey); err != nil {
+			add(classificationKeyField, "%s: %s", classificationKeyField, err)
+		}
+	}
+	if cl.ShowAssumptions != nil && *cl.ShowAssumptions &&
+		(cl.ShowKeywords == nil || !*cl.ShowKeywords) {
+		add(
+			"classification.show_assumptions",
+			"classification.show_assumptions requires classification.show_keywords: assumptions are never shown without keywords",
+		)
+	}
+	if cl.Interval < 0 {
+		add("classification.interval", "classification.interval must not be negative")
 	}
 	if r.Briefing.MaxArticles > MaxBriefingArticles {
 		add("briefing.max_articles", "briefing.max_articles must be at most %d", MaxBriefingArticles)
@@ -619,9 +707,10 @@ func migrateV1(raw []byte) ([]byte, error) {
 		f.Inference.SystemPrompt = SystemPromptSetting{}
 	}
 	c := Config{
-		User:      f.User,
-		Inference: f.Inference.InferenceConfig,
-		Ingest:    IngestConfig{DigestDir: f.Ingest.DigestDir},
+		User:           f.User,
+		Inference:      f.Inference.InferenceConfig,
+		Classification: f.Classification,
+		Ingest:         IngestConfig{DigestDir: f.Ingest.DigestDir},
 	}
 	return c.Marshal()
 }

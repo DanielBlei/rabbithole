@@ -12,6 +12,8 @@ rabbithole [global flags] <command>
 |---|---|
 | [`ingest`](#ingest) | Fetch the feeds, score what is new, record it, and optionally write a markdown digest |
 | [`digest`](#digest) | Print a daily or weekly Markdown digest of already-scored articles |
+| [`classify`](#classify) | Queue or run content classification (keywords and assumptions) |
+| [`tags`](#tags) | Inspect and curate the content-tag vocabulary |
 | [`serve`](#serve) | Serve the web UI and the JSON API, behind the login |
 | [`config`](#config) | Export, import, list and roll back the saved settings |
 | [`sources`](#sources) | Import and export the feed set |
@@ -90,6 +92,38 @@ and are never saved.
 | `--no-think` | Disable model reasoning for this run, for models without a thinking mode or for a faster pass |
 | `--markdown` | Also write `YYYY-MM-DD.md` to `--out`, else `ingest.digest_dir` if a config set it, else `./digests` |
 | `--out DIR` | Folder for `--markdown` |
+
+## classify
+
+```
+rabbithole classify backfill [--since D] [--all] [--limit N] [--wait]
+```
+
+Queues stored, already-scored items for content classification. Without `--wait` the rows stay
+pending and a running `serve` classifies them on its next pass; `--wait` drains them in this
+process, using the configured `classification` backend.
+
+| Flag | Description | Default |
+|---|---|---|
+| `--since` | Only items this recent (`720h`, `30d`) | `720h` |
+| `--all` | Classify the full history, ignoring `--since` | off |
+| `--limit` | Cap how many items are queued; `0` means no cap | `0` |
+| `--wait` | Drain the queue now instead of leaving it for `serve` | off |
+
+An item already classified at the current classifier version is skipped. A version bump makes
+every older item eligible again.
+
+## tags
+
+```
+rabbithole tags list
+rabbithole tags alias <alias> <canonical>
+```
+
+`list` prints each canonical content tag, its display label and its aliases. `alias` points an
+alternate spelling at a canonical tag (creating the canonical tag if needed); for example,
+`rabbithole tags alias k8s kubernetes` makes future classifications of either spelling share
+one tag. Aliases are curated only: nothing infers them, and a label may not alias itself.
 
 ## serve
 
