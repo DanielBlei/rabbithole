@@ -43,6 +43,11 @@ const (
 	// costs at most one wave of duplicate model work while it recovers a
 	// crashed worker's items without operator action.
 	defaultClaimLease = 30 * time.Minute
+
+	// selectionClaimChunk bounds how many selected IDs one claim statement
+	// carries. SQLite has a hard limit on bound parameters, and a backfill of
+	// the full history can select far more IDs than one statement can hold.
+	selectionClaimChunk = 500
 )
 
 // Stats summarises one classification pass.
@@ -165,7 +170,7 @@ func (w *Worker) notify(queue bool) {
 
 	go func() {
 		defer w.wg.Done()
-		stats, err := w.run(ctx)
+		stats, err := w.run(ctx, nil)
 		w.logResult(ctx, stats, err)
 		w.finishPass()
 	}()
@@ -198,6 +203,21 @@ func (w *Worker) finishPass() {
 // zero on it would report work that was never recorded. Model failures are not
 // errors: they are recorded against the item and retried on a later pass.
 func (w *Worker) RunOnce(ctx context.Context) (Stats, error) {
+	return w.runOnce(ctx, nil)
+}
+
+// RunOnceSelected drains synchronously, but claims only itemIDs. It is the
+// synchronous backfill's engine: --since and --limit decide the selection once,
+// and this pass cannot discover or process an item outside it. A nil selection
+// means the ordinary whole-queue pass; an empty non-nil selection does nothing.
+func (w *Worker) RunOnceSelected(ctx context.Context, itemIDs []string) (Stats, error) {
+	if itemIDs == nil {
+		return w.runOnce(ctx, nil)
+	}
+	return w.runOnce(ctx, itemIDs)
+}
+
+func (w *Worker) runOnce(ctx context.Context, selection []string) (Stats, error) {
 	w.mu.Lock()
 	if w.running {
 		w.mu.Unlock()
@@ -205,7 +225,7 @@ func (w *Worker) RunOnce(ctx context.Context) (Stats, error) {
 	}
 	w.running = true
 	w.mu.Unlock()
-	stats, err := w.run(ctx)
+	stats, err := w.run(ctx, selection)
 	w.finishPass()
 	return stats, err
 }
@@ -319,7 +339,7 @@ func (r *batchRunner) beginWave() {
 	r.mu.Unlock()
 }
 
-func (w *Worker) run(ctx context.Context) (Stats, error) {
+func (w *Worker) run(ctx context.Context, selection []string) (Stats, error) {
 	logger := zerolog.Ctx(ctx)
 	cfg, _, err := w.src.Active(ctx)
 	if err != nil {
@@ -336,6 +356,9 @@ func (w *Worker) run(ctx context.Context) (Stats, error) {
 	if w.factory == nil {
 		return Stats{Skipped: true, Reason: "no classifier factory configured"}, nil
 	}
+	if selection != nil && len(selection) == 0 {
+		return Stats{}, nil
+	}
 
 	var classifier Classifier
 	r := &batchRunner{}
@@ -348,50 +371,65 @@ func (w *Worker) run(ctx context.Context) (Stats, error) {
 	// duplicate model work — the token check and the stale-claim abandon below
 	// keep even that bounded.
 	wave := min(w.claimLimit, batchSize*maxParallel)
+	chunkSize := min(max(wave, 1), selectionClaimChunk)
+	selectionPos := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			break
 		}
-		// Probe before claiming. A claim installs an ownership lease, and an
-		// unavailable backend must not leave claimed items stranded behind
-		// one. The probe is a read, so an idle install still never resolves —
-		// let alone dials — the model on every tick.
-		eligible, err := w.db.EligibleClassificationItems(ctx, time.Time{}, 1, w.version)
-		if err != nil {
-			logger.Warn().Err(err).Msg("classification: probing the queue failed")
-			r.stop(err)
-			break
-		}
-		if len(eligible) == 0 {
-			break
-		}
-		if classifier == nil {
-			var vocabulary []string
-			if cl.VocabularyHint != nil && *cl.VocabularyHint {
-				tags, err := w.db.TopTags(ctx, time.Time{}, []string{store.TagKindKeyword}, 50)
+		var candidates []store.ClassificationCandidate
+		if selection == nil {
+			// Probe before claiming. A claim installs an ownership lease, and an
+			// unavailable backend must not leave claimed items stranded behind
+			// one. The probe is a read, so an idle install still never resolves —
+			// let alone dials — the model on every tick.
+			eligible, err := w.db.EligibleClassificationItems(ctx, time.Time{}, 1, w.version)
+			if err != nil {
+				logger.Warn().Err(err).Msg("classification: probing the queue failed")
+				r.stop(err)
+				break
+			}
+			if len(eligible) == 0 {
+				break
+			}
+			if classifier == nil {
+				classifier, err = w.newClassifier(ctx, cfg, cl)
 				if err != nil {
-					logger.Warn().Err(err).Msg("classification: vocabulary hint unavailable, continuing without it")
-				} else {
-					vocabulary = make([]string, len(tags))
-					for i, tag := range tags {
-						vocabulary[i] = tag.Slug
-					}
+					return Stats{Skipped: true, Reason: "backend unavailable"}, nil
 				}
 			}
-			classifier, err = w.factory(ctx, cfg, vocabulary)
+			candidates, err = w.db.ClaimClassification(
+				ctx, w.version, time.Now(), wave, w.maxAttempts, w.claimLease)
 			if err != nil {
-				logger.Warn().Err(err).Msg("classification: backend unavailable, items stay pending")
-				return Stats{Skipped: true, Reason: "backend unavailable"}, nil
+				logger.Warn().Err(err).Msg("classification: claiming items failed")
+				r.stop(err)
+				break
+			}
+		} else {
+			if selectionPos >= len(selection) {
+				break
+			}
+			end := min(selectionPos+chunkSize, len(selection))
+			chunk := selection[selectionPos:end]
+			selectionPos = end
+			if classifier == nil {
+				classifier, err = w.newClassifier(ctx, cfg, cl)
+				if err != nil {
+					return Stats{Skipped: true, Reason: "backend unavailable"}, nil
+				}
+			}
+			candidates, err = w.db.ClaimClassificationSelected(
+				ctx, w.version, time.Now(), wave, w.maxAttempts, w.claimLease, chunk)
+			if err != nil {
+				logger.Warn().Err(err).Msg("classification: claiming selected items failed")
+				r.stop(err)
+				break
 			}
 		}
-		candidates, err := w.db.ClaimClassification(
-			ctx, w.version, time.Now(), wave, w.maxAttempts, w.claimLease)
-		if err != nil {
-			logger.Warn().Err(err).Msg("classification: claiming items failed")
-			r.stop(err)
-			break
-		}
 		if len(candidates) == 0 {
+			if selection != nil {
+				continue
+			}
 			break
 		}
 		r.addCandidates(len(candidates))
@@ -420,6 +458,34 @@ func (w *Worker) run(ctx context.Context) (Stats, error) {
 		Int("failed", stats.Failed).
 		Msg("classification pass complete")
 	return stats, r.failure()
+}
+
+// newClassifier resolves the configured backend once per pass, adding the
+// current vocabulary when the hint is enabled. The caller decides when a pass
+// has work worth resolving a backend for.
+func (w *Worker) newClassifier(
+	ctx context.Context,
+	cfg config.Config,
+	cl config.ClassificationConfig,
+) (Classifier, error) {
+	logger := zerolog.Ctx(ctx)
+	var vocabulary []string
+	if cl.VocabularyHint != nil && *cl.VocabularyHint {
+		tags, err := w.db.TopTags(ctx, time.Time{}, []string{store.TagKindKeyword}, 50)
+		if err != nil {
+			logger.Warn().Err(err).Msg("classification: vocabulary hint unavailable, continuing without it")
+		} else {
+			vocabulary = make([]string, len(tags))
+			for i, tag := range tags {
+				vocabulary[i] = tag.Slug
+			}
+		}
+	}
+	classifier, err := w.factory(ctx, cfg, vocabulary)
+	if err != nil {
+		logger.Warn().Err(err).Msg("classification: backend unavailable, items stay pending")
+	}
+	return classifier, err
 }
 
 // processCandidates classifies the claimed items with at most

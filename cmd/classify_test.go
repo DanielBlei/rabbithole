@@ -54,7 +54,7 @@ func TestClassifyBackfillWaitSurfacesPersistenceFailure(t *testing.T) {
 		// an unreachable model must stay a retry, not a command failure.
 		return nil, errors.New("the model is never reached while the store is down")
 	})
-	if err := waitBackfill(context.Background(), worker); err == nil {
+	if err := waitBackfill(context.Background(), worker, nil); err == nil {
 		t.Fatal("waitBackfill reported success for a pass that could not persist")
 	}
 }
@@ -126,7 +126,7 @@ func TestClassifyBackfillWaitFailsWhenVerdictsCannotBeStored(t *testing.T) {
 	) (classify.Classifier, error) {
 		return verdictClassifier{}, nil
 	})
-	if err := waitBackfill(context.Background(), worker); err == nil {
+	if err := waitBackfill(context.Background(), worker, nil); err == nil {
 		t.Fatal("waitBackfill reported success for a pass whose verdicts could not be stored")
 	}
 	state, ok, err := db.ClassificationState(context.Background(), "a")
@@ -135,5 +135,111 @@ func TestClassifyBackfillWaitFailsWhenVerdictsCannotBeStored(t *testing.T) {
 	}
 	if state.Status != store.ClassificationPending || state.Attempts != 0 || state.LastError != "" {
 		t.Fatalf("state = %+v, want pending: the failure mark must not relabel a result-write failure", state)
+	}
+}
+
+// stubBackfillClassifier makes the command's real synchronous path run without
+// a model backend and resets the package-level backfill flags between runs.
+func stubBackfillClassifier(t *testing.T) {
+	t.Helper()
+	oldResolve := resolveBackfillClassifier
+	resolveBackfillClassifier = func(
+		context.Context, config.ClassificationConfig, []string,
+	) (classify.Classifier, error) {
+		return verdictClassifier{}, nil
+	}
+	oldSince, oldAll, oldLimit, oldWait := backfillSince, backfillAll, backfillLimit, backfillWait
+	backfillSince, backfillAll, backfillLimit, backfillWait = "720h", false, 0, false
+	t.Cleanup(func() {
+		resolveBackfillClassifier = oldResolve
+		backfillSince, backfillAll, backfillLimit, backfillWait = oldSince, oldAll, oldLimit, oldWait
+	})
+}
+
+func seedBackfillItems(t *testing.T, path string, items ...feeds.Item) {
+	t.Helper()
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	for _, item := range items {
+		if err := db.Record(context.Background(), []feeds.Item{item}, []store.DigestEntry{{
+			Item: item, Score: 8, Reason: "relevant",
+		}}, time.Now()); err != nil {
+			t.Fatalf("Record(%s): %v", item.ID, err)
+		}
+	}
+}
+
+func backfillState(t *testing.T, path, id string) (store.ClassificationState, bool) {
+	t.Helper()
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	state, ok, err := db.ClassificationState(context.Background(), id)
+	if err != nil {
+		t.Fatalf("ClassificationState(%s): %v", id, err)
+	}
+	return state, ok
+}
+
+// --since must bound the synchronous pass as well as the enqueue. The old
+// worker rediscovered every scored item in ClaimClassification, so --wait
+// classified the whole history even though only the recent item was queued.
+func TestClassifyBackfillWaitHonoursSince(t *testing.T) {
+	stubBackfillClassifier(t)
+	e := newCLIEnv(t)
+	now := time.Now().UTC()
+	seedBackfillItems(t, e.db,
+		feeds.Item{
+			ID: "recent", Source: "S", Title: "Recent", Link: "https://x/recent",
+			Summary: "summary", Published: now.Add(-time.Hour),
+		},
+		feeds.Item{
+			ID: "old", Source: "S", Title: "Old", Link: "https://x/old",
+			Summary: "summary", Published: now.Add(-30 * 24 * time.Hour),
+		},
+	)
+
+	if _, _, err := e.run("classify", "backfill", "--since", "7d", "--wait"); err != nil {
+		t.Fatalf("classify backfill --since 7d --wait: %v", err)
+	}
+	if state, ok := backfillState(t, e.db, "recent"); !ok || state.Status != store.ClassificationOK {
+		t.Fatalf("recent state = %+v, %v, want ok", state, ok)
+	}
+	if state, ok := backfillState(t, e.db, "old"); ok && state.Status == store.ClassificationOK {
+		t.Fatalf("old state = %+v, want an item outside --since left unclassified", state)
+	}
+}
+
+// --limit must cap the synchronous pass too. Enqueueing one item while letting
+// the worker claim the rest of the queue made --limit cosmetic.
+func TestClassifyBackfillWaitHonoursLimit(t *testing.T) {
+	stubBackfillClassifier(t)
+	e := newCLIEnv(t)
+	now := time.Now().UTC()
+	seedBackfillItems(t, e.db,
+		feeds.Item{
+			ID: "newest", Source: "S", Title: "Newest", Link: "https://x/newest",
+			Summary: "summary", Published: now.Add(-time.Hour),
+		},
+		feeds.Item{
+			ID: "older", Source: "S", Title: "Older", Link: "https://x/older",
+			Summary: "summary", Published: now.Add(-2 * time.Hour),
+		},
+	)
+
+	_, _, err := e.run("classify", "backfill", "--since", "7d", "--limit", "1", "--wait")
+	if err != nil {
+		t.Fatalf("classify backfill --since 7d --limit 1 --wait: %v", err)
+	}
+	if state, ok := backfillState(t, e.db, "newest"); !ok || state.Status != store.ClassificationOK {
+		t.Fatalf("newest state = %+v, %v, want ok", state, ok)
+	}
+	if state, ok := backfillState(t, e.db, "older"); ok && state.Status == store.ClassificationOK {
+		t.Fatalf("older state = %+v, want an item beyond --limit left unclassified", state)
 	}
 }

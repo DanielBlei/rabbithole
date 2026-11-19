@@ -731,16 +731,28 @@ func (s *Store) EligibleClassificationItems(
 	return scanFeedItems(rows)
 }
 
-// EnqueueBackfill queues scored items in the window that are not yet classified
-// at version, and returns how many rows became claimable.
-func (s *Store) EnqueueBackfill(ctx context.Context, cutoff time.Time, limit, version int) (int, error) {
+// SelectBackfillItems returns the IDs of scored items in the window that are
+// not yet classified at version, newest first. It is the selection half of a
+// backfill: the caller can enqueue those items and then keep synchronous work
+// scoped to exactly this set instead of rediscovering the whole queue.
+func (s *Store) SelectBackfillItems(ctx context.Context, cutoff time.Time, limit, version int) ([]string, error) {
 	items, err := s.EligibleClassificationItems(ctx, cutoff, limit, version)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	ids := make([]string, len(items))
 	for i, item := range items {
 		ids[i] = item.ID
+	}
+	return ids, nil
+}
+
+// EnqueueBackfill queues scored items in the window that are not yet classified
+// at version, and returns how many rows became claimable.
+func (s *Store) EnqueueBackfill(ctx context.Context, cutoff time.Time, limit, version int) (int, error) {
+	ids, err := s.SelectBackfillItems(ctx, cutoff, limit, version)
+	if err != nil {
+		return 0, err
 	}
 	return s.EnqueueClassification(ctx, ids, version, false)
 }
@@ -800,6 +812,34 @@ func (s *Store) ClaimClassification(
 	limit, maxAttempts int,
 	lease time.Duration,
 ) ([]ClassificationCandidate, error) {
+	return s.claimClassification(ctx, version, now, limit, maxAttempts, lease, nil)
+}
+
+// ClaimClassificationSelected claims up to limit scored items from itemIDs only.
+// Unlike ClaimClassification it never discovers unclassified items outside the
+// selection, so a synchronous backfill can drain exactly what it queued.
+func (s *Store) ClaimClassificationSelected(
+	ctx context.Context,
+	version int,
+	now time.Time,
+	limit, maxAttempts int,
+	lease time.Duration,
+	itemIDs []string,
+) ([]ClassificationCandidate, error) {
+	if len(itemIDs) == 0 {
+		return nil, nil
+	}
+	return s.claimClassification(ctx, version, now, limit, maxAttempts, lease, itemIDs)
+}
+
+func (s *Store) claimClassification(
+	ctx context.Context,
+	version int,
+	now time.Time,
+	limit, maxAttempts int,
+	lease time.Duration,
+	itemIDs []string,
+) ([]ClassificationCandidate, error) {
 	if version < 1 {
 		return nil, fmt.Errorf("classifier version must be positive, got %d", version)
 	}
@@ -829,24 +869,40 @@ func (s *Store) ClaimClassification(
 	//    ON CONFLICT is not decoration: on Postgres two claims can both see a
 	//    missing row before either commits (read committed), and the loser's
 	//    insert must be a no-op, not a unique-violation error.
-	if _, err := s.txExec(ctx, tx, `INSERT INTO item_classification
+	insertSQL := `INSERT INTO item_classification
 			(item_id, classifier_version, status, attempts, next_attempt_at, last_error, updated_at)
 		SELECT i.id, ?, 'pending', 0, NULL, '', ?
 		FROM items i LEFT JOIN item_classification c ON c.item_id = i.id
-		WHERE c.item_id IS NULL AND `+classificationItemFilter("i")+`
-		ORDER BY `+itemDate+` DESC, i.id ASC
+		WHERE c.item_id IS NULL AND ` + classificationItemFilter("i")
+	insertArgs := []any{version, nowStr}
+	if itemIDs != nil {
+		insertSQL += ` AND i.id IN (` + placeholders(len(itemIDs)) + `)`
+		insertArgs = append(insertArgs, toAnySlice(itemIDs)...)
+	}
+	insertSQL += `
+		ORDER BY ` + itemDate + ` DESC, i.id ASC
 		LIMIT ?
-		ON CONFLICT (item_id) DO NOTHING`, version, nowStr, limit); err != nil {
+		ON CONFLICT (item_id) DO NOTHING`
+	insertArgs = append(insertArgs, limit)
+	if _, err := s.txExec(ctx, tx, insertSQL, insertArgs...); err != nil {
 		return nil, fmt.Errorf("queue unclassified items: %w", err)
 	}
 
 	// 2. Pick the candidates, newest first.
-	rows, err := s.txQuery(ctx, tx, `SELECT c.item_id
+	selectSQL := `SELECT c.item_id
 		FROM item_classification c JOIN items i ON i.id = c.item_id
-		WHERE `+classificationItemFilter("i")+`
-			AND `+classificationQueueFilter("c")+`
-		ORDER BY `+itemDate+` DESC, i.id ASC
-		LIMIT ?`, version, maxAttempts, nowStr, nowStr, limit)
+		WHERE ` + classificationItemFilter("i") + `
+			AND ` + classificationQueueFilter("c")
+	selectArgs := []any{version, maxAttempts, nowStr, nowStr}
+	if itemIDs != nil {
+		selectSQL += ` AND c.item_id IN (` + placeholders(len(itemIDs)) + `)`
+		selectArgs = append(selectArgs, toAnySlice(itemIDs)...)
+	}
+	selectSQL += `
+		ORDER BY ` + itemDate + ` DESC, i.id ASC
+		LIMIT ?`
+	selectArgs = append(selectArgs, limit)
+	rows, err := s.txQuery(ctx, tx, selectSQL, selectArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("pick classification candidates: %w", err)
 	}

@@ -20,6 +20,10 @@ var (
 	backfillAll   bool
 	backfillLimit int
 	backfillWait  bool
+
+	// resolveBackfillClassifier is a test seam; production resolves through
+	// inference.ResolveClassifier, exactly like the serve worker.
+	resolveBackfillClassifier = inference.ResolveClassifier
 )
 
 var classifyCmd = &cobra.Command{
@@ -61,7 +65,11 @@ func runClassifyBackfill(cmd *cobra.Command, _ []string) error {
 		cutoff = time.Now().Add(-window)
 	}
 
-	queued, err := db.EnqueueBackfill(cmd.Context(), cutoff, backfillLimit, classify.Version)
+	selected, err := db.SelectBackfillItems(cmd.Context(), cutoff, backfillLimit, classify.Version)
+	if err != nil {
+		return err
+	}
+	queued, err := db.EnqueueClassification(cmd.Context(), selected, classify.Version, false)
 	if err != nil {
 		return err
 	}
@@ -72,21 +80,33 @@ func runClassifyBackfill(cmd *cobra.Command, _ []string) error {
 		}
 		return nil
 	}
+	if len(selected) == 0 {
+		fmt.Println("Nothing to classify.")
+		return nil
+	}
 
 	worker := classify.NewWorker(db, src, func(
 		ctx context.Context, cfg config.Config, hints []string,
 	) (classify.Classifier, error) {
-		return inference.ResolveClassifier(ctx, cfg.Classification, hints)
+		return resolveBackfillClassifier(ctx, cfg.Classification, hints)
 	})
-	return waitBackfill(cmd.Context(), worker)
+	return waitBackfill(cmd.Context(), worker, selected)
 }
 
-// waitBackfill drains the queue in this process and reports the outcome. A
-// pass that could not persist its outcomes fails the command: a backfill that
-// exits zero has actually been recorded. Model failures are not command
-// failures — they are counted, and the items retry on a later pass.
-func waitBackfill(ctx context.Context, worker *classify.Worker) error {
-	stats, err := worker.RunOnce(ctx)
+// waitBackfill drains the selected items in this process and reports the
+// outcome. A pass that could not persist its outcomes fails the command: a
+// backfill that exits zero has actually been recorded. Model failures are not
+// command failures — they are counted, and the items retry on a later pass.
+// A nil selection keeps the whole-queue behavior used by callers that did not
+// scope the pass.
+func waitBackfill(ctx context.Context, worker *classify.Worker, selection []string) error {
+	var stats classify.Stats
+	var err error
+	if selection == nil {
+		stats, err = worker.RunOnce(ctx)
+	} else {
+		stats, err = worker.RunOnceSelected(ctx, selection)
+	}
 	switch {
 	case stats.Skipped:
 		fmt.Printf("Classification did not run: %s.\n", stats.Reason)
