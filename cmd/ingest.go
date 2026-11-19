@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -99,6 +100,15 @@ func ingestE(cmd *cobra.Command, _ []string) error {
 	if !dryRun {
 		// After the digest is printed, so the lookups never delay it.
 		defer func() { ingest.RefreshIcons(ctx, db, client, outcome.Sites, time.Now()) }()
+		// Same rule as the manager's post-run rebuild: a run that added no
+		// items cannot change the clusters, unless none exist yet.
+		if ingest.ShouldRebuildClusters(ctx, db, len(outcome.Unseen), false, log) {
+			clusterCtx, cancel := context.WithTimeout(ctx, ingest.StoryClusterTimeout)
+			if _, cerr := ingest.RebuildStoryClusters(clusterCtx, run, db); cerr != nil {
+				log.Warn().Err(cerr).Msg("story clustering failed; the feed is unchanged")
+			}
+			cancel()
+		}
 	}
 	if len(outcome.Unseen) == 0 {
 		fmt.Println("No new items to score.")

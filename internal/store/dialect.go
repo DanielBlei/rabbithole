@@ -141,6 +141,9 @@ func (sqliteDialect) additiveTables() []additive {
 		{table: "ingest_run_fetches", ddl: ingestRunFetchSchema},
 		{table: "store_version", ddl: storeVersionSchema},
 		{table: "briefings", ddl: briefingSchema},
+		{table: "item_briefs", ddl: itemBriefSchema},
+		{table: "story_clusters", ddl: storyClusterSchema},
+		{table: "story_cluster_items", ddl: storyClusterItemSchema},
 	}
 }
 
@@ -207,6 +210,13 @@ func execAdditive(ctx context.Context, db *sql.DB, d dialect, t additive, fresh 
 		}
 	}
 	return tx.Commit()
+}
+
+// execRawTx runs one statement on an initialization transaction, before a
+// Store exists. It lives here, beside execAdditive, because dialect.go is where
+// raw handle access belongs; the migration that needs it stays in its own file.
+func execRawTx(ctx context.Context, tx *sql.Tx, q string) (sql.Result, error) {
+	return tx.ExecContext(ctx, q)
 }
 
 // uniqueViolation reads the column out of modernc's message, which reads
@@ -308,6 +318,9 @@ func (postgresDialect) additiveTables() []additive {
 		{table: "ingest_run_fetches", ddl: ingestRunFetchSchemaPG},
 		{table: "store_version", ddl: storeVersionSchemaPG},
 		{table: "briefings", ddl: briefingSchemaPG},
+		{table: "item_briefs", ddl: itemBriefSchemaPG},
+		{table: "story_clusters", ddl: storyClusterSchemaPG},
+		{table: "story_cluster_items", ddl: storyClusterItemSchemaPG},
 	}
 }
 

@@ -136,18 +136,21 @@ func TestFetchAllRefusesLoopbackByDefault(t *testing.T) {
 	}
 }
 
+// The over-cap path runs against a test-scoped cap, so the check needs
+// kilobytes instead of a 16 MiB body inside the fetch timeout.
 func TestFetchAllRejectsOversizedBody(t *testing.T) {
+	const maxFeed = 64 << 10
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`<?xml version="1.0"?><rss version="2.0"><channel><title>Big</title><description>`))
-		chunk := []byte(strings.Repeat("x", 1<<20))
-		for range MaxFeedBytes/len(chunk) + 1 {
+		chunk := []byte(strings.Repeat("x", 4<<10))
+		for range maxFeed/len(chunk) + 1 {
 			_, _ = w.Write(chunk)
 		}
 		_, _ = w.Write([]byte(`</description></channel></rss>`))
 	}))
 	defer srv.Close()
 
-	res := FetchAll(context.Background(), srv.Client(), []Source{{Name: "Big", URL: srv.URL}})[0]
+	res := fetchAll(context.Background(), srv.Client(), []Source{{Name: "Big", URL: srv.URL}}, maxFeed)[0]
 	if !errors.Is(res.Err, httpclient.ErrTooLarge) {
 		t.Fatalf("err = %v, want ErrTooLarge", res.Err)
 	}

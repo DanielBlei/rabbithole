@@ -578,6 +578,7 @@ func TestScoreOmitsSystemMessageWhenPromptEmpty(t *testing.T) {
 }
 
 func TestChatJSONSendsBriefingSchema(t *testing.T) {
+func TestChatJSONSendsDecisionBriefSchema(t *testing.T) {
 	var got map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
@@ -616,6 +617,7 @@ func TestChatJSONSendsBriefingSchema(t *testing.T) {
 	}
 	schema := format["json_schema"].(map[string]any)
 	if schema["name"] != "briefing" || schema["strict"] != true {
+	if schema["name"] != "decision_brief" || schema["strict"] != true {
 		t.Errorf("json_schema = %v", schema)
 	}
 	msgs := got["messages"].([]any)

@@ -19,6 +19,7 @@ import (
 	zlog "github.com/rs/zerolog/log"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/profile"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -412,8 +413,8 @@ func TestManagerGuardBlocksAStartUntilReleased(t *testing.T) {
 	started := make(chan error, 1)
 	go func() { started <- m.Start(context.Background(), store.IngestTriggerManual) }()
 	select {
-	case <-started:
-		t.Fatal("Start proceeded while Guard still held the lock")
+	case err := <-started:
+		t.Fatalf("Start proceeded while Guard still held the lock: %v", err)
 	case <-time.After(50 * time.Millisecond):
 	}
 
@@ -772,5 +773,68 @@ func TestManagerSnapshotPerRun(t *testing.T) {
 	close(release)
 	if calls != 2 || len(got) != 2 || got[0] != "model-1" || got[1] != "model-2" {
 		t.Errorf("calls = %d, models = %v, want one Active call per run", calls, got)
+	}
+}
+
+// A run that adds no items and changes no scores leaves the stored clusters
+// alone: the rebuild — and its model calls — is skipped.
+func TestManagerSkipsClusterRebuildWhenNothingNew(t *testing.T) {
+	m, release := newManagerForTest(t, Outcome{}, nil)
+	seed := []store.StoryCluster{{
+		ID: "story-keep", RepresentativeItemID: "x", Method: "exact", Confidence: 1,
+		Items: []store.StoryClusterItem{{ItemID: "x", Position: 0}},
+	}}
+	if err := m.db.ReplaceStoryClusters(context.Background(), seed); err != nil {
+		t.Fatalf("ReplaceStoryClusters: %v", err)
+	}
+	if err := m.Start(context.Background(), store.IngestTriggerManual); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	close(release)
+	waitIdle(t, m)
+
+	clusters, err := m.db.StoryClusters(context.Background())
+	if err != nil {
+		t.Fatalf("StoryClusters: %v", err)
+	}
+	if len(clusters) != 1 || clusters[0].ID != "story-keep" {
+		t.Errorf("clusters = %+v, want the seeded cluster untouched: rebuild was not skipped", clusters)
+	}
+}
+
+// Even with nothing new, the first run after upgrade initializes the clusters —
+// and the clustering runs on the run's context, so its log lines reach the run
+// log the UI tails.
+func TestManagerFirstRunInitializesClustersAndLogsToRunContext(t *testing.T) {
+	m, release := newManagerForTest(t, Outcome{}, nil)
+	now := time.Now()
+	if err := m.db.Record(context.Background(), []feeds.Item{
+		{ID: "a", Source: "S1", Title: "The same headline about a release", Link: "https://example.com/a"},
+		{ID: "b", Source: "S1", Title: "The same headline about a release", Link: "https://example.com/b"},
+	}, nil, now); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if err := m.Start(context.Background(), store.IngestTriggerManual); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	close(release)
+	waitIdle(t, m)
+
+	clusters, err := m.db.StoryClusters(context.Background())
+	if err != nil {
+		t.Fatalf("StoryClusters: %v", err)
+	}
+	if len(clusters) != 1 {
+		t.Fatalf("clusters = %+v, want the exact pair grouped on first run", clusters)
+	}
+	st := m.Status()
+	found := false
+	for _, line := range st.Lines {
+		if strings.Contains(line, "story clustering complete") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("run log has no clustering line; got %d lines", len(st.Lines))
 	}
 }

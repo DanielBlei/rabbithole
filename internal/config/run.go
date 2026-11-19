@@ -38,6 +38,12 @@ type File struct {
 	Ingest    FileIngest     `yaml:"ingest"`
 	Briefing  BriefingConfig `yaml:"briefing"`
 	Store     StoreConfig    `yaml:"store"`
+	User          string              `yaml:"user"`
+	Profile       string              `yaml:"profile"`
+	Inference     FileInference       `yaml:"inference"`
+	Ingest        FileIngest          `yaml:"ingest"`
+	DecisionBrief DecisionBriefConfig `yaml:"decision_brief"`
+	Store         StoreConfig         `yaml:"store"`
 }
 
 // Config is the stored shape: what the config store keeps and what ingest
@@ -48,6 +54,10 @@ type Config struct {
 	Inference InferenceConfig `yaml:"inference,omitempty"`
 	Ingest    IngestConfig    `yaml:"ingest,omitempty"`
 	Briefing  BriefingConfig  `yaml:"briefing,omitempty"`
+	User          string              `yaml:"user,omitempty"` // shell-prompt name on the web UI; blank falls back to the OS user
+	Inference     InferenceConfig     `yaml:"inference,omitempty"`
+	Ingest        IngestConfig        `yaml:"ingest,omitempty"`
+	DecisionBrief DecisionBriefConfig `yaml:"decision_brief,omitempty"`
 
 	// AdaptiveRanking adds bounded explicit reader feedback to the scoring
 	// prompt. Unset means on, preserving profile-plus-feedback behavior for
@@ -152,6 +162,10 @@ func (f File) Split() (run Config, store StoreConfig, legacy Legacy, dropped []s
 		Inference: f.Inference.InferenceConfig,
 		Ingest:    IngestConfig{DigestDir: f.Ingest.DigestDir},
 		Briefing:  f.Briefing,
+		User:          f.User,
+		Inference:     f.Inference.InferenceConfig,
+		Ingest:        IngestConfig{DigestDir: f.Ingest.DigestDir},
+		DecisionBrief: f.DecisionBrief,
 	}
 	dropped = run.Normalize()
 	legacy.ProfilePath = f.Profile
@@ -242,6 +256,9 @@ func (r *Config) DropDefaults() (dropped []string) {
 	for _, f := range briefingFields {
 		if f.isSet(&r.Briefing) {
 			try("briefing."+f.name, func(c *Config) { f.clear(&c.Briefing) })
+	for _, f := range decisionBriefFields {
+		if f.isSet(&r.DecisionBrief) {
+			try("decision_brief."+f.name, func(c *Config) { f.clear(&c.DecisionBrief) })
 		}
 	}
 	return dropped
@@ -265,24 +282,28 @@ func cloneBool(b *bool) *bool {
 	return &v
 }
 
-// Prepare normalizes, applies defaults and validates, in that order. Normalizing
-// comes first because defaults would otherwise fill fields the provider ignores.
+// Prepare normalizes, validates raw values, applies defaults and validates the
+// effective config, in that order. Normalizing comes first because defaults
+// would otherwise fill fields the provider ignores; raw validation comes before
+// defaulting so a negative value cannot be silently replaced by a default.
 // dropped lists the non-applicable keys that were set and removed.
 func (r *Config) Prepare() (dropped []string, err error) {
 	dropped = r.Normalize()
+	rawErr := r.DecisionBrief.validateRaw()
 	r.applyDefaults()
-	return dropped, r.validate()
+	return dropped, errors.Join(rawErr, r.validate())
 }
 
 // Canonical is the form that is stored, marshaled and hashed: normalized but
 // not defaulted, so it holds only what the user set and a later release's new
-// defaults still reach them. It validates a defaulted copy, so the errors match
-// Prepare's.
+// defaults still reach them. It validates raw values and a defaulted copy, so
+// the errors match Prepare's.
 func (r *Config) Canonical() (dropped []string, err error) {
 	dropped = r.Normalize()
+	rawErr := r.DecisionBrief.validateRaw()
 	eff := *r
 	eff.applyDefaults()
-	return dropped, eff.validate()
+	return dropped, errors.Join(rawErr, eff.validate())
 }
 
 // Normalize clears inference fields the provider does not read and makes the
@@ -354,6 +375,7 @@ func (r *Config) applyDefaults() {
 		in.MaxParallel = defaultMaxParallel
 	}
 	r.Briefing = r.Briefing.WithDefaults()
+	r.DecisionBrief = r.DecisionBrief.WithDefaults()
 }
 
 // FieldError is one validation failure, keyed by the dotted field name so a UI
@@ -416,6 +438,9 @@ func (r *Config) validate() error {
 	if r.Briefing.RecommendedReads > MaxBriefingRecommendedReads {
 		add("briefing.recommended_reads", "briefing.recommended_reads must be at most %d", MaxBriefingRecommendedReads)
 	}
+	// Decision Brief raw values are checked by validateRaw before defaulting.
+	// WithDefaults intentionally clamps upper bounds and floors the output-token
+	// minimum, so the effective values need no range checks here.
 	return errors.Join(errs...)
 }
 
@@ -455,6 +480,7 @@ type inferenceYAML struct {
 	Provider         string              `yaml:"provider,omitempty"`
 	Host             string              `yaml:"host,omitempty"`
 	Model            string              `yaml:"model,omitempty"`
+	EmbeddingModel   string              `yaml:"embedding_model,omitempty"`
 	APIKey           string              `yaml:"api_key,omitempty"`
 	Think            *bool               `yaml:"think,omitempty"`
 	Effort           string              `yaml:"effort,omitempty"`
@@ -468,8 +494,8 @@ type inferenceYAML struct {
 // MarshalYAML renders the minimal form: unset optional fields are omitted.
 func (c InferenceConfig) MarshalYAML() (any, error) {
 	out := inferenceYAML{
-		Provider: c.Provider, Host: c.Host, Model: c.Model, APIKey: c.APIKey,
-		Think: c.Think, Effort: c.Effort, StructuredOutput: c.StructuredOutput,
+		Provider: c.Provider, Host: c.Host, Model: c.Model, EmbeddingModel: c.EmbeddingModel,
+		APIKey: c.APIKey, Think: c.Think, Effort: c.Effort, StructuredOutput: c.StructuredOutput,
 		SystemPrompt: c.SystemPrompt, BatchSize: c.BatchSize, MaxParallel: c.MaxParallel,
 	}
 	t := tuningYAML{

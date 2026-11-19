@@ -222,6 +222,36 @@ func TestHandleSetStatus(t *testing.T) {
 	}
 }
 
+func TestHandleSetStatusUsesCanonicalID(t *testing.T) {
+	s := newTestServer(t)
+	items := []feeds.Item{
+		{ID: "alias-item", Source: "S", Title: "A", Link: "x"},
+		{ID: "x", Source: "S", Title: "B", Link: "https://example.com/x"},
+	}
+	if err := s.db.Record(context.Background(), items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	s.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/items/x/seen", nil))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body)
+	}
+	a, err := s.db.GetByID(context.Background(), "alias-item")
+	if err != nil {
+		t.Fatalf("GetByID A: %v", err)
+	}
+	b, err := s.db.GetByID(context.Background(), "x")
+	if err != nil {
+		t.Fatalf("GetByID B: %v", err)
+	}
+	if a.Status != store.StatusUnread {
+		t.Fatalf("A status = %q, want unread; API canonical ID mutated the link owner", a.Status)
+	}
+	if b.Status != store.StatusRead {
+		t.Fatalf("B status = %q, want read", b.Status)
+	}
+}
+
 func TestHandleSources(t *testing.T) {
 	s := newTestServer(t)
 	ctx := context.Background()
