@@ -602,6 +602,120 @@ func TestEnqueueVersionBumpInvalidatesOwnership(t *testing.T) {
 	}
 }
 
+// A same-version enqueue must not interrupt a live claim: the worker already
+// owns the item, so resetting its token would let a second worker claim and
+// classify the same item again. The claim remains authoritative until it
+// completes or its lease expires.
+func TestEnqueuePreservesActiveSameVersionClaim(t *testing.T) {
+	db := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	lease := 30 * time.Minute
+	item := seedScoredItem(t, db, "a", now.Add(-time.Hour))
+
+	claimed := claimOne(t, db, 1, now, lease)
+	before, ok, err := db.ClassificationState(ctx, item.ID)
+	if err != nil || !ok {
+		t.Fatalf("ClassificationState: %+v, %v, %v", before, ok, err)
+	}
+
+	enqueued, err := db.EnqueueClassification(ctx, []string{item.ID}, 1, false)
+	if err != nil || enqueued != 0 {
+		t.Fatalf("same-version enqueue = %d, %v, want 0 and no error", enqueued, err)
+	}
+	after, ok, err := db.ClassificationState(ctx, item.ID)
+	if err != nil || !ok {
+		t.Fatalf("ClassificationState after enqueue: %+v, %v, %v", after, ok, err)
+	}
+	if after.ClaimToken != claimed.ClaimToken || after.Status != ClassificationPending {
+		t.Fatalf("enqueue reset the live claim: before = %+v, after = %+v", before, after)
+	}
+	if after.ClaimExpiresAt == nil || before.ClaimExpiresAt == nil ||
+		!after.ClaimExpiresAt.Equal(*before.ClaimExpiresAt) {
+		t.Fatalf("enqueue changed the lease: before = %+v, after = %+v", before, after)
+	}
+
+	second, err := db.ClaimClassification(ctx, 1, now.Add(time.Minute), 10, 5, lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("enqueue made a live claim stealable: %+v", second)
+	}
+	if _, err := db.ReplaceItemTags(
+		ctx, item.ID, 1, claimed.ClaimToken, []string{"go"}, nil); err != nil {
+		t.Fatalf("original claim lost ownership: %v", err)
+	}
+}
+
+// Backfill is the concrete path that used to interrupt serve's in-flight work:
+// it selects pending rows and then enqueues them at the same version. It must
+// leave a live claim alone rather than queue a duplicate model request.
+func TestEnqueueBackfillPreservesActiveSameVersionClaim(t *testing.T) {
+	db := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	lease := 30 * time.Minute
+	item := seedScoredItem(t, db, "a", now.Add(-time.Hour))
+
+	claimed := claimOne(t, db, 1, now, lease)
+	enqueued, err := db.EnqueueBackfill(ctx, time.Time{}, 0, 1)
+	if err != nil || enqueued != 0 {
+		t.Fatalf("backfill = %d, %v, want 0 and no error", enqueued, err)
+	}
+	state, ok, err := db.ClassificationState(ctx, item.ID)
+	if err != nil || !ok {
+		t.Fatalf("ClassificationState after backfill: %+v, %v, %v", state, ok, err)
+	}
+	if state.ClaimToken != claimed.ClaimToken {
+		t.Fatalf("backfill reset the live claim: %+v", state)
+	}
+
+	second, err := db.ClaimClassification(ctx, 1, now.Add(time.Minute), 10, 5, lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("backfill made a live claim stealable: %+v", second)
+	}
+	if _, err := db.ReplaceItemTags(
+		ctx, item.ID, 1, claimed.ClaimToken, []string{"go"}, nil); err != nil {
+		t.Fatalf("original claim lost ownership after backfill: %v", err)
+	}
+}
+
+// Force is the manual re-classification path: unlike an ordinary enqueue it
+// must invalidate a live same-version claim, because the operator explicitly
+// asked for a fresh verdict.
+func TestForceEnqueueInvalidatesActiveClaim(t *testing.T) {
+	db := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	lease := 30 * time.Minute
+	item := seedScoredItem(t, db, "a", now.Add(-time.Hour))
+
+	claimed := claimOne(t, db, 1, now, lease)
+	enqueued, err := db.EnqueueClassification(ctx, []string{item.ID}, 1, true)
+	if err != nil || enqueued != 1 {
+		t.Fatalf("forced enqueue = %d, %v, want 1 and no error", enqueued, err)
+	}
+	state, ok, err := db.ClassificationState(ctx, item.ID)
+	if err != nil || !ok {
+		t.Fatalf("ClassificationState after forced enqueue: %+v, %v, %v", state, ok, err)
+	}
+	if state.ClaimToken != "" || state.ClaimExpiresAt != nil {
+		t.Fatalf("forced enqueue kept the old claim: %+v", state)
+	}
+	if _, err := db.ReplaceItemTags(
+		ctx, item.ID, 1, claimed.ClaimToken, []string{"obsolete"}, nil); !errors.Is(err, ErrStaleClaim) {
+		t.Fatalf("pre-force claim still owned the item: %v", err)
+	}
+	next := claimOne(t, db, 1, now, lease)
+	if next.ClaimToken == claimed.ClaimToken {
+		t.Fatal("forced enqueue did not mint a fresh claim")
+	}
+}
+
 // --- Label safety (A3) ---
 
 func TestSanitizeLabelStripsControlAndFormatRunes(t *testing.T) {

@@ -640,7 +640,9 @@ func (s *Store) TopTags(ctx context.Context, since time.Time, kinds []string, li
 
 // EnqueueClassification makes the given items claimable by the worker at
 // version. An item already ok at that version is left alone unless force is
-// set, which also clears its attempt count for a manual retry.
+// set, which also clears its attempt count for a manual retry. A same-version
+// claim is left untouched — active work already owns the item — while a
+// version change or force invalidates it, because that verdict is obsolete.
 func (s *Store) EnqueueClassification(ctx context.Context, itemIDs []string, version int, force bool) (int, error) {
 	if version < 1 {
 		return 0, fmt.Errorf("classifier version must be positive, got %d", version)
@@ -672,9 +674,14 @@ func (s *Store) EnqueueClassification(ctx context.Context, itemIDs []string, ver
 				last_error = '',
 				claim_token = '', claim_expires_at = NULL,
 				updated_at = excluded.updated_at
-			WHERE item_classification.classifier_version <> excluded.classifier_version
+			WHERE (item_classification.classifier_version <> excluded.classifier_version
 				OR item_classification.status <> 'ok'
-				OR ? = 1`, version, now, itemID, forceInt)
+				OR ? = 1)
+				AND (item_classification.classifier_version <> excluded.classifier_version
+					OR ? = 1
+					OR item_classification.claim_expires_at IS NULL
+					OR item_classification.claim_expires_at <= ?)`,
+			version, now, itemID, forceInt, forceInt, now)
 		if err != nil {
 			return 0, fmt.Errorf("enqueue classification for item %s: %w", itemID, err)
 		}
