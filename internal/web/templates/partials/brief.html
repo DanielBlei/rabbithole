@@ -9,9 +9,11 @@
   {{- if eq .Status "idle"}}
   <p class="brief__empty">No deep dive yet.</p>
   <p class="brief__hint">Fetch this article and judge it against your profile.</p>
-  <button type="button" class="brief__btn brief__btn--go"
-    hx-post="/items/{{.URLID}}/brief" hx-target="closest .brief" hx-swap="outerHTML"
-    hx-disabled-elt="this">[ deep dive ]</button>
+  <div class="note-actions">
+    <button type="button" class="note-apply"
+      hx-post="/items/{{.URLID}}/brief" hx-target="closest .brief" hx-swap="outerHTML"
+      hx-disabled-elt="this">Dive In</button>
+  </div>
   {{- else if or (eq .Status "queued") (eq .Status "running")}}
   <p class="brief__loading" role="status"><span class="brief__dot" aria-hidden="true"></span>{{.PhaseText}}{{if .Current}} — showing the last brief until the update finishes{{end}}</p>
   {{- if .Current}}{{template "brief_ready_body" .Current}}{{end}}
@@ -20,10 +22,10 @@
   {{- else if eq .Status "failed"}}
   <p class="brief__error">{{.ErrorMessage}}</p>
   {{- if .ErrorDetail}}<p class="brief__detail">{{.ErrorDetail}}</p>{{end}}
-  <div class="brief__acts">
-    <button type="button" class="brief__btn brief__btn--go"
+  <div class="note-actions">
+    <button type="button" class="note-apply"
       hx-post="/items/{{.URLID}}/brief" hx-target="closest .brief" hx-swap="outerHTML"
-      hx-disabled-elt="this">[ retry ]</button>
+      hx-disabled-elt="this">Retry</button>
   </div>
   {{- if .Previous}}
   <section class="brief__previous" aria-label="Last successful brief">
@@ -40,10 +42,10 @@
 
 {{define "brief_ready"}}
 {{template "brief_ready_body" .}}
-<div class="brief__acts">
-  <button type="button" class="brief__btn"
+<div class="note-actions">
+  <button type="button" class="note-cancel"
     hx-post="/items/{{.URLID}}/brief/refresh" hx-target="closest .brief" hx-swap="outerHTML"
-    hx-disabled-elt="this">refresh</button>
+    hx-disabled-elt="this">Refresh</button>
 </div>
 {{end}}
 

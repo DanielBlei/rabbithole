@@ -120,3 +120,18 @@ func TestTodoMutationUnknown(t *testing.T) {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
 }
+
+func TestWeatherSlotsOnSharedPages(t *testing.T) {
+	w := newTestWeb(t)
+	for _, path := range []string{"/maze", "/sources", "/sources/manage", "/sources/library", "/briefing"} {
+		body := getPage(t, w, path)
+		for _, want := range []string{`id="wxMazeBar"`, `id="wxMazeBand"`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("GET %s missing %s", path, want)
+			}
+		}
+		if path != "/maze" && !strings.Contains(body, `id="wxChip"`) {
+			t.Errorf("GET %s missing the weather chip", path)
+		}
+	}
+}

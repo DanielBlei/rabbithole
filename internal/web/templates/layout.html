@@ -39,8 +39,8 @@
       <nav class="topbar__nav" aria-label="Main">
         <a class="{{if eq .Active "feed"}}active{{end}}" href="/feed"{{if eq .Active "feed"}} aria-current="page"{{end}}>Feed</a>
         <a class="{{if eq .Active "sources"}}active{{end}}" href="/sources"{{if eq .Active "sources"}} aria-current="page"{{end}}>Sources</a>
-        <a class="{{if eq .Active "maze"}}active{{end}}" href="/maze"{{if eq .Active "maze"}} aria-current="page"{{end}}>Maze</a>
         <a class="{{if eq .Active "briefing"}}active{{end}}" href="/briefing"{{if eq .Active "briefing"}} aria-current="page"{{end}}>Briefing</a>
+        <a class="{{if eq .Active "maze"}}active{{end}}" href="/maze"{{if eq .Active "maze"}} aria-current="page"{{end}}>Maze</a>
       </nav>
     </div>
     <div class="topbar__right">
@@ -107,12 +107,20 @@
         <span class="navrail__ds">the rabbit hole</span>
       </span>
     </a>
-    <a class="navrail__item navrail__item--page{{if eq .Active "sources"}} navrail__item--on{{end}}" href="/sources"
+    <a class="navrail__item navrail__item--page navrail__item--sub{{if eq .Active "sources"}} navrail__item--on{{end}}" href="/sources"
        {{if eq .Active "sources"}}aria-current="page"{{end}}>
       <span class="navrail__mk" aria-hidden="true">&#10095;</span>
       <span class="navrail__txt">
         <span class="navrail__nm">Sources<i class="navrail__cur" aria-hidden="true"></i></span>
         <span class="navrail__ds">feeds &amp; health</span>
+      </span>
+    </a>
+    <a class="navrail__item navrail__item--page navrail__item--sub{{if eq .Active "briefing"}} navrail__item--on{{end}}" href="/briefing"
+       {{if eq .Active "briefing"}}aria-current="page"{{end}}>
+      <span class="navrail__mk" aria-hidden="true">&#10095;</span>
+      <span class="navrail__txt">
+        <span class="navrail__nm">Briefing<i class="navrail__cur" aria-hidden="true"></i></span>
+        <span class="navrail__ds">daily / weekly</span>
       </span>
     </a>
     <a class="navrail__item navrail__item--page{{if eq .Active "maze"}} navrail__item--on{{end}}" href="/maze"
@@ -121,14 +129,6 @@
       <span class="navrail__txt">
         <span class="navrail__nm">Maze<i class="navrail__cur" aria-hidden="true"></i></span>
         <span class="navrail__ds">day-to-day</span>
-      </span>
-    </a>
-    <a class="navrail__item navrail__item--page{{if eq .Active "briefing"}} navrail__item--on{{end}}" href="/briefing"
-       {{if eq .Active "briefing"}}aria-current="page"{{end}}>
-      <span class="navrail__mk" aria-hidden="true">&#10095;</span>
-      <span class="navrail__txt">
-        <span class="navrail__nm">Briefing<i class="navrail__cur" aria-hidden="true"></i></span>
-        <span class="navrail__ds">daily / weekly</span>
       </span>
     </a>
     {{/* Weather, for the two placements that put it in here rather than on the
@@ -261,4 +261,11 @@
 {{define "ingWatch"}}
 <span id="ingWatch" hidden data-running="{{if .Running}}1{{else}}0{{end}}" {{if .OOB}}hx-swap-oob="true"{{end}}
       {{if .Running}}hx-get="/ingest/chrome" hx-trigger="every 3s [!document.hidden]" hx-swap="none"{{end}}></span>
+{{end}}
+
+{{/* The weather slots the Maze, Settings, Sources and Briefing share; weather.js
+     fills whichever one the chosen shape uses and the stylesheet hides the empty rest. */}}
+{{define "wxSlots"}}
+<div class="wx-subbar" id="wxMazeBar"></div>
+<aside class="wx-band wx-full" id="wxMazeBand"></aside>
 {{end}}

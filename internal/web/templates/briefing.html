@@ -1,20 +1,22 @@
 {{define "content"}}
 <div class="briefing-page">
-  <div class="briefing-head">
-    <form class="briefing-kinds" method="get" action="/briefing">
-      <input type="hidden" name="period" value="{{.PeriodStart}}">
-      <button class="clk-btn{{if .Daily}} is-on{{end}}" type="submit" name="kind" value="daily"
-              {{if .Daily}}aria-current="page"{{end}}>Daily</button>
-      <button class="clk-btn{{if .Weekly}} is-on{{end}}" type="submit" name="kind" value="weekly"
-              {{if .Weekly}}aria-current="page"{{end}}>Weekly</button>
-    </form>
-    <div class="briefing-nav">
-      <a class="clk-btn" href="/briefing?kind={{.Kind}}&period={{.PrevStart}}">&larr; Previous</a>
-      <span class="briefing-nav__label">{{.PeriodLabel}}</span>
-      {{if .HasNext}}<a class="clk-btn" href="/briefing?kind={{.Kind}}&period={{.NextStart}}">Next &rarr;</a>{{else}}<span class="clk-btn is-disabled" aria-disabled="true">Next &rarr;</span>{{end}}
-    </div>
+{{template "wxSlots"}}
+<div class="briefing-head">
+  <form class="briefing-kinds" method="get" action="/briefing">
+    <input type="hidden" name="period" value="{{.PeriodStart}}">
+    <button class="clk-btn{{if .Daily}} is-on{{end}}" type="submit" name="kind" value="daily"
+            {{if .Daily}}aria-current="page"{{end}}>Daily</button>
+    <button class="clk-btn{{if .Weekly}} is-on{{end}}" type="submit" name="kind" value="weekly"
+            {{if .Weekly}}aria-current="page"{{end}}>Weekly</button>
+  </form>
+  <div class="briefing-nav">
+    <a class="clk-btn" href="/briefing?kind={{.Kind}}&period={{.PrevStart}}">&larr; Previous</a>
+    <span class="briefing-nav__label">{{.PeriodLabel}}</span>
+    {{if .HasNext}}<a class="clk-btn" href="/briefing?kind={{.Kind}}&period={{.NextStart}}">Next &rarr;</a>{{else}}<span class="clk-btn is-disabled" aria-disabled="true">Next &rarr;</span>{{end}}
   </div>
-  {{template "briefingPanel" .Panel}}
+  <div class="wx-chip" id="wxChip"></div>
+</div>
+{{template "briefingPanel" .Panel}}
 </div>
 {{end}}
 
@@ -32,7 +34,8 @@
     {{if .Ready}}<a class="clk-btn" href="{{.ExportURL}}">Download markdown</a>{{end}}
   </div>
   {{if .Ready}}
-    <article class="briefing__body">{{.BodyHTML}}</article>
+    {{if .Error}}<p class="briefing__error">Regenerate failed: {{.Error}}</p>{{end}}
+    <article class="md briefing__body">{{.BodyHTML}}</article>
     <p class="briefing__prov">
       {{if .ProfileName}}Profile: {{.ProfileName}}{{if .ProfileHash}} ({{.ProfileHash}}){{end}} · {{end}}
       {{if .Provider}}{{.Provider}}{{if .Model}}/{{.Model}}{{end}} · {{end}}
@@ -41,18 +44,21 @@
   {{else if .Generating}}
     <p class="briefing__state">Generating this briefing… <span class="blink">_</span></p>
     <p class="briefing__hint">This makes one model call and can take a minute. You can leave this page; the result is stored.</p>
+    {{if .BodyHTML}}<article class="md briefing__body">{{.BodyHTML}}</article>{{end}}
   {{else if .Failed}}
     <p class="briefing__state briefing__state--err">This briefing could not be generated.</p>
     <p class="briefing__error">{{.Error}}</p>
   {{else}}
     <p class="briefing__state">No briefing is stored for this period yet.</p>
-    <p class="briefing__hint">Generate one from the articles already scored in this period.</p>
+    {{if .Complete}}<p class="briefing__hint">Generate one from the articles already scored in this period.</p>{{else}}<p class="briefing__hint">This period has not finished yet.</p>{{end}}
   {{end}}
+  {{if .Complete}}
   <form class="briefing__actions"
         hx-post="/briefing/generate" hx-target="#briefingPanel" hx-swap="outerHTML">
     <input type="hidden" name="kind" value="{{.Kind}}">
     <input type="hidden" name="period" value="{{.PeriodStart}}">
-    <button class="prof-form__save" type="submit"{{if .Generating}} disabled{{end}}>{{.ActionLabel}}</button>
+    <button class="clk-btn clk-btn--go" type="submit"{{if .Generating}} disabled{{end}}>{{.ActionLabel}}</button>
   </form>
+  {{end}}
 </section>
 {{end}}

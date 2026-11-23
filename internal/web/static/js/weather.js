@@ -42,6 +42,7 @@
   var SIDES = ['off','up','down'];
   function side(){ var s = wxGet('side','off'); return SIDES.indexOf(s) < 0 ? 'off' : s; }
   function onFeed(){ return wxOn('feed'); }
+  var MAZE_PAGE = '.maze, .stp-page, .src-page, .briefing-page';
   function onMaze(){ return wxOn('maze'); }
   // Weather on, and somewhere for it to go. Everything that costs something —
   // the location prompt, the Open-Meteo request — asks this rather than the
@@ -82,7 +83,7 @@
     if (!wanted()) return null;
     var el = document.getElementById('wxSide');
     if (side() !== 'off' && el) return el;
-    var maze = document.querySelector('.maze, .stp-page');
+    var maze = document.querySelector(MAZE_PAGE);
     if (maze) return onMaze() ? maze : null;
     var feed = document.getElementById('wxFeedTile');
     return (feed && onFeed()) ? feed : null;
@@ -327,7 +328,7 @@
     // container that isn't the chosen one is emptied — the CSS hides an empty
     // one, so clearing is what turns a placement off rather than a second rule
     // somewhere saying so.
-    var sh = shape(), isFeed = !document.querySelector('.maze, .stp-page');
+    var sh = shape(), isFeed = !document.querySelector(MAZE_PAGE);
     var pageOn = isFeed ? onFeed() : onMaze();
     var sub  = pageOn && sh === 'subbar' ? el(isFeed ? 'wxFeedBar'  : 'wxMazeBar')  : null;
     var band = pageOn && sh === 'full'   ? el(isFeed ? 'wxFeedBand' : 'wxMazeBand') : null;

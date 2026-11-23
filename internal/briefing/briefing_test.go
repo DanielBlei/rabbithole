@@ -700,3 +700,165 @@ func TestRenderIsStableAndEscapesTitles(t *testing.T) {
 		t.Error("render is not deterministic")
 	}
 }
+
+func TestGenerateFailureKeepsPriorReadyBriefing(t *testing.T) {
+	st := newFakeStore(sampleItems(2)...)
+	opts := options()
+	start, _ := PeriodFor("daily", opts.Now)
+	prior := store.Briefing{
+		ID: briefingID(start), PeriodKind: "daily", PeriodStart: start.Start, PeriodEnd: start.End,
+		Status: store.BriefingReady, BodyMD: "# prior body",
+		ReferencedItemIDs: []string{"item-a"},
+		ProfileID:         "p-old", ProfileName: "Old profile", ProfileHash: "h-old",
+		Provider: "old-provider", Model: "old-model", ItemCount: 7,
+	}
+	if _, err := st.SaveBriefing(context.Background(), prior); err != nil {
+		t.Fatal(err)
+	}
+	gen := &fakeGenerator{errs: []error{errors.New("connection refused")}}
+	svc := testService(st, func(context.Context) (Generator, error) { return gen, nil })
+
+	got, err := svc.Generate(context.Background(), "daily", time.Time{}, opts)
+	if !errors.Is(err, ErrGenerationFailed) {
+		t.Fatalf("error = %v, want ErrGenerationFailed", err)
+	}
+	stored := st.get("daily", start.Start)
+	for name, b := range map[string]store.Briefing{"returned": got, "stored": stored} {
+		if b.Status != store.BriefingReady || b.BodyMD != prior.BodyMD {
+			t.Errorf("%s: status = %q body = %q, want the prior ready briefing", name, b.Status, b.BodyMD)
+		}
+		if len(b.ReferencedItemIDs) != 1 || b.ReferencedItemIDs[0] != "item-a" {
+			t.Errorf("%s: references = %v", name, b.ReferencedItemIDs)
+		}
+		if b.ProfileName != prior.ProfileName || b.Provider != prior.Provider ||
+			b.Model != prior.Model || b.ItemCount != prior.ItemCount {
+			t.Errorf("%s: provenance changed: %+v", name, b)
+		}
+		if !strings.Contains(b.Error, "connection refused") {
+			t.Errorf("%s: error = %q, want the cause", name, b.Error)
+		}
+	}
+}
+
+func TestGenerateFirstRunFailureIsFailedAndEmpty(t *testing.T) {
+	st := newFakeStore(sampleItems(2)...)
+	gen := &fakeGenerator{errs: []error{errors.New("boom")}}
+	svc := testService(st, func(context.Context) (Generator, error) { return gen, nil })
+
+	got, err := svc.Generate(context.Background(), "daily", time.Time{}, options())
+	if !errors.Is(err, ErrGenerationFailed) {
+		t.Fatalf("error = %v", err)
+	}
+	if got.Status != store.BriefingFailed || got.BodyMD != "" || len(got.ReferencedItemIDs) != 0 {
+		t.Errorf("got %+v, want failed with empty body", got)
+	}
+}
+
+// ctxStore refuses writes made with a finished context, like a real database.
+type ctxStore struct{ *fakeStore }
+
+func (c ctxStore) SaveBriefing(ctx context.Context, b store.Briefing) (store.Briefing, error) {
+	if err := ctx.Err(); err != nil {
+		return store.Briefing{}, err
+	}
+	return c.fakeStore.SaveBriefing(ctx, b)
+}
+
+// endingGenerator finishes the run's context (cancel or deadline) mid-call.
+type endingGenerator struct {
+	end   func()
+	reply string
+	err   error
+}
+
+func (g endingGenerator) ChatJSON(context.Context, string, string, json.RawMessage, int) (string, error) {
+	g.end()
+	return g.reply, g.err
+}
+
+func TestTerminalSavePersistsAfterCancelOrTimeout(t *testing.T) {
+	tests := []struct {
+		name       string
+		newCtx     func() (context.Context, func())
+		reply      string
+		err        error
+		wantStatus string
+	}{
+		{"cancel then success", func() (context.Context, func()) {
+			ctx, cancel := context.WithCancel(context.Background())
+			return ctx, cancel
+		}, validJSON(), nil, store.BriefingReady},
+		{"cancel then failure", func() (context.Context, func()) {
+			ctx, cancel := context.WithCancel(context.Background())
+			return ctx, cancel
+		}, "", context.Canceled, store.BriefingFailed},
+		{"timeout then success", func() (context.Context, func()) {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+			return ctx, func() { <-ctx.Done(); cancel() }
+		}, validJSON(), nil, store.BriefingReady},
+		{"timeout then failure", func() (context.Context, func()) {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+			return ctx, func() { <-ctx.Done(); cancel() }
+		}, "", context.DeadlineExceeded, store.BriefingFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st := ctxStore{newFakeStore(sampleItems(2)...)}
+			ctx, end := tt.newCtx()
+			gen := endingGenerator{end: end, reply: tt.reply, err: tt.err}
+			svc := New(st, fakeProfiles{snap: profile.Default()},
+				func(context.Context) (Generator, error) { return gen, nil })
+			_, _ = svc.Generate(ctx, "daily", time.Time{}, options())
+			p, _ := PeriodFor("daily", options().Now)
+			if got := st.get("daily", p.Start); got.Status != tt.wantStatus {
+				t.Errorf("stored status = %q, want %q", got.Status, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestRenderNeutralisesImagesAndParens(t *testing.T) {
+	p, _ := PeriodFor("daily", options().Now)
+	items := sampleItems(1)
+	items[0].Link = "https://en.wikipedia.org/wiki/Foo_(bar)"
+	out := Render(p, items, Briefing{
+		ExecutiveSummary: "![s](http://e/s.png)",
+		Developments: []Development{{
+			Headline: "H", Synthesis: "![x](http://e/p.png)", WhyItMatters: "![w](http://e/w.png)",
+			ItemIDs: []int{1},
+		}},
+	})
+	if strings.Contains(out, "\n![") || strings.Contains(out, " ![") {
+		t.Errorf("an image survived in the export:\n%s", out)
+	}
+	for _, want := range []string{`\![x](http://e/p.png)`, `\![s]`, `\![w]`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "https://en.wikipedia.org/wiki/Foo_%28bar%29") {
+		t.Errorf("parens not encoded:\n%s", out)
+	}
+}
+
+func TestExtractJSONPrefersValidObject(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{"fence inside a string value", "{\"a\": \"use ``` here\"}"},
+		{"trailing prose line", "{\"a\": 1}\nHope this helps."},
+		{"fenced", "```json\n{\"a\": 1}\n```"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := extractJSON(tt.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !json.Valid([]byte(got)) {
+				t.Errorf("extractJSON = %q, not valid JSON", got)
+			}
+		})
+	}
+}

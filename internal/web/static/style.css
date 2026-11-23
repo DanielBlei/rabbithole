@@ -1338,9 +1338,9 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
    note-toggle checkbox flips to the edit form (textarea + apply/cancel). Apply
    persists via the form's hx-post to the note mutation route. */
 .note-toggle{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;}
-.note-view{display:flex;align-items:flex-start;gap:12px;}
+.note-view{display:flex;align-items:flex-start;gap:12px;cursor:text;}
 .note-view .md{flex:1;min-width:0;color:var(--text);}
-.note-view .note-empty{flex:1;margin:0;color:var(--text-dim);font-style:italic;}
+.note-view .note-empty{flex:1;margin:0;color:var(--text-dim);font-style:italic;cursor:text;}
 .note-edit-btn{cursor:pointer;color:var(--text-dim);font-size:1.15rem;flex:none;}
 .note-edit-btn:hover{color:var(--accent);}
 
@@ -1355,13 +1355,14 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
 .note-input::placeholder{color:var(--text-dim);}
 .note-actions{display:flex;gap:8px;margin-top:7px;}
 .note-apply,.note-cancel{
-  font-family:inherit;font-size:1.15rem;padding:4px 14px;border-radius:8px;cursor:pointer;
+  font-family:inherit;font-size:1.15rem;padding:0 14px;height:26px;display:inline-flex;align-items:center;box-sizing:border-box;border-radius:8px;cursor:pointer;
   border:1px solid transparent;background:var(--fill);
 }
 .note-apply{color:var(--accent);background:var(--tint);}
 .note-apply:hover{background:rgba(128,203,196,.2);}
 .note-cancel{color:var(--text-dim);}
 .note-cancel:hover{color:var(--accent);}
+.brief .note-actions{margin-top:12px;}
 
 @media (max-width: 720px){
   /* One number for the bar, the content and the menu's hot zone: the bar
@@ -1614,6 +1615,10 @@ header.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;}
   transition:color .16s ease;
 }
 .navrail__ds{display:block;margin-top:1px;font-size:1.15rem;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;}
+.navrail__item--sub{position:relative;padding-left:30px;padding-top:6px;padding-bottom:6px;}
+.navrail__item--sub::after{content:"";position:absolute;left:18px;top:0;bottom:0;width:1px;background:var(--line);}
+.navrail__item--sub .navrail__ds{font-size:1.05rem;}
+.navrail__item--sub .navrail__nm{font-size:1.25rem;}
 /* The lit state. The glow is the whole point of the tier — a teal bloom on the
    name and marker, over a wash that decays across the row. */
 .navrail__item--on.navrail__item--page{
@@ -2079,6 +2084,8 @@ button.modal__act{border:0;font:inherit;}
    its items; groups are told apart by a separator. */
 .src-page{display:grid;grid-template-columns:184px minmax(0,1fr);gap:22px;align-items:start;}
 .src-page__main{min-width:0;}
+.src-wxrow{display:flex;}
+.src-wxrow:has(#wxChip:not(:empty)){margin-bottom:12px;}
 .sh-nav{position:sticky;top:calc(var(--topbar-h) + 16px);}
 .sh-nav__list{display:flex;flex-direction:column;gap:1px;}
 .sh-nav__h{padding:0 10px 6px;font-size:1.05rem;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim);}
@@ -2154,11 +2161,11 @@ summary.sh-nav__h:focus-visible{outline:1px solid var(--accent);outline-offset:1
 .mg :is(h1,h2,p){margin:0;}
 
 /* Buttons on both Sources pages: secondary, primary (go), destructive, link. */
-.src-page .clk-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:var(--stp-h);box-sizing:border-box;
+.src-page .clk-btn,.briefing-head .clk-btn,.briefing .clk-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:var(--stp-h);box-sizing:border-box;
   padding:0 16px;border:0;font-size:1.2rem;white-space:nowrap;color:var(--text);}
-.src-page .clk-btn:hover:not(:disabled){color:var(--title);}
-.src-page .clk-btn--go{background:var(--tint);box-shadow:inset 0 0 0 1px var(--accent-ring);color:var(--accent);font-weight:500;}
-.src-page .clk-btn--go:hover:not(:disabled){background:var(--tint-hover);color:var(--accent);}
+.src-page .clk-btn:hover:not(:disabled),.briefing-head .clk-btn:hover:not(:disabled),.briefing .clk-btn:hover:not(:disabled){color:var(--title);}
+.src-page .clk-btn--go,.briefing .clk-btn--go{background:var(--tint);box-shadow:inset 0 0 0 1px var(--accent-ring);color:var(--accent);font-weight:500;}
+.src-page .clk-btn--go:hover:not(:disabled),.briefing .clk-btn--go:hover:not(:disabled){background:var(--tint-hover);color:var(--accent);}
 .src-page .clk-btn--danger{background:var(--warn-tint);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--warn) 30%,transparent);color:var(--warn);}
 .src-page .clk-btn--danger:hover:not(:disabled){background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn);}
 .src-page .clk-btn.clk-btn--link{height:24px;padding:0 8px;background:none;box-shadow:none;color:var(--accent);}
@@ -3713,7 +3720,7 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
    13.5, sticky bodies / placeholders / title input 14, edit inputs 12–13)
    at every size step. In px, like --fs-body itself: the interface size moves
    the rem base, and reading text must not ride along with it. */
-.tg-panel .md,.tg-why-msg{font-size:var(--fs-body);}
+.tg-panel .md,.tg-why-msg,.brief{font-size:var(--fs-body);}
 .note-empty,.todo-add__title,.idea__body,.note__new-input{font-size:calc(var(--fs-body) + .5px);}
 .tg-footnote,.note-input{font-size:calc(var(--fs-body) - .5px);}
 .todo-add__note textarea{font-size:calc(var(--fs-body) - 1px);}
@@ -4087,6 +4094,7 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
   gap:0;padding:10px 12px;border-radius:var(--r-sm);
 }
 :root[data-theme="minimal"] .navrail__nm{font-weight:500;}
+:root[data-theme="minimal"] .navrail__item--sub{padding-top:7px;padding-bottom:7px;padding-left:32px;}
 /* The lit page keeps Default's whole treatment — the decaying wash, the accent
    rule down the left edge, the bloom on the name. Which page you are on is the
    one thing the menu has to say without being read, and there is no ❯ here to
@@ -4185,6 +4193,7 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
   border-top:1px solid var(--hairline);
   transition:opacity .12s;
 }
+:root[data-theme="minimal"] .story-group{margin-bottom:0;}
 :root[data-theme="minimal"] .pane__body > .row:first-child{border-top:0;padding-top:8px;}
 :root[data-theme="minimal"] .row:hover{transform:none;box-shadow:none;}
 :root[data-theme="minimal"] .line1,
@@ -4208,6 +4217,7 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
   position:static;grid-column:2;grid-row:2;
   justify-self:end;align-self:center;margin-top:9px;
 }
+:root[data-theme="minimal"] .note-edit-btn{margin-right:7px;}
 :root[data-theme="minimal"] .toggles{grid-column:1 / 3;grid-row:3;margin-top:10px;}
 
 /* The score keeps every part of how it works — the same --score fill, the same
@@ -4334,12 +4344,17 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
 :root[data-theme="minimal"] .li-done{background:none;box-shadow:inset 0 0 0 1px var(--accent-ring);}
 /* Sources actions follow Settings' Minimal hierarchy: quiet secondary actions,
    outlined accent actions, and clear danger/link states. */
-:root[data-theme="minimal"] .src-page .clk-btn:not(.clk-btn--go,.clk-btn--danger,.clk-btn--link){
+:root[data-theme="minimal"] .src-page .clk-btn:not(.clk-btn--go,.clk-btn--danger,.clk-btn--link),
+:root[data-theme="minimal"] .briefing-head .clk-btn:not(.clk-btn--go,.clk-btn--danger,.clk-btn--link),
+:root[data-theme="minimal"] .briefing .clk-btn:not(.clk-btn--go,.clk-btn--danger,.clk-btn--link){
   background:none;box-shadow:inset 0 0 0 1px var(--hairline-strong);color:var(--text);}
-:root[data-theme="minimal"] .src-page .clk-btn:not(:disabled):hover:not(.clk-btn--go,.clk-btn--danger,.clk-btn--link){
+:root[data-theme="minimal"] .src-page .clk-btn:not(:disabled):hover:not(.clk-btn--go,.clk-btn--danger,.clk-btn--link),
+:root[data-theme="minimal"] .briefing-head .clk-btn:not(:disabled):hover:not(.clk-btn--go,.clk-btn--danger,.clk-btn--link),
+:root[data-theme="minimal"] .briefing .clk-btn:not(:disabled):hover:not(.clk-btn--go,.clk-btn--danger,.clk-btn--link){
   background:var(--fill);color:var(--title);}
-:root[data-theme="minimal"] .src-page .clk-btn--go{background:none;box-shadow:inset 0 0 0 1px var(--accent-ring);color:var(--accent);}
-:root[data-theme="minimal"] .src-page .clk-btn--go:hover:not(:disabled){background:var(--tint);color:var(--accent);}
+:root[data-theme="minimal"] .briefing-head .clk-btn.is-on:not(.clk-btn--go,.clk-btn--danger,.clk-btn--link){background:var(--tint);box-shadow:inset 0 0 0 1px var(--accent-ring);color:var(--accent);}
+:root[data-theme="minimal"] .src-page .clk-btn--go,:root[data-theme="minimal"] .briefing .clk-btn--go{background:none;box-shadow:inset 0 0 0 1px var(--accent-ring);color:var(--accent);}
+:root[data-theme="minimal"] .src-page .clk-btn--go:hover:not(:disabled),:root[data-theme="minimal"] .briefing .clk-btn--go:hover:not(:disabled){background:var(--tint);color:var(--accent);}
 :root[data-theme="minimal"] .src-page .clk-btn--danger{background:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--warn) 45%,transparent);color:var(--warn);}
 :root[data-theme="minimal"] .src-page .clk-btn--danger:hover:not(:disabled){background:var(--warn-tint);color:var(--warn);}
 :root[data-theme="minimal"] .li-tags-box{background:var(--bg);box-shadow:none;}
@@ -5435,23 +5450,24 @@ a.welcome__step{text-decoration:none;}
 
 /* Briefing page: one stored product state per period, with daily/weekly and
    previous/next navigation above it. The panel polls itself while generating. */
-.briefing-page{max-width:78rem;margin:0 auto;padding:24px 18px 48px;}
+.briefing-page{width:100%;max-width:1000px;margin:0 auto;}
 .briefing-head{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:18px;}
 .briefing-kinds{display:flex;gap:6px;}
-.briefing-nav{display:flex;gap:10px;align-items:center;font-size:1.25rem;}
-.briefing-nav__label{font-weight:600;}
+.briefing-nav{display:flex;gap:10px;align-items:center;}
+.briefing-nav__label{font-size:1.2rem;font-weight:600;color:var(--title);}
 .clk-btn.is-disabled{opacity:.45;pointer-events:none;}
 .briefing{background:var(--pane-bg,transparent);border:1px solid var(--line,#3333);border-radius:8px;padding:18px;}
 .briefing__bar{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px;}
-.briefing__body{font-size:1.35rem;line-height:1.6;}
-.briefing__body h1{font-size:1.9rem;margin:.2em 0 .6em;}
-.briefing__body h2{font-size:1.5rem;margin:1.2em 0 .4em;}
-.briefing__body h3{font-size:1.3rem;margin:1em 0 .3em;}
-.briefing__state{font-size:1.35rem;margin:12px 0 6px;}
-.briefing__state--err{color:var(--red,#c44);}
-.briefing__error{font-family:var(--mono,monospace);font-size:1.15rem;white-space:pre-wrap;}
-.briefing__hint{font-size:1.15rem;opacity:.75;}
-.briefing__prov{font-size:1.1rem;opacity:.7;margin-top:16px;}
+.briefing__body{font-size:calc(var(--fs-body) + 1.5px);line-height:1.6;}
+.md.briefing__body h1{font-size:1.45em;margin:1.4em 0 .5em;}
+.md.briefing__body h2{font-size:1.25em;margin:1.8em 0 .5em;padding-bottom:.35em;border-bottom:1px solid var(--line);}
+.md.briefing__body h3{font-size:1.1em;margin:1.3em 0 .5em;}
+.md.briefing__body>:first-child{margin-top:0;}
+.briefing__state{font-size:1.3rem;margin:12px 0 6px;color:var(--title);}
+.briefing__state--err{color:var(--warn);}
+.briefing__error{font-family:var(--font-mono);font-size:1.2rem;white-space:pre-wrap;color:var(--text-dim);}
+.briefing__hint{font-size:1.2rem;line-height:1.5;color:var(--text-dim);}
+.briefing__prov{font-size:1.1rem;color:var(--text-dim);margin-top:16px;}
 .briefing__actions{margin-top:16px;}
 /* ── Decision Brief ("dive") ─────────────────────────────────────────────
    The third row tab. It shares the why/note radio-panel mechanics; the panel
@@ -5461,17 +5477,12 @@ a.welcome__step{text-decoration:none;}
 .tg-radio-dive:checked ~ .tg-panel-dive{display:block;}
 .brief{max-width:76ch;color:var(--text);}
 .brief__empty,.brief__hint{margin:0 0 6px;color:var(--text-dim);font-style:italic;}
-.brief__hint{font-size:.9em;}
-.brief__btn{font:inherit;font-size:.85em;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:3px 9px;cursor:pointer;}
-.brief__btn:hover,.brief__btn:focus-visible{color:var(--accent);border-color:var(--accent);}
-.brief__btn--go{color:var(--accent);border-color:var(--accent-dim);}
 .brief__loading{display:flex;align-items:center;gap:8px;margin:0;color:var(--text-dim);}
 .brief__dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:brief-pulse 1.2s ease-in-out infinite;}
 @keyframes brief-pulse{0%,100%{opacity:.25}50%{opacity:1}}
 @media (prefers-reduced-motion: reduce){ .brief__dot{animation:none;opacity:1;} }
 .brief__error{margin:0 0 6px;color:var(--warn);}
 .brief__detail{margin:0 0 6px;color:var(--text-dim);font-size:.82em;overflow-wrap:anywhere;}
-.brief__acts{display:flex;gap:10px;margin-top:8px;}
 .brief__previous{margin-top:10px;border-top:1px dashed var(--line);padding-top:8px;}
 .brief__previous-title{margin:0 0 8px;color:var(--text-dim);font-size:.8em;letter-spacing:.04em;text-transform:uppercase;font-weight:600;}
 .brief__compare{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;}
