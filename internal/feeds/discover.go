@@ -125,7 +125,7 @@ func discover(ctx context.Context, client *http.Client, rawURL string, maxFeed i
 		if len(refs) > MaxCandidates {
 			refs = refs[:MaxCandidates]
 		}
-		found = verifyAll(ctx, client, refs, maxFeed)
+		found = verifyAll(ctx, client, refs, maxFeed, false)
 	} else {
 		found = probeFallbacks(ctx, client, fallbackFeeds(pg.final), maxFeed)
 	}
@@ -444,7 +444,7 @@ func isCommentsFeed(r feedRef) bool {
 // segment when it has one, then on the site root.
 func fallbackFeeds(final *url.URL) []feedRef {
 	var paths []string
-	if seg := strings.SplitN(strings.Trim(final.Path, "/"), "/", 2)[0]; seg != "" {
+	if seg := strings.SplitN(strings.Trim(final.Path, "/"), "/", 2)[0]; seg != "" && !numericSegment(seg) {
 		for _, p := range sectionPaths {
 			paths = append(paths, "/"+seg+p)
 		}
@@ -464,13 +464,29 @@ func fallbackFeeds(final *url.URL) []feedRef {
 	return refs
 }
 
+func numericSegment(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
+}
+
 // probeFallbacks verifies refs a batch at a time and stops after the first
-// batch that holds a feed, so a site with one feed costs a few requests.
+// batch that holds a post feed, so a site with one feed costs a few requests.
+// Comments feeds are dropped; a batch of only those does not end the search.
 func probeFallbacks(ctx context.Context, client *http.Client, refs []feedRef, maxFeed int64) []Candidate {
 	for len(refs) > 0 && ctx.Err() == nil {
 		n := min(verifyParallel, len(refs))
-		if found := verifyAll(ctx, client, refs[:n], maxFeed); len(found) > 0 {
-			return found
+		var posts []Candidate
+		for _, c := range verifyAll(ctx, client, refs[:n], maxFeed, true) {
+			if !isCommentsFeed(feedRef{title: c.Title}) {
+				posts = append(posts, c)
+			}
+		}
+		if len(posts) > 0 {
+			return posts
 		}
 		refs = refs[n:]
 	}
@@ -478,10 +494,12 @@ func probeFallbacks(ctx context.Context, client *http.Client, refs []feedRef, ma
 }
 
 // verifyAll fetches and parses every ref, at most verifyParallel at a time,
-// and returns the ones that are feeds in their original order.
-func verifyAll(ctx context.Context, client *http.Client, refs []feedRef, maxFeed int64) []Candidate {
+// and returns the ones that are feeds in their original order. With dedupe,
+// refs serving the same feed collapse to the first.
+func verifyAll(ctx context.Context, client *http.Client, refs []feedRef, maxFeed int64, dedupe bool) []Candidate {
 	logger := zerolog.Ctx(ctx)
 	out := make([]*Candidate, len(refs))
+	keys := make([]string, len(refs))
 	sem := make(chan struct{}, verifyParallel)
 	var wg sync.WaitGroup
 	for i, ref := range refs {
@@ -499,17 +517,28 @@ func verifyAll(ctx context.Context, client *http.Client, refs []feedRef, maxFeed
 			}
 			c := candidateFrom(feed, ref.url, ref.title)
 			out[i] = &c
+			keys[i] = feedIdentity(feed)
 		}(i, ref)
 	}
 	wg.Wait()
 
 	var found []Candidate
-	for _, c := range out {
-		if c != nil {
-			found = append(found, *c)
+	seen := map[string]bool{}
+	for i, c := range out {
+		if c == nil || (dedupe && seen[keys[i]]) {
+			continue
 		}
+		seen[keys[i]] = true
+		found = append(found, *c)
 	}
 	return found
+}
+
+func feedIdentity(feed *gofeed.Feed) string {
+	if feed.FeedLink != "" {
+		return feed.FeedLink
+	}
+	return feed.Link + "|" + feed.Title
 }
 
 // candidateFrom builds a candidate from a parsed feed. The title falls back to

@@ -42,7 +42,9 @@ var (
 
 	negativeWords = wordSet("not no dont never less least avoid skip dislike hate boring uninteresting exclude ignore")
 	weakWords     = wordSet("somewhat moderately moderate secondary sometimes")
-	neutralWords  = wordSet("context notes about background")
+	neutralEdges  = wordSet("context notes background")
+	listMarkerRE  = regexp.MustCompile(`^\s*([-*+]|\d+[.)])\s+`)
+	eDropRE       = regexp.MustCompile(`(?:ch|sh|x|z|ss)e$`)
 )
 
 func wordSet(s string) map[string]bool {
@@ -81,8 +83,10 @@ func headingKind(text string, level int) sectionKind {
 	if level == 1 {
 		return sectionWeak
 	}
-	for _, w := range words {
-		if neutralWords[w] {
+	if len(words) > 0 {
+		whole := strings.Join(words, " ")
+		if whole == "about" || whole == "about me" ||
+			neutralEdges[words[0]] || neutralEdges[words[len(words)-1]] {
 			return sectionNeutral
 		}
 	}
@@ -114,7 +118,11 @@ func profileTerms(profile string) map[string]int {
 		if kind == sectionWeak {
 			weight = 1
 		}
-		for _, w := range terms(line, true) {
+		text, start := line, true
+		if loc := listMarkerRE.FindStringIndex(line); loc != nil {
+			text, start = line[loc[1]:], false
+		}
+		for _, w := range terms(text, true, start) {
 			if pos[w.norm] < weight {
 				pos[w.norm] = weight
 			}
@@ -143,7 +151,7 @@ func (h *Heuristic) Score(_ context.Context, profile string, items []feeds.Item)
 	for _, it := range items {
 		hits := make(map[string]*hit)
 		collect := func(text string, fieldPoints int, title bool) {
-			for _, w := range terms(text, false) {
+			for _, w := range terms(text, false, true) {
 				weight, ok := keywords[w.norm]
 				if !ok || hits[w.norm] != nil {
 					continue
@@ -192,16 +200,19 @@ type term struct{ orig, norm string }
 // terms splits s into keyword candidates. Words of two letters are kept only
 // when capitalized, so AI and ML survive while "to" and "go deeper" do not;
 // in a profile a capitalized Go counts only away from the start of a sentence.
-func terms(s string, profile bool) []term {
+func terms(s string, profile, start bool) []term {
 	var out []term
 	var run []rune
-	start := true
 	flush := func(first bool) {
 		if len(run) == 0 {
 			return
 		}
 		w := string(run)
 		run = run[:0]
+		if stem := w[:len(w)-1]; strings.HasSuffix(w, "s") && utf8.RuneCountInString(stem) >= 2 &&
+			isUpperLetters(stem) {
+			w = stem
+		}
 		if keepWord(w, profile && first) {
 			lw := strings.ToLower(w)
 			if n := normalize(lw); !stop[lw] && !stop[n] {
@@ -233,6 +244,15 @@ func terms(s string, profile bool) []term {
 	return out
 }
 
+func isUpperLetters(w string) bool {
+	for _, r := range w {
+		if !unicode.IsUpper(r) {
+			return false
+		}
+	}
+	return true
+}
+
 // keepWord applies the minimum length rule.
 func keepWord(w string, sentenceStart bool) bool {
 	switch utf8.RuneCountInString(w) {
@@ -250,7 +270,11 @@ func keepWord(w string, sentenceStart bool) bool {
 // normalize folds a lowercase word to a form shared by its plural and by
 // British and American spellings.
 func normalize(w string) string {
-	return spellingRE.ReplaceAllString(singular(w), "${1}iz$2")
+	n := spellingRE.ReplaceAllString(singular(w), "${1}iz$2")
+	if eDropRE.MatchString(n) {
+		n = n[:len(n)-1]
+	}
+	return n
 }
 
 func singular(w string) string {

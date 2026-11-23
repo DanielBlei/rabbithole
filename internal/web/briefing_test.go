@@ -6,6 +6,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -58,12 +59,25 @@ func (g *blockingGenerator) callCount() int {
 	return g.calls
 }
 
-func briefingToday() string { return time.Now().UTC().Format("2006-01-02") }
+// briefingPeriodDay is yesterday, the newest daily period a generate accepts.
+func briefingPeriodDay() string { return time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02") }
+
+type failingWebProfiles struct{}
+
+func (failingWebProfiles) Resolve(context.Context) (profile.Snapshot, error) {
+	return profile.Snapshot{}, errors.New("profile store down")
+}
 
 func seedScoredItem(t *testing.T, w *Web) {
 	t.Helper()
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Truncate(24 * time.Hour).Add(12 * time.Hour)
+	if err := w.db.Record(context.Background(),
+		[]feeds.Item{{ID: "scored", Source: "S1", Title: "Scored", Link: "https://x/scored", Published: yesterday}},
+		nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
 	n, err := w.db.ReplaceItemScores(context.Background(), []store.ScoreReplacement{{
-		ItemID: "a", Score: 9, Reason: "worth it", Model: "test",
+		ItemID: "scored", Score: 9, Reason: "worth it", Model: "test",
 		ProfileID: "builtin-default", ProfileName: "Default", ProfileHash: "hash",
 	}})
 	if err != nil {
@@ -101,7 +115,8 @@ func TestBriefingPageAndGenerateFlow(t *testing.T) {
 	w := newBriefingWeb(t, gen)
 
 	page := httptest.NewRecorder()
-	w.Routes().ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/briefing?kind=daily&period="+briefingToday(), nil))
+	w.Routes().ServeHTTP(page, httptest.NewRequest(http.MethodGet,
+		"/briefing?kind=daily&period="+briefingPeriodDay(), nil))
 	if page.Code != http.StatusOK {
 		t.Fatalf("page status = %d", page.Code)
 	}
@@ -112,7 +127,7 @@ func TestBriefingPageAndGenerateFlow(t *testing.T) {
 		t.Error("nav entry missing")
 	}
 
-	form := url.Values{"kind": {"daily"}, "period": {briefingToday()}}
+	form := url.Values{"kind": {"daily"}, "period": {briefingPeriodDay()}}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/briefing/generate", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -130,7 +145,7 @@ func TestBriefingPageAndGenerateFlow(t *testing.T) {
 	}
 	close(gen.release)
 
-	start, _ := time.ParseInLocation("2006-01-02", briefingToday(), time.UTC)
+	start, _ := time.ParseInLocation("2006-01-02", briefingPeriodDay(), time.UTC)
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		b, err := w.db.BriefingForPeriod(context.Background(), "daily", start)
@@ -156,7 +171,7 @@ func TestBriefingPageAndGenerateFlow(t *testing.T) {
 
 	ready := httptest.NewRecorder()
 	w.Routes().
-		ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "/briefing?kind=daily&period="+briefingToday(), nil))
+		ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "/briefing?kind=daily&period="+briefingPeriodDay(), nil))
 	body := ready.Body.String()
 	for _, want := range []string{"One article mattered", "A development", "Download markdown", "Regenerate"} {
 		if !strings.Contains(body, want) {
@@ -173,7 +188,7 @@ func TestBriefingPageAndGenerateFlow(t *testing.T) {
 
 func TestBriefingStatusTransitions(t *testing.T) {
 	w := newTestWeb(t)
-	start, _ := time.ParseInLocation("2006-01-02", briefingToday(), time.UTC)
+	start, _ := time.ParseInLocation("2006-01-02", briefingPeriodDay(), time.UTC)
 	if _, err := w.db.SaveBriefing(context.Background(), store.Briefing{
 		ID: "b", PeriodKind: "daily", PeriodStart: start, PeriodEnd: start.AddDate(0, 0, 1),
 		Status: store.BriefingGenerating,
@@ -182,7 +197,7 @@ func TestBriefingStatusTransitions(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
-		"/briefing/status?kind=daily&period="+briefingToday(), nil))
+		"/briefing/status?kind=daily&period="+briefingPeriodDay(), nil))
 	if !strings.Contains(rec.Body.String(), "every 3s") || !strings.Contains(rec.Body.String(), "Generating") {
 		t.Errorf("generating status lost its poll:\n%s", rec.Body.String())
 	}
@@ -195,7 +210,7 @@ func TestBriefingStatusTransitions(t *testing.T) {
 	}
 	rec = httptest.NewRecorder()
 	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
-		"/briefing/status?kind=daily&period="+briefingToday(), nil))
+		"/briefing/status?kind=daily&period="+briefingPeriodDay(), nil))
 	if strings.Contains(rec.Body.String(), "every 3s") {
 		t.Errorf("ready status kept polling:\n%s", rec.Body.String())
 	}
@@ -206,7 +221,7 @@ func TestBriefingStatusTransitions(t *testing.T) {
 
 func TestBriefingExportDownloadsTheStoredBody(t *testing.T) {
 	w := newTestWeb(t)
-	start, _ := time.ParseInLocation("2006-01-02", briefingToday(), time.UTC)
+	start, _ := time.ParseInLocation("2006-01-02", briefingPeriodDay(), time.UTC)
 	body := "# Briefing\n\nStored body.\n"
 	if _, err := w.db.SaveBriefing(context.Background(), store.Briefing{
 		ID: "b", PeriodKind: "daily", PeriodStart: start, PeriodEnd: start.AddDate(0, 0, 1),
@@ -216,7 +231,7 @@ func TestBriefingExportDownloadsTheStoredBody(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
-		"/briefing/export?kind=daily&period="+briefingToday(), nil))
+		"/briefing/export?kind=daily&period="+briefingPeriodDay(), nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body)
 	}
@@ -244,7 +259,7 @@ func TestBriefingGenerateWithHeuristicIsAProductState(t *testing.T) {
 	seedScoredItem(t, w)
 	w.src = config.Static(config.Config{Inference: config.InferenceConfig{Provider: "heuristic"}})
 
-	form := url.Values{"kind": {"daily"}, "period": {briefingToday()}}
+	form := url.Values{"kind": {"daily"}, "period": {briefingPeriodDay()}}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/briefing/generate", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -253,7 +268,7 @@ func TestBriefingGenerateWithHeuristicIsAProductState(t *testing.T) {
 		t.Fatalf("generate status = %d; body=%s", rec.Code, rec.Body)
 	}
 
-	start, _ := time.ParseInLocation("2006-01-02", briefingToday(), time.UTC)
+	start, _ := time.ParseInLocation("2006-01-02", briefingPeriodDay(), time.UTC)
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		b, err := w.db.BriefingForPeriod(context.Background(), "daily", start)
@@ -270,7 +285,8 @@ func TestBriefingGenerateWithHeuristicIsAProductState(t *testing.T) {
 	}
 
 	page := httptest.NewRecorder()
-	w.Routes().ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/briefing?kind=daily&period="+briefingToday(), nil))
+	w.Routes().ServeHTTP(page, httptest.NewRequest(http.MethodGet,
+		"/briefing?kind=daily&period="+briefingPeriodDay(), nil))
 	if !strings.Contains(page.Body.String(), "needs a model provider") {
 		t.Errorf("failure state missing from page:\n%s", page.Body.String())
 	}
@@ -327,7 +343,7 @@ func TestBriefingGenerateSingleFlightAcrossRequests(t *testing.T) {
 	}
 	w := newBriefingWeb(t, gen)
 
-	form := url.Values{"kind": {"daily"}, "period": {briefingToday()}}
+	form := url.Values{"kind": {"daily"}, "period": {briefingPeriodDay()}}
 	newRequest := func() *http.Request {
 		req := httptest.NewRequest(http.MethodPost, "/briefing/generate", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -365,7 +381,7 @@ func TestBriefingGenerateSingleFlightAcrossRequests(t *testing.T) {
 	}
 
 	close(gen.release)
-	start, _ := time.ParseInLocation("2006-01-02", briefingToday(), time.UTC)
+	start, _ := time.ParseInLocation("2006-01-02", briefingPeriodDay(), time.UTC)
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		b, err := w.db.BriefingForPeriod(context.Background(), "daily", start)
@@ -406,7 +422,7 @@ func TestBriefingGenerateRendersGeneratingDuringPrePersistWindow(t *testing.T) {
 	w.briefingSvc = briefing.New(w.db, blockingWebProfiles{entered: entered, release: release},
 		func(context.Context) (briefing.Generator, error) { return gen, nil })
 
-	form := url.Values{"kind": {"daily"}, "period": {briefingToday()}}
+	form := url.Values{"kind": {"daily"}, "period": {briefingPeriodDay()}}
 	newRequest := func() *http.Request {
 		req := httptest.NewRequest(http.MethodPost, "/briefing/generate", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -439,7 +455,7 @@ func TestBriefingGenerateRendersGeneratingDuringPrePersistWindow(t *testing.T) {
 
 	close(release)
 	<-firstDone
-	start, _ := time.ParseInLocation("2006-01-02", briefingToday(), time.UTC)
+	start, _ := time.ParseInLocation("2006-01-02", briefingPeriodDay(), time.UTC)
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		b, err := w.db.BriefingForPeriod(context.Background(), "daily", start)
@@ -466,7 +482,7 @@ func TestBriefingStatusShowsGeneratingDuringPrePersistWindow(t *testing.T) {
 	w.briefingSvc = briefing.New(w.db, blockingWebProfiles{entered: entered, release: release},
 		func(context.Context) (briefing.Generator, error) { return gen, nil })
 
-	form := url.Values{"kind": {"daily"}, "period": {briefingToday()}}
+	form := url.Values{"kind": {"daily"}, "period": {briefingPeriodDay()}}
 	owner := httptest.NewRequest(http.MethodPost, "/briefing/generate", strings.NewReader(form.Encode()))
 	owner.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	first := httptest.NewRecorder()
@@ -478,8 +494,8 @@ func TestBriefingStatusShowsGeneratingDuringPrePersistWindow(t *testing.T) {
 	<-entered // the owner holds the flight; no generating row exists yet
 
 	readers := []struct{ name, path string }{
-		{"status poll", "/briefing/status?kind=daily&period=" + briefingToday()},
-		{"page", "/briefing?kind=daily&period=" + briefingToday()},
+		{"status poll", "/briefing/status?kind=daily&period=" + briefingPeriodDay()},
+		{"page", "/briefing?kind=daily&period=" + briefingPeriodDay()},
 	}
 	for _, rd := range readers {
 		rec := httptest.NewRecorder()
@@ -501,7 +517,7 @@ func TestBriefingStatusShowsGeneratingDuringPrePersistWindow(t *testing.T) {
 
 	close(release)
 	<-firstDone
-	start, _ := time.ParseInLocation("2006-01-02", briefingToday(), time.UTC)
+	start, _ := time.ParseInLocation("2006-01-02", briefingPeriodDay(), time.UTC)
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		b, err := w.db.BriefingForPeriod(context.Background(), "daily", start)
@@ -516,7 +532,7 @@ func TestBriefingStatusShowsGeneratingDuringPrePersistWindow(t *testing.T) {
 	// The poll converges on the stored result once the run finishes.
 	rec := httptest.NewRecorder()
 	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
-		"/briefing/status?kind=daily&period="+briefingToday(), nil))
+		"/briefing/status?kind=daily&period="+briefingPeriodDay(), nil))
 	if !strings.Contains(rec.Body.String(), "One article mattered.") {
 		t.Errorf("status after completion did not render the briefing:\n%s", rec.Body)
 	}
@@ -583,6 +599,138 @@ func TestBriefingRejectsBadPeriod(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400", path, rec.Code)
 		}
+	}
+}
+
+func TestBriefingFuturePeriodIsNotGenerable(t *testing.T) {
+	w := newTestWeb(t)
+	future := time.Now().UTC().AddDate(0, 0, 2).Format("2006-01-02")
+
+	form := url.Values{"kind": {"daily"}, "period": {future}}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/briefing/generate", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("future generate status = %d, want 400", rec.Code)
+	}
+
+	page := httptest.NewRecorder()
+	w.Routes().ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/briefing?kind=daily&period="+future, nil))
+	if page.Code != http.StatusOK {
+		t.Fatalf("future page status = %d", page.Code)
+	}
+	body := page.Body.String()
+	if !strings.Contains(body, "No briefing is stored") {
+		t.Errorf("future page missing empty state:\n%s", body)
+	}
+	if strings.Contains(body, `hx-post="/briefing/generate"`) {
+		t.Errorf("future page offers generate:\n%s", body)
+	}
+}
+
+func TestBriefingStartFailureShowsInlineMessage(t *testing.T) {
+	gen := &blockingGenerator{reply: webBriefingJSON}
+	w := newBriefingWeb(t, gen)
+	w.briefingSvc = briefing.New(w.db, failingWebProfiles{},
+		func(context.Context) (briefing.Generator, error) { return gen, nil })
+
+	form := url.Values{"kind": {"daily"}, "period": {briefingPeriodDay()}}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/briefing/generate", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("start failure status = %d; body=%s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "Could not start the briefing") {
+		t.Errorf("start failure message missing:\n%s", rec.Body.String())
+	}
+	if got := gen.callCount(); got != 0 {
+		t.Errorf("model calls = %d, want 0 after a start failure", got)
+	}
+}
+
+func TestBriefingReadyRowShowsRegenerateFailure(t *testing.T) {
+	w := newTestWeb(t)
+	start, _ := time.ParseInLocation("2006-01-02", briefingPeriodDay(), time.UTC)
+	if _, err := w.db.SaveBriefing(context.Background(), store.Briefing{
+		ID: "b", PeriodKind: "daily", PeriodStart: start, PeriodEnd: start.AddDate(0, 0, 1),
+		Status: store.BriefingReady, BodyMD: "# Kept\n\nPrior body.", Error: "model timed out",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/briefing?kind=daily&period="+briefingPeriodDay(), nil))
+	body := rec.Body.String()
+	if !strings.Contains(body, "Regenerate failed: model timed out") {
+		t.Errorf("regenerate failure missing:\n%s", body)
+	}
+	if !strings.Contains(body, "Prior body.") {
+		t.Errorf("prior body missing:\n%s", body)
+	}
+}
+
+func TestBriefingGeneratingRowShowsPriorBody(t *testing.T) {
+	w := newTestWeb(t)
+	start, _ := time.ParseInLocation("2006-01-02", briefingPeriodDay(), time.UTC)
+	if _, err := w.db.SaveBriefing(context.Background(), store.Briefing{
+		ID: "b", PeriodKind: "daily", PeriodStart: start, PeriodEnd: start.AddDate(0, 0, 1),
+		Status: store.BriefingGenerating, BodyMD: "# Old\n\nOld body.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/briefing?kind=daily&period="+briefingPeriodDay(), nil))
+	body := rec.Body.String()
+	if !strings.Contains(body, "Generating this briefing") {
+		t.Errorf("generating state missing:\n%s", body)
+	}
+	if !strings.Contains(body, "Old body.") {
+		t.Errorf("prior body missing from generating row:\n%s", body)
+	}
+}
+
+func TestBriefingBodyDropsImages(t *testing.T) {
+	w := newTestWeb(t)
+	start, _ := time.ParseInLocation("2006-01-02", briefingPeriodDay(), time.UTC)
+	if _, err := w.db.SaveBriefing(context.Background(), store.Briefing{
+		ID: "b", PeriodKind: "daily", PeriodStart: start, PeriodEnd: start.AddDate(0, 0, 1),
+		Status: store.BriefingReady, BodyMD: "Text.\n\n![x](http://example.com/p.png)\n",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/briefing?kind=daily&period="+briefingPeriodDay(), nil))
+	if !strings.Contains(rec.Body.String(), "Text.") {
+		t.Fatalf("body text missing:\n%s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "<img") {
+		t.Errorf("briefing body rendered an image:\n%s", rec.Body.String())
+	}
+}
+
+func TestBriefingExportAllowsGeneratingRowWithBody(t *testing.T) {
+	w := newTestWeb(t)
+	start, _ := time.ParseInLocation("2006-01-02", briefingPeriodDay(), time.UTC)
+	body := "# Prior\n\nKept body.\n"
+	if _, err := w.db.SaveBriefing(context.Background(), store.Briefing{
+		ID: "b", PeriodKind: "daily", PeriodStart: start, PeriodEnd: start.AddDate(0, 0, 1),
+		Status: store.BriefingGenerating, BodyMD: body,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/briefing/export?kind=daily&period="+briefingPeriodDay(), nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export status = %d; body=%s", rec.Code, rec.Body)
+	}
+	if rec.Body.String() != body {
+		t.Errorf("export body = %q, want the prior body", rec.Body.String())
 	}
 }
 

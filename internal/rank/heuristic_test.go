@@ -133,6 +133,41 @@ func TestHeuristicHeadings(t *testing.T) {
 		{name: "empty", prof: "", title: "gardening", want: false},
 		{name: "negative prose ignored", prof: "## Not for me\nI dislike gardening", title: "gardening", want: false},
 		{
+			name:  "about heading positive",
+			prof:  "## What I care about\n- rust compilers",
+			title: "Rust compilers",
+			want:  true,
+		},
+		{name: "notes heading neutral", prof: "## Notes\n- rust compilers", title: "Rust compilers", want: false},
+		{name: "about me heading neutral", prof: "## About me\n- rust compilers", title: "Rust compilers", want: false},
+		{
+			name:  "background heading neutral",
+			prof:  "## Background:\n- rust compilers",
+			title: "Rust compilers",
+			want:  false,
+		},
+		{
+			name:  "background and goals neutral",
+			prof:  "## Background and goals\n- rust compilers",
+			title: "Rust compilers",
+			want:  false,
+		},
+		{
+			name:  "things I care about positive",
+			prof:  "## Things I care about\n- rust compilers",
+			title: "Rust compilers",
+			want:  true,
+		},
+		{name: "plural branches", prof: "## Interested\n- git branch", title: "Release branches", want: true},
+		{name: "plural classes", prof: "## Interested\n- classes", title: "A class act", want: true},
+		{name: "plural fixes", prof: "## Interested\n- fixes", title: "Quick fix", want: true},
+		{name: "plural caches", prof: "## Interested\n- caches", title: "Warm cache", want: true},
+		{name: "plural databases", prof: "## Interested\n- database", title: "New databases", want: true},
+		{name: "APIs", prof: "## Interested\n- API design", title: "Public APIs", want: true},
+		{name: "VMs", prof: "## Interested\n- VMs", title: "Faster VM boot", want: true},
+		{name: "SBOMs", prof: "## Interested\n- SBOM", title: "Signing SBOMs", want: true},
+		{name: "LLMs", prof: "## Interested\n- LLMs", title: "An LLM story", want: true},
+		{
 			name:  "both lists positive wins",
 			prof:  "## Interested\n- kubernetes\n## Less interested\n- kubernetes beginner tutorials",
 			title: "kubernetes",
@@ -184,8 +219,13 @@ func TestHeuristicShortWords(t *testing.T) {
 	if got := heuristicScore(t, "## Interested\n- I write Go services", "Go release", ""); got.Score == 0 {
 		t.Errorf("Go language should match: %+v", got)
 	}
-	if got := heuristicScore(t, "## Interested\n- Go services", "Go release", ""); got.Score != 0 {
+	if got := heuristicScore(t, "## Interested\nGo to the store", "Go release", ""); got.Score != 0 {
 		t.Errorf("Go opening a sentence is not the language: %+v", got)
+	}
+	for _, prof := range []string{"- Go and Rust tooling", "1. Go services", "* Go services", "2) Go services"} {
+		if got := heuristicScore(t, "## Interested\n"+prof, "Go release", ""); got.Score == 0 {
+			t.Errorf("Go after a list marker should match (%q): %+v", prof, got)
+		}
 	}
 }
 
@@ -195,6 +235,8 @@ func TestNormalize(t *testing.T) {
 		{"scheduler", "schedulers"}, {"promise", "promises"},
 		{"quantised", "quantized"}, {"quantising", "quantizing"}, {"quantisation", "quantization"},
 		{"optimiser", "optimizer"}, {"policy", "policies"},
+		{"branch", "branches"}, {"class", "classes"}, {"fix", "fixes"}, {"box", "boxes"},
+		{"patch", "patches"}, {"index", "indexes"}, {"database", "databases"},
 	}
 	for _, p := range same {
 		if a, b := normalize(p[0]), normalize(p[1]); a != b {

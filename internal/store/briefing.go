@@ -32,6 +32,8 @@ var ErrBriefingNotFound = errors.New("briefing not found")
 // is phrased for the reader and names the retry path.
 const interruptedBriefingError = "generation was interrupted before it finished (the server restarted while this briefing was being written); generate again to retry"
 
+const interruptedKeptBriefingError = "regeneration was interrupted; showing the previous briefing"
+
 // Briefing is one persisted period briefing plus the provenance of the run
 // that produced it.
 type Briefing struct {
@@ -167,8 +169,9 @@ func (s *Store) SaveBriefing(ctx context.Context, b Briefing) (Briefing, error) 
 	return s.BriefingForPeriod(ctx, b.PeriodKind, b.PeriodStart)
 }
 
-// RecoverInterruptedBriefings fails every briefing still marked generating
-// and returns how many it recovered.
+// RecoverInterruptedBriefings settles every briefing still marked generating
+// (ready when it still holds a body, failed otherwise) and returns how many
+// it recovered.
 //
 // Recovery policy: generation runs in one process and every briefing row is
 // written from that process, so a row still generating after startup belongs
@@ -179,9 +182,13 @@ func (s *Store) SaveBriefing(ctx context.Context, b Briefing) (Briefing, error) 
 // processes against one shared database must not call this.
 func (s *Store) RecoverInterruptedBriefings(ctx context.Context) (int, error) {
 	res, err := s.exec(ctx, `UPDATE briefings
-		SET status = ?, error = ?, updated_at = ?
+		SET status = CASE WHEN body_md <> '' THEN ? ELSE ? END,
+			error = CASE WHEN body_md <> '' THEN ? ELSE ? END,
+			updated_at = ?
 		WHERE status = ?`,
-		BriefingFailed, interruptedBriefingError, sqlTime(time.Now()), BriefingGenerating)
+		BriefingReady, BriefingFailed,
+		interruptedKeptBriefingError, interruptedBriefingError,
+		sqlTime(time.Now()), BriefingGenerating)
 	if err != nil {
 		return 0, fmt.Errorf("recover interrupted briefings: %w", err)
 	}

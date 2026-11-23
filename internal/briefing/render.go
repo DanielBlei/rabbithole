@@ -30,15 +30,15 @@ func Render(p Period, items []store.BriefingItem, b Briefing) string {
 	}
 
 	out.WriteString("## Executive summary\n\n")
-	out.WriteString(strings.TrimSpace(b.ExecutiveSummary))
+	out.WriteString(inertImages(strings.TrimSpace(b.ExecutiveSummary)))
 	out.WriteString("\n\n")
 
 	out.WriteString("## Key developments\n\n")
 	for _, d := range b.Developments {
 		fmt.Fprintf(&out, "### %s\n\n", markdownText(d.Headline))
-		out.WriteString(strings.TrimSpace(d.Synthesis))
+		out.WriteString(inertImages(strings.TrimSpace(d.Synthesis)))
 		if why := strings.TrimSpace(d.WhyItMatters); why != "" {
-			fmt.Fprintf(&out, "\n\n**Why it matters:** %s", why)
+			fmt.Fprintf(&out, "\n\n**Why it matters:** %s", inertImages(why))
 		}
 		out.WriteString("\n\n**Supporting articles:**\n\n")
 		for _, n := range d.ItemIDs {
@@ -70,6 +70,10 @@ func Render(p Period, items []store.BriefingItem, b Briefing) string {
 		}
 	}
 	return out.String()
+}
+
+func inertImages(s string) string {
+	return strings.ReplaceAll(s, "![", `\![`)
 }
 
 func periodTitle(p Period) string {
@@ -125,5 +129,5 @@ func markdownURL(value string) string {
 		(!strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https")) {
 		return ""
 	}
-	return strings.NewReplacer("<", "%3C", ">", "%3E", " ", "%20").Replace(u.String())
+	return strings.NewReplacer("<", "%3C", ">", "%3E", " ", "%20", "(", "%28", ")", "%29").Replace(u.String())
 }

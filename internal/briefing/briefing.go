@@ -235,6 +235,7 @@ type runState struct {
 	items   []store.BriefingItem
 	opts    Options
 	release func()
+	prior   *store.Briefing
 }
 
 // begin acquires the single flight for the period, resolves the profile and
@@ -294,12 +295,21 @@ func (s *Service) begin(
 		Provider: opts.Provider, Model: opts.Model,
 		ItemCount: len(items),
 	}
+	var prior *store.Briefing
+	if old, err := s.store.BriefingForPeriod(ctx, period.Kind, period.Start); err == nil &&
+		old.Status == store.BriefingReady && old.BodyMD != "" {
+		prior = &old
+		b.BodyMD = old.BodyMD
+		b.ReferencedItemIDs = old.ReferencedItemIDs
+	}
 	saved, err := s.store.SaveBriefing(ctx, b)
 	if err != nil {
 		release()
 		return nil, store.Briefing{}, err
 	}
-	return &runState{period: period, profile: prof, items: items, opts: opts, release: release}, saved, nil
+	return &runState{
+		period: period, profile: prof, items: items, opts: opts, release: release, prior: prior,
+	}, saved, nil
 }
 
 func (s *Service) synthesize(ctx context.Context, state *runState, b store.Briefing) (store.Briefing, error) {
@@ -313,24 +323,24 @@ func (s *Service) synthesize(ctx context.Context, state *runState, b store.Brief
 
 	gen, err := s.generator(ctx)
 	if err != nil {
-		return s.fail(ctx, b, err)
+		return s.fail(ctx, state, b, err)
 	}
 	userPrompt := BuildUserPrompt(period, prof.Content, items)
 	schema := Schema(opts.MaxDevelopments, opts.RecommendedReads)
 	raw, err := gen.ChatJSON(ctx, SystemPrompt, userPrompt, schema, opts.MaxOutputTokens)
 	if err != nil {
-		return s.fail(ctx, b, fmt.Errorf("briefing model call: %w", err))
+		return s.fail(ctx, state, b, fmt.Errorf("briefing model call: %w", err))
 	}
 	brief, err := Parse(raw, len(items), opts.MaxDevelopments, opts.RecommendedReads)
 	if err != nil {
 		// One retry, then the row is recorded as failed. Never partially store.
 		raw, retryErr := gen.ChatJSON(ctx, SystemPrompt, userPrompt, schema, opts.MaxOutputTokens)
 		if retryErr != nil {
-			return s.fail(ctx, b, fmt.Errorf("briefing model call on retry: %w", retryErr))
+			return s.fail(ctx, state, b, fmt.Errorf("briefing model call on retry: %w", retryErr))
 		}
 		brief, err = Parse(raw, len(items), opts.MaxDevelopments, opts.RecommendedReads)
 		if err != nil {
-			return s.fail(ctx, b, fmt.Errorf("briefing output invalid after retry: %w", err))
+			return s.fail(ctx, state, b, fmt.Errorf("briefing output invalid after retry: %w", err))
 		}
 	}
 
@@ -341,20 +351,33 @@ func (s *Service) synthesize(ctx context.Context, state *runState, b store.Brief
 	return s.finish(ctx, b)
 }
 
+// terminalSaveTimeout bounds the final write, which runs on a detached context.
+const terminalSaveTimeout = 10 * time.Second
+
 func (s *Service) finish(ctx context.Context, b store.Briefing) (store.Briefing, error) {
-	saved, err := s.store.SaveBriefing(ctx, b)
+	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalSaveTimeout)
+	defer cancel()
+	saved, err := s.store.SaveBriefing(saveCtx, b)
 	if err != nil {
 		return b, err
 	}
 	return saved, nil
 }
 
-func (s *Service) fail(ctx context.Context, b store.Briefing, cause error) (store.Briefing, error) {
-	b.Status = store.BriefingFailed
+// fail restores the prior ready briefing (carrying the error) when there is one.
+func (s *Service) fail(ctx context.Context, state *runState, b store.Briefing, cause error) (store.Briefing, error) {
+	if state.prior != nil {
+		b = *state.prior
+		b.Status = store.BriefingReady
+	} else {
+		b.Status = store.BriefingFailed
+		b.BodyMD = ""
+		b.ReferencedItemIDs = nil
+	}
 	b.Error = cause.Error()
-	b.BodyMD = ""
-	b.ReferencedItemIDs = nil
-	saved, err := s.store.SaveBriefing(ctx, b)
+	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalSaveTimeout)
+	defer cancel()
+	saved, err := s.store.SaveBriefing(saveCtx, b)
 	if err != nil {
 		return b, err
 	}
@@ -507,6 +530,11 @@ func validateIDs(ids []int, maxItem int, label string) error {
 // unconstrained providers sometimes emit.
 func extractJSON(raw string) (string, error) {
 	s := strings.TrimSpace(raw)
+	if i, j := strings.IndexByte(s, '{'), strings.LastIndexByte(s, '}'); i >= 0 && j > i {
+		if cand := s[i : j+1]; json.Valid([]byte(cand)) {
+			return cand, nil
+		}
+	}
 	if i := strings.Index(s, "```"); i >= 0 {
 		s = s[i+3:]
 		if j := strings.IndexByte(s, '\n'); j >= 0 {

@@ -562,6 +562,24 @@ var feedPager = (function(){
     if (input){ e.preventDefault(); input.checked = false; }
   });
 
+  document.addEventListener('click', function(e){
+    var view = e.target.closest('.note-view');
+    if (!view || e.target.closest('a, .note-edit-btn')) return;
+    var toggle = view.parentNode.querySelector('.note-toggle');
+    if (!toggle || toggle.checked) return;
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change', {bubbles: true}));
+  });
+
+  document.addEventListener('change', function(e){
+    var t = e.target;
+    if (!t.classList || !t.classList.contains('note-toggle') || !t.checked) return;
+    var input = t.closest('.tg-panel-note').querySelector('.note-input');
+    if (!input) return;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  });
+
   // Apply persists via the form's hx-post and htmx swaps in the server-rendered
   // row (already in view mode with the saved note) — no optimistic update here.
   // Cancel just restores the textarea to the last saved text (the view <p>) in

@@ -150,19 +150,23 @@ func TestBriefingItemsAreBoundedAndScored(t *testing.T) {
 }
 
 // TestRecoverInterruptedBriefings pins the startup recovery policy: only rows
-// still generating are failed (with the retry-hint error), terminal rows are
-// untouched, and a second sweep is a no-op.
+// still generating are settled (failed with the retry-hint error, or ready when
+// a body survives), terminal rows are untouched, and a second sweep is a no-op.
 func TestRecoverInterruptedBriefings(t *testing.T) {
 	db := openTestStore(t)
 	ctx := context.Background()
 	start := time.Date(2026, 1, 6, 0, 0, 0, 0, time.UTC)
-	save := func(id string, offset int, status string) {
+	save := func(id string, offset int, status string, body ...string) {
 		t.Helper()
 		s := start.AddDate(0, 0, offset)
-		if _, err := db.SaveBriefing(ctx, Briefing{
+		b := Briefing{
 			ID: id, PeriodKind: "daily", PeriodStart: s, PeriodEnd: s.AddDate(0, 0, 1),
 			Status: status,
-		}); err != nil {
+		}
+		if len(body) > 0 {
+			b.BodyMD = body[0]
+		}
+		if _, err := db.SaveBriefing(ctx, b); err != nil {
 			t.Fatalf("SaveBriefing(%s): %v", id, err)
 		}
 	}
@@ -170,13 +174,21 @@ func TestRecoverInterruptedBriefings(t *testing.T) {
 	save("briefing-generating-2", 1, BriefingGenerating)
 	save("briefing-ready", 2, BriefingReady)
 	save("briefing-failed", 3, BriefingFailed)
+	save("briefing-regenerating", 4, BriefingGenerating, "# previous body")
 
 	n, err := db.RecoverInterruptedBriefings(ctx)
 	if err != nil {
 		t.Fatalf("RecoverInterruptedBriefings: %v", err)
 	}
-	if n != 2 {
-		t.Fatalf("recovered = %d, want 2", n)
+	if n != 3 {
+		t.Fatalf("recovered = %d, want 3", n)
+	}
+	kept, err := db.BriefingForPeriod(ctx, "daily", start.AddDate(0, 0, 4))
+	if err != nil {
+		t.Fatalf("BriefingForPeriod(regenerating): %v", err)
+	}
+	if kept.Status != BriefingReady || kept.BodyMD != "# previous body" {
+		t.Errorf("interrupted row with a body = %q %q, want ready with body kept", kept.Status, kept.BodyMD)
 	}
 
 	recovered, err := db.BriefingForPeriod(ctx, "daily", start)

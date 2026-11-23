@@ -49,6 +49,7 @@ type briefingPanel struct {
 	Generating  bool
 	Ready       bool
 	Failed      bool
+	Complete    bool
 	Status      string
 
 	BodyHTML template.HTML
@@ -110,6 +111,10 @@ func (s *Web) handleBriefingGenerate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if period.End.After(time.Now()) {
+		http.Error(w, "this period is not complete yet", http.StatusBadRequest)
+		return
+	}
 	svc, cfg, err := s.briefingService(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -121,7 +126,14 @@ func (s *Web) handleBriefingGenerate(w http.ResponseWriter, r *http.Request) {
 	// directly, even in the window before the owner has persisted its row.
 	b, err := svc.Start(r.Context(), period.Kind, period.Start, opts)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Error().Err(err).Msg("start briefing")
+		p := briefingPanelFor(period, store.Briefing{})
+		p.Failed = true
+		p.Error = "Could not start the briefing. Check the server log."
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := briefingTmpl.ExecuteTemplate(w, "briefingPanel", p); err != nil {
+			log.Error().Err(err).Msg("render briefing start failure")
+		}
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -165,7 +177,8 @@ func (s *Web) handleBriefingExport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if stored.Status != store.BriefingReady || stored.BodyMD == "" {
+	exportable := stored.Status == store.BriefingReady || stored.Status == store.BriefingGenerating
+	if !exportable || stored.BodyMD == "" {
 		http.Error(w, "this briefing is not ready", http.StatusConflict)
 		return
 	}
@@ -237,6 +250,7 @@ func briefingPanelFor(period briefing.Period, b store.Briefing) briefingPanel {
 		PeriodStart: period.Start.Format("2006-01-02"),
 		PeriodLabel: briefingPeriodLabel(period),
 		Status:      b.Status,
+		Complete:    !period.End.After(time.Now()),
 		ActionLabel: "Generate briefing",
 	}
 	if b.ID == "" {
@@ -252,10 +266,12 @@ func briefingPanelFor(period briefing.Period, b store.Briefing) briefingPanel {
 	switch b.Status {
 	case store.BriefingGenerating:
 		p.Generating = true
+		p.BodyHTML = renderBriefingMarkdown(b.BodyMD)
 		p.ActionLabel = "Generating…"
 	case store.BriefingReady:
 		p.Ready = true
-		p.BodyHTML = renderMarkdown(b.BodyMD)
+		p.Error = b.Error
+		p.BodyHTML = renderBriefingMarkdown(b.BodyMD)
 		p.ActionLabel = "Regenerate"
 	case store.BriefingFailed:
 		p.Failed = true

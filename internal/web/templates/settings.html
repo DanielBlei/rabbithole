@@ -122,8 +122,7 @@
 <div class="stp-page" data-stp>
   <h1 class="stp-sr">Settings</h1>
   {{/* Weather takes the Maze's slots, so the page reads the same coming from either. */}}
-  <div class="wx-subbar" id="wxMazeBar"></div>
-  <aside class="wx-band wx-full" id="wxMazeBand"></aside>
+  {{template "wxSlots"}}
   <div class="stp-tabline">
   <nav class="stp-tabs" aria-label="Settings sections">
     {{range .Tabs}}<a class="stp-tab{{if eq .Slug $.Tab}} is-on{{end}}" href="/settings/{{.Slug}}" data-stp-tab="{{.Slug}}"{{if eq .Slug $.Tab}} aria-current="page"{{end}}>{{.Title}}</a>{{end}}
