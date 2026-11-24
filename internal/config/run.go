@@ -32,14 +32,15 @@ const RunSchemaVersion = 2
 // that are not stored (store, profile, ingest.feeds). It is decoded leniently,
 // so unknown keys are ignored.
 type File struct {
-	User          string              `yaml:"user"`
-	GroupStories  *bool               `yaml:"group_stories"`
-	Profile       string              `yaml:"profile"`
-	Inference     FileInference       `yaml:"inference"`
-	Ingest        FileIngest          `yaml:"ingest"`
-	Briefing      BriefingConfig      `yaml:"briefing"`
-	DecisionBrief DecisionBriefConfig `yaml:"decision_brief"`
-	Store         StoreConfig         `yaml:"store"`
+	User           string               `yaml:"user"`
+	GroupStories   *bool                `yaml:"group_stories"`
+	Profile        string               `yaml:"profile"`
+	Inference      FileInference        `yaml:"inference"`
+	Classification ClassificationConfig `yaml:"classification"`
+	Ingest         FileIngest           `yaml:"ingest"`
+	Briefing       BriefingConfig       `yaml:"briefing"`
+	DecisionBrief  DecisionBriefConfig  `yaml:"decision_brief"`
+	Store          StoreConfig          `yaml:"store"`
 }
 
 // Config is the stored shape: what the config store keeps and what ingest
@@ -157,17 +158,12 @@ func ReadFile(path string) (File, error) {
 func (f File) Split() (run Config, store StoreConfig, legacy Legacy, dropped []string) {
 	run = Config{
 		User:           f.User,
+		GroupStories:   f.GroupStories,
 		Inference:      f.Inference.InferenceConfig,
 		Classification: f.Classification,
 		Ingest:         IngestConfig{DigestDir: f.Ingest.DigestDir},
 		Briefing:       f.Briefing,
 		DecisionBrief:  f.DecisionBrief,
-		User:          f.User,
-		GroupStories:  f.GroupStories,
-		Inference:     f.Inference.InferenceConfig,
-		Ingest:        IngestConfig{DigestDir: f.Ingest.DigestDir},
-		Briefing:      f.Briefing,
-		DecisionBrief: f.DecisionBrief,
 	}
 	dropped = run.Normalize()
 	legacy.ProfilePath = f.Profile
