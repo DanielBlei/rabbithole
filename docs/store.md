@@ -239,7 +239,7 @@ The core table: one row per article ever seen, whether or not it was scored.
 | `id` | TEXT PK | Derived from the feed's entry id |
 | `source` | TEXT | The feed's `name` at the time of ingest |
 | `title` | TEXT | |
-| `link` | TEXT UNIQUE | **The real identity.** Dedup and upserts key on this |
+| `link` | TEXT UNIQUE | **The real identity.** Upserts and link dedup key on this |
 | `summary` | TEXT | Feed-provided summary, sent to the model |
 | `published_at` | TIMESTAMP | From the feed; NULL when it publishes no date |
 | `created_at` | TIMESTAMP | When this row was first written; stands in for `published_at` when the feed gives none |
@@ -355,7 +355,10 @@ first import and only if `profile_state` has never been set.
 
 **Dedup.** `ScoredLinks` treats only a link with a non-NULL `llm_score` as done. A row
 recorded without a score is reported as absent so the next run retries it: a scoring
-failure costs one run, not the article.
+failure costs one run, not the article. Within a run, the pre-pass also claims each link and
+item ID first-wins across feeds: an article two feeds carry — the same link, or the same GUID
+under different links — is kept from the first feed in configuration order and skipped,
+before scoring, from the rest.
 
 **Date windows.** `List` and `Count` filter on `COALESCE(published_at, created_at)`, an
 item's own date falling back to when we first saw it, with a matching index. `After` is
@@ -461,7 +464,7 @@ the log bodies along.
 | `fetched` | INTEGER | Items inside the recency window, all feeds |
 | `new_items` | INTEGER | Not-yet-seen items considered for scoring |
 | `scored` | INTEGER | Items the model scored |
-| `skipped` | INTEGER | Already-scored items skipped |
+| `skipped` | INTEGER | Items skipped by dedup: already scored, or a duplicate link or ID earlier in the run |
 | `failed` | INTEGER | Items the model failed to score |
 | `error` | TEXT | Failure message for `error` / `cancelled` |
 
@@ -591,14 +594,15 @@ sequenceDiagram
         I->>I: cap to max_items, newest first
         I->>DB: ScoredLinks(links)
         DB-->>I: already-scored subset
-        alt nothing new
-            I->>I: skip feed
-        else
-            I->>L: score batch (profile + items)
-            L-->>I: score, reason per item
-            I->>DB: Record(items, scores + profile provenance, day)
-            Note right of DB: one tx per feed
-        end
+        I->>I: drop duplicate links and IDs already claimed
+    end
+
+    I->>L: score every batch through one run-wide pool
+    L-->>I: score, reason per item
+
+    loop each feed with new items
+        I->>DB: Record(items, scores + profile provenance, day)
+        Note right of DB: one tx per feed
     end
 
     M->>DB: FinishIngestRun(status, counts, error)
@@ -607,11 +611,18 @@ sequenceDiagram
 
 Two properties worth preserving:
 
-- **Feed isolation.** Scoring and recording happen per feed, in that feed's own transaction.
-  A feed that fails to score is logged and skipped; feeds already committed are not lost.
-- **Dedup precedes scoring.** `ScoredLinks` runs before the model is called, so the
-  expensive step only ever sees genuinely new items. The scorer itself is built lazily, so a
-  run with nothing new never contacts the backend at all.
+- **Run-wide scoring, per-feed recording.** Every feed's batches share one scoring pool, so
+  `max_parallel` is a ceiling for the whole run rather than for each feed alone. Recording
+  still happens per feed, in that feed's own transaction: a feed that fails to record is
+  logged and skipped, and feeds already committed are not lost.
+- **Dedup precedes scoring.** `ScoredLinks` runs before the model is called, and the pre-pass
+  also drops a duplicate link or item ID already claimed by an earlier feed, so the expensive
+  step only ever sees genuinely new items. The scorer itself is built lazily, so a run with
+  nothing new never contacts the backend at all.
+
+A cancel that arrives while scoring is in flight stops the run after the pool stops and
+before recording, so none of that run's feeds are written; rows committed by earlier runs are
+untouched.
 
 The explicit rescore path is separate: it selects scored rows from a fixed seven-day window,
 never fetches feeds, and intentionally scores every selected candidate even when its stored

@@ -93,6 +93,10 @@ and are never saved.
 | `--markdown` | Also write `YYYY-MM-DD.md` to `--out`, else `ingest.digest_dir` if a config set it, else `./digests` |
 | `--out DIR` | Folder for `--markdown` |
 
+While batches finish, the run logs a per-feed `scoring progress` line and a run-wide
+`run scoring progress` line. The run-wide line adds `in_flight` (scoring requests still
+running) and `peak` (the most that ran at once) to its batch count.
+
 ## classify
 
 ```
