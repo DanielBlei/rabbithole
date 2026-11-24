@@ -81,12 +81,35 @@ func TestFeedConfiguredOffShowsIndividuallyUnlessParamOverrides(t *testing.T) {
 	}
 }
 
-func TestFeedHasNoGroupToggle(t *testing.T) {
-	w := newTestWeb(t)
-	seedCluster(t, w)
-	for _, path := range []string{"/feed", "/feed?grouped=0"} {
-		if body := get(t, w, path); strings.Contains(body, "feed-view") {
-			t.Errorf("%s still renders a view toggle", path)
+func TestFeedGroupingFollowsSettingWithoutToggle(t *testing.T) {
+	on, off := true, false
+	for _, tc := range []struct {
+		name    string
+		setting *bool
+		grouped bool
+	}{
+		{"default", nil, true},
+		{"on", &on, true},
+		{"off", &off, false},
+	} {
+		w := newTestWeb(t)
+		w.src = config.Static(config.Config{GroupStories: tc.setting})
+		seedCluster(t, w)
+		body := get(t, w, "/feed")
+		if got := strings.Contains(body, `class="story-group"`); got != tc.grouped {
+			t.Errorf("%s: story-group rendered = %v, want %v", tc.name, got, tc.grouped)
+		}
+		want := 3
+		if tc.grouped {
+			want = 2
+		}
+		if n := strings.Count(body, "data-source="); n != want {
+			t.Errorf("%s: %d rows, want %d", tc.name, n, want)
+		}
+		for _, gone := range []string{"feed-view", "grouped=0", "grouped=1"} {
+			if strings.Contains(body, gone) {
+				t.Errorf("%s: page still offers a group toggle (%q)", tc.name, gone)
+			}
 		}
 	}
 }

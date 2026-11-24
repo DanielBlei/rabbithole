@@ -37,9 +37,14 @@
       <span class="wordmark"><b>The Rabbit Hole</b></span>
       <span class="breaker">/</span>
       <nav class="topbar__nav" aria-label="Main">
-        <a class="{{if eq .Active "feed"}}active{{end}}" href="/feed"{{if eq .Active "feed"}} aria-current="page"{{end}}>Feed</a>
-        <a class="{{if eq .Active "sources"}}active{{end}}" href="/sources"{{if eq .Active "sources"}} aria-current="page"{{end}}>Sources</a>
-        <a class="{{if eq .Active "briefing"}}active{{end}}" href="/briefing"{{if eq .Active "briefing"}} aria-current="page"{{end}}>Briefing</a>
+        <div class="navgrp{{if or (eq .Active "sources") (eq .Active "briefing")}} navgrp--open{{end}}{{if eq .Active "feed"}} navgrp--on{{end}}">
+          <a class="{{if eq .Active "feed"}}active{{end}}" href="/feed"{{if eq .Active "feed"}} aria-current="page"{{end}}>Feed</a>
+          <span class="navgrp__car" aria-hidden="true">&#9656;</span>
+          <div class="navgrp__more"><div class="navgrp__in">
+            <a class="{{if eq .Active "sources"}}active{{end}}" href="/sources"{{if eq .Active "sources"}} aria-current="page"{{end}}>Sources</a>
+            <a class="{{if eq .Active "briefing"}}active{{end}}" href="/briefing"{{if eq .Active "briefing"}} aria-current="page"{{end}}>Briefing</a>
+          </div></div>
+        </div>
         <a class="{{if eq .Active "maze"}}active{{end}}" href="/maze"{{if eq .Active "maze"}} aria-current="page"{{end}}>Maze</a>
       </nav>
     </div>
@@ -196,9 +201,8 @@
   </div>
   {{end}}
 
-  <!-- Every script is external so the page can carry a strict Content-Security-
-       Policy: none of this is inline, and none of it is needed before the DOM
-       is parsed. Each file says at the top what it owns. -->
+  <!-- Every script is external and none uses inline handlers; none of it is
+       needed before the DOM is parsed. Each file says at the top what it owns. -->
   <script src="/static/js/net.js" defer></script>
   <script src="/static/js/chrome.js" defer></script>
   <script src="/static/js/hint.js" defer></script>

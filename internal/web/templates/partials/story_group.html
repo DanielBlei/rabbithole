@@ -2,8 +2,8 @@
 {{/* The representative is the group's highest-scored member (newest first on
      ties, then item ID) — the order the clustering run sorts by, so the choice
      is deterministic across rebuilds. Members keep their own score and reason
-     here; the seen/hide/bookmark controls live on the individual view, one
-     toggle away. */}}
+     here; the row's own controls act on the representative only. Turn grouping
+     off in Settings to act on each item. */}}
 <div class="story-group{{if not .Members}} story-group--single{{end}}">
   {{template "row" .Representative}}
   {{if .Members}}

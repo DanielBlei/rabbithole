@@ -301,6 +301,9 @@ func (s *Service) begin(
 		prior = &old
 		b.BodyMD = old.BodyMD
 		b.ReferencedItemIDs = old.ReferencedItemIDs
+		// The kept body keeps its own provenance until the new run succeeds.
+		b.ProfileID, b.ProfileName, b.ProfileHash = old.ProfileID, old.ProfileName, old.ProfileHash
+		b.Provider, b.Model, b.ItemCount = old.Provider, old.Model, old.ItemCount
 	}
 	saved, err := s.store.SaveBriefing(ctx, b)
 	if err != nil {
@@ -315,6 +318,7 @@ func (s *Service) begin(
 func (s *Service) synthesize(ctx context.Context, state *runState, b store.Briefing) (store.Briefing, error) {
 	period, prof, items, opts := state.period, state.profile, state.items, state.opts
 	if len(items) == 0 {
+		stampProvenance(&b, state)
 		b.Status = store.BriefingReady
 		b.Error = ""
 		b.BodyMD = Render(period, nil, Briefing{})
@@ -344,11 +348,20 @@ func (s *Service) synthesize(ctx context.Context, state *runState, b store.Brief
 		}
 	}
 
+	stampProvenance(&b, state)
 	b.Status = store.BriefingReady
 	b.Error = ""
 	b.ReferencedItemIDs = referencedIDs(brief, items)
 	b.BodyMD = Render(period, items, brief)
 	return s.finish(ctx, b)
+}
+
+// stampProvenance records the profile, model and article count of the run that
+// produced the body, replacing any carried over from a prior briefing.
+func stampProvenance(b *store.Briefing, state *runState) {
+	b.ProfileID, b.ProfileName, b.ProfileHash = state.profile.ID, state.profile.Name, state.profile.Hash
+	b.Provider, b.Model = state.opts.Provider, state.opts.Model
+	b.ItemCount = len(state.items)
 }
 
 // terminalSaveTimeout bounds the final write, which runs on a detached context.

@@ -354,6 +354,15 @@ RABBITHOLE_DB_PASSWORD=your-password</code></pre>
         <div class="stp-look__pv">{{template "lookPreview"}}</div>
       </div>
     </section>
+    <section class="stp-group" data-tone="teal">
+      <header class="stp-group__h"><h3><span class="stp-group__t">Top bar</span></h3><p>How the page links in the top bar behave.</p></header>
+      <div class="stp-box">
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Auto expand</span><p class="stp-row__h" id="navx-desc">Open Sources and Briefing under Feed on hover or focus. Off keeps them always shown.</p></div>
+          <div class="stp-row__c"><button type="button" class="wx-sw is-on" data-navx-toggle role="switch" aria-checked="true" aria-label="Auto expand" aria-describedby="navx-desc"><span class="wx-sw__knob" aria-hidden="true"></span><span class="wx-sw__txt">On</span></button></div>
+        </div>
+      </div>
+    </section>
     <section class="stp-group" data-tone="blue">
       <header class="stp-group__h stp-group__h--act"><div><h3><span class="stp-group__t">Type</span>{{with tip "type"}}{{template "stpHint" .}}{{end}}</h3><p>Face and size for each part of the page.</p></div>{{template "stpResetLocal" "appearance"}}</header>
       <div class="stp-box">
@@ -489,8 +498,8 @@ RABBITHOLE_DB_PASSWORD=your-password</code></pre>
           <div class="stp-row__c"><button type="button" class="wx-sw" data-wx-toggle="feed" role="switch" aria-checked="true" aria-label="Weather on the Feed"><span class="wx-sw__knob" aria-hidden="true"></span><span class="wx-sw__txt">On</span></button></div>
         </div>
         <div class="stp-row">
-          <div class="stp-row__l"><span class="stp-row__n">Show on Maze and Settings</span></div>
-          <div class="stp-row__c"><button type="button" class="wx-sw" data-wx-toggle="maze" role="switch" aria-checked="true" aria-label="Weather on the Maze"><span class="wx-sw__knob" aria-hidden="true"></span><span class="wx-sw__txt">On</span></button></div>
+          <div class="stp-row__l"><span class="stp-row__n">Show on Maze, Sources, Briefing and Settings</span></div>
+          <div class="stp-row__c"><button type="button" class="wx-sw" data-wx-toggle="maze" role="switch" aria-checked="true" aria-label="Weather on Maze, Sources, Briefing and Settings"><span class="wx-sw__knob" aria-hidden="true"></span><span class="wx-sw__txt">On</span></button></div>
         </div>
         <div class="stp-row">
           <div class="stp-row__l"><span class="stp-row__n">Layout</span><p class="stp-row__h">The shape the weather takes on those pages.</p></div>

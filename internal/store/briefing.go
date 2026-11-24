@@ -280,3 +280,42 @@ func (s *Store) BriefingItems(ctx context.Context, start, end time.Time, limit i
 	}
 	return items, nil
 }
+
+// BriefingMark is the status of the briefing stored for one period start.
+type BriefingMark struct {
+	PeriodStart time.Time
+	Status      string
+}
+
+// BriefingMarks returns the status of every stored briefing of one kind whose
+// period starts in [from, to). Bodies are not read, so a calendar can mark a
+// month of periods in one bounded query.
+func (s *Store) BriefingMarks(ctx context.Context, kind string, from, to time.Time) ([]BriefingMark, error) {
+	if !from.Before(to) {
+		return nil, errors.New("briefing range start must be before end")
+	}
+	rows, err := s.query(ctx, `SELECT period_start, status FROM briefings
+		WHERE period_kind = ? AND period_start >= ? AND period_start < ?
+		ORDER BY period_start ASC`, kind, sqlTime(from), sqlTime(to))
+	if err != nil {
+		return nil, fmt.Errorf("query briefing marks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var marks []BriefingMark
+	for rows.Next() {
+		var (
+			m     BriefingMark
+			start time.Time
+		)
+		if err := rows.Scan(&start, &m.Status); err != nil {
+			return nil, fmt.Errorf("scan briefing mark: %w", err)
+		}
+		m.PeriodStart = utcTime(start)
+		marks = append(marks, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate briefing marks: %w", err)
+	}
+	return marks, nil
+}

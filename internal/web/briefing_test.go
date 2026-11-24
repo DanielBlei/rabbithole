@@ -181,7 +181,7 @@ func TestBriefingPageAndGenerateFlow(t *testing.T) {
 	if strings.Contains(body, "<script>alert") {
 		t.Error("model markdown was not sanitised")
 	}
-	if strings.Contains(body, "every 3s") {
+	if strings.Contains(body, "every 2s") {
 		t.Error("ready page kept the status poll")
 	}
 }
@@ -198,7 +198,7 @@ func TestBriefingStatusTransitions(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
 		"/briefing/status?kind=daily&period="+briefingPeriodDay(), nil))
-	if !strings.Contains(rec.Body.String(), "every 3s") || !strings.Contains(rec.Body.String(), "Generating") {
+	if !strings.Contains(rec.Body.String(), "every 2s") || !strings.Contains(rec.Body.String(), "Generating") {
 		t.Errorf("generating status lost its poll:\n%s", rec.Body.String())
 	}
 
@@ -211,7 +211,7 @@ func TestBriefingStatusTransitions(t *testing.T) {
 	rec = httptest.NewRecorder()
 	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
 		"/briefing/status?kind=daily&period="+briefingPeriodDay(), nil))
-	if strings.Contains(rec.Body.String(), "every 3s") {
+	if strings.Contains(rec.Body.String(), "every 2s") {
 		t.Errorf("ready status kept polling:\n%s", rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "Ready") {
@@ -314,8 +314,8 @@ func TestBriefingNextNavigationStopsAtLastCompletedPeriod(t *testing.T) {
 				body := rec.Body.String()
 
 				nextHref := `href="/briefing?kind=` + kind + `&period=` +
-					tc.period.Next().Start.Format("2006-01-02") + `">Next &rarr;</a>`
-				disabled := `aria-disabled="true">Next &rarr;</span>`
+					tc.period.Next().Start.Format("2006-01-02") + `">Next <span aria-hidden="true">&rarr;</span></a>`
+				disabled := `aria-disabled="true">Next <span aria-hidden="true">&rarr;</span></span>`
 				if tc.wantNext {
 					if !strings.Contains(body, nextHref) {
 						t.Errorf("Next link %q missing:\n%s", nextHref, body)
@@ -691,6 +691,9 @@ func TestBriefingGeneratingRowShowsPriorBody(t *testing.T) {
 	if !strings.Contains(body, "Old body.") {
 		t.Errorf("prior body missing from generating row:\n%s", body)
 	}
+	if !strings.Contains(body, "Download markdown") {
+		t.Errorf("download link missing from generating row with a body:\n%s", body)
+	}
 }
 
 func TestBriefingBodyDropsImages(t *testing.T) {
@@ -735,3 +738,146 @@ func TestBriefingExportAllowsGeneratingRowWithBody(t *testing.T) {
 }
 
 var _ briefing.Generator = (*blockingGenerator)(nil)
+
+func seedCalBriefing(t *testing.T, w *Web, kind, day, status string) {
+	t.Helper()
+	start, err := time.ParseInLocation("2006-01-02", day, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	end := start.AddDate(0, 0, 1)
+	if kind == "weekly" {
+		end = start.AddDate(0, 0, 7)
+	}
+	if _, err := w.db.SaveBriefing(context.Background(), store.Briefing{
+		ID: kind + "-" + day, PeriodKind: kind, PeriodStart: start, PeriodEnd: end,
+		Status: status, BodyMD: "body",
+	}); err != nil {
+		t.Fatalf("SaveBriefing: %v", err)
+	}
+}
+
+func getBody(t *testing.T, w *Web, target string) (int, string) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+	return rec.Code, rec.Body.String()
+}
+
+func TestBriefingCalendarDaily(t *testing.T) {
+	w := newTestWeb(t)
+	seedCalBriefing(t, w, "daily", "2026-03-10", store.BriefingReady)
+	seedCalBriefing(t, w, "daily", "2026-03-11", store.BriefingFailed)
+	seedCalBriefing(t, w, "weekly", "2026-03-09", store.BriefingReady)
+
+	code, body := getBody(t, w, "/briefing/calendar?kind=daily&month=2026-03&period=2026-03-12")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d", code)
+	}
+	for _, want := range []string{
+		"March 2026",
+		`aria-label="10 March 2026, briefing available"`,
+		`aria-label="11 March 2026"`,
+		`href="/briefing?kind=daily&amp;period=2026-03-10"`,
+		`hx-get="/briefing/calendar?kind=daily&month=2026-02&period=2026-03-12"`,
+		`hx-get="/briefing/calendar?kind=daily&month=2026-04&period=2026-03-12"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	// Only the ready daily briefing is marked; the weekly one is another kind.
+	if n := strings.Count(body, `class="cal__dot"`); n != 1 {
+		t.Errorf("dots = %d, want 1", n)
+	}
+	// 12 March is the viewed period.
+	if !strings.Contains(body, `is-sel" data-cal-cell href="/briefing?kind=daily&amp;period=2026-03-12"`) {
+		t.Error("viewed day is not marked selected")
+	}
+	// Monday-first: the grid starts on 23 February, dimmed.
+	first := strings.Index(body, `aria-label="23 February 2026"`)
+	if first < 0 || !strings.Contains(body[max(0, first-120):first], "is-out") {
+		t.Error("adjacent-month day missing or not dimmed")
+	}
+	if !strings.Contains(body[strings.Index(body, "cal__dow"):], "<span>Mo</span>") {
+		t.Error("weekday header does not start Monday")
+	}
+}
+
+func TestBriefingCalendarDisabledAndToday(t *testing.T) {
+	w := newTestWeb(t)
+	now := time.Now().UTC()
+	_, body := getBody(t, w, "/briefing/calendar?kind=daily&month="+now.Format("2006-01"))
+	label := now.Format("2 January 2006") + ", not finished yet"
+	i := strings.Index(body, label)
+	if i < 0 {
+		t.Fatalf("today is not disabled: %q missing", label)
+	}
+	chunk := body[max(0, i-200):i]
+	if !strings.Contains(chunk, `aria-disabled="true"`) || !strings.Contains(chunk, "is-today") || strings.Contains(chunk, "<a ") {
+		t.Errorf("today cell = %q", chunk)
+	}
+	// No later month to browse to.
+	if !strings.Contains(body, `id="briefingCalNext" aria-label="Next month" disabled`) {
+		t.Error("next month is not disabled in the current month")
+	}
+}
+
+func TestBriefingCalendarWeekly(t *testing.T) {
+	w := newTestWeb(t)
+	seedCalBriefing(t, w, "weekly", "2026-03-09", store.BriefingReady)
+	seedCalBriefing(t, w, "weekly", "2026-03-16", store.BriefingFailed)
+
+	code, body := getBody(t, w, "/briefing/calendar?kind=weekly&month=2026-03&period=2026-03-16")
+	if code != http.StatusOK {
+		t.Fatalf("status = %d", code)
+	}
+	for _, want := range []string{
+		`class="cal__week is-ready" data-cal-cell href="/briefing?kind=weekly&amp;period=2026-03-09"`,
+		`aria-label="Week of 9 March 2026, briefing available"`,
+		`href="/briefing?kind=weekly&amp;period=2026-02-23"`,
+		`aria-label="Week of 16 March 2026"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if n := strings.Count(body, `class="cal__dot"`); n != 1 {
+		t.Errorf("dots = %d, want 1", n)
+	}
+	if !strings.Contains(body, `is-sel" data-cal-cell href="/briefing?kind=weekly&amp;period=2026-03-16"`) {
+		t.Error("viewed week is not selected")
+	}
+}
+
+func TestBriefingCalendarBadInput(t *testing.T) {
+	w := newTestWeb(t)
+	for _, target := range []string{
+		"/briefing/calendar?kind=monthly",
+		"/briefing/calendar?kind=daily&month=2026-13",
+		"/briefing/calendar?kind=daily&month=garbage",
+		"/briefing/calendar?kind=daily&period=nope",
+	} {
+		if code, _ := getBody(t, w, target); code != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400", target, code)
+		}
+	}
+}
+
+func TestBriefingPageCalendarButton(t *testing.T) {
+	w := newTestWeb(t)
+	for kind, label := range map[string]string{"daily": "Pick a date", "weekly": "Pick a week"} {
+		_, body := getBody(t, w, "/briefing?kind="+kind+"&period=2026-03-09")
+		for _, want := range []string{
+			`id="briefingCalBtn" aria-label="` + label + `"`,
+			`aria-haspopup="dialog" aria-expanded="false" aria-controls="briefingCal"`,
+			`id="briefingCal" role="dialog" aria-label="Choose a period" hidden`,
+			`/static/js/briefing-cal.js`,
+			`href="/briefing?kind=` + kind + `&amp;period=2026-03-09"`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s page missing %q", kind, want)
+			}
+		}
+	}
+}

@@ -213,3 +213,48 @@ func TestRecoverInterruptedBriefings(t *testing.T) {
 		t.Errorf("second sweep recovered = (%d, %v), want (0, nil)", n, err)
 	}
 }
+
+func TestBriefingMarks(t *testing.T) {
+	db := openTestStore(t)
+	ctx := context.Background()
+	day := func(d int) time.Time { return time.Date(2026, 3, d, 0, 0, 0, 0, time.UTC) }
+	save := func(id, kind string, start time.Time, status string) {
+		t.Helper()
+		end := start.AddDate(0, 0, 1)
+		if kind == "weekly" {
+			end = start.AddDate(0, 0, 7)
+		}
+		if _, err := db.SaveBriefing(ctx, Briefing{ID: id, PeriodKind: kind,
+			PeriodStart: start, PeriodEnd: end, Status: status, BodyMD: "body"}); err != nil {
+			t.Fatalf("SaveBriefing %s: %v", id, err)
+		}
+	}
+
+	got, err := db.BriefingMarks(ctx, "daily", day(1), day(31))
+	if err != nil || len(got) != 0 {
+		t.Fatalf("empty range = %v, %v", got, err)
+	}
+
+	save("d1", "daily", day(1), BriefingReady)
+	save("d5", "daily", day(5), BriefingFailed)
+	save("d10", "daily", day(10), BriefingReady)
+	save("w5", "weekly", day(2), BriefingReady)
+
+	got, err = db.BriefingMarks(ctx, "daily", day(1), day(10))
+	if err != nil {
+		t.Fatalf("BriefingMarks: %v", err)
+	}
+	if len(got) != 2 || !got[0].PeriodStart.Equal(day(1)) || got[0].Status != BriefingReady ||
+		!got[1].PeriodStart.Equal(day(5)) || got[1].Status != BriefingFailed {
+		t.Fatalf("marks = %+v, want day 1 ready and day 5 failed (end exclusive)", got)
+	}
+
+	got, err = db.BriefingMarks(ctx, "weekly", day(1), day(31))
+	if err != nil || len(got) != 1 || !got[0].PeriodStart.Equal(day(2)) {
+		t.Fatalf("weekly marks = %+v, %v", got, err)
+	}
+
+	if _, err := db.BriefingMarks(ctx, "daily", day(5), day(5)); err == nil {
+		t.Fatal("empty bounds should error")
+	}
+}
