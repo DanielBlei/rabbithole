@@ -91,3 +91,178 @@ func TestRunLogsScoringProgressNoHeuristicConnect(t *testing.T) {
 		t.Errorf("ingesting feeds = %v, want one line with feeds=2", got)
 	}
 }
+
+// The run-wide scoring progress counts batches across every feed: its "of"
+// is the sum of the per-feed batch totals and its "done" rises monotonically
+// from 1 to that total, while the per-feed lines keep their own counts.
+func TestRunLogsRunWideScoringProgress(t *testing.T) {
+	cfg := testConfig(t,
+		config.Feed{Name: "A", URL: serveRSS(t, multiItemRSS(t, "a", 5))},
+		config.Feed{Name: "B", URL: serveRSS(t, multiItemRSS(t, "b", 3))},
+	)
+	lines := runLines(t, cfg)
+
+	run := linesWith(lines, "run scoring progress")
+	wantTotal := 5 // 3 batches (5 items) + 2 batches (3 items), batch size 2
+	if len(run) != wantTotal {
+		t.Fatalf("run scoring progress lines = %d, want %d: %v", len(run), wantTotal, run)
+	}
+	for i, l := range run {
+		if l["level"] != "info" {
+			t.Errorf("level = %v, want info", l["level"])
+		}
+		done, of := int(l["done"].(float64)), int(l["of"].(float64))
+		if of != wantTotal {
+			t.Errorf("run line %d of = %d, want %d", i, of, wantTotal)
+		}
+		if done != i+1 {
+			t.Errorf("run line %d done = %d, want %d (monotonic from 1)", i, done, i+1)
+		}
+		if _, ok := l["elapsed"].(string); !ok {
+			t.Errorf("run line %d has no elapsed: %v", i, l)
+		}
+	}
+}
+
+// Every enabled feed gets exactly one accounting record — including feeds
+// that return no items, feeds whose fetch fails, and feeds with nothing new
+// after dedup — with the funnel counts that distinguish raw fetches from
+// filtered candidates from scoring input.
+func TestRunLogsFeedAccountingForEveryEnabledFeed(t *testing.T) {
+	cfg := testConfig(t,
+		config.Feed{Name: "Full", URL: serveRSS(t, multiItemRSS(t, "full", 4))},
+		config.Feed{Name: "Empty", URL: serveRSS(t, multiItemRSS(t, "empty", 0))},
+		config.Feed{Name: "Dead", URL: "http://127.0.0.1:1/feed"},
+	)
+	lines := runLines(t, cfg)
+
+	accounts := linesWith(lines, "feed accounting")
+	if len(accounts) != 3 {
+		t.Fatalf("feed accounting lines = %d, want 3: %v", len(accounts), accounts)
+	}
+	byFeed := map[string]map[string]any{}
+	for _, l := range accounts {
+		feed, _ := l["feed"].(string)
+		if _, dup := byFeed[feed]; dup {
+			t.Fatalf("feed %s logged more than one accounting record: %v", feed, accounts)
+		}
+		byFeed[feed] = l
+	}
+	full := byFeed["Full"]
+	if int(full["raw"].(float64)) != 4 || int(full["filtered"].(float64)) != 4 ||
+		int(full["new"].(float64)) != 4 || int(full["skipped"].(float64)) != 0 {
+		t.Errorf("Full accounting = %v, want raw=filtered=new=4 skipped=0", full)
+	}
+	if full["fetch_failed"] != false {
+		t.Errorf("Full accounting fetch_failed = %v, want false", full["fetch_failed"])
+	}
+	empty := byFeed["Empty"]
+	if int(empty["raw"].(float64)) != 0 || int(empty["new"].(float64)) != 0 {
+		t.Errorf("Empty accounting = %v, want raw=0 new=0", empty)
+	}
+	if empty["fetch_failed"] != false {
+		t.Errorf("Empty accounting fetch_failed = %v, want false", empty["fetch_failed"])
+	}
+	dead := byFeed["Dead"]
+	if int(dead["raw"].(float64)) != 0 || int(dead["new"].(float64)) != 0 {
+		t.Errorf("Dead accounting = %v, want raw=0 new=0", dead)
+	}
+	if dead["fetch_failed"] != true {
+		t.Errorf("Dead accounting fetch_failed = %v, want true", dead["fetch_failed"])
+	}
+}
+
+// The accounting record must never carry the raw transport error: fetch
+// failures embed the full request URL, credentials in query parameters
+// included. A feed URL with a token exercises the actual failed-fetch path
+// (connection refused), and the accounting record may report the failure
+// only as a boolean.
+func TestRunFeedAccountingOmitsFetchErrorDetails(t *testing.T) {
+	cfg := testConfig(t,
+		config.Feed{Name: "Leaky", URL: "http://127.0.0.1:1/feed?token=SECRET"},
+	)
+	lines := runLines(t, cfg)
+
+	accounts := linesWith(lines, "feed accounting")
+	if len(accounts) != 1 {
+		t.Fatalf("feed accounting lines = %d, want 1: %v", len(accounts), accounts)
+	}
+	a := accounts[0]
+	if a["feed"] != "Leaky" || a["fetch_failed"] != true {
+		t.Errorf("accounting = %v, want feed=Leaky fetch_failed=true", a)
+	}
+	for _, field := range []string{"fetch_error", "error", "err", "url"} {
+		if _, present := a[field]; present {
+			t.Errorf("accounting carries %q field: %v", field, a)
+		}
+	}
+	// The decisive check: the accounting record's JSON must not contain the
+	// credential, in any field, however the error text happens to render.
+	for _, l := range accounts {
+		encoded, err := json.Marshal(l)
+		if err != nil {
+			t.Fatalf("re-encode accounting line: %v", err)
+		}
+		if bytes.Contains(encoded, []byte("SECRET")) {
+			t.Errorf("accounting record leaks the URL credential: %s", encoded)
+		}
+	}
+}
+
+// A second run over the same feeds accounts them with new=0: every item is
+// already scored, so the feeds contribute candidates to no batch and the
+// run reports no scoring progress at all.
+func TestRunLogsFeedAccountingForAlreadyScoredFeeds(t *testing.T) {
+	cfg := testConfig(t,
+		config.Feed{Name: "A", URL: serveRSS(t, multiItemRSS(t, "again", 3))},
+	)
+	runLines(t, cfg) // first run scores everything
+	lines := runLines(t, cfg)
+
+	accounts := linesWith(lines, "feed accounting")
+	if len(accounts) != 1 {
+		t.Fatalf("feed accounting lines = %d, want 1: %v", len(accounts), accounts)
+	}
+	a := accounts[0]
+	if int(a["raw"].(float64)) != 3 || int(a["filtered"].(float64)) != 3 ||
+		int(a["new"].(float64)) != 0 || int(a["skipped"].(float64)) != 3 {
+		t.Errorf("accounting = %v, want raw=filtered=3 new=0 skipped=3", a)
+	}
+	if got := linesWith(lines, "run scoring progress"); len(got) != 0 {
+		t.Errorf("run scoring progress lines = %d, want 0 with no candidates: %v", len(got), got)
+	}
+	if got := linesWith(lines, "scoring progress"); len(got) != 0 {
+		t.Errorf("scoring progress lines = %d, want 0 with no candidates: %v", len(got), got)
+	}
+}
+
+// The effective inference settings are logged once per run with every field
+// the run will actually use.
+func TestRunLogsInferenceSettingsOnce(t *testing.T) {
+	cfg := testConfig(t,
+		config.Feed{Name: "A", URL: serveRSS(t, multiItemRSS(t, "settings", 2))},
+	)
+	lines := runLines(t, cfg)
+
+	settings := linesWith(lines, "inference settings")
+	if len(settings) != 1 {
+		t.Fatalf("inference settings lines = %d, want 1: %v", len(settings), settings)
+	}
+	s := settings[0]
+	if s["level"] != "info" {
+		t.Errorf("level = %v, want info", s["level"])
+	}
+	want := map[string]any{
+		"provider":         "heuristic",
+		"model":            "test-model",
+		"batch_size":       float64(2),
+		"max_parallel":     float64(2),
+		"think":            false,
+		"adaptive_ranking": true, // unset means on
+	}
+	for k, v := range want {
+		if s[k] != v {
+			t.Errorf("inference settings %s = %v, want %v", k, s[k], v)
+		}
+	}
+}
