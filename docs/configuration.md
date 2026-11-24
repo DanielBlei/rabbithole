@@ -129,7 +129,7 @@ Every field is optional. A setting you leave out takes its default, now and in l
 | `inference.effort` | `openai` only: `reasoning_effort` while thinking, `low` \| `medium` \| `high` \| `xhigh` | `medium` |
 | `inference.system_prompt` | The prompt text, or `false` to send none, see [System prompt](#system-prompt) | built-in |
 | `inference.batch_size` | Articles per scoring request | `1` |
-| `inference.max_parallel` | Scoring requests in flight | `1` |
+| `inference.max_parallel` | Scoring requests in flight, across every feed in a run | `1` |
 | `inference.model_tuning.*` | Decoding limits, see [model_tuning](#inferencemodel_tuning) | see below |
 | `classification.*` | Content keywords and assumptions, see [classification](#classification) | inherits the inference backend |
 | `decision_brief.max_article_bytes` | Largest article page fetched for an on-demand Decision Brief | 5 MiB (cap 16 MiB) |

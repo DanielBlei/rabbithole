@@ -64,7 +64,8 @@ a judgement on the metadata or summary available from RSS/Atom or the academic p
 The summary is capped at 1,500 characters before scoring.
 
 **How it's grouped.** Articles are gathered into batches of `batch_size` and each batch is one
-request, with `max_parallel` requests in flight. Both default to 1: a small local model reads
+request, with at most `max_parallel` requests in flight across every feed in the run — the
+ceiling is run-wide, not per feed. Both default to 1: a small local model reads
 one article better than five, and Ollama queues concurrent requests anyway. Raise them against
 a bigger model or an endpoint that genuinely serves in parallel, such as vLLM. Your profile
 goes with every request, since the question is always "worth reading for this reader".
