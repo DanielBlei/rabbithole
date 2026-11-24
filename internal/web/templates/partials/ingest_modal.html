@@ -77,8 +77,10 @@
   {{end}}
 
   {{if .ShowBanner}}
-  <div class="ing__done">
-    {{if .Last.Rescore}}
+  <div class="ing__done" data-fetched="{{.Last.Counts.Fetched}}" data-new="{{.Last.Counts.NewItems}}" data-scored="{{.Last.Counts.Scored}}"{{if .Last.Demo}} data-demo="1"{{end}}>
+    {{if .Last.Demo}}
+    <span>{{if .Last.Counts.NewItems}}Demo run: 1 built-in item scored 10/10, no model needed. Hide removes it.{{else}}Demo item already in your Feed.{{end}}</span>
+    {{else if .Last.Rescore}}
     <span>✓ rescore complete — <b>{{.Last.Counts.Scored}}</b> of <b>{{.Last.Counts.Fetched}}</b> candidate{{if ne .Last.Counts.Fetched 1}}s{{end}} updated</span>
     {{else}}
     <span>✓ run complete — <b>{{.Last.Counts.NewItems}}</b> new item{{if ne .Last.Counts.NewItems 1}}s{{end}} scored</span>

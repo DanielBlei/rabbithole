@@ -707,13 +707,15 @@ func (s *Store) EligibleClassificationItems(
 	if version < 1 {
 		return nil, fmt.Errorf("classifier version must be positive, got %d", version)
 	}
+	noDemo, demoArgs := demoExclusion("i.")
 	q := `SELECT i.id, i.source, i.title, i.link,
 			COALESCE(i.summary, ''), i.published_at, COALESCE(i.tags, '')
 		FROM items i LEFT JOIN item_classification c ON c.item_id = i.id
 		WHERE i.llm_score IS NOT NULL
 			AND trim(i.id) <> '' AND trim(i.source) <> '' AND trim(i.title) <> '' AND trim(i.link) <> ''
+			AND ` + noDemo + `
 			AND (c.item_id IS NULL OR c.classifier_version <> ? OR c.status <> 'ok')`
-	args := []any{version}
+	args := append(demoArgs, version)
 	if !cutoff.IsZero() {
 		q += " AND " + itemDate + " >= ?"
 		args = append(args, sqlTime(cutoff))

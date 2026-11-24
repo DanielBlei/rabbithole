@@ -1136,3 +1136,23 @@ func TestWriteTxReadThenWriteWaitsForOtherWriter(t *testing.T) {
 		t.Fatalf("other writer: %v", err)
 	}
 }
+
+func TestCountExcludeDemo(t *testing.T) {
+	db := openTestStore(t)
+	ctx := context.Background()
+	items := []feeds.Item{
+		{ID: "a", Source: "S", Title: "A", Link: "https://x/a"},
+		{ID: "demo", Source: "Demo", Title: "Welcome", Link: DemoItemLink},
+	}
+	if err := db.Record(ctx, items, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	all, err := db.Count(ctx, ListFilter{})
+	if err != nil || all != 2 {
+		t.Fatalf("Count = %d, err %v; want 2", all, err)
+	}
+	real, err := db.Count(ctx, ListFilter{ExcludeDemo: true})
+	if err != nil || real != 1 {
+		t.Errorf("Count(ExcludeDemo) = %d, err %v; want 1", real, err)
+	}
+}

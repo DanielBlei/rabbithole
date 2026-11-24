@@ -537,15 +537,19 @@ against, so a password reset that lands first wins and the retire gets `ErrAuthC
 
 ## onboarding
 
-The first-run welcome's progress: one row per `step` (`sources`, `profile`, `ingest`, or
-`dismissed` for the welcome itself) with the `done_at` it was first taken. Written by the web UI
-as the user works through the welcome; marking a step again keeps the first row. The welcome
-shows while no ingest has run, no items are stored and no `dismissed` row exists, so a new
-database greets its user again whatever the browser remembers.
+The first-run popup's record. The only step the store accepts is `dismissed`. Any answer to the
+popup, the x, the backdrop, Escape, or starting a tour writes it. The first dismissal writes the
+row; later ones keep it. Rows under any other step name are ignored.
 
-The welcome is for new installs only. A database that existed before the table gets it with the
-`dismissed` row already in place, and the first time the web UI finds stored items without a
-recorded run (a CLI ingest), it writes that row too.
+The popup shows while no ingest has run, no items are stored and no `dismissed` row exists, so a
+new database greets its user again whatever the browser remembers.
+
+The popup is for new installs only. A database that predates this table gets the `dismissed` row
+at upgrade, and the first time the web UI finds stored items without a recorded run (a CLI
+ingest), it writes that row too.
+
+The tour's position is not stored. It lives in the browser tab, so a reload keeps it and closing
+the tab ends it.
 
 ## config_versions
 

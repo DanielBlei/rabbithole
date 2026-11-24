@@ -165,11 +165,11 @@
   <div id="modal"></div>
   <!-- Second layer: dialogs opened from inside another one stack here. -->
   <div id="modalTop"></div>
+{{template "tour" .}}
 
   {{/* First run: nothing ingested, nothing stored and not yet dismissed. The
-       bottom modal layer, so each step opens over it and returns to it. The
-       server keeps the ticks and the dismissal; static/js/welcome.js opens it
-       and reports each step. */}}
+       bottom modal layer. The server keeps only the dismissal; static/js/tour.js
+       opens it, records the dismissal when it closes and starts the tour. */}}
   {{if and (or (eq .Active "feed") (eq .Active "maze")) .Chrome.FirstRun}}
   <div class="modal modal--welcome" id="welcomeModal" hidden>
     <div class="modal__backdrop" data-modal-close></div>
@@ -178,24 +178,22 @@
         <span class="modal__title" id="welcomeTitle"><span class="pane__prompt">{{.PromptUser}}@rabbithole</span><span class="sh">:</span><span class="pane__path">~</span><span class="sh">$&nbsp;</span><span class="pane__cmd">welcome</span><span class="blink">_</span></span>
         <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
       </div>
-      <div class="ask">
-        <p class="ask__lead">Nothing has been ingested yet.</p>
-        <p class="ask__sub">A few places worth a look before your first feed. <span class="welcome__opt">All optional.</span></p>
-        <ul class="welcome__steps">
-          <li><a class="welcome__step{{if index .Chrome.Welcome "sources"}} is-done{{end}}" href="/sources" data-welcome-step="sources">
-            <span class="welcome__txt">Check your sources<small>the feeds that get read</small></span>
-            <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></a></li>
-          <li><a class="welcome__step{{if index .Chrome.Welcome "profile"}} is-done{{end}}" href="/settings/profiles" data-welcome-step="profile">
-            <span class="welcome__txt">Check your profile<small>what gets ranked up and down</small></span>
-            <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></a></li>
-          <li><button class="welcome__step{{if index .Chrome.Welcome "ingest"}} is-done{{end}}" type="button" data-welcome-step="ingest"
-                      hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML">
-            <span class="welcome__txt">Run your first ingest<small>fetch, score and fill the feed</small></span>
-            <span class="welcome__mark" aria-hidden="true"></span><span class="welcome__state">opened</span></button></li>
-        </ul>
-      </div>
-      <div class="modal__foot stp-dlg__foot">
-        <button class="clk-btn clk-btn--go" type="button" data-modal-close>got it</button>
+      <div class="ask welcome">
+        <div class="welcome__top">
+          <pre class="welcome__bunny" aria-hidden="true"> (\_/)
+ (^_^)/
+(")_(")</pre>
+          <div class="welcome__text">
+            <p class="ask__lead">Nothing fetched yet.</p>
+            <p class="ask__sub">See your feed and where sources live, then watch a demo ingestion.</p>
+          </div>
+        </div>
+        <p class="welcome__q">Take the tour? <span class="welcome__acc" aria-hidden="true">[Y/n]</span><span class="welcome__cursor blink" aria-hidden="true"></span></p>
+        <div class="welcome__acts">
+          <button class="clk-btn welcome__btn" type="button" data-modal-close aria-keyshortcuts="n"><span class="welcome__key" aria-hidden="true">n</span>Skip for now</button>
+          <button class="clk-btn clk-btn--go welcome__btn welcome__btn--go" type="button" data-modal-close data-tour-start aria-keyshortcuts="y"><span class="welcome__key" aria-hidden="true">y</span>Take the tour</button>
+        </div>
+        <p class="welcome__note">Enter takes the tour. Skip it and find it later under Settings, General.</p>
       </div>
     </div>
   </div>
@@ -217,7 +215,7 @@
   {{block "pagescripts" .}}{{end}}
   <script src="/static/js/modal.js" defer></script>
   <script src="/static/js/profiles.js" defer></script>
-  <script src="/static/js/welcome.js" defer></script>
+  <script src="/static/js/tour.js" defer></script>
   <script src="/static/js/ingest.js" defer></script>
   <script src="/static/js/clock.js" defer></script>
   <script src="/static/js/weather.js" defer></script>

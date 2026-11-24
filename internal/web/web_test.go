@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -253,7 +252,7 @@ func TestFeedZeroStateAfterEmptyRun(t *testing.T) {
 
 // The welcome dialog greets a store with no run and no items, on both pages,
 // until it is dismissed. Items stored by a CLI ingest, which records no run,
-// are not a first run. Steps already taken render ticked.
+// are not a first run.
 func TestWelcomeDialog(t *testing.T) {
 	withRun := func(t *testing.T) *Web {
 		t.Helper()
@@ -273,34 +272,24 @@ func TestWelcomeDialog(t *testing.T) {
 		}
 		return w
 	}
-	emptyWith := func(steps ...string) func(t *testing.T) *Web {
-		return func(t *testing.T) *Web {
-			w := newEmptyWeb(t)
-			for _, step := range steps {
-				if code := postFormCode(w, "/welcome/"+step, nil); code != http.StatusNoContent {
-					t.Fatalf("POST /welcome/%s = %d, want 204", step, code)
-				}
-			}
-			return w
+	dismissed := func(t *testing.T) *Web {
+		t.Helper()
+		w := newEmptyWeb(t)
+		if code := postFormCode(w, "/welcome/"+store.OnboardingDismissed, nil); code != http.StatusNoContent {
+			t.Fatalf("POST /welcome/dismissed = %d, want 204", code)
 		}
+		return w
 	}
 	tests := []struct {
 		name    string
 		web     func(t *testing.T) *Web
 		path    string
 		welcome bool
-		ticked  string
 	}{
 		{name: "feed, nothing ingested", web: newEmptyWeb, path: "/feed", welcome: true},
 		{name: "maze, nothing ingested", web: newEmptyWeb, path: "/maze", welcome: true},
-		{
-			name:    "a taken step renders ticked",
-			web:     emptyWith(store.OnboardingSources),
-			path:    "/feed",
-			welcome: true,
-			ticked:  "sources",
-		},
-		{name: "dismissed", web: emptyWith(store.OnboardingDismissed), path: "/feed"},
+		{name: "other page, nothing ingested", web: newEmptyWeb, path: "/sources"},
+		{name: "dismissed", web: dismissed, path: "/feed"},
 		{name: "feed, run recorded", web: withRun, path: "/feed"},
 		{name: "maze, run recorded", web: withRun, path: "/maze"},
 		{name: "feed, items without a run", web: newTestWeb, path: "/feed"},
@@ -325,33 +314,48 @@ func TestWelcomeDialog(t *testing.T) {
 			if !tt.welcome {
 				return
 			}
-			for _, want := range []string{`data-welcome-step="sources"`, `href="/settings/profiles"`, `hx-get="/ingest"`} {
-				if !strings.Contains(body, want) {
-					t.Errorf("welcome missing step %q", want)
+			start := strings.Index(body, `id="welcomeModal"`)
+			rest := body[start:]
+			end := strings.Index(rest, "<script")
+			if end < 0 {
+				t.Fatal("welcome block end not found")
+			}
+			block := rest[:end]
+			for _, want := range []string{
+				"Nothing fetched yet.",
+				"See your feed and where sources live, then watch a demo ingestion.",
+				`<p class="welcome__q">Take the tour? <span class="welcome__acc" aria-hidden="true">[Y/n]</span>`,
+				"Enter takes the tour. Skip it and find it later under Settings, General.",
+				"Skip for now",
+				`aria-keyshortcuts="y"`,
+				`aria-keyshortcuts="n"`,
+				`clk-btn clk-btn--go`,
+			} {
+				if !strings.Contains(block, want) {
+					t.Errorf("welcome missing %q", want)
 				}
 			}
-			ticks := strings.Count(body, "welcome__step is-done")
-			want := 0
-			if tt.ticked != "" {
-				want = 1
-				tick := regexp.MustCompile(
-					`<[^>]*\bwelcome__step is-done\b[^>]*\bdata-welcome-step="` + regexp.QuoteMeta(tt.ticked) + `"`,
-				)
-				if !tick.MatchString(body) {
-					t.Errorf("step %q not rendered ticked", tt.ticked)
+			for _, label := range []string{"Skip for now", "Take the tour</button>"} {
+				i := strings.Index(block, label)
+				open := strings.LastIndex(block[:i], "<button")
+				if !strings.Contains(block[open:i], "data-modal-close") {
+					t.Errorf("button %q has no data-modal-close", label)
 				}
 			}
-			if ticks != want {
-				t.Errorf("ticked steps = %d, want %d", ticks, want)
+			if strings.Count(block, "data-tour-start") != 1 {
+				t.Error("exactly the tour button starts the tour")
 			}
 		})
 	}
 }
 
-// Only the welcome's own steps can be recorded.
+// Only the dismissal can be recorded.
 func TestWelcomeStepRejectsUnknown(t *testing.T) {
-	if code := postFormCode(newEmptyWeb(t), "/welcome/elsewhere", nil); code != http.StatusBadRequest {
-		t.Errorf("POST /welcome/elsewhere = %d, want 400", code)
+	if code := postFormCode(newEmptyWeb(t), "/welcome/sources", nil); code != http.StatusBadRequest {
+		t.Errorf("POST /welcome/sources = %d, want 400", code)
+	}
+	if code := postFormCode(newEmptyWeb(t), "/welcome/dismissed", nil); code != http.StatusNoContent {
+		t.Errorf("POST /welcome/dismissed = %d, want 204", code)
 	}
 }
 
@@ -366,7 +370,7 @@ func TestFeedZeroStateFiltered(t *testing.T) {
 	if !strings.Contains(body, "clear filters") {
 		t.Error("filtered-empty feed missing the clear-filters way out")
 	}
-	if strings.Contains(body, "run ingest") {
+	if strings.Contains(body, `class="feed-empty__go" type="button" hx-get="/ingest"`) {
 		t.Error("filtered-empty feed should not offer an ingest")
 	}
 }

@@ -97,6 +97,17 @@ func TestAdditiveSeedFailureRollsBack(t *testing.T) {
 	}
 }
 
+func TestValidOnboardingStep(t *testing.T) {
+	if !ValidOnboardingStep(OnboardingDismissed) {
+		t.Errorf("ValidOnboardingStep(%q) = false, want true", OnboardingDismissed)
+	}
+	for _, step := range []string{"sources", "profile", "ingest", ""} {
+		if ValidOnboardingStep(step) {
+			t.Errorf("ValidOnboardingStep(%q) = true, want false", step)
+		}
+	}
+}
+
 func TestOnboarding(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -105,12 +116,13 @@ func TestOnboarding(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "fresh store has nothing done"},
-		{name: "a step is recorded", marks: []string{OnboardingSources}, want: []string{OnboardingSources}},
+		{name: "dismissal is recorded", marks: []string{OnboardingDismissed}, want: []string{OnboardingDismissed}},
 		{
 			name:  "marking twice keeps one row",
-			marks: []string{OnboardingIngest, OnboardingIngest, OnboardingDismissed},
-			want:  []string{OnboardingDismissed, OnboardingIngest},
+			marks: []string{OnboardingDismissed, OnboardingDismissed},
+			want:  []string{OnboardingDismissed},
 		},
+		{name: "retired step name is refused", marks: []string{"sources"}, wantErr: true},
 		{name: "unknown step is refused", marks: []string{"elsewhere"}, wantErr: true},
 	}
 	for _, tt := range tests {

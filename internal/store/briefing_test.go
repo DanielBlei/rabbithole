@@ -258,3 +258,45 @@ func TestBriefingMarks(t *testing.T) {
 		t.Fatal("empty bounds should error")
 	}
 }
+
+func TestBriefingItemsExcludesDemo(t *testing.T) {
+	db := openTestStore(t)
+	ctx := context.Background()
+	start := time.Date(2026, 1, 6, 0, 0, 0, 0, time.UTC)
+	seed := func(id, link string, score int) {
+		t.Helper()
+		at := sqlTime(start.Add(time.Hour))
+		if _, err := db.exec(ctx, `INSERT INTO items
+			(id, source, title, link, created_at, updated_at, llm_score)
+			VALUES (?, 'S', ?, ?, ?, ?, ?)`, id, id, link, at, at, score); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	seed("real", "https://example.com/real", 4)
+	seed("demo", DemoItemLink, 10)
+
+	for name, fetch := range map[string]func() (int, string, error){
+		"briefing": func() (int, string, error) {
+			got, err := db.BriefingItems(ctx, start, start.AddDate(0, 0, 1), 5)
+			if len(got) == 0 {
+				return 0, "", err
+			}
+			return len(got), got[0].ID, err
+		},
+		"digest": func() (int, string, error) {
+			got, err := db.DigestItems(ctx, start, start.AddDate(0, 0, 1), 5)
+			if len(got) == 0 {
+				return 0, "", err
+			}
+			return len(got), got[0].Item.ID, err
+		},
+	} {
+		n, first, err := fetch()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if n != 1 || first != "real" {
+			t.Errorf("%s = %d items led by %q, want only the real item", name, n, first)
+		}
+	}
+}

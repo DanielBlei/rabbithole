@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Demo</title>
+    <link>https://github.com/DanielBlei/rabbithole</link>
+    <description>The built-in feed behind the demo run.</description>
+    <item>
+      <title>Welcome to the Rabbit Hole</title>
+      <link>https://github.com/DanielBlei/rabbithole</link>
+      <guid>https://github.com/DanielBlei/rabbithole</guid>
+      <description>The source code, docs and issue tracker. Star it, report bugs, or read how scoring works.</description>
+    </item>
+  </channel>
+</rss>

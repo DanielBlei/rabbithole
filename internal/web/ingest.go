@@ -73,6 +73,7 @@ type ingestRunView struct {
 	Counts  store.IngestCounts
 	Error   string
 	Rescore bool
+	Demo    bool // ran over the built-in demo feed
 }
 
 // ingestHistRowData is one history row rendered on its own — the summary row
@@ -159,14 +160,13 @@ func (d ingestBarData) Query() string {
 // that ingest responses re-render out-of-band so the chrome never goes stale.
 type chromeData struct {
 	Chip     ingestChipData
-	IngDot   string          // ingest status dot: err | warn | run | "" (healthy — no dot)
-	IngSub   string          // ingest subline shown inside the open side menu
-	IngNever bool            // no run has ever been recorded
-	FirstRun bool            // no run, no items and the welcome not dismissed — gates the welcome dialog
-	Welcome  map[string]bool // welcome steps already taken, by store.Onboarding* name
-	Running  bool            // a run is live — the ingWatch fragment polls while true
-	OOB      bool            // render the fragments with hx-swap-oob
-	Account  accountData     // Settings → Account; empty Mode when no gate ran
+	IngDot   string      // ingest status dot: err | warn | run | "" (healthy: no dot)
+	IngSub   string      // ingest subline shown inside the open side menu
+	IngNever bool        // no run has ever been recorded
+	FirstRun bool        // no run, no items and the welcome not dismissed: gates the welcome dialog
+	Running  bool        // a run is live: the ingWatch fragment polls while true
+	OOB      bool        // render the fragments with hx-swap-oob
+	Account  accountData // Settings > Account; empty Mode when no gate ran
 }
 
 // chrome assembles the layout's shared state for a full page render.
@@ -178,39 +178,39 @@ func (s *Web) chrome(ctx context.Context) chromeData {
 func (s *Web) chromeWith(ctx context.Context, c chromeData) chromeData {
 	c.Account = accountView(authFrom(ctx), "")
 	if c.IngNever {
-		c.FirstRun, c.Welcome = s.welcome(ctx)
+		c.FirstRun = s.welcome(ctx)
 	}
 	return c
 }
 
-// welcome reports whether to greet a first run, and the steps already taken.
-// A CLI ingest stores items without recording a run, so finding items retires
-// the welcome for good. Any failure skips the welcome rather than the page.
-func (s *Web) welcome(ctx context.Context) (bool, map[string]bool) {
+// welcome reports whether to greet a first run. A CLI ingest stores items
+// without recording a run, so finding items retires the welcome for good. Any
+// failure skips the welcome rather than the page.
+func (s *Web) welcome(ctx context.Context) bool {
 	done, err := s.db.OnboardingDone(ctx)
 	if err != nil {
 		log.Warn().Err(err).Msg("reading the welcome steps")
-		return false, nil
+		return false
 	}
 	if done[store.OnboardingDismissed] {
-		return false, nil
+		return false
 	}
-	n, err := s.db.Count(ctx, store.ListFilter{})
+	n, err := s.db.Count(ctx, store.ListFilter{ExcludeDemo: true})
 	if err != nil {
 		log.Warn().Err(err).Msg("counting items for the welcome dialog")
-		return false, nil
+		return false
 	}
 	if n > 0 {
 		if err := s.db.MarkOnboarding(ctx, store.OnboardingDismissed); err != nil {
 			log.Warn().Err(err).Msg("retiring the welcome")
 		}
-		return false, nil
+		return false
 	}
-	return true, done
+	return true
 }
 
-// handleWelcomeStep records a welcome step, or its dismissal, so the server
-// remembers it for every browser.
+// handleWelcomeStep records the welcome's dismissal, so the server remembers
+// it for every browser.
 func (s *Web) handleWelcomeStep(w http.ResponseWriter, r *http.Request) {
 	step := r.PathValue("step")
 	if !store.ValidOnboardingStep(step) {
@@ -320,11 +320,22 @@ func (s *Web) renderIngestModal(w http.ResponseWriter, r *http.Request, fresh bo
 	}
 }
 
-// handleIngestRun starts a manual run (a no-op joining the live run if one is
-// already in flight — single-flight lives in the manager) and re-renders the
-// modal body in its running state.
+// handleIngestRun starts a manual run, or with scorer=demo a demo run over the
+// built-in feed (a no-op joining the live run if one is already in flight:
+// single-flight lives in the manager) and re-renders the modal body in its
+// running state.
 func (s *Web) handleIngestRun(w http.ResponseWriter, r *http.Request) {
-	if err := s.ing.Start(r.Context(), store.IngestTriggerManual); err != nil {
+	var err error
+	switch r.URL.Query().Get("scorer") {
+	case "":
+		err = s.ing.Start(r.Context(), store.IngestTriggerManual)
+	case "demo":
+		err = s.ing.StartDemo(r.Context())
+	default:
+		http.Error(w, "unknown scorer", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -662,6 +673,7 @@ func toIngestRunView(r store.IngestRun, now time.Time) ingestRunView {
 		Counts:  r.Counts,
 		Error:   r.Error,
 		Rescore: r.TriggeredBy == store.IngestTriggerProfileRescore,
+		Demo:    r.TriggeredBy == store.IngestTriggerDemo,
 	}
 	if r.FinishedAt != nil {
 		v.Took = fmtRunDur(r.FinishedAt.Sub(r.StartedAt))

@@ -837,3 +837,55 @@ func TestConcurrentClaimsPartitionTheQueue(t *testing.T) {
 		}
 	}
 }
+
+func TestEligibleClassificationExcludesDemo(t *testing.T) {
+	db := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	seedScoredItem(t, db, "real", now.Add(-time.Hour))
+	demo := feeds.Item{
+		ID: "demo", Source: "Demo", Title: "Welcome", Link: DemoItemLink, Published: now,
+	}
+	model := DemoItemModel
+	if err := db.Record(ctx, []feeds.Item{demo}, []DigestEntry{{
+		Item: demo, Score: 10, Reason: "fixed", Model: model,
+	}}, now); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	items, err := db.EligibleClassificationItems(ctx, time.Time{}, 0, 1)
+	if err != nil {
+		t.Fatalf("EligibleClassificationItems: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "real" {
+		t.Errorf("eligible = %+v, want only the real item", items)
+	}
+}
+
+func TestRescoreCandidatesExcludeDemo(t *testing.T) {
+	db := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	seedScoredItem(t, db, "real", now.Add(-time.Hour))
+	demo := feeds.Item{ID: "demo", Source: "Demo", Title: "Welcome", Link: DemoItemLink, Published: now}
+	if err := db.Record(ctx, []feeds.Item{demo}, []DigestEntry{{
+		Item: demo, Score: 10, Reason: "fixed", Model: DemoItemModel,
+	}}, now); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	got, err := db.RecentScoredItems(ctx, now.Add(-7*24*time.Hour))
+	if err != nil {
+		t.Fatalf("RecentScoredItems: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "real" {
+		t.Errorf("rescore candidates = %+v, want only the real item", got)
+	}
+	stories, err := db.StoryItems(ctx, 10)
+	if err != nil {
+		t.Fatalf("StoryItems: %v", err)
+	}
+	if len(stories) != 1 || stories[0].ID != "real" {
+		t.Errorf("story items = %+v, want only the real item", stories)
+	}
+}

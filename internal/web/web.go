@@ -558,6 +558,7 @@ type rowData struct {
 	ScoreProfile     string
 	ScoreProfileHash string
 	ScoreFeedback    string
+	Demo             bool // the built-in demo item
 	// The user's own rating. It lights a thumb; when adaptive feedback is
 	// active, explicit ratings may also inform future scores. Either one
 	// re-posted clears it.
@@ -768,7 +769,7 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 // degrades to the filtered wording, which advises nothing.
 func (s *Web) emptyState(ctx context.Context, neverIngested bool, cmd string) emptyData {
 	e := emptyData{Kind: emptyFiltered, Cmd: cmd}
-	n, err := s.db.Count(ctx, store.ListFilter{})
+	n, err := s.db.Count(ctx, store.ListFilter{ExcludeDemo: true})
 	if err != nil {
 		log.Warn().Err(err).Msg("counting items for the feed zero-state")
 		return e
@@ -1347,6 +1348,7 @@ func toRow(row store.ItemRow) rowData {
 		rd.ScoreProfileHash = shortHash(strOf(row.LLMProfileHash))
 		rd.ScoreFeedback = feedbackProvenance(row)
 	}
+	rd.Demo = row.Link == store.DemoItemLink
 	if row.UserScore != nil {
 		rd.RatedUp = *row.UserScore == rateUp
 		rd.RatedDown = *row.UserScore == rateDown

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -186,5 +187,33 @@ func TestMakeIDStable(t *testing.T) {
 	c := makeID("", "https://x.com/a")
 	if c == a {
 		t.Error("link-derived ID should differ from guid-derived ID")
+	}
+}
+
+// ParseFeed builds the same items, in the same way, as a fetch of the document.
+func TestParseFeedMatchesFetchOne(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(sampleRSS))
+	}))
+	defer srv.Close()
+
+	src := Source{Name: "Test", URL: srv.URL, Tags: []string{"a"}}
+	want, wantSite, err := fetchOne(context.Background(), newParser(srv.Client(), MaxFeedBytes), src)
+	if err != nil {
+		t.Fatalf("fetchOne: %v", err)
+	}
+	got, gotSite, err := ParseFeed(src, strings.NewReader(sampleRSS))
+	if err != nil {
+		t.Fatalf("ParseFeed: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ParseFeed items = %+v, want %+v", got, want)
+	}
+	if gotSite != wantSite {
+		t.Errorf("site = %q, want %q", gotSite, wantSite)
+	}
+	if _, _, err := ParseFeed(src, strings.NewReader("not a feed")); err == nil {
+		t.Error("ParseFeed accepted a document that is not a feed")
 	}
 }

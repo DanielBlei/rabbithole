@@ -32,6 +32,9 @@ type Options struct {
 	// RunID is the history row of the run this cycle belongs to. Its feed
 	// fetches are linked to it; 0 links none (CLI and dry runs).
 	RunID int64
+	// Demo runs the cycle over the built-in demo feed instead of the
+	// configured feeds, with a fixed score and no model.
+	Demo bool
 }
 
 // Outcome is the result of one cycle. Rendering it (markdown file, stdout,
@@ -82,53 +85,68 @@ func Run(
 	if opts.Client == nil {
 		opts.Client = feeds.NewClient("")
 	}
-	// One read of the feed set for the whole run. The Sources page can edit
-	// feeds while this is in flight, and a run that re-read the store partway
-	// through would fetch one set and tag against another.
-	configured, err := ResolveFeeds(ctx, db)
-	if err != nil {
-		return Outcome{}, err
-	}
-	// Only enabled feeds are fetched; a disabled one is parked, not deleted,
-	// so it stays in the store (and on the Sources page) without costing a request.
-	active := config.EnabledFeeds(configured)
-	for _, f := range active {
-		logger.Debug().Str("feed", f.Name).Str("url", f.URL).Str("type", string(f.Type)).
-			Str("since", f.Since.String()).Int("max_items", f.MaxItems).Msg("configured feed")
-	}
-	if disabled := len(configured) - len(active); disabled > 0 {
-		logger.Info().Int("disabled", disabled).Msg("skipping disabled feeds")
-	}
-	if len(active) == 0 {
-		// Not an early return: the cycle still runs to completion (over nothing)
-		// so a successful run always ends with the "ingest complete" line the
-		// run manager and its log tail rely on.
-		logger.Warn().Msg("no enabled feeds; nothing to ingest")
-	}
-	logger.Info().Int("feeds", len(active)).Msg("ingesting feeds")
+	var (
+		configured []config.ResolvedFeed
+		active     []config.ResolvedFeed
+		results    []feeds.Result
+		failed     int
+	)
+	if opts.Demo {
+		logger.Info().Str("feed", demoFeed.Name).Msg("demo feed: Demo (built-in, no network)")
+		active = []config.ResolvedFeed{demoFeed}
+		results = []feeds.Result{fetchDemo()}
+		_, failed = tallyFetches(results)
+	} else {
+		// One read of the feed set for the whole run. The Sources page can edit
+		// feeds while this is in flight, and a run that re-read the store partway
+		// through would fetch one set and tag against another.
+		var err error
+		configured, err = ResolveFeeds(ctx, db)
+		if err != nil {
+			return Outcome{}, err
+		}
+		// Only enabled feeds are fetched; a disabled one is parked, not deleted,
+		// so it stays in the store (and on the Sources page) without costing a request.
+		active = config.EnabledFeeds(configured)
+		for _, f := range active {
+			logger.Debug().Str("feed", f.Name).Str("url", f.URL).Str("type", string(f.Type)).
+				Str("since", f.Since.String()).Int("max_items", f.MaxItems).Msg("configured feed")
+		}
+		if disabled := len(configured) - len(active); disabled > 0 {
+			logger.Info().Int("disabled", disabled).Msg("skipping disabled feeds")
+		}
+		if len(active) == 0 {
+			// Not an early return: the cycle still runs to completion (over nothing)
+			// so a successful run always ends with the "ingest complete" line the
+			// run manager and its log tail rely on.
+			logger.Warn().Msg("no enabled feeds; nothing to ingest")
+		}
+		logger.Info().Int("feeds", len(active)).Msg("ingesting feeds")
 
-	fetchStart := time.Now()
-	// dispatchFetch returns one Result per feed, positionally — results[i] is
-	// active[i]'s outcome. That pairing is used directly below rather than
-	// flattening the items and regrouping them by feed name.
-	results := dispatchFetch(ctx, opts.Client, active)
-	fetched, failed := tallyFetches(results)
-	logger.Info().Int("items", fetched).Int("failed_feeds", failed).
-		Str("elapsed", time.Since(fetchStart).Round(100*time.Millisecond).String()).Msg("fetched items")
+		fetchStart := time.Now()
+		// dispatchFetch returns one Result per feed, positionally: results[i] is
+		// active[i]'s outcome. That pairing is used directly below rather than
+		// flattening the items and regrouping them by feed name.
+		results = dispatchFetch(ctx, opts.Client, active)
+		var fetched int
+		fetched, failed = tallyFetches(results)
+		logger.Info().Int("items", fetched).Int("failed_feeds", failed).
+			Str("elapsed", time.Since(fetchStart).Round(100*time.Millisecond).String()).Msg("fetched items")
 
-	// Per-feed fetch outcomes are recorded whether or not the run records
-	// items: a dead feed should surface even on a --dry-run. Best-effort —
-	// history is observability and must never fail the run.
-	if err := recordFeedFetches(ctx, db, opts.RunID, active, results); err != nil {
-		logger.Warn().Err(err).Msg("recording feed fetch history failed")
-	}
+		// Per-feed fetch outcomes are recorded whether or not the run records
+		// items: a dead feed should surface even on a --dry-run. Best-effort:
+		// history is observability and must never fail the run.
+		if err := recordFeedFetches(ctx, db, opts.RunID, active, results); err != nil {
+			logger.Warn().Err(err).Msg("recording feed fetch history failed")
+		}
 
-	// Items carry their feed's tags, written when they're inserted. An already
-	// scored item is never re-inserted, so retagging a feed in the feeds file
-	// reaches its existing items only through this sync. Best-effort, like the
-	// history above.
-	if err := db.SyncSourceTags(ctx, ConfiguredTags(configured)); err != nil {
-		logger.Warn().Err(err).Msg("syncing feed tags failed")
+		// Items carry their feed's tags, written when they're inserted. An already
+		// scored item is never re-inserted, so retagging a feed in the feeds file
+		// reaches its existing items only through this sync. Best-effort, like the
+		// history above.
+		if err := db.SyncSourceTags(ctx, ConfiguredTags(configured)); err != nil {
+			logger.Warn().Err(err).Msg("syncing feed tags failed")
+		}
 	}
 
 	// Apply each feed's filters before scoring so the feedback snapshot can
@@ -181,8 +199,9 @@ func Run(
 		candidates = append(candidates, deduped...)
 	}
 
+	var err error
 	scoringContext := rank.ProfileContext(activeProfile.Content)
-	if len(candidates) > 0 {
+	if len(candidates) > 0 && !opts.Demo {
 		scoringContext, err = loadScoringContext(
 			ctx, db, activeProfile, candidates, cfg.AdaptiveRankingEnabled(),
 		)
@@ -199,6 +218,10 @@ func Run(
 	)
 	resolveScorer := func() (rank.Scorer, error) {
 		if resolved {
+			return scorer, nil
+		}
+		if opts.Demo {
+			scorer, resolved = demoScorer{}, true
 			return scorer, nil
 		}
 		if cfg.Inference.Provider != config.ProviderHeuristic {
@@ -218,7 +241,10 @@ func Run(
 	// run early (a DB error, a backend that fails to resolve) still returns
 	// accurate counts for the feeds already completed, instead of resetting
 	// everything to zero.
-	outcome := Outcome{Sites: iconSites(active, results)}
+	outcome := Outcome{}
+	if !opts.Demo {
+		outcome.Sites = iconSites(active, results)
+	}
 	for i, f := range active {
 		p := prepared[i]
 		if p.raw == 0 {
@@ -266,7 +292,11 @@ func Run(
 		results := rank.Select(p.unseen, scores)
 
 		if opts.Record {
-			if err := record(ctx, db, p.unseen, scores, cfg.Inference.Model, activeProfile, day); err != nil {
+			model := cfg.Inference.Model
+			if opts.Demo {
+				model = store.DemoItemModel
+			}
+			if err := record(ctx, db, p.unseen, scores, model, activeProfile, day); err != nil {
 				logger.Warn().Str("feed", f.Name).Err(err).Msg("recording feed failed, skipping")
 				continue
 			}

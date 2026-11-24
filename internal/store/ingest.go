@@ -84,7 +84,22 @@ const (
 	IngestTriggerManual         = "manual"
 	IngestTriggerCron           = "cron"
 	IngestTriggerProfileRescore = "profile-rescore"
+	IngestTriggerDemo           = "demo"
 )
+
+// The built-in demo item: a fixed link and the model name its score carries.
+// Classification, briefings and the first-run checks leave it out.
+const (
+	DemoItemLink  = "https://github.com/DanielBlei/rabbithole"
+	DemoItemModel = "demo"
+)
+
+// demoExclusion is the SQL condition (and its args) that drops the demo item
+// from a query over items, whose columns carry prefix (empty or "i.").
+func demoExclusion(prefix string) (string, []any) {
+	return prefix + "link <> ? AND COALESCE(" + prefix + "llm_score_model, '') <> ?",
+		[]any{DemoItemLink, DemoItemModel}
+}
 
 // ErrIngestRunNotFound is returned when no history row matches the given id.
 var ErrIngestRunNotFound = errors.New("ingest run not found")
