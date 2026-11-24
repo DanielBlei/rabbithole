@@ -558,6 +558,141 @@ func TestRunAttributesPartialScoringFailureToFeed(t *testing.T) {
 	}
 }
 
+// B-1 (CDR-52): two feeds can carry one syndicated article under the same GUID
+// but different links, so both copies derive the same Item.ID. The pre-pass
+// claims IDs first-wins like links: the first feed's copy is scored and
+// persisted once, the later copy never reaches the model, and no record
+// collision discards the score.
+func TestRunDuplicateGUIDScoresFirstFeedOnce(t *testing.T) {
+	const guid = "urn:uuid:0b7f42e2-1c1d-4f2e-9a3b-5c6d7e8f9a0b"
+	cfg := testConfig(t,
+		config.Feed{Name: "Alpha", URL: serveRSS(t, feedRSSWithGUID("Same article", guid, "https://alpha.test/a42?utm=rss"))},
+		config.Feed{Name: "Beta", URL: serveRSS(t, feedRSSWithGUID("Same article", guid, "https://beta.test/a42"))},
+	)
+	db := openStore(t, cfg)
+	scorer := &staticScorer{}
+
+	out, lines, err := runWithScorer(t, t.Context(), cfg, db, fixedResolver(scorer, nil),
+		Options{Record: true, Client: loopbackClient})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Scored != 1 || out.Failed != 0 {
+		t.Errorf("Scored/Failed = %d/%d, want 1/0", out.Scored, out.Failed)
+	}
+	if len(out.Unseen) != 1 || len(out.Results) != 1 {
+		t.Fatalf("Unseen/Results = %d/%d, want 1/1", len(out.Unseen), len(out.Results))
+	}
+	if got := out.Results[0].Item.Source; got != "Alpha" {
+		t.Errorf("surviving result is from %q, want Alpha (first in config order)", got)
+	}
+	if got := scorer.Calls(); got != 1 {
+		t.Errorf("scoring calls = %d, want 1 (the duplicate ID never reaches the model)", got)
+	}
+
+	row, err := db.GetByID(t.Context(), out.Results[0].Item.ID)
+	if err != nil {
+		t.Fatalf("GetByID(%s): %v", out.Results[0].Item.ID, err)
+	}
+	if row.LLMScore == nil || *row.LLMScore != 6 {
+		t.Errorf("persisted row score = %v, want 6", row.LLMScore)
+	}
+	if row.Source != "Alpha" {
+		t.Errorf("persisted row source = %q, want Alpha", row.Source)
+	}
+
+	if warns := linesWith(lines, "recording feed failed, skipping"); len(warns) != 0 {
+		t.Errorf("record failure warnings = %v, want none", warns)
+	}
+
+	accounts := map[string]map[string]any{}
+	for _, line := range linesWith(lines, "feed accounting") {
+		accounts[line["feed"].(string)] = line
+	}
+	if got := int(accounts["Alpha"]["new"].(float64)); got != 1 {
+		t.Errorf("Alpha new = %d, want 1", got)
+	}
+	if got := int(accounts["Alpha"]["skipped"].(float64)); got != 0 {
+		t.Errorf("Alpha skipped = %d, want 0", got)
+	}
+	if got := int(accounts["Beta"]["new"].(float64)); got != 0 {
+		t.Errorf("Beta new = %d, want 0 (duplicate ID claimed by Alpha)", got)
+	}
+	if got := int(accounts["Beta"]["skipped"].(float64)); got != 1 {
+		t.Errorf("Beta skipped = %d, want 1 (duplicate ID dropped in the pre-pass)", got)
+	}
+}
+
+// N-1 (CDR-52): a record failure on a middle feed leaves an earlier feed's
+// committed rows intact and does not stop a later feed from being recorded. A
+// row already owning the middle feed's Item.ID under a different link makes its
+// insert fail on the items.id primary key — the same store-level collision a
+// duplicate GUID produced before the pre-pass claimed IDs.
+func TestRunRecordFailureIsolatesFeeds(t *testing.T) {
+	const guid = "urn:uuid:5d2a9c31-7b6e-4f0a-8c1d-2e3f4a5b6c7d"
+	warmCfg := testConfig(t,
+		config.Feed{Name: "Warm", URL: serveRSS(t, feedRSSWithGUID("Warm", guid, "https://x.test/warm"))},
+	)
+	warmDB := openStore(t, warmCfg)
+	warm, _, err := runWithScorer(t, t.Context(), warmCfg, warmDB, fixedResolver(&staticScorer{}, nil),
+		Options{Record: true, Client: loopbackClient})
+	if err != nil {
+		t.Fatalf("warm Run: %v", err)
+	}
+	if len(warm.Unseen) != 1 {
+		t.Fatalf("warm Unseen = %d, want 1", len(warm.Unseen))
+	}
+	colliding := warm.Unseen[0]
+
+	cfg := testConfig(t,
+		config.Feed{Name: "Earlier", URL: serveRSS(t, feedRSSWithGUID("Earlier", "urn:uuid:earlier", "https://x.test/earlier"))},
+		config.Feed{Name: "Failing", URL: serveRSS(t, feedRSSWithGUID("Failing", guid, "https://x.test/failing"))},
+		config.Feed{Name: "Later", URL: serveRSS(t, feedRSSWithGUID("Later", "urn:uuid:later", "https://x.test/later"))},
+	)
+	db := openStore(t, cfg)
+	if err := db.Record(t.Context(), []feeds.Item{colliding}, nil, time.Now()); err != nil {
+		t.Fatalf("seed colliding row: %v", err)
+	}
+
+	out, lines, err := runWithScorer(t, t.Context(), cfg, db, fixedResolver(&staticScorer{}, nil),
+		Options{Record: true, Client: loopbackClient})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.Scored != 2 || out.Failed != 0 {
+		t.Errorf("Scored/Failed = %d/%d, want 2/0 (the two feeds that recorded)", out.Scored, out.Failed)
+	}
+	if len(out.Results) != 2 {
+		t.Errorf("Results = %d, want 2", len(out.Results))
+	}
+
+	warns := linesWith(lines, "recording feed failed, skipping")
+	if len(warns) != 1 || warns[0]["feed"] != "Failing" {
+		t.Fatalf("record failure warnings = %v, want exactly one for Failing", warns)
+	}
+	recorded := map[string]bool{}
+	for _, line := range linesWith(lines, "ingested to db") {
+		recorded[line["feed"].(string)] = true
+	}
+	if !recorded["Earlier"] || !recorded["Later"] {
+		t.Errorf("feed completion lines = %v, want Earlier and Later committed", recorded)
+	}
+	if recorded["Failing"] {
+		t.Errorf("failing feed logged a successful ingest: %v", recorded)
+	}
+
+	counts := sourceCounts(t, db)
+	if counts["Earlier"] != 1 || counts["Later"] != 1 {
+		t.Errorf("source counts = %v, want Earlier:1 Later:1", counts)
+	}
+	if counts["Failing"] != 0 {
+		t.Errorf("failing feed rows = %d, want 0 (its transaction rolled back)", counts["Failing"])
+	}
+	if _, err := db.Get(t.Context(), "https://x.test/failing"); !errors.Is(err, store.ErrItemNotFound) {
+		t.Errorf("Get(failing link) error = %v, want ErrItemNotFound", err)
+	}
+}
+
 // Empty and failed feeds contribute no batches; only the nonempty feed drives
 // progress, and batchCount(0, …) contributes zero rather than dividing by zero.
 func TestRunScoresOnlyNonemptyFeeds(t *testing.T) {

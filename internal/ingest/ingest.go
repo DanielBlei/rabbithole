@@ -41,7 +41,7 @@ type Outcome struct {
 	Unseen  []feeds.Item  // fresh, not-yet-seen items considered for scoring
 	Results []rank.Result // every scored item, sorted best-first
 	Scored  int           // items the model scored, across all feeds
-	Skipped int           // items skipped as already scored or as duplicate links in this run
+	Skipped int           // items skipped as already scored or as duplicate links or ids in this run
 	Failed  int           // items the model failed to score
 	// Sites pairs every fetched feed with the site that stands for it, for the
 	// icon pass that follows the run.
@@ -168,13 +168,21 @@ func run(
 	var candidates []feeds.Item
 	// feedOfItem maps each candidate back to the active feed it came from, so
 	// the post-scoring pass can attribute a score to exactly one feed without
-	// trusting the item's Source label.
+	// trusting the item's Source label. The pre-pass claims Item.ID first-wins,
+	// so every key here has exactly one owner.
 	feedOfItem := make(map[string]int)
 	// The prepass records nothing, so two feeds carrying one link would both
 	// schedule it. Remember links already claimed by an earlier feed: scoring
 	// now happens after every feed is collected, so this in-run claim is what
 	// keeps a shared link from being scored twice.
 	seenLinks := make(map[string]struct{})
+	// IDs need the same in-run claim. ID is derived from the GUID when one is
+	// present, so two feeds can carry one syndicated article under different
+	// links and still share an Item.ID. Scoring both would write two rows for
+	// one primary key, and the later feed's record transaction would roll the
+	// surviving score back. First feed in active order keeps the item; later
+	// copies are skipped (and counted as such) before they reach the model.
+	seenIDs := make(map[string]struct{})
 	for i, f := range active {
 		feedItems := results[i].Items
 		if len(feedItems) == 0 {
@@ -206,6 +214,12 @@ func run(
 					continue
 				}
 				seenLinks[item.Link] = struct{}{}
+			}
+			if item.ID != "" {
+				if _, seen := seenIDs[item.ID]; seen {
+					continue
+				}
+				seenIDs[item.ID] = struct{}{}
 			}
 			deduped = append(deduped, item)
 		}
