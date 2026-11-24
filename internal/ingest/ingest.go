@@ -107,6 +107,15 @@ func Run(
 	}
 	logger.Info().Int("feeds", len(active)).Msg("ingesting feeds")
 
+	// The effective inference settings, once per run, so a log can answer
+	// "how was this run scored" without digging through the config file.
+	// Logged whether or not the scorer ends up resolving: it describes the
+	// run's configuration, not a connection.
+	logger.Info().Str("provider", cfg.Inference.Provider).Str("model", cfg.Inference.Model).
+		Int("batch_size", cfg.Inference.BatchSize).Int("max_parallel", cfg.Inference.MaxParallel).
+		Bool("think", opts.Think).Bool("adaptive_ranking", cfg.AdaptiveRankingEnabled()).
+		Msg("inference settings")
+
 	fetchStart := time.Now()
 	// dispatchFetch returns one Result per feed, positionally — results[i] is
 	// active[i]'s outcome. That pairing is used directly below rather than
@@ -181,6 +190,36 @@ func Run(
 		candidates = append(candidates, deduped...)
 	}
 
+	// Run-wide scoring progress: batches are counted across every feed, so a
+	// long run can report its position in the whole scoring operation and
+	// not only within the feed currently being scored. batchCount mirrors
+	// rank.ScoreAll's chunking so the run-wide "of" is the exact sum of the
+	// per-feed totals the progress callbacks report.
+	runBatches := 0
+	for _, p := range prepared {
+		runBatches += batchCount(len(p.unseen), cfg.Inference.BatchSize)
+	}
+
+	// One accounting record per enabled feed — including feeds that fetched
+	// nothing, failed to fetch, or had nothing new to score — so the log alone
+	// answers what each feed contributed. Emitted as a pass of its own before
+	// scoring setup: loadScoringContext and resolveScorer can both abort the
+	// run, and the per-feed counts are already known from results and prepared,
+	// so a failed run still accounts for every feed. raw is what the fetch
+	// returned, filtered what survived the age window and item cap, new the
+	// candidates actually scored, skipped what dedup removed. A fetch failure
+	// is a plain boolean: transport errors can embed the full request URL,
+	// credentials in query parameters included, so the raw error string must
+	// not reach the log.
+	for i, f := range active {
+		p := prepared[i]
+		logger.Info().Str("feed", f.Name).
+			Int("raw", p.raw).Int("filtered", p.fetched).
+			Int("new", len(p.unseen)).Int("skipped", p.skipped).
+			Bool("fetch_failed", results[i].Err != nil).
+			Msg("feed accounting")
+	}
+
 	scoringContext := rank.ProfileContext(activeProfile.Content)
 	if len(candidates) > 0 {
 		scoringContext, err = loadScoringContext(
@@ -219,6 +258,12 @@ func Run(
 	// accurate counts for the feeds already completed, instead of resetting
 	// everything to zero.
 	outcome := Outcome{Sites: iconSites(active, results)}
+	// Batches completed by the feeds scored before the current one, so the
+	// run-wide progress line keeps rising across feeds instead of restarting
+	// at each one. Feeds are scored sequentially, so a plain counter is
+	// enough; the per-feed OnBatch callbacks are themselves serialised by
+	// rank.ScoreAll.
+	runBatchesDone := 0
 	for i, f := range active {
 		p := prepared[i]
 		if p.raw == 0 {
@@ -249,7 +294,12 @@ func Run(
 		}
 
 		// Batches run in parallel, so progress reports a completion count.
+		// The per-feed line keeps its original shape; the run-wide line
+		// adds the batches completed by earlier feeds so its count is
+		// monotonic across the whole run.
 		scoreStart := time.Now()
+		feedBatchBase := runBatchesDone
+		feedBatchTotal := batchCount(len(p.unseen), cfg.Inference.BatchSize)
 		scores := rank.ScoreAll(
 			ctx, s, scoringContext.Profile, p.unseen, cfg.Inference.BatchSize, cfg.Inference.MaxParallel,
 			rank.WithFeedback(scoringContext.Feedback),
@@ -257,8 +307,12 @@ func Run(
 				logger.Info().Str("feed", f.Name).Int("done", done).Int("of", total).
 					Str("elapsed", time.Since(scoreStart).Round(100*time.Millisecond).String()).
 					Msg("scoring progress")
+				logger.Info().Int("done", feedBatchBase+done).Int("of", runBatches).
+					Str("elapsed", time.Since(runStart).Round(100*time.Millisecond).String()).
+					Msg("run scoring progress")
 			}),
 		)
+		runBatchesDone += feedBatchTotal
 		failed := len(p.unseen) - len(scores)
 		outcome.Failed += failed
 		logger.Info().Str("feed", f.Name).Int("processed", len(scores)).Int("failed", failed).
@@ -366,6 +420,19 @@ func recordFeedFetches(
 	// Append-only needs a ceiling; trimming here keeps it tied to the only
 	// thing that grows the table.
 	return db.PruneFeedFetches(ctx, 0)
+}
+
+// batchCount reports how many scoring batches rank.ScoreAll chunks items
+// into, mirroring its batchSize < 1 means 1 rule, so run-wide progress
+// totals are the exact sum of the per-feed totals.
+func batchCount(items, batchSize int) int {
+	if items <= 0 {
+		return 0
+	}
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	return (items + batchSize - 1) / batchSize
 }
 
 // capNewest keeps at most maxItems items, newest first. maxItems <= 0 means
