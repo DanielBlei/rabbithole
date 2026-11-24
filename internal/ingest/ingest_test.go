@@ -35,6 +35,17 @@ func feedRSS(title, link string) string {
 </channel></rss>`, title, link, link)
 }
 
+// feedRSSWithGUID renders a one-item RSS feed whose GUID differs from its link.
+// Item.ID derives from the GUID, so two feeds serving one GUID under different
+// links carry one ID — the syndicated-article shape makeID documents.
+func feedRSSWithGUID(title, guid, link string) string {
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Feed</title>
+  <item><title>%s</title><link>%s</link><guid isPermaLink="false">%s</guid>
+  <description>summary</description></item>
+</channel></rss>`, title, link, guid)
+}
+
 // serveRSS starts a test server returning the given RSS body, registered for
 // cleanup, and returns its URL.
 func serveRSS(t *testing.T, body string) string {
