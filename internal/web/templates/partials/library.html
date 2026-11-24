@@ -4,7 +4,8 @@
 {{/* The Library section of Sources: the ready-made sources, grouped, with the
      state of each against your own. The header and the filter tools sit outside
      #libBody, so an action repaints the list without wiping the filter box. The
-     plan replaces the list in #libBody and the list stays in the page, hidden.
+     plan of a failed Add replaces the list in #libBody and the list stays in the
+     page, hidden.
      static/js/library.js owns the filter, the ticks and the Add bar. */}}
 {{define "sourcesLibrary"}}
 <section class="li" id="lib" data-lib data-scope="{{.Scope}}">

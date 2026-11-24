@@ -233,6 +233,7 @@ func (s *Web) Routes() http.Handler {
 	mux.HandleFunc("GET /briefing", s.handleBriefing)
 	mux.HandleFunc("POST /briefing/generate", s.handleBriefingGenerate)
 	mux.HandleFunc("GET /briefing/status", s.handleBriefingStatus)
+	mux.HandleFunc("GET /briefing/calendar", s.handleBriefingCalendar)
 	mux.HandleFunc("GET /briefing/export", s.handleBriefingExport)
 	mux.HandleFunc("GET /settings", s.handleSettingsIndex)
 	mux.HandleFunc("GET /settings/{tab}", s.handleSettings)

@@ -1542,3 +1542,55 @@ func TestSourcesAttentionClipsALongError(t *testing.T) {
 		t.Errorf("the whole error is not in the tooltip: %.120s", code)
 	}
 }
+
+func TestTopbarGroupsSourcesAndBriefingUnderFeed(t *testing.T) {
+	w, _ := sourcesTestWeb(t, config.FeedsDoc{
+		Feeds: []config.Feed{{Name: "Alpha", URL: "https://alpha.test/feed"}},
+	})
+	feed := get(t, w, "/feed")
+	for _, want := range []string{`class="navgrp navgrp--on"`, `class="navgrp__more"`, `href="/feed"`, `href="/sources"`, `href="/briefing"`, `href="/maze"`} {
+		if !strings.Contains(feed, want) {
+			t.Errorf("GET /feed: topbar missing %s", want)
+		}
+	}
+	if strings.Contains(feed, "navgrp--open") {
+		t.Error("GET /feed renders the group expanded")
+	}
+	if strings.Contains(get(t, w, "/maze"), "navgrp--on") {
+		t.Error("GET /maze lights the Feed group")
+	}
+	idx := func(s string) int { return strings.Index(feed, `href="`+s+`"`) }
+	if f, so, b, m := idx("/feed"), idx("/sources"), idx("/briefing"), idx("/maze"); f < 0 || so < 0 || b < 0 || m < 0 || !(f < so && so < b && b < m) {
+		t.Errorf("topbar links are out of order: feed=%d sources=%d briefing=%d maze=%d", f, so, b, m)
+	}
+	more := strings.Index(feed, `class="navgrp__more"`)
+	for _, path := range []string{"/sources", "/briefing"} {
+		if at := idx(path); at < more || at > idx("/maze") {
+			t.Errorf("GET /feed: %s is not inside navgrp__more", path)
+		}
+	}
+	link := func(out, path string) string {
+		_, rest, _ := strings.Cut(out, `href="`+path+`"`)
+		start := strings.LastIndex(out[:len(out)-len(rest)], "<a ")
+		tag, _, _ := strings.Cut(out[start:], ">")
+		return tag
+	}
+	for _, path := range []string{"/sources", "/briefing"} {
+		out := get(t, w, path)
+		if !strings.Contains(out, `class="navgrp navgrp--open"`) {
+			t.Errorf("GET %s: group is not expanded", path)
+		}
+		tag := link(out, path)
+		if !strings.Contains(tag, `class="active"`) || !strings.Contains(tag, `aria-current="page"`) {
+			t.Errorf("GET %s: link is not lit: %s", path, tag)
+		}
+	}
+	settings := get(t, w, "/settings/appearance")
+	_, sw, ok := strings.Cut(settings, `data-navx-toggle`)
+	if !ok {
+		t.Fatal("settings has no Auto expand control")
+	}
+	if sw, _, _ = strings.Cut(sw, ">"); !strings.Contains(sw, `aria-checked="true"`) {
+		t.Errorf("Auto expand does not default to on: %s", sw)
+	}
+}

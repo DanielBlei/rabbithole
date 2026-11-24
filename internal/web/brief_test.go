@@ -124,8 +124,8 @@ func TestBriefEndToEndReady(t *testing.T) {
 	body := waitBriefBody(t, w, "a", "Full-text 8/10")
 	for _, want := range []string{
 		"Feed score 4/10", "Full-text 8/10", "min read", "Read in full",
-		"WHY THIS MATTERS TO YOU", "KEY IDEAS", "A new benchmark",
-		"WHAT IS ACTUALLY NEW", "LIMITATIONS / CAVEATS", "FOCUS ON",
+		"Why this matters to you", "Key ideas", "A new benchmark",
+		"What is actually new", "Limitations and caveats", "Focus on",
 		"A feed score was recorded", "computed from the fetched article",
 		"Fetched from https://x/a",
 	} {

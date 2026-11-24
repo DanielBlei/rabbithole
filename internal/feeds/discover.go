@@ -437,7 +437,7 @@ func isCommentsFeed(r feedRef) bool {
 	if u, err := url.Parse(r.url); err == nil {
 		s += " " + strings.ToLower(u.Path)
 	}
-	return strings.Contains(s, "comment")
+	return strings.Contains(s, "comments")
 }
 
 // fallbackFeeds are the common feed paths of final: under its first path

@@ -128,6 +128,7 @@ func TestHeuristicHeadings(t *testing.T) {
 			want:  true,
 		},
 		{name: "canonical less", prof: canon("- rust compilers", "- gardening"), title: "gardening", want: false},
+		{name: "hyphenated no is not negative", prof: "## No-code tools\n- zapier", title: "zapier", want: true},
 		{name: "no headings", prof: "rust compilers", title: "Rust compilers", want: true},
 		{name: "only negative", prof: "## Not for me\n- gardening", title: "gardening", want: false},
 		{name: "empty", prof: "", title: "gardening", want: false},

@@ -740,6 +740,32 @@ func TestGenerateFailureKeepsPriorReadyBriefing(t *testing.T) {
 	}
 }
 
+func TestGenerateSuccessReplacesPriorProvenance(t *testing.T) {
+	st := newFakeStore(sampleItems(2)...)
+	opts := options()
+	period, _ := PeriodFor("daily", opts.Now)
+	prior := store.Briefing{
+		ID: briefingID(period), PeriodKind: "daily", PeriodStart: period.Start, PeriodEnd: period.End,
+		Status: store.BriefingReady, BodyMD: "# prior body",
+		ProfileID: "p-old", ProfileName: "Old profile", ProfileHash: "h-old",
+		Provider: "old-provider", Model: "old-model", ItemCount: 7,
+	}
+	if _, err := st.SaveBriefing(context.Background(), prior); err != nil {
+		t.Fatal(err)
+	}
+	gen := &fakeGenerator{replies: []string{validJSON()}}
+	svc := testService(st, func(context.Context) (Generator, error) { return gen, nil })
+
+	got, err := svc.Generate(context.Background(), "daily", time.Time{}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Provider != opts.Provider || got.Model != opts.Model || got.ItemCount != 2 ||
+		got.ProfileName == prior.ProfileName {
+		t.Errorf("provenance not replaced by the new run: %+v", got)
+	}
+}
+
 func TestGenerateFirstRunFailureIsFailedAndEmpty(t *testing.T) {
 	st := newFakeStore(sampleItems(2)...)
 	gen := &fakeGenerator{errs: []error{errors.New("boom")}}
