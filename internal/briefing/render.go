@@ -72,8 +72,25 @@ func Render(p Period, items []store.BriefingItem, b Briefing) string {
 	return out.String()
 }
 
+// inertImages escapes every image marker so the text cannot load a picture.
+// A marker already escaped by an odd run of backslashes is left alone, since
+// adding another would cancel the escape.
 func inertImages(s string) string {
-	return strings.ReplaceAll(s, "![", `\![`)
+	var out strings.Builder
+	slashes := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '!' && i+1 < len(s) && s[i+1] == '[' && slashes%2 == 0 {
+			out.WriteByte('\\')
+		}
+		if c == '\\' {
+			slashes++
+		} else {
+			slashes = 0
+		}
+		out.WriteByte(c)
+	}
+	return out.String()
 }
 
 func periodTitle(p Period) string {

@@ -194,6 +194,14 @@ func (s *Web) pagePromptUser(ctx context.Context) string {
 	return promptUser(cfg.User)
 }
 
+// groupedParam keeps only the values groupedView understands.
+func groupedParam(param string) string {
+	if param == "0" || param == "1" {
+		return param
+	}
+	return ""
+}
+
 // groupedView resolves whether the feed groups items by story: an explicit
 // grouped=1 or grouped=0 wins, otherwise the configured default applies (on
 // when unset or when the config cannot be read).
@@ -482,7 +490,10 @@ type pageData struct {
 	Rows      []rowData
 	Groups    []feedGroup
 	Grouped   bool
-	Empty     emptyData // the zero-state, filled only when Rows is empty
+	// GroupedParam is the explicit grouped=0|1 the request carried, so the
+	// filter form can send it back; empty when the setting decides.
+	GroupedParam string
+	Empty        emptyData // the zero-state, filled only when Rows is empty
 }
 
 // pickChip is one option in a multi-select filter menu.
@@ -730,6 +741,7 @@ func (s *Web) handleFeed(w http.ResponseWriter, r *http.Request) {
 		Rows:               items,
 		Groups:             groups,
 		Grouped:            grouped,
+		GroupedParam:       groupedParam(q.Get("grouped")),
 	}
 	data.ViewPick = wornView(showUnread, showSeen, showHidden, onlyBookmark)
 	// Sort always has exactly one value, so it wears it plainly, spelled the way

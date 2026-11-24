@@ -675,7 +675,41 @@ var feedPager = (function(){
     });
     el.textContent = n;
   }
-  function remove(row){ (row.closest('.story-group') || row).remove(); tweenAvg(); setHigh(); feedPager.render(); }
+  function refresh(){ tweenAvg(); setHigh(); feedPager.render(); }
+  // A group's controls act on its representative, so when that row leaves the
+  // view its members are still in it. Ask the server to regroup the page and
+  // put back the groups that now hold those members.
+  function regroup(parent, before, ids){
+    fetch(window.location.href, { credentials: 'same-origin' })
+      .then(function(res){ return res.ok ? res.text() : Promise.reject(); })
+      .then(function(text){
+        var doc = new DOMParser().parseFromString(text, 'text/html');
+        var seen = [];
+        ids.forEach(function(id){
+          var sel = '.pane__body .row[data-id="' + id + '"]';
+          if (document.querySelector(sel)) return;
+          var row = doc.querySelector(sel);
+          var unit = row && row.closest('.story-group');
+          if (!unit || seen.indexOf(unit) !== -1) return;
+          seen.push(unit);
+          var node = document.importNode(unit, true);
+          parent.insertBefore(node, before && before.parentNode === parent ? before : null);
+          if (window.htmx) htmx.process(node);
+        });
+        if (seen.length) refresh();
+      })
+      .catch(function(){});
+  }
+  function remove(row){
+    var group = row.closest('.story-group');
+    var ids = group ? Array.prototype.map.call(
+      group.querySelectorAll('.story-group__list li[data-id]'),
+      function(li){ return li.getAttribute('data-id'); }) : [];
+    var parent = group && group.parentNode, next = group && group.nextSibling;
+    (group || row).remove();
+    refresh();
+    if (ids.length) regroup(parent, next, ids);
+  }
   function leave(row){
     if (row._leaving) return;
     row._leaving = true;

@@ -321,6 +321,7 @@ func (s *Service) synthesize(ctx context.Context, state *runState, b store.Brief
 		stampProvenance(&b, state)
 		b.Status = store.BriefingReady
 		b.Error = ""
+		b.ReferencedItemIDs = nil
 		b.BodyMD = Render(period, nil, Briefing{})
 		return s.finish(ctx, b)
 	}
