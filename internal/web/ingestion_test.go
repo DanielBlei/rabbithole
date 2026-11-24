@@ -404,7 +404,7 @@ func TestIngestionNav(t *testing.T) {
 
 func TestIngestModalLinksAllRuns(t *testing.T) {
 	w := ingestionWeb(t)
-	mustContain(t, "modal", get(t, w, "/ingest"), `<a class="modal__act" href="/ingestion">▤ all runs</a>`)
+	mustContain(t, "modal", get(t, w, "/ingest"), `<a class="tile tile--go" href="/ingestion">`)
 }
 
 // Everything a run recorded is untrusted: it renders as text.
@@ -832,7 +832,7 @@ func TestIngestLiveClockRendered(t *testing.T) {
 	// While a run is live the modal hides the previous run's counts.
 	prev := store.IngestCounts{Fetched: 60, NewItems: 60}
 	seedIngestionRun(t, w, store.IngestTriggerManual, store.IngestStatusOK, prev, "")
-	mustContain(t, "modal", get(t, w, "/ingest/status"), `<div class="ing__counts is-idle">`)
+	mustContain(t, "modal", get(t, w, "/ingest/status"), `<div class="stats-row ing__stats is-idle">`)
 
 	// A finished run's bar has no clock.
 	idle := ingestionWeb(t)

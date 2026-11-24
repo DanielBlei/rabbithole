@@ -93,9 +93,9 @@ func TestIngestModalAndRun(t *testing.T) {
 	if !strings.Contains(out, "ingest complete") {
 		t.Errorf("status body missing captured log lines; body=%s", out)
 	}
-	// Idle chip after an ok run: present for OOB targeting but hidden.
-	if !strings.Contains(out, "hidden") {
-		t.Errorf("idle chip should render hidden; body=%s", out)
+	// Idle chip after an ok run: the green play chip that opens the runner.
+	if !strings.Contains(out, "ing-chip--idle") {
+		t.Errorf("idle chip should render the green play state; body=%s", out)
 	}
 
 	// Reopening once the run is done starts over: the finished run stays as the

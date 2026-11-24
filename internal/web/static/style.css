@@ -1447,6 +1447,7 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
   .topbar__nav{gap:4px;}
   .topbar__nav a{padding:0 9px;}
   .topbar__amb .ing-chip{font-size:0;gap:0;}
+  .topbar__amb .ing-chip__play{width:11px;height:11px;}
   .topbar__right{gap:8px;min-width:0;}
   .topbar__amb{gap:8px;padding:5px 10px;min-width:0;}
 }
@@ -1827,6 +1828,10 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    the alarm a cancelled run leaves behind. */
 .ing-chip--never{color:var(--caution);}
 .ing-chip--never i{background:transparent;box-shadow:inset 0 0 0 1px var(--caution);}
+/* Idle and healthy: a green play button that opens the runner. */
+.ing-chip--idle{color:var(--score-high);}
+.ing-chip__play{flex:none;filter:drop-shadow(0 0 4px var(--score-high));}
+.ing-chip--idle:hover{background:var(--fill-hover,var(--fill));}
 @keyframes ing-pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
 @media (prefers-reduced-motion: reduce){
   .navrail__dot--run,.navtab--run,.ing-chip--running i,.ing__st--run,.ing__live{animation:none;}
@@ -1899,7 +1904,7 @@ button.modal__act{border:0;font:inherit;}
 /* The one that leaves the app says so. */
 .modal__foot--acts .modal__act--ext{margin-right:auto;}
 .ing{padding:16px 22px 20px;min-height:0;overflow-y:auto;overscroll-behavior:contain;}
-.ing__runline{display:flex;align-items:center;gap:9px;font-size:1.45rem;flex-wrap:wrap;}
+.ing__runline{display:flex;align-items:center;justify-content:center;gap:9px;margin-top:14px;font-size:1.45rem;flex-wrap:wrap;}
 .ing__st{font-weight:500;}
 .ing__st--ok{color:var(--score-high);}
 .ing__st--err{color:var(--warn);}
@@ -1907,15 +1912,9 @@ button.modal__act{border:0;font:inherit;}
 .ing__sep{color:var(--line);}
 .ing__dim{color:var(--text-dim);}
 .ing__trigger{font-size:1.15rem;padding:2px 9px;border-radius:999px;background:var(--fill);color:var(--text-dim);}
-.ing__errline{margin-top:9px;font-size:1.3rem;color:var(--warn);}
-.ing__counts{display:flex;gap:9px;margin-top:14px;flex-wrap:wrap;}
-.ing__counts.is-idle{visibility:hidden;}
-.ing__cnt{background:var(--fill);border-radius:8px;padding:8px 14px;font-size:1.25rem;color:var(--text-dim);}
-.ing__cnt b{display:block;font-size:1.9rem;color:var(--title);font-weight:500;}
-.ing__cnt--new b{color:var(--accent);}
-.ing__cnt--warn b{color:var(--warn);}
+.ing__errline{margin-top:9px;text-align:center;font-size:1.3rem;color:var(--warn);}
 .ing__actions{display:flex;align-items:center;gap:10px;margin-top:14px;}
-.ing__actions--end{justify-content:flex-end;margin-top:10px;}
+.ing__actions--split .ing__btn--cancel{margin-left:auto;}
 .ing__btn{
   font-family:inherit;font-size:1.35rem;border:0;border-radius:8px;
   padding:9px 18px;cursor:pointer;transition:background .15s ease,color .15s ease,box-shadow .15s ease;
@@ -1931,6 +1930,57 @@ button.modal__act{border:0;font:inherit;}
 .ing__btn:disabled{
   background:var(--fill);color:var(--text-dim);opacity:.45;
   box-shadow:inset 0 0 0 1px var(--hairline);cursor:default;
+}
+/* The counts and the next-step links reuse the Feed's tile row, so both looks
+   restyle them. The links are accent-filled so they read as places to go. */
+.ing__stats,.ing__nav{margin-bottom:12px;}
+.ing__stats .tile{min-width:84px;}
+.ing__stats.is-idle{opacity:.4;}
+.ing__stats .tile--bad .num{color:var(--warn);text-shadow:none;}
+.ing__nav .tile{min-width:120px;}
+.tile--go{
+  color:var(--accent);text-decoration:none;cursor:pointer;
+  border-color:rgba(128,203,196,.14);
+  transition:background .15s var(--ease),border-color .15s var(--ease),transform .15s var(--ease);
+}
+.tile--go .num{font-size:1.4rem;font-weight:500;text-shadow:none;}
+.tile--go .num i{font-style:normal;display:inline-block;transition:transform .15s var(--ease);}
+.tile--go:hover{background:var(--tint);border-color:rgba(128,203,196,.45);}
+.tile--go:hover .num i{transform:translateX(3px);}
+.tile--go:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
+:root[data-theme="minimal"] .ing__stats,:root[data-theme="minimal"] .ing__nav{margin-bottom:10px;}
+:root[data-theme="minimal"] .tile--go{background:none;border:0;color:var(--accent);}
+:root[data-theme="minimal"] .tile.tile--go .num{color:var(--accent);}
+:root[data-theme="minimal"] .tile--go .label{display:none;}
+:root[data-theme="minimal"] .tile--go:hover{background:none;text-decoration:underline;}
+:root[data-theme="minimal"] .ing__stats .tile--bad .num{color:var(--warn);}
+
+/* Idle runner: the run button is the centre of the popup, with the last run
+   under it. Starting a run swaps in the log layout, with Run back on the left. */
+.ing--idle{display:flex;flex-direction:column;align-items:center;text-align:center;animation:ing-rise .35s var(--ease) both;}
+.ing--idle .ing__stats,.ing--idle .ing__nav{align-self:stretch;}
+.ing--idle .ing__pad{display:flex;flex-direction:column;align-items:center;gap:16px;margin:40px 0 38px;}
+.ing--idle .ing__hist{align-self:stretch;text-align:left;margin-top:22px;}
+.ing__go{
+  position:relative;display:grid;place-items:center;width:8.8rem;height:8.8rem;border:0;border-radius:50%;
+  background:var(--tint);color:var(--score-high);cursor:pointer;
+  box-shadow:inset 0 0 0 2px var(--score-high);
+  transition:transform .18s var(--ease),background .18s var(--ease);
+}
+.ing__go svg{position:relative;margin-left:4px;}
+.ing__go:hover{transform:scale(1.06);background:var(--tint-hover);}
+.ing__go:active{transform:scale(.97);}
+.ing__go:focus-visible{outline:2px solid var(--accent);outline-offset:5px;}
+.ing__go-ring{position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 1px var(--score-high);opacity:0;
+  animation:ing-ring 2.8s ease-out infinite;pointer-events:none;}
+.ing__go-ring--b{animation-delay:1.4s;}
+.ing__go-lbl{font-size:1.6rem;font-weight:500;color:var(--title);}
+@keyframes ing-ring{0%{transform:scale(1);opacity:.55;}100%{transform:scale(1.7);opacity:0;}}
+@keyframes ing-rise{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+@media (prefers-reduced-motion: reduce){
+  .ing__go-ring{animation:none;}
+  .ing--idle{animation:none;}
+  .ing__go{transition:none;}
 }
 .ing__log{margin-top:12px;border:1px solid var(--hairline);border-radius:8px;background:rgba(0,0,0,.28);}
 .ing__logbar{
@@ -2008,15 +2058,12 @@ button.modal__act{border:0;font:inherit;}
 .ing__hist-log td{padding:0;}
 .ing__hist-log .ing__lines{height:auto;max-height:230px;background:rgba(0,0,0,.28);}
 .ing__hist-nolog{padding:10px 12px;color:var(--text-dim);opacity:.7;font-style:italic;font-size:1.25rem;}
-.ing__hist-pager{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:12px;font-size:1.2rem;}
-.ing__pg{
-  font-family:inherit;font-size:inherit;background:none;border:0;cursor:pointer;
-  color:var(--accent);padding:3px 10px;border-radius:999px;
-  transition:background .13s ease,color .13s ease;
-}
-.ing__pg:hover{background:var(--tint);}
-.ing__pg--off{color:var(--text-dim);opacity:.4;cursor:default;}
-.ing__pg-n{color:var(--text-dim);letter-spacing:0.042em;}
+/* A dimmed pointer to the rest of the history, lighting up like the All runs link. */
+.ing__more{display:block;text-align:right;margin-top:10px;font-size:1.2rem;color:var(--text-dim);text-decoration:none;opacity:.7;transition:color .13s ease,opacity .13s ease;}
+.ing__more i{font-style:normal;display:inline-block;transition:transform .13s ease;}
+.ing__more:hover{color:var(--accent);opacity:1;}
+.ing__more:hover i{transform:translateX(3px);}
+:root[data-theme="minimal"] .ing__more{text-decoration:none;}
 
 /* --- Ingest bar (Sources pages) ------------------------------------------ */
 .ingb{

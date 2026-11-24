@@ -7,12 +7,6 @@
       <button class="modal__close" type="button" data-modal-close aria-label="Close">&times;</button>
     </div>
     {{template "ingestBody" .Body}}
-    <div class="modal__foot modal__foot--acts">
-      {{/* Sources and Ingestion open their own pages. */}}
-      <a class="modal__act" href="/settings/scoring">⚙ scoring settings</a>
-      <a class="modal__act" href="/sources">▤ edit sources</a>
-      <a class="modal__act" href="/ingestion">▤ all runs</a>
-    </div>
   </div>
 </div>
 {{end}}
@@ -24,50 +18,48 @@
      modal frame (delegated JS in static/js/ingest.js) — the frame sits outside this
      swap target, so the picked level survives every poll refresh. */}}
 {{define "ingestBody"}}
-<div class="ing" id="ingestBody" {{if .Running}}hx-get="/ingest/status?histPage={{.HistPage}}" hx-trigger="every 2s [!document.hidden]" hx-target="this" hx-swap="outerHTML"{{end}}>
-  <div class="ing__runline">
-    {{if .Running}}
-      {{if eq .RunKind "rescore"}}<span class="ing__st ing__st--run">◌ rescoring recent items</span>
-      {{else}}<span class="ing__st ing__st--run">◌ running ingest</span>{{end}}
-      <span class="ing__sep">·</span><span class="ing__dim">running <span class="run-clock" data-elapsed-ms="{{.ElapsedMS}}">{{.Clock}}</span></span>
-      {{if .RunProfile}}<span class="ing__dim">with {{.RunProfile}}</span>{{end}}
-    {{else if .Last}}
-      {{if eq .Last.Status "ok"}}<span class="ing__st ing__st--ok">✓ ok</span>
-      {{else if eq .Last.Status "cancelled"}}<span class="ing__st ing__st--err">✕ cancelled</span>
-      {{else}}<span class="ing__st ing__st--err">✕ error</span>{{end}}
-      <span class="ing__sep">·</span><span class="ing__dim">{{.Last.When}}</span>
-      {{if .Last.Took}}<span class="ing__dim">took {{.Last.Took}}</span>{{end}}
-      <span class="ing__trigger">{{.Last.Trigger}}</span>
+{{$idle := and (not .Running) (not .Lines)}}
+<div class="ing{{if $idle}} ing--idle{{end}}" id="ingestBody" {{if .Running}}hx-get="/ingest/status" hx-trigger="every 2s [!document.hidden]" hx-target="this" hx-swap="outerHTML"{{end}}>
+  {{/* The newest finished run's counts, in the Feed's tile row; dimmed, not removed, while a run is live so the modal keeps its height. */}}
+  <div class="stats-row ing__stats{{if .Running}} is-idle{{end}}">
+    {{if and .Last .Last.Rescore}}
+    <div class="tile"><div class="num">{{.Last.Counts.Fetched}}</div><div class="label">candidates</div></div>
+    <div class="tile"><div class="num num--high">{{.Last.Counts.Scored}}</div><div class="label">rescored</div></div>
     {{else}}
-      <span class="ing__dim">never ran</span>
+    <div class="tile"><div class="num">{{if .Last}}{{.Last.Counts.Fetched}}{{else}}&ndash;{{end}}</div><div class="label">fetched</div></div>
+    <div class="tile"><div class="num num--high">{{if .Last}}{{.Last.Counts.NewItems}}{{else}}&ndash;{{end}}</div><div class="label">new</div></div>
+    <div class="tile"><div class="num">{{if .Last}}{{.Last.Counts.Scored}}{{else}}&ndash;{{end}}</div><div class="label">scored</div></div>
+    <div class="tile"><div class="num">{{if .Last}}{{.Last.Counts.Skipped}}{{else}}&ndash;{{end}}</div><div class="label">skipped</div></div>
     {{end}}
+    <div class="tile{{if and .Last (gt .Last.Counts.Failed 0)}} tile--bad{{end}}"><div class="num">{{if .Last}}{{.Last.Counts.Failed}}{{else}}&ndash;{{end}}</div><div class="label">failed</div></div>
   </div>
-  {{/* Skipped for cancelled runs — the message is just "cancelled" again. */}}
-  {{if and .Last .Last.Error (ne .Last.Status "cancelled")}}{{if not .Running}}
-    <div class="ing__errline">{{.Last.Error}}</div>
-  {{end}}{{end}}
-
-  {{/* The newest finished run's counts; hidden, not removed, while a run is live so the modal keeps its height. */}}
-  {{if .Last}}
-  <div class="ing__counts{{if .Running}} is-idle{{end}}">
-    {{if .Last.Rescore}}
-    <span class="ing__cnt">candidates<b>{{.Last.Counts.Fetched}}</b></span>
-    <span class="ing__cnt ing__cnt--new">rescored<b>{{.Last.Counts.Scored}}</b></span>
-    {{else}}
-    <span class="ing__cnt">fetched<b>{{.Last.Counts.Fetched}}</b></span>
-    <span class="ing__cnt ing__cnt--new">new<b>{{.Last.Counts.NewItems}}</b></span>
-    <span class="ing__cnt">scored<b>{{.Last.Counts.Scored}}</b></span>
-    <span class="ing__cnt">skipped<b>{{.Last.Counts.Skipped}}</b></span>
-    {{end}}
-    <span class="ing__cnt {{if gt .Last.Counts.Failed 0}}ing__cnt--warn{{end}}">failed<b>{{.Last.Counts.Failed}}</b></span>
+  {{/* Where to go next, right under the numbers: Sources and Ingestion open their own pages. */}}
+  <nav class="stats-row ing__nav" aria-label="Ingestion pages">
+    <a class="tile tile--go" href="/settings/scoring"><div class="num">Scoring <i aria-hidden="true">&rarr;</i></div><div class="label">tune the ranking</div></a>
+    <a class="tile tile--go" href="/sources"><div class="num">Sources <i aria-hidden="true">&rarr;</i></div><div class="label">edit your feeds</div></a>
+    <a class="tile tile--go" href="/ingestion"><div class="num">All runs <i aria-hidden="true">&rarr;</i></div><div class="label">full history</div></a>
+  </nav>
+  {{if $idle}}
+  <div class="ing__pad">
+    <button class="ing__go" type="button" aria-label="Run ingestion now"
+            hx-post="/ingest/run" hx-target="#ingestBody" hx-swap="outerHTML">
+      <span class="ing__go-ring" aria-hidden="true"></span><span class="ing__go-ring ing__go-ring--b" aria-hidden="true"></span>
+      <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true" focusable="false"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>
+    </button>
+    <span class="ing__go-lbl">Run ingestion</span>
   </div>
   {{end}}
-
-  {{/* Always here; greys out while a run is live. */}}
-  <div class="ing__actions">
+  {{/* Always here; greys out while a run is live. With no log to show, the launch
+       pad above stands in for it, centred; a run moves Run back to the left. */}}
+  {{if not $idle}}
+  <div class="ing__actions ing__actions--split">
     <button class="ing__btn ing__btn--run" type="button" {{if .Running}}disabled{{end}}
             hx-post="/ingest/run" hx-target="#ingestBody" hx-swap="outerHTML">▶ run now</button>
+    {{/* Only while a run is live; the finished banner takes its place below the log. */}}
+    {{if .Running}}<button class="ing__btn ing__btn--cancel" type="button"
+            hx-post="/ingest/cancel" hx-target="#ingestBody" hx-swap="outerHTML">✕ cancel</button>{{end}}
   </div>
+  {{end}}
 
   {{if .Lines}}
   <div class="ing__log">
@@ -95,11 +87,27 @@
   </div>
   {{end}}
 
-  {{/* Always here; greys out once there's nothing to cancel. */}}
-  <div class="ing__actions ing__actions--end">
-    <button class="ing__btn ing__btn--cancel" type="button" {{if not .Running}}disabled{{end}}
-            hx-post="/ingest/cancel" hx-target="#ingestBody" hx-swap="outerHTML">✕ cancel</button>
+  <div class="ing__runline">
+    {{if .Running}}
+      {{if eq .RunKind "rescore"}}<span class="ing__st ing__st--run">◌ rescoring recent items</span>
+      {{else}}<span class="ing__st ing__st--run">◌ running ingest</span>{{end}}
+      <span class="ing__sep">·</span><span class="ing__dim">running <span class="run-clock" data-elapsed-ms="{{.ElapsedMS}}">{{.Clock}}</span></span>
+      {{if .RunProfile}}<span class="ing__dim">with {{.RunProfile}}</span>{{end}}
+    {{else if .Last}}
+      {{if eq .Last.Status "ok"}}<span class="ing__st ing__st--ok">✓ ok</span>
+      {{else if eq .Last.Status "cancelled"}}<span class="ing__st ing__st--err">✕ cancelled</span>
+      {{else}}<span class="ing__st ing__st--err">✕ error</span>{{end}}
+      <span class="ing__sep">·</span><span class="ing__dim">{{.Last.When}}</span>
+      {{if .Last.Took}}<span class="ing__dim">took {{.Last.Took}}</span>{{end}}
+      <span class="ing__trigger">{{.Last.Trigger}}</span>
+    {{else}}
+      <span class="ing__dim">never ran</span>
+    {{end}}
   </div>
+  {{/* Skipped for cancelled runs — the message is just "cancelled" again. */}}
+  {{if and .Last .Last.Error (ne .Last.Status "cancelled")}}{{if not .Running}}
+    <div class="ing__errline">{{.Last.Error}}</div>
+  {{end}}{{end}}
 
   {{if .History}}
   <div class="ing__hist">
@@ -109,15 +117,7 @@
       {{template "ingestHistRow" .}}
       {{end}}
     </table>
-    {{if or .HistHasPrev .HistHasNext}}
-    <div class="ing__hist-pager">
-      {{if .HistHasPrev}}<button type="button" class="ing__pg" hx-get="/ingest/status?histPage={{.HistPrevPage}}" hx-target="#ingestBody" hx-swap="outerHTML">&laquo; newer</button>
-      {{else}}<span class="ing__pg ing__pg--off">&laquo; newer</span>{{end}}
-      <span class="ing__pg-n">page {{.HistNextPage}}</span>
-      {{if .HistHasNext}}<button type="button" class="ing__pg" hx-get="/ingest/status?histPage={{.HistNextPage}}" hx-target="#ingestBody" hx-swap="outerHTML">older &raquo;</button>
-      {{else}}<span class="ing__pg ing__pg--off">older &raquo;</span>{{end}}
-    </div>
-    {{end}}
+    {{if .HistMore}}<a class="ing__more" href="/ingestion">older runs in All runs <i aria-hidden="true">&rarr;</i></a>{{end}}
   </div>
   {{end}}
 </div>
@@ -168,14 +168,14 @@
 
 {{/* Topbar status chip: an amber "never ran" until the first run, a pulsing
      amber "running" while one is live, then a red "failed" or amber "cancelled"
-     alarm after, hidden only when idle and healthy. Rendered into the topbar by
+     alarm after, and a green "Ingestion" play chip when idle and healthy. Rendered into the topbar by
      layout.html and updated out-of-band by every ingest poll/mutation response.
      Clicking it opens the runner modal. */}}
 {{define "ingestChip"}}
 <span id="ingChip" class="ing-chip{{if .State}} ing-chip--{{.State}}{{end}}"
       {{if .OOB}}hx-swap-oob="true"{{end}} {{if not .State}}hidden{{end}}
       hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML" role="button" tabindex="0">
-  {{- if eq .State "running"}}<i></i>{{if eq .Activity "rescore"}}rescoring…{{else}}ingest running…{{end}}{{else if eq .State "failed"}}<i></i>{{.Activity}} failed · {{.Ago}}{{else if eq .State "warn"}}<i></i>{{.Activity}} cancelled · {{.Ago}}{{else if eq .State "never"}}<i></i>ingest never ran{{end -}}
+  {{- if eq .State "running"}}<i></i>{{if eq .Activity "rescore"}}rescoring…{{else}}ingest running…{{end}}{{else if eq .State "failed"}}<i></i>{{.Activity}} failed · {{.Ago}}{{else if eq .State "warn"}}<i></i>{{.Activity}} cancelled · {{.Ago}}{{else if eq .State "never"}}<i></i>ingest never ran{{else if eq .State "idle"}}<svg class="ing-chip__play" viewBox="0 0 10 10" width="9" height="9" aria-hidden="true" focusable="false"><path d="M2 1 9 5 2 9z" fill="currentColor"/></svg>Ingestion{{end -}}
 </span>
 {{end}}
 
