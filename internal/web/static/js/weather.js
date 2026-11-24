@@ -42,20 +42,20 @@
   var SIDES = ['off','up','down'];
   function side(){ var s = wxGet('side','off'); return SIDES.indexOf(s) < 0 ? 'off' : s; }
   function onFeed(){ return wxOn('feed'); }
-  function onMaze(){ return wxOn('maze'); }
+  // The work pages share one placement switch, stored under the key 'maze'.
+  var WORK_PAGE = '.maze, .stp-page, .src-page, .briefing-page';
+  function onWork(){ return wxOn('maze'); }
   // Weather on, and somewhere for it to go. Everything that costs something —
   // the location prompt, the Open-Meteo request — asks this rather than the
   // master switch alone, so "on with every placement off" stays quiet instead
   // of fetching a payload nothing will draw.
   function wanted(){
-    return wxOn('show') && (onFeed() || onMaze() || side() !== 'off');
+    return wxOn('show') && (onFeed() || onWork() || side() !== 'off');
   }
 
-  // The single mode this all replaced, unpicked into the two axes. Rails widened
-  // the whole frame to stand beside the board and are gone; a band across the
-  // column is what they became. Rewriting the stored keys is the point — left
-  // alone, a reader who had chosen one of these would silently fall back to the
-  // defaults on their next load.
+  // Stored legacy modes are unpicked into the two axes (mode and per-page
+  // switches) by rewriting their keys, so a saved choice never falls back to
+  // the defaults. Rail modes map to a band across the column.
   var RETIRED = {
     'rail-left'   :{mode:'full',  maze:'1'},
     'rail-right'  :{mode:'full',  maze:'1'},
@@ -82,8 +82,8 @@
     if (!wanted()) return null;
     var el = document.getElementById('wxSide');
     if (side() !== 'off' && el) return el;
-    var maze = document.querySelector('.maze, .stp-page');
-    if (maze) return onMaze() ? maze : null;
+    var maze = document.querySelector(WORK_PAGE);
+    if (maze) return onWork() ? maze : null;
     var feed = document.getElementById('wxFeedTile');
     return (feed && onFeed()) ? feed : null;
   }
@@ -327,8 +327,8 @@
     // container that isn't the chosen one is emptied — the CSS hides an empty
     // one, so clearing is what turns a placement off rather than a second rule
     // somewhere saying so.
-    var sh = shape(), isFeed = !document.querySelector('.maze, .stp-page');
-    var pageOn = isFeed ? onFeed() : onMaze();
+    var sh = shape(), isFeed = !document.querySelector(WORK_PAGE);
+    var pageOn = isFeed ? onFeed() : onWork();
     var sub  = pageOn && sh === 'subbar' ? el(isFeed ? 'wxFeedBar'  : 'wxMazeBar')  : null;
     var band = pageOn && sh === 'full'   ? el(isFeed ? 'wxFeedBand' : 'wxMazeBand') : null;
     var tile = pageOn && sh === 'inline' && isFeed ? el('wxFeedTile') : null;
@@ -431,7 +431,7 @@
     var root = document.documentElement;
     set(root, 'data-wx-shape', wanted() ? shape() : null);
     set(root, 'data-wx-feed',  wanted() && onFeed() ? '1' : null);
-    set(root, 'data-wx-maze',  wanted() && onMaze() ? '1' : null);
+    set(root, 'data-wx-maze',  wanted() && onWork() ? '1' : null);
     set(root, 'data-wx-place', wxOn('show') && side() !== 'off' ? side() : null);
   }
   function set(node, name, value){
@@ -472,7 +472,7 @@
     // menu answers for itself.
     syncPick('unit', wxGet('unit','C'), weatherOn);
     syncPick('time24', wxOn('time24') ? '24' : '12', weatherOn);
-    syncPick('layout', shape(), weatherOn && (onFeed() || onMaze()));
+    syncPick('layout', shape(), weatherOn && (onFeed() || onWork()));
     syncPick('side', side(), weatherOn);
     syncLocField();
   }

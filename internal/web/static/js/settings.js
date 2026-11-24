@@ -376,7 +376,7 @@
     lastProv = now;
   }
   var PLACE = ['weather.feed', 'weather.maze', 'weather.mode', 'weather.side'];
-  var PREFS = {appearance: ['theme', 'font.'], widgets: ['clock.', 'weather.'], clock: ['clock.'], weather: ['weather.'], placement: PLACE};
+  var PREFS = {appearance: ['theme', 'font.', 'navx'], widgets: ['clock.', 'weather.'], clock: ['clock.'], weather: ['weather.'], placement: PLACE};
   // Weather owns every weather.* key except the ones Placement holds.
   var EXCEPT = {weather: PLACE};
   function clearPrefs(kind){

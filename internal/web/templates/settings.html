@@ -122,8 +122,7 @@
 <div class="stp-page" data-stp>
   <h1 class="stp-sr">Settings</h1>
   {{/* Weather takes the Maze's slots, so the page reads the same coming from either. */}}
-  <div class="wx-subbar" id="wxMazeBar"></div>
-  <aside class="wx-band wx-full" id="wxMazeBand"></aside>
+  {{template "wxSlots"}}
   <div class="stp-tabline">
   <nav class="stp-tabs" aria-label="Settings sections">
     {{range .Tabs}}<a class="stp-tab{{if eq .Slug $.Tab}} is-on{{end}}" href="/settings/{{.Slug}}" data-stp-tab="{{.Slug}}"{{if eq .Slug $.Tab}} aria-current="page"{{end}}>{{.Title}}</a>{{end}}
@@ -173,6 +172,7 @@
               <input type="file" accept=".yaml,.yml" hidden data-stp-importfile aria-label="Import feeds file">
             </div>
           </div>
+          {{template "stpField" index .F "group_stories"}}
         </div>
       </section>
       <section class="stp-group" data-tone="slate">
@@ -227,7 +227,7 @@
         </div>
         <div class="stp-callout stp-callout--kw{{if ne (index .F "inference.provider").Value "heuristic"}} is-off{{end}}" role="note" data-applies="heuristic">
           <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v3.6M8 5.2v.1"/></svg>
-          <p>Keywords scores by counting your profile's words in each title and summary. No model, no server, works offline. Meant for development and trying the app, not for real reading.</p>
+          <p>Keywords scores by matching the words under your profile's interested headings, with titles counting more than summaries, and ignores the words you list as not for you. No model, no server, works offline. Meant for development and trying the app, not for real reading.</p>
         </div>
       </section>
       <section class="stp-group" data-tone="green">
@@ -352,6 +352,15 @@ RABBITHOLE_DB_PASSWORD=your-password</code></pre>
       <div class="stp-look">
         <div class="stp-look__pick">{{template "lookOptions"}}</div>
         <div class="stp-look__pv">{{template "lookPreview"}}</div>
+      </div>
+    </section>
+    <section class="stp-group" data-tone="teal">
+      <header class="stp-group__h"><h3><span class="stp-group__t">Top bar</span></h3><p>How the page links in the top bar behave.</p></header>
+      <div class="stp-box">
+        <div class="stp-row">
+          <div class="stp-row__l"><span class="stp-row__n">Auto expand</span><p class="stp-row__h" id="navx-desc">Open Sources and Briefing under Feed on hover or focus. Off keeps them always shown.</p></div>
+          <div class="stp-row__c"><button type="button" class="wx-sw is-on" data-navx-toggle role="switch" aria-checked="true" aria-label="Auto expand" aria-describedby="navx-desc"><span class="wx-sw__knob" aria-hidden="true"></span><span class="wx-sw__txt">On</span></button></div>
+        </div>
       </div>
     </section>
     <section class="stp-group" data-tone="blue">
@@ -489,8 +498,8 @@ RABBITHOLE_DB_PASSWORD=your-password</code></pre>
           <div class="stp-row__c"><button type="button" class="wx-sw" data-wx-toggle="feed" role="switch" aria-checked="true" aria-label="Weather on the Feed"><span class="wx-sw__knob" aria-hidden="true"></span><span class="wx-sw__txt">On</span></button></div>
         </div>
         <div class="stp-row">
-          <div class="stp-row__l"><span class="stp-row__n">Show on Maze and Settings</span></div>
-          <div class="stp-row__c"><button type="button" class="wx-sw" data-wx-toggle="maze" role="switch" aria-checked="true" aria-label="Weather on the Maze"><span class="wx-sw__knob" aria-hidden="true"></span><span class="wx-sw__txt">On</span></button></div>
+          <div class="stp-row__l"><span class="stp-row__n">Show on Maze, Sources, Briefing and Settings</span></div>
+          <div class="stp-row__c"><button type="button" class="wx-sw" data-wx-toggle="maze" role="switch" aria-checked="true" aria-label="Weather on Maze, Sources, Briefing and Settings"><span class="wx-sw__knob" aria-hidden="true"></span><span class="wx-sw__txt">On</span></button></div>
         </div>
         <div class="stp-row">
           <div class="stp-row__l"><span class="stp-row__n">Layout</span><p class="stp-row__h">The shape the weather takes on those pages.</p></div>

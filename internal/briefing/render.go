@@ -30,15 +30,15 @@ func Render(p Period, items []store.BriefingItem, b Briefing) string {
 	}
 
 	out.WriteString("## Executive summary\n\n")
-	out.WriteString(strings.TrimSpace(b.ExecutiveSummary))
+	out.WriteString(inertImages(strings.TrimSpace(b.ExecutiveSummary)))
 	out.WriteString("\n\n")
 
 	out.WriteString("## Key developments\n\n")
 	for _, d := range b.Developments {
 		fmt.Fprintf(&out, "### %s\n\n", markdownText(d.Headline))
-		out.WriteString(strings.TrimSpace(d.Synthesis))
+		out.WriteString(inertImages(strings.TrimSpace(d.Synthesis)))
 		if why := strings.TrimSpace(d.WhyItMatters); why != "" {
-			fmt.Fprintf(&out, "\n\n**Why it matters:** %s", why)
+			fmt.Fprintf(&out, "\n\n**Why it matters:** %s", inertImages(why))
 		}
 		out.WriteString("\n\n**Supporting articles:**\n\n")
 		for _, n := range d.ItemIDs {
@@ -68,6 +68,27 @@ func Render(p Period, items []store.BriefingItem, b Briefing) string {
 			}
 			fmt.Fprintf(&out, "%d. %s\n", i+1, articleLine(items[n-1]))
 		}
+	}
+	return out.String()
+}
+
+// inertImages escapes every image marker so the text cannot load a picture.
+// A marker already escaped by an odd run of backslashes is left alone, since
+// adding another would cancel the escape.
+func inertImages(s string) string {
+	var out strings.Builder
+	slashes := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '!' && i+1 < len(s) && s[i+1] == '[' && slashes%2 == 0 {
+			out.WriteByte('\\')
+		}
+		if c == '\\' {
+			slashes++
+		} else {
+			slashes = 0
+		}
+		out.WriteByte(c)
 	}
 	return out.String()
 }
@@ -125,5 +146,5 @@ func markdownURL(value string) string {
 		(!strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https")) {
 		return ""
 	}
-	return strings.NewReplacer("<", "%3C", ">", "%3E", " ", "%20").Replace(u.String())
+	return strings.NewReplacer("<", "%3C", ">", "%3E", " ", "%20", "(", "%28", ")", "%29").Replace(u.String())
 }

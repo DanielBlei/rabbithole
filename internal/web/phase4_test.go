@@ -166,7 +166,7 @@ func TestBriefRefreshFailureShowsPreviousBrief(t *testing.T) {
 		"Last successful brief",
 		"It matches your interest in databases.",
 		"Full-text 8/10",
-		"[ retry ]",
+		"Retry",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("failed refresh panel missing %q:\n%s", want, body)

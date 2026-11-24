@@ -116,6 +116,29 @@
   // Switching theme changes which face is unset, so the buttons follow it.
   new MutationObserver(syncControls).observe(root, {attributes:true, attributeFilter:['data-theme']});
 
+  // Auto expand: on by default, so only the off choice is stored and reflected
+  // as data-navx="off" (applied pre-paint by fonts-preload.js).
+  var navx = document.querySelector('[data-navx-toggle]');
+  function syncNavx(){
+    var on = root.getAttribute('data-navx') !== 'off';
+    if (!navx) return;
+    navx.classList.toggle('is-on', on);
+    navx.setAttribute('aria-checked', on ? 'true' : 'false');
+    navx.querySelector('.wx-sw__txt').textContent = on ? 'On' : 'Off';
+  }
+  function store(fn){ try { fn(); } catch (e) {} }
+  if (navx) navx.addEventListener('click', function(){
+    if (root.getAttribute('data-navx') === 'off'){
+      root.removeAttribute('data-navx');
+      store(function(){ localStorage.removeItem('navx'); });
+    } else {
+      root.setAttribute('data-navx', 'off');
+      store(function(){ localStorage.setItem('navx', 'off'); });
+    }
+    syncNavx();
+  });
+  syncNavx();
+
   apply();
   syncControls();
 })();

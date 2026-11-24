@@ -1,0 +1,38 @@
+{{/* Month grid for the briefing period picker (static/js/briefing-cal.js).
+     Every enabled cell is a plain link to its period; the month buttons swap
+     this whole fragment. */}}
+{{define "briefingCal"}}<div class="cal" id="briefingCalBody">
+  <div class="cal__head">
+    <button type="button" class="cal__nav" id="briefingCalPrev" aria-label="Previous month"
+            hx-get="/briefing/calendar?kind={{.Kind}}&month={{.PrevMonth}}&period={{.Period}}"
+            hx-target="#briefingCalBody" hx-swap="outerHTML">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
+    </button>
+    <span class="cal__title" aria-live="polite">{{.MonthLabel}}</span>
+    {{if .HasNext}}<button type="button" class="cal__nav" id="briefingCalNext" aria-label="Next month"
+            hx-get="/briefing/calendar?kind={{.Kind}}&month={{.NextMonth}}&period={{.Period}}"
+            hx-target="#briefingCalBody" hx-swap="outerHTML">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg>
+    </button>{{else}}<button type="button" class="cal__nav" id="briefingCalNext" aria-label="Next month" aria-disabled="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg>
+    </button>{{end}}
+  </div>
+  <div class="cal__dow" aria-hidden="true"><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span></div>
+  <div class="cal__grid">
+  {{range .Weeks}}
+    {{if $.Weekly}}
+      {{if .Disabled}}<span class="cal__week is-off{{if .Selected}} is-sel{{end}}{{if .Today}} is-today{{end}}" aria-disabled="true" aria-label="{{.Label}}">
+      {{else}}<a class="cal__week{{if .Ready}} is-ready{{end}}{{if .Selected}} is-sel{{end}}{{if .Today}} is-today{{end}}" data-cal-cell href="{{.Href}}" aria-label="{{.Label}}" tabindex="{{if .Tab}}0{{else}}-1{{end}}"{{if .Selected}} aria-current="date"{{end}}{{if .Ready}} title="Briefing available"{{end}}>
+      {{end}}{{if .Ready}}<span class="cal__dot" aria-hidden="true"></span>{{end}}{{range .Days}}<span class="cal__wd{{if .Out}} is-out{{end}}{{if .Today}} is-today{{end}}" aria-hidden="true">{{.Num}}</span>{{end}}{{if .Disabled}}</span>{{else}}</a>{{end}}
+    {{else}}
+      <div class="cal__row">
+      {{range .Days}}
+        {{if .Disabled}}<span class="cal__day is-off{{if .Out}} is-out{{end}}{{if .Today}} is-today{{end}}" aria-disabled="true" aria-label="{{.Label}}">{{.Num}}</span>
+        {{else}}<a class="cal__day{{if .Out}} is-out{{end}}{{if .Selected}} is-sel{{end}}{{if .Today}} is-today{{end}}{{if .Ready}} is-ready{{end}}" data-cal-cell href="{{.Href}}" aria-label="{{.Label}}" tabindex="{{if .Tab}}0{{else}}-1{{end}}"{{if .Selected}} aria-current="date"{{end}}{{if .Ready}} title="Briefing available"{{end}}>{{.Num}}{{if .Ready}}<span class="cal__dot" aria-hidden="true"></span>{{end}}</a>{{end}}
+      {{end}}
+      </div>
+    {{end}}
+  {{end}}
+  </div>
+  <div class="cal__foot"><a class="cal__latest" href="{{.LatestHref}}">Latest</a></div>
+</div>{{end}}

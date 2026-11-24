@@ -124,8 +124,8 @@ func TestBriefEndToEndReady(t *testing.T) {
 	body := waitBriefBody(t, w, "a", "Full-text 8/10")
 	for _, want := range []string{
 		"Feed score 4/10", "Full-text 8/10", "min read", "Read in full",
-		"WHY THIS MATTERS TO YOU", "KEY IDEAS", "A new benchmark",
-		"WHAT IS ACTUALLY NEW", "LIMITATIONS / CAVEATS", "FOCUS ON",
+		"Why this matters to you", "Key ideas", "A new benchmark",
+		"What is actually new", "Limitations and caveats", "Focus on",
 		"A feed score was recorded", "computed from the fetched article",
 		"Fetched from https://x/a",
 	} {
@@ -259,7 +259,7 @@ func TestBriefFailureStatesRenderMessages(t *testing.T) {
 		if !strings.Contains(body, message) {
 			t.Errorf("%s panel missing message %q:\n%s", code, message, body)
 		}
-		if !strings.Contains(body, "[ retry ]") {
+		if !strings.Contains(body, "Retry") {
 			t.Errorf("%s panel missing retry: %s", code, body)
 		}
 		if strings.Contains(body, `hx-trigger="every 2s`) {
@@ -299,7 +299,7 @@ func TestStorageFailureHidesDatabaseDetail(t *testing.T) {
 	if strings.Contains(body, "password authentication") || strings.Contains(body, "pq:") {
 		t.Errorf("storage panel exposed a database error:\n%s", body)
 	}
-	if !strings.Contains(body, "[ retry ]") {
+	if !strings.Contains(body, "Retry") {
 		t.Errorf("storage panel missing retry: %s", body)
 	}
 }

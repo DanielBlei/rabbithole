@@ -279,7 +279,7 @@ func phaseText(phase string) string {
 	case decisionbrief.PhaseAnalyzing:
 		return "Analyzing full text…"
 	case decisionbrief.PhaseQueued:
-		return "Queued — waiting for a free analysis slot…"
+		return "Queued: waiting for a free analysis slot…"
 	default:
 		return "Working…"
 	}

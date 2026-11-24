@@ -204,6 +204,7 @@ var feedPager = (function(){
   // (a mutation moved one out of the active view) and come back replaced by
   // htmx swaps, and a swapped-in row arrives without the display the pager
   // had set on the element it replaced.
+  function unit(row){ return row.closest('.story-group') || row; }
   function allRows(){ return Array.prototype.slice.call(document.querySelectorAll('.pane__body .row')); }
 
   function render(){
@@ -218,9 +219,11 @@ var feedPager = (function(){
     var start = (page - 1) * size;
     var end = Math.min(start + size, total);
 
-    rows.forEach(function(row){ row.style.display = 'none'; });
+    // A grouped row hides with its wrapper, so the related list and the gap
+    // go with the representative.
+    rows.forEach(function(row){ unit(row).style.display = 'none'; });
     shown.forEach(function(row, i){
-      if (i >= start && i < end) row.style.display = '';
+      if (i >= start && i < end) unit(row).style.display = '';
     });
 
     // The server caps the render at listLimit, so say when there are matches
@@ -536,9 +539,23 @@ var feedPager = (function(){
 
   apply();
 
+  // A brief polls while queued or running; a panel whose dive tab is closed
+  // is display:none, so its poll is cancelled until the tab is opened again.
+  document.addEventListener('htmx:beforeRequest', function(e){
+    var t = e.target;
+    if (t && t.classList && t.classList.contains('brief') && t.offsetParent === null) e.preventDefault();
+  });
+
   // A row htmx swaps back in is a fresh element: it has neither the filter
   // class nor the display the pager gave its predecessor, so reapply both.
-  document.addEventListener('htmx:afterSwap', function(){ apply(); feedPager.render(); });
+  // Only a swap that replaces a whole row needs it; swaps inside a row (the
+  // brief panel and its polling) leave the list as it was.
+  document.addEventListener('htmx:afterSwap', function(e){
+    var t = e.detail && e.detail.target;
+    if (!t || !t.classList || !t.classList.contains('row')) return;
+    apply();
+    feedPager.render();
+  });
 })();
 
 (function(){
@@ -562,18 +579,36 @@ var feedPager = (function(){
     if (input){ e.preventDefault(); input.checked = false; }
   });
 
+  document.addEventListener('click', function(e){
+    var view = e.target.closest('.note-view');
+    if (!view || e.target.closest('a, .note-edit-btn')) return;
+    var toggle = view.parentNode.querySelector('.note-toggle');
+    if (!toggle || toggle.checked) return;
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change', {bubbles: true}));
+  });
+
+  document.addEventListener('change', function(e){
+    var t = e.target;
+    if (!t.classList || !t.classList.contains('note-toggle') || !t.checked) return;
+    var panel = t.closest('.tg-panel-note');
+    var input = panel && panel.querySelector('.note-input');
+    if (!input) return;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  });
+
   // Apply persists via the form's hx-post and htmx swaps in the server-rendered
   // row (already in view mode with the saved note) — no optimistic update here.
-  // Cancel just restores the textarea to the last saved text (the view <p>) in
-  // case the user typed and changed their mind without applying.
+  // Cancel restores the textarea to its server-rendered text (the last saved
+  // note) in case the user typed and changed their mind without applying.
   document.addEventListener('click', function(e){
     var cancel = e.target.closest('.note-cancel');
     if (!cancel) return;
     var panel = cancel.closest('.tg-panel-note');
     if (!panel) return;
     var input = panel.querySelector('.note-input');
-    var viewP = panel.querySelector('.note-view p');
-    if (input) input.value = panel.classList.contains('empty') ? '' : viewP.textContent;
+    if (input) input.value = input.defaultValue;
   });
 })();
 
@@ -640,7 +675,41 @@ var feedPager = (function(){
     });
     el.textContent = n;
   }
-  function remove(row){ row.remove(); tweenAvg(); setHigh(); feedPager.render(); }
+  function refresh(){ tweenAvg(); setHigh(); feedPager.render(); }
+  // A group's controls act on its representative, so when that row leaves the
+  // view its members are still in it. Ask the server to regroup the page and
+  // put back the groups that now hold those members.
+  function regroup(parent, before, ids){
+    fetch(window.location.href, { credentials: 'same-origin' })
+      .then(function(res){ return res.ok ? res.text() : Promise.reject(); })
+      .then(function(text){
+        var doc = new DOMParser().parseFromString(text, 'text/html');
+        var seen = [];
+        ids.forEach(function(id){
+          var sel = '.pane__body .row[data-id="' + id + '"]';
+          if (document.querySelector(sel)) return;
+          var row = doc.querySelector(sel);
+          var unit = row && row.closest('.story-group');
+          if (!unit || seen.indexOf(unit) !== -1) return;
+          seen.push(unit);
+          var node = document.importNode(unit, true);
+          parent.insertBefore(node, before && before.parentNode === parent ? before : null);
+          if (window.htmx) htmx.process(node);
+        });
+        if (seen.length) refresh();
+      })
+      .catch(function(){});
+  }
+  function remove(row){
+    var group = row.closest('.story-group');
+    var ids = group ? Array.prototype.map.call(
+      group.querySelectorAll('.story-group__list li[data-id]'),
+      function(li){ return li.getAttribute('data-id'); }) : [];
+    var parent = group && group.parentNode, next = group && group.nextSibling;
+    (group || row).remove();
+    refresh();
+    if (ids.length) regroup(parent, next, ids);
+  }
   function leave(row){
     if (row._leaving) return;
     row._leaving = true;
@@ -654,7 +723,9 @@ var feedPager = (function(){
   }
   // Scan after every swap: only the just-mutated row can now fall out of view
   // (the rest were server-rendered to match the filter), so this stays cheap.
-  document.addEventListener('htmx:afterSwap', function(){
+  document.addEventListener('htmx:afterSwap', function(e){
+    var t = e.detail && e.detail.target;
+    if (!t || !t.classList || !t.classList.contains('row')) return;
     var vs = viewState();
     document.querySelectorAll('.pane__body .row').forEach(function(row){
       if (outOfView(row, vs)) leave(row);

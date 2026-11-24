@@ -689,3 +689,86 @@ func TestDedupeKeyMatchesConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoverFallbackUnderTheTypedSection(t *testing.T) {
+	s := newSite(t, map[string]resp{
+		"/blog":      head(""),
+		"/blog/feed": {ctype: typeRSS, body: rssDoc("Section", 1)},
+		"/feed":      {ctype: typeRSS, body: rssDoc("Root", 1)},
+	})
+	got, err := feeds.Discover(context.Background(), s.Client(), s.URL+"/blog")
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if want := []string{s.URL + "/blog/feed"}; !equalStrings(urls(got), want) {
+		t.Fatalf("urls = %v, want %v", urls(got), want)
+	}
+}
+
+func TestDiscoverFallbackBlogPathsFromTheRoot(t *testing.T) {
+	s := newSite(t, map[string]resp{
+		"/":             head(""),
+		"/blog/rss.xml": {ctype: typeRSS, body: rssDoc("Blog", 1)},
+	})
+	got, err := feeds.Discover(context.Background(), s.Client(), s.URL)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if want := []string{s.URL + "/blog/rss.xml"}; !equalStrings(urls(got), want) {
+		t.Fatalf("urls = %v, want %v", urls(got), want)
+	}
+}
+
+func TestDiscoverFallbackStopsAfterTheFirstBatchWithAFeed(t *testing.T) {
+	s := newSite(t, map[string]resp{
+		"/":     head(""),
+		"/feed": {ctype: typeRSS, body: rssDoc("Root", 1)},
+	})
+	if _, err := feeds.Discover(context.Background(), s.Client(), s.URL); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if n := s.count("/blog/feed"); n != 0 {
+		t.Errorf("a later fallback batch was tried after a hit (%d requests)", n)
+	}
+}
+
+func TestDiscoverProbeSkipsCommentsFeed(t *testing.T) {
+	s := newSite(t, map[string]resp{
+		"/some-post/":     head(""),
+		"/some-post/feed": {ctype: typeRSS, body: rssDoc("Comments on: Some post", 1)},
+		"/feed":           {ctype: typeRSS, body: rssDoc("Real Site", 2)},
+	})
+	got, err := feeds.Discover(context.Background(), s.Client(), s.URL+"/some-post/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{s.URL + "/feed"}; !equalStrings(urls(got), want) {
+		t.Fatalf("got %v, want %v", urls(got), want)
+	}
+}
+
+func TestDiscoverNumericSegmentSkipsSectionProbes(t *testing.T) {
+	s := newSite(t, map[string]resp{
+		"/2024/05/x": head(""),
+		"/feed":      {ctype: typeRSS, body: rssDoc("Real Site", 1)},
+	})
+	got, err := feeds.Discover(context.Background(), s.Client(), s.URL+"/2024/05/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || s.count("/2024/feed") != 0 {
+		t.Fatalf("got %v, /2024/feed hits %d", urls(got), s.count("/2024/feed"))
+	}
+}
+
+func TestDiscoverProbeDedupesIdenticalFeeds(t *testing.T) {
+	doc := resp{ctype: typeRSS, body: rssDoc("Same", 2)}
+	s := newSite(t, map[string]resp{"/": head(""), "/feed": doc, "/rss": doc, "/rss.xml": doc})
+	got, err := feeds.Discover(context.Background(), s.Client(), s.URL+"/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{s.URL + "/feed"}; !equalStrings(urls(got), want) {
+		t.Fatalf("got %v, want %v", urls(got), want)
+	}
+}

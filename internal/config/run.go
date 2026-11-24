@@ -32,14 +32,14 @@ const RunSchemaVersion = 2
 // that are not stored (store, profile, ingest.feeds). It is decoded leniently,
 // so unknown keys are ignored.
 type File struct {
-	User           string               `yaml:"user"`
-	Profile        string               `yaml:"profile"`
-	Inference      FileInference        `yaml:"inference"`
-	Classification ClassificationConfig `yaml:"classification"`
-	Ingest         FileIngest           `yaml:"ingest"`
-	Briefing       BriefingConfig       `yaml:"briefing"`
-	DecisionBrief  DecisionBriefConfig  `yaml:"decision_brief"`
-	Store          StoreConfig          `yaml:"store"`
+	User          string              `yaml:"user"`
+	GroupStories  *bool               `yaml:"group_stories"`
+	Profile       string              `yaml:"profile"`
+	Inference     FileInference       `yaml:"inference"`
+	Ingest        FileIngest          `yaml:"ingest"`
+	Briefing      BriefingConfig      `yaml:"briefing"`
+	DecisionBrief DecisionBriefConfig `yaml:"decision_brief"`
+	Store         StoreConfig         `yaml:"store"`
 }
 
 // Config is the stored shape: what the config store keeps and what ingest
@@ -57,6 +57,10 @@ type Config struct {
 	// prompt. Unset means on, preserving profile-plus-feedback behavior for
 	// configs saved before the toggle existed; false pins profile-only scoring.
 	AdaptiveRanking *bool `yaml:"adaptive_ranking,omitempty"`
+
+	// GroupStories shows feed items that cover the same story together. Unset
+	// means on; false pins the individual list.
+	GroupStories *bool `yaml:"group_stories,omitempty"`
 }
 
 // IngestConfig is the stored part of the ingest block.
@@ -158,6 +162,12 @@ func (f File) Split() (run Config, store StoreConfig, legacy Legacy, dropped []s
 		Ingest:         IngestConfig{DigestDir: f.Ingest.DigestDir},
 		Briefing:       f.Briefing,
 		DecisionBrief:  f.DecisionBrief,
+		User:          f.User,
+		GroupStories:  f.GroupStories,
+		Inference:     f.Inference.InferenceConfig,
+		Ingest:        IngestConfig{DigestDir: f.Ingest.DigestDir},
+		Briefing:      f.Briefing,
+		DecisionBrief: f.DecisionBrief,
 	}
 	dropped = run.Normalize()
 	legacy.ProfilePath = f.Profile
@@ -236,6 +246,9 @@ func (r *Config) DropDefaults() (dropped []string) {
 	}
 	if r.AdaptiveRanking != nil {
 		try("adaptive_ranking", func(c *Config) { c.AdaptiveRanking = nil })
+	}
+	if r.GroupStories != nil {
+		try("group_stories", func(c *Config) { c.GroupStories = nil })
 	}
 	if in.Provider != "" {
 		try("inference.provider", func(c *Config) { c.Inference.Provider = "" })
@@ -323,6 +336,7 @@ func (r Config) Clone() Config {
 	c.Classification.ShowAssumptions = cloneBool(r.Classification.ShowAssumptions)
 	c.Classification.VocabularyHint = cloneBool(r.Classification.VocabularyHint)
 	c.AdaptiveRanking = cloneBool(r.AdaptiveRanking)
+	c.GroupStories = cloneBool(r.GroupStories)
 	return c
 }
 
@@ -400,6 +414,10 @@ func (r *Config) applyDefaults() {
 	if r.AdaptiveRanking == nil {
 		t := true
 		r.AdaptiveRanking = &t
+	}
+	if r.GroupStories == nil {
+		t := true
+		r.GroupStories = &t
 	}
 	if in.Provider == "" {
 		in.Provider = defaultProvider
@@ -532,6 +550,12 @@ func (c InferenceConfig) ThinkEnabled() bool { return c.Think != nil && *c.Think
 // before the toggle existed.
 func (c Config) AdaptiveRankingEnabled() bool {
 	return c.AdaptiveRanking == nil || *c.AdaptiveRanking
+}
+
+// GroupStoriesEnabled reports whether feed items covering the same story are
+// shown together. Unset means on.
+func (c Config) GroupStoriesEnabled() bool {
+	return c.GroupStories == nil || *c.GroupStories
 }
 
 // MarshalYAML writes the setting back as it was written: false when disabled,

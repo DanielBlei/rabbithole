@@ -10,6 +10,8 @@
   <div id="srcFlash" hidden></div>
   {{template "sourcesNav" .}}
   <div class="src-page__main">
+    {{template "wxSlots"}}
+    <div class="src-wxrow"><div class="wx-chip" id="wxChip"></div></div>
     {{/* An ingestion run starting or ending anywhere on the page (static/js/ingest.js
          raises the event) refreshes this page's live parts out of band. */}}
     {{if or (eq .Section "overview") (eq .Section "manage")}}<span hidden hx-get="/sources/live?page={{.Section}}" hx-trigger="sources-ingest-change from:body" hx-swap="none"></span>{{end}}

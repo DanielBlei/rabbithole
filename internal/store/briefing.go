@@ -32,6 +32,8 @@ var ErrBriefingNotFound = errors.New("briefing not found")
 // is phrased for the reader and names the retry path.
 const interruptedBriefingError = "generation was interrupted before it finished (the server restarted while this briefing was being written); generate again to retry"
 
+const interruptedKeptBriefingError = "regeneration was interrupted; showing the previous briefing"
+
 // Briefing is one persisted period briefing plus the provenance of the run
 // that produced it.
 type Briefing struct {
@@ -167,8 +169,9 @@ func (s *Store) SaveBriefing(ctx context.Context, b Briefing) (Briefing, error) 
 	return s.BriefingForPeriod(ctx, b.PeriodKind, b.PeriodStart)
 }
 
-// RecoverInterruptedBriefings fails every briefing still marked generating
-// and returns how many it recovered.
+// RecoverInterruptedBriefings settles every briefing still marked generating
+// (ready when it still holds a body, failed otherwise) and returns how many
+// it recovered.
 //
 // Recovery policy: generation runs in one process and every briefing row is
 // written from that process, so a row still generating after startup belongs
@@ -179,9 +182,13 @@ func (s *Store) SaveBriefing(ctx context.Context, b Briefing) (Briefing, error) 
 // processes against one shared database must not call this.
 func (s *Store) RecoverInterruptedBriefings(ctx context.Context) (int, error) {
 	res, err := s.exec(ctx, `UPDATE briefings
-		SET status = ?, error = ?, updated_at = ?
+		SET status = CASE WHEN body_md <> '' THEN ? ELSE ? END,
+			error = CASE WHEN body_md <> '' THEN ? ELSE ? END,
+			updated_at = ?
 		WHERE status = ?`,
-		BriefingFailed, interruptedBriefingError, sqlTime(time.Now()), BriefingGenerating)
+		BriefingReady, BriefingFailed,
+		interruptedKeptBriefingError, interruptedBriefingError,
+		sqlTime(time.Now()), BriefingGenerating)
 	if err != nil {
 		return 0, fmt.Errorf("recover interrupted briefings: %w", err)
 	}
@@ -272,4 +279,43 @@ func (s *Store) BriefingItems(ctx context.Context, start, end time.Time, limit i
 		return nil, fmt.Errorf("iterate briefing items: %w", err)
 	}
 	return items, nil
+}
+
+// BriefingMark is the status of the briefing stored for one period start.
+type BriefingMark struct {
+	PeriodStart time.Time
+	Status      string
+}
+
+// BriefingMarks returns the status of every stored briefing of one kind whose
+// period starts in [from, to). Bodies are not read, so a calendar can mark a
+// month of periods in one bounded query.
+func (s *Store) BriefingMarks(ctx context.Context, kind string, from, to time.Time) ([]BriefingMark, error) {
+	if !from.Before(to) {
+		return nil, errors.New("briefing range start must be before end")
+	}
+	rows, err := s.query(ctx, `SELECT period_start, status FROM briefings
+		WHERE period_kind = ? AND period_start >= ? AND period_start < ?
+		ORDER BY period_start ASC`, kind, sqlTime(from), sqlTime(to))
+	if err != nil {
+		return nil, fmt.Errorf("query briefing marks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var marks []BriefingMark
+	for rows.Next() {
+		var (
+			m     BriefingMark
+			start time.Time
+		)
+		if err := rows.Scan(&start, &m.Status); err != nil {
+			return nil, fmt.Errorf("scan briefing mark: %w", err)
+		}
+		m.PeriodStart = utcTime(start)
+		marks = append(marks, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate briefing marks: %w", err)
+	}
+	return marks, nil
 }

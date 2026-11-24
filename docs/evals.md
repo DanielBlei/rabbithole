@@ -292,12 +292,12 @@ diagnosis:
 ```
 SWEEP  the same measure at other marks
   MARK  BADGED  WANTED  PRECISION  CHANCE  RECALL
-  3+    12      27      0.75       0.77    0.33
-  4+    7       23      0.86       0.66    0.26
-  5+    3       17      0.67       0.49    0.12
-  6+    2       14      0.50       0.40    0.07
-  7+    0       12      —          0.34    0.00
-  8+    0       10      —          0.29    0.00
+  3+    25      27      0.72       0.77    0.67
+  4+    18      23      0.50       0.66    0.39
+  5+    10      18      0.40       0.51    0.22
+  6+    6       15      0.33       0.43    0.13
+  7+    2       13      0.00       0.37    0.00
+  8+    1       10      0.00       0.29    0.00
   9+    0       7       —          0.20    0.00
 ```
 
@@ -305,10 +305,10 @@ Read precision against `CHANCE`, never alone: `CHANCE` is what picking at random
 and nearly everything clears a low mark. Pulling ahead of it as the mark rises means the model
 orders articles well and only the 7 is misplaced, which is a setting rather than a model
 problem. Tracking it the whole way means the ordering carries no signal, and moving the mark
-will not help. Above, the keyword matcher sits *below* chance at the lowest mark, pulls a
-little ahead in the middle, and badges nothing at all from 7 up: some ordering, nowhere near
-enough for the badge to fire. That is the right verdict for a keyword matcher tested on a set
-built to catch one.
+will not help. Above, the keyword matcher sits *below* chance at every mark, and the two
+articles it does badge at 7 are both wrong: its ordering carries no signal, so moving the mark
+will not help. That is the right verdict for a keyword matcher tested on a set built to catch
+one.
 
 **By tag** is where a bad number becomes actionable. A poor average says only that marking
 is off; one tag standing out says which kind of article it is off about.
