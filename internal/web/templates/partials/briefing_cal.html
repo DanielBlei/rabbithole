@@ -13,7 +13,7 @@
             hx-get="/briefing/calendar?kind={{.Kind}}&month={{.NextMonth}}&period={{.Period}}"
             hx-target="#briefingCalBody" hx-swap="outerHTML">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg>
-    </button>{{else}}<button type="button" class="cal__nav" id="briefingCalNext" aria-label="Next month" disabled>
+    </button>{{else}}<button type="button" class="cal__nav" id="briefingCalNext" aria-label="Next month" aria-disabled="true">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg>
     </button>{{end}}
   </div>

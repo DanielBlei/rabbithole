@@ -766,6 +766,26 @@ func TestGenerateSuccessReplacesPriorProvenance(t *testing.T) {
 	}
 }
 
+func TestGenerateEmptyPeriodDropsPriorCitations(t *testing.T) {
+	st := newFakeStore()
+	opts := options()
+	period, _ := PeriodFor("daily", opts.Now)
+	if _, err := st.SaveBriefing(context.Background(), store.Briefing{
+		ID: briefingID(period), PeriodKind: "daily", PeriodStart: period.Start, PeriodEnd: period.End,
+		Status: store.BriefingReady, BodyMD: "# prior", ReferencedItemIDs: []string{"item-a"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := testService(st, func(context.Context) (Generator, error) { return &fakeGenerator{}, nil })
+	got, err := svc.Generate(context.Background(), "daily", time.Time{}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.ReferencedItemIDs) != 0 {
+		t.Errorf("references = %v, want none for an empty period", got.ReferencedItemIDs)
+	}
+}
+
 func TestGenerateFirstRunFailureIsFailedAndEmpty(t *testing.T) {
 	st := newFakeStore(sampleItems(2)...)
 	gen := &fakeGenerator{errs: []error{errors.New("boom")}}
@@ -864,6 +884,20 @@ func TestRenderNeutralisesImagesAndParens(t *testing.T) {
 	}
 	if !strings.Contains(out, "https://en.wikipedia.org/wiki/Foo_%28bar%29") {
 		t.Errorf("parens not encoded:\n%s", out)
+	}
+}
+
+func TestInertImagesKeepsExistingEscapes(t *testing.T) {
+	tests := map[string]string{
+		"![a](u)":    `\![a](u)`,
+		`\![a](u)`:   `\![a](u)`,
+		`\\![a](u)`:  `\\\![a](u)`,
+		"hi! [a](u)": "hi! [a](u)",
+	}
+	for in, want := range tests {
+		if got := inertImages(in); got != want {
+			t.Errorf("inertImages(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

@@ -481,7 +481,7 @@ func probeFallbacks(ctx context.Context, client *http.Client, refs []feedRef, ma
 		n := min(verifyParallel, len(refs))
 		var posts []Candidate
 		for _, c := range verifyAll(ctx, client, refs[:n], maxFeed, true) {
-			if !isCommentsFeed(feedRef{title: c.Title}) {
+			if !isCommentsFeed(feedRef{url: c.URL, title: c.Title}) {
 				posts = append(posts, c)
 			}
 		}

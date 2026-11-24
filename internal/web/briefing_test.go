@@ -814,11 +814,13 @@ func TestBriefingCalendarDisabledAndToday(t *testing.T) {
 		t.Fatalf("today is not disabled: %q missing", label)
 	}
 	chunk := body[max(0, i-200):i]
-	if !strings.Contains(chunk, `aria-disabled="true"`) || !strings.Contains(chunk, "is-today") || strings.Contains(chunk, "<a ") {
+	if !strings.Contains(chunk, `aria-disabled="true"`) ||
+		!strings.Contains(chunk, "is-today") ||
+		strings.Contains(chunk, "<a ") {
 		t.Errorf("today cell = %q", chunk)
 	}
 	// No later month to browse to.
-	if !strings.Contains(body, `id="briefingCalNext" aria-label="Next month" disabled`) {
+	if !strings.Contains(body, `id="briefingCalNext" aria-label="Next month" aria-disabled="true"`) {
 		t.Error("next month is not disabled in the current month")
 	}
 }

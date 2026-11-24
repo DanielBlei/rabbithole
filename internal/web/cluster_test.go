@@ -54,6 +54,27 @@ func TestFeedGroupsByDefaultAndShowsRepresentativeAndMembers(t *testing.T) {
 	}
 }
 
+func TestFeedGroupsExposeItemIDsForRegrouping(t *testing.T) {
+	w := newTestWeb(t)
+	seedCluster(t, w)
+	body := get(t, w, "/feed")
+	if strings.Count(body, "data-id=") < 3 {
+		t.Errorf("rows and group members should carry data-id:\n%s", body)
+	}
+}
+
+func TestFeedFilterFormCarriesExplicitGrouped(t *testing.T) {
+	w := newTestWeb(t)
+	seedCluster(t, w)
+	hidden := `<input type="hidden" name="grouped" value="0">`
+	if !strings.Contains(get(t, w, "/feed?grouped=0"), hidden) {
+		t.Error("filter form drops an explicit grouped=0")
+	}
+	if strings.Contains(get(t, w, "/feed"), `name="grouped"`) {
+		t.Error("filter form sends grouped when the request had none")
+	}
+}
+
 func TestFeedGroupedZeroShowsItemsIndividually(t *testing.T) {
 	w := newTestWeb(t)
 	seedCluster(t, w)

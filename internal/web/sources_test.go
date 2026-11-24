@@ -1560,7 +1560,8 @@ func TestTopbarGroupsSourcesAndBriefingUnderFeed(t *testing.T) {
 		t.Error("GET /maze lights the Feed group")
 	}
 	idx := func(s string) int { return strings.Index(feed, `href="`+s+`"`) }
-	if f, so, b, m := idx("/feed"), idx("/sources"), idx("/briefing"), idx("/maze"); f < 0 || so < 0 || b < 0 || m < 0 || !(f < so && so < b && b < m) {
+	f, so, b, m := idx("/feed"), idx("/sources"), idx("/briefing"), idx("/maze")
+	if f < 0 || so < 0 || b < 0 || m < 0 || f >= so || so >= b || b >= m {
 		t.Errorf("topbar links are out of order: feed=%d sources=%d briefing=%d maze=%d", f, so, b, m)
 	}
 	more := strings.Index(feed, `class="navgrp__more"`)

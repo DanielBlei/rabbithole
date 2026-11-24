@@ -40,6 +40,7 @@ var (
 	pluralKeep = wordSet("news")
 	spellingRE = regexp.MustCompile(`^(\p{L}{3,})is(ation|ations|e|ed|er|ers|ing)$`)
 
+	apostrophes   = strings.NewReplacer("'", "", "\u2019", "", "\u2018", "")
 	negativeWords = wordSet("not no dont never less least avoid skip dislike hate boring uninteresting exclude ignore")
 	weakWords     = wordSet("somewhat moderately moderate secondary sometimes")
 	neutralEdges  = wordSet("context notes background")
@@ -68,7 +69,7 @@ const (
 // introduction, which weighs like a weak section.
 func headingKind(text string, level int) sectionKind {
 	// Hyphens stay inside a word, so "no-code" is not the negative word "no".
-	words := strings.FieldsFunc(strings.ToLower(strings.ReplaceAll(text, "'", "")), func(r rune) bool {
+	words := strings.FieldsFunc(strings.ToLower(apostrophes.Replace(text)), func(r rune) bool {
 		return r != '-' && (r < 'a' || r > 'z')
 	})
 	for i, w := range words {
@@ -104,15 +105,21 @@ func headingKind(text string, level int) sectionKind {
 func profileTerms(profile string) map[string]int {
 	pos := make(map[string]int)
 	kind := sectionWeak
+	excluded := 0 // level of the open negative heading; deeper headings stay excluded
 	for _, line := range strings.Split(profile, "\n") {
 		t := strings.TrimSpace(line)
-		if level := len(
-			t,
-		) - len(
-			strings.TrimLeft(t, "#"),
-		); level >= 1 && level <= 3 &&
+		if level := len(t) - len(strings.TrimLeft(t, "#")); level >= 1 && level <= 6 &&
 			(len(t) == level || t[level] == ' ') {
+			if excluded > 0 && level <= excluded {
+				excluded = 0
+			}
 			kind = headingKind(t[level:], level)
+			if excluded > 0 && kind == sectionPositive {
+				kind = sectionNegative
+			}
+			if kind == sectionNegative && excluded == 0 {
+				excluded = level
+			}
 			continue
 		}
 		if kind == sectionNeutral || kind == sectionNegative {

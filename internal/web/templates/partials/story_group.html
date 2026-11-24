@@ -11,7 +11,7 @@
     <summary>{{.MemberCount}} related {{if eq .MemberCount 1}}item{{else}}items{{end}} on this story</summary>
     <ul class="story-group__list">
       {{range .Members}}
-      <li><a href="{{.Link}}" target="_blank" rel="noopener noreferrer">{{.Title}}</a><span>{{if .Scored}}score {{.Score}}/10 &middot; {{end}}{{.Source}} &middot; {{.Date}}</span>{{if .Reason}}<span class="story-group__why" title="{{.Reason}}">{{.Reason}}</span>{{end}}</li>
+      <li data-id="{{.ID}}"><a href="{{.Link}}" target="_blank" rel="noopener noreferrer">{{.Title}}</a><span>{{if .Scored}}score {{.Score}}/10 &middot; {{end}}{{.Source}} &middot; {{.Date}}</span>{{if .Reason}}<span class="story-group__why" title="{{.Reason}}">{{.Reason}}</span>{{end}}</li>
       {{end}}
     </ul>
   </details>
