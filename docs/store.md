@@ -226,6 +226,7 @@ Three groups, largely independent:
 | **Feed icons** | `feed_icons` | `internal/ingest`; one row per feed, PNG bytes or the lookup outcome |
 | **Library hidden** | `library_hidden` | The Library page; one row per hidden library source, keyed on its URL |
 | **Run history** | `ingest_history`, `ingest_run_logs` | `internal/ingest`'s run manager     |
+| **Content tags** | `tags`, `tag_aliases`, `item_tags`, `item_classification` | `internal/classify`; model-authored keywords, assumptions and queue state |
 | **Interest profiles** | `profiles`, `profile_state`, `profile_imports` | Settings UI, CLI/server bootstrap |
 | **Maze boards** | `todos`, `ideas` | The web UI only                     |
 
@@ -284,6 +285,46 @@ LLM score, and includes legacy scored rows whose profile provenance is NULL.
 `ReplaceItemScores` performs the short database write only after model calls finish. It updates
 successful score/reason/model/profile fields in one transaction while leaving user ratings,
 notes, status, bookmarks, item metadata, tags and digest membership untouched.
+
+## Content tags and classification state
+
+Four additive tables hold the model's content classification. They are deliberately separate
+from `items.tags`, which is the source feed's own metadata: "content tags" in the docs and UI
+mean the model-authored keywords and assumptions.
+
+`tags` is the canonical vocabulary. One row per normalized slug; `label` keeps the first-seen
+display spelling, so `vLLM` stays a label while `vllm` is the identity.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | INTEGER PK | Auto-increment identity |
+| `slug` | TEXT UNIQUE | Lowercase, NFC, hyphen-separated; see `internal/tags` |
+| `label` | TEXT | Display form as first seen |
+| `parent_id` | INTEGER | Nullable taxonomy headroom; unused in v1 queries |
+| `created_at` | TIMESTAMP | |
+
+`tag_aliases` maps an alternate normalized spelling to one canonical tag. Aliases are curated
+(`rabbithole tags alias k8s kubernetes`), never inferred; an alias may not equal its target.
+
+`item_tags` is the item↔tag edge, keyed on `(item_id, tag_id)` so one item cannot carry the
+same tag in both lists. `kind` is per edge (`keyword` or `assumption`) because the same tag may
+be a fact on one article and an inference on another. `classifier_version` records which
+prompt/schema produced the edge. `idx_item_tags_tag(tag_id, kind, item_id)` makes "items with
+tag X" an index scan.
+
+`item_classification` is the queue row per item: `pending`, `ok` or `failed`, with `attempts`,
+`next_attempt_at` and `last_error`. It is what lets a failed item be retried and then skipped
+without poisoning `item_tags`, and what makes "already classified at this version" an
+idempotency check rather than a guess. An item already `ok` at the current version is not
+re-queued; a version bump makes every older row claimable again.
+
+Writes go through `ReplaceItemTags`, one transaction per item: resolve aliases and get-or-create
+the canonical tags, delete the item's old edges, insert the new ones, mark the queue row `ok`,
+bump `store_version`. A missing item is ignored, so a concurrent prune cannot turn a valid
+classification into an error. `items.tags` is never read or modified by this path.
+
+Reverse lookups are `TagsForItem`, `ItemsForTag` and `TopTags`. `TopTags` is also the source of
+the optional vocabulary hint.
 
 ## profiles and profile_state
 
@@ -647,7 +688,10 @@ instead, whose DDL runs on every open, after a `tableExists` check, not on the s
 `IF NOT EXISTS` alone. Postgres checks a role's rights on the schema before it notices the table
 is already there, so an unconditional create would need `CREATE` on every start and rule out a
 DML-only runtime role, which is how a hosted database is normally set up. `auth` was the first
-such table and `onboarding` the second; `additiveTables` entries carry the name they check
+such table and `onboarding` the second. The four content-classification tables (`tags`,
+`tag_aliases`, `item_tags`, `item_classification`) were added the same way without a schema
+version bump: nothing older depends on them, and an existing database gains them on the next
+open. `additiveTables` entries carry the name they check
 alongside the DDL they run, and `TestAdditiveTablesNameTheirOwnTable` keeps the two honest, since
 a mismatch would mean a table that is never created and never complained about.
 

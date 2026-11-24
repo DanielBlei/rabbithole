@@ -10,7 +10,10 @@ import (
 )
 
 // Canonical environment names for the api_key fields.
-const inferenceKeyField = "inference.api_key"
+const (
+	inferenceKeyField      = "inference.api_key"
+	classificationKeyField = "classification.api_key"
+)
 
 // allowedNameRE matches every variable the .env loader reads (RABBITHOLE_DB and
 // RABBITHOLE_DB_PASSWORD included). keyRefRE is the narrower positive list for
@@ -24,10 +27,14 @@ var (
 // RefFor returns the canonical environment variable name for an api_key field,
 // or "" for any other field.
 func RefFor(field string) string {
-	if field == inferenceKeyField {
+	switch field {
+	case inferenceKeyField:
 		return "RABBITHOLE_INFERENCE_API_KEY"
+	case classificationKeyField:
+		return "RABBITHOLE_CLASSIFICATION_API_KEY"
+	default:
+		return ""
 	}
-	return ""
 }
 
 // allowedName reports whether name may be referenced from a stored config or
@@ -61,14 +68,18 @@ type Secret struct {
 // a reference to its canonical variable, and returns the literals so the caller
 // can store them in .env. Run it before Prepare, which rejects literals.
 func (r *Config) ExtractLiterals() []Secret {
-	key := &r.Inference.APIKey
-	if *key == "" || strings.HasPrefix(*key, "$") {
-		return nil
+	var out []Secret
+	extract := func(field string, key *string) {
+		if *key == "" || strings.HasPrefix(*key, "$") {
+			return
+		}
+		name := RefFor(field)
+		out = append(out, Secret{Field: field, Name: name, Value: *key})
+		*key = "$" + name
 	}
-	name := RefFor(inferenceKeyField)
-	sec := Secret{Field: inferenceKeyField, Name: name, Value: *key}
-	*key = "$" + name
-	return []Secret{sec}
+	extract(inferenceKeyField, &r.Inference.APIKey)
+	extract(classificationKeyField, &r.Classification.APIKey)
+	return out
 }
 
 // ResolvedAPIKey resolves the inference api_key reference through the
