@@ -50,7 +50,7 @@ type Outcome struct {
 
 // preparedFeed is one feed's post-fetch filtering result. Computing these
 // before scoring lets Run assemble the whole operation's candidate set first,
-// while the scoring loop keeps its original per-feed order and logging.
+// while the per-feed progress lines keep their original shape.
 type preparedFeed struct {
 	start   time.Time
 	raw     int
@@ -60,16 +60,19 @@ type preparedFeed struct {
 	unseen  []feeds.Item
 }
 
-// Run fetches every feed in cfg, then processes the feeds one at a time: each
-// feed's fresh items whose link isn't already scored in db are scored against
-// profile and, if opts.Record is set, recorded under day in their own
-// transaction (every item with its score, plus a digest date for the selected
-// ones). Dedup keys on link, so a feed re-issuing a different id for the same
-// article — or several feeds carrying one link in the same run — doesn't trigger
-// a needless re-score. Processing per feed keeps each feed's work isolated and
-// durable — a feed that fails to score or record is logged and skipped without
-// losing the feeds already committed. The returned Outcome aggregates every
-// feed, with Results sorted best-first across all.
+// Run fetches every feed in cfg, then scores every feed's fresh items whose
+// link isn't already scored in db through ONE run-wide scoring pool, so
+// max_parallel is a ceiling for the whole run rather than for each feed alone.
+// Batches stay feed-pure: each feed is chunked separately before all batches
+// share the pool, keeping per-feed progress exact. If opts.Record is set, each
+// feed is then recorded under day in its own transaction (every item with its
+// score, plus a digest date for the selected ones). Dedup keys on link, so a
+// feed re-issuing a different id for the same article — or several feeds
+// carrying one link in the same run — doesn't trigger a needless re-score.
+// Per-feed recording keeps each feed's work isolated and durable — a feed that
+// fails to record is logged and skipped without losing the feeds already
+// committed. The returned Outcome aggregates every feed, with Results sorted
+// best-first across all.
 func Run(
 	ctx context.Context,
 	cfg config.Config,
@@ -77,6 +80,23 @@ func Run(
 	db *store.Store,
 	day time.Time,
 	opts Options,
+) (Outcome, error) {
+	return run(ctx, cfg, activeProfile, db, day, opts, resolveConfiguredScorer)
+}
+
+// scorerResolver resolves the configured scoring backend. Run passes
+// resolveConfiguredScorer; tests inject deterministic scorers through run.
+type scorerResolver func(context.Context, config.Config, bool) (rank.Scorer, error)
+
+// run is Run with the scorer resolver injected as a seam.
+func run(
+	ctx context.Context,
+	cfg config.Config,
+	activeProfile profile.Snapshot,
+	db *store.Store,
+	day time.Time,
+	opts Options,
+	resolve scorerResolver,
 ) (Outcome, error) {
 	logger := zerolog.Ctx(ctx)
 	if opts.Client == nil {
@@ -146,9 +166,14 @@ func Run(
 	// see different feedback depending on which feed had been processed first.
 	prepared := make([]preparedFeed, len(active))
 	var candidates []feeds.Item
+	// feedOfItem maps each candidate back to the active feed it came from, so
+	// the post-scoring pass can attribute a score to exactly one feed without
+	// trusting the item's Source label.
+	feedOfItem := make(map[string]int)
 	// The prepass records nothing, so two feeds carrying one link would both
-	// schedule it. Remember links already claimed by an earlier feed: the old
-	// per-feed loop got the same effect from the store after the first record.
+	// schedule it. Remember links already claimed by an earlier feed: scoring
+	// now happens after every feed is collected, so this in-run claim is what
+	// keeps a shared link from being scored twice.
 	seenLinks := make(map[string]struct{})
 	for i, f := range active {
 		feedItems := results[i].Items
@@ -187,13 +212,16 @@ func Run(
 		p.skipped = len(fresh) - len(deduped)
 		p.unseen = deduped
 		prepared[i] = p
+		for _, item := range deduped {
+			feedOfItem[item.ID] = i
+		}
 		candidates = append(candidates, deduped...)
 	}
 
 	// Run-wide scoring progress: batches are counted across every feed, so a
 	// long run can report its position in the whole scoring operation and
 	// not only within the feed currently being scored. batchCount mirrors
-	// rank.ScoreAll's chunking so the run-wide "of" is the exact sum of the
+	// rank.Chunk's chunking so the run-wide "of" is the exact sum of the
 	// per-feed totals the progress callbacks report.
 	runBatches := 0
 	for _, p := range prepared {
@@ -210,27 +238,6 @@ func Run(
 		}
 	}
 
-	// resolveScorer builds the backend lazily on the first feed with items to
-	// score, so a run with nothing new never validates (and hits) the backend.
-	var (
-		scorer   rank.Scorer
-		resolved bool
-	)
-	resolveScorer := func() (rank.Scorer, error) {
-		if resolved {
-			return scorer, nil
-		}
-		if cfg.Inference.Provider != config.ProviderHeuristic {
-			logger.Info().Str("backend", cfg.Inference.Provider).Msg("connecting to model")
-		}
-		s, err := resolveConfiguredScorer(ctx, cfg, opts.Think)
-		if err != nil {
-			return nil, err
-		}
-		scorer, resolved = s, true
-		return scorer, nil
-	}
-
 	runStart := time.Now()
 	// Counts are written straight into outcome as each feed is processed
 	// (rather than into locals assigned at the end), so a feed that aborts the
@@ -238,27 +245,27 @@ func Run(
 	// accurate counts for the feeds already completed, instead of resetting
 	// everything to zero.
 	outcome := Outcome{Sites: iconSites(active, results)}
-	// Batches completed by the feeds scored before the current one, so the
-	// run-wide progress line keeps rising across feeds instead of restarting
-	// at each one. Feeds are scored sequentially, so a plain counter is
-	// enough; the per-feed OnBatch callbacks are themselves serialised by
-	// rank.ScoreAll.
-	runBatchesDone := 0
+
+	// One accounting record per enabled feed — including feeds that fetched
+	// nothing, failed to fetch, or had nothing new to score — so the log alone
+	// answers what each feed contributed. raw is what the fetch returned,
+	// filtered what survived the age window and item cap, new the candidates
+	// actually scored, skipped what dedup removed. A fetch failure is a plain
+	// boolean: transport errors can embed the full request URL, credentials in
+	// query parameters included, so the raw error string must not reach the log.
+	//
+	// This pass also precomputes each feed's batch total. The run-wide pool
+	// completes batches in completion order, not feed order, so the per-feed
+	// progress line needs its own exact "of" from the pre-pass.
+	feedBatchTotals := make([]int, len(active))
 	for i, f := range active {
 		p := prepared[i]
-		// One accounting record per enabled feed — including feeds that
-		// fetched nothing, failed to fetch, or had nothing new to score —
-		// so the log alone answers what each feed contributed. raw is what
-		// the fetch returned, filtered what survived the age window and
-		// item cap, new the candidates actually scored, skipped what dedup
-		// removed. A fetch failure is a plain boolean: transport errors can
-		// embed the full request URL, credentials in query parameters
-		// included, so the raw error string must not reach the log.
-		feedAccount := logger.Info().Str("feed", f.Name).
+		feedBatchTotals[i] = batchCount(len(p.unseen), cfg.Inference.BatchSize)
+		logger.Info().Str("feed", f.Name).
 			Int("raw", p.raw).Int("filtered", p.fetched).
 			Int("new", len(p.unseen)).Int("skipped", p.skipped).
-			Bool("fetch_failed", results[i].Err != nil)
-		feedAccount.Msg("feed accounting")
+			Bool("fetch_failed", results[i].Err != nil).
+			Msg("feed accounting")
 		if p.raw == 0 {
 			continue
 		}
@@ -277,54 +284,78 @@ func Run(
 		// was nothing to process for this feed.
 		logger.Info().Str("feed", f.Name).Int("new", len(p.unseen)).Int("skipped", p.skipped).
 			Msg("processing feed")
-		if len(p.unseen) == 0 {
-			continue
-		}
+	}
 
-		s, err := resolveScorer()
+	if len(candidates) > 0 {
+		// Resolve/validate the backend only when there is something to score,
+		// so a run with nothing new never reaches the model.
+		if cfg.Inference.Provider != config.ProviderHeuristic {
+			logger.Info().Str("backend", cfg.Inference.Provider).Msg("connecting to model")
+		}
+		scorer, err := resolve(ctx, cfg, opts.Think)
 		if err != nil {
 			return outcome, err
 		}
 
-		// Batches run in parallel, so progress reports a completion count.
-		// The per-feed line keeps its original shape; the run-wide line
-		// adds the batches completed by earlier feeds so its count is
-		// monotonic across the whole run.
+		// One shared pool for the whole run. groups is indexed by active feed,
+		// so a completed batch's Group identifies the feed whose per-feed
+		// progress line it advances. Empty groups contribute no batches.
+		groups := make([][]feeds.Item, len(active))
+		for i := range prepared {
+			groups[i] = prepared[i].unseen
+		}
 		scoreStart := time.Now()
-		feedBatchBase := runBatchesDone
-		feedBatchTotal := batchCount(len(p.unseen), cfg.Inference.BatchSize)
-		scores := rank.ScoreAll(
-			ctx, s, scoringContext.Profile, p.unseen, cfg.Inference.BatchSize, cfg.Inference.MaxParallel,
+		scores := rank.ScoreGroups(
+			ctx, scorer, scoringContext.Profile, groups, cfg.Inference.BatchSize, cfg.Inference.MaxParallel,
 			rank.WithFeedback(scoringContext.Feedback),
-			rank.OnBatch(func(done, total, _ int) {
-				logger.Info().Str("feed", f.Name).Int("done", done).Int("of", total).
+			rank.OnBatchProgress(func(p rank.BatchProgress) {
+				f := active[p.Group]
+				logger.Info().Str("feed", f.Name).Int("done", p.GroupDone).Int("of", feedBatchTotals[p.Group]).
 					Str("elapsed", time.Since(scoreStart).Round(100*time.Millisecond).String()).
 					Msg("scoring progress")
-				logger.Info().Int("done", feedBatchBase+done).Int("of", runBatches).
+				logger.Info().Int("done", p.Done).Int("of", runBatches).
+					Int("in_flight", p.InFlight).Int("peak", p.Peak).
 					Str("elapsed", time.Since(runStart).Round(100*time.Millisecond).String()).
 					Msg("run scoring progress")
 			}),
 		)
-		runBatchesDone += feedBatchTotal
-		failed := len(p.unseen) - len(scores)
-		outcome.Failed += failed
-		logger.Info().Str("feed", f.Name).Int("processed", len(scores)).Int("failed", failed).
-			Msg("items processed")
-		results := rank.Select(p.unseen, scores)
-
-		if opts.Record {
-			if err := record(ctx, db, p.unseen, scores, cfg.Inference.Model, activeProfile, day); err != nil {
-				logger.Warn().Str("feed", f.Name).Err(err).Msg("recording feed failed, skipping")
-				continue
-			}
-			logger.Info().Str("feed", f.Name).Int("recorded", len(p.unseen)).Int("scored", len(scores)).
-				Int("results", len(results)).Int("failed", failed).
-				Str("elapsed", time.Since(p.start).Round(100*time.Millisecond).String()).Msg("ingested to db")
+		// A cancel that arrived while batches were in flight stops the run
+		// before the Record loop. Nothing from this run is persisted, while
+		// rows committed by earlier runs stay untouched.
+		if err := ctx.Err(); err != nil {
+			return outcome, err
 		}
 
-		outcome.Unseen = append(outcome.Unseen, p.unseen...)
-		outcome.Results = append(outcome.Results, results...)
-		outcome.Scored += len(scores)
+		// Persist per feed, in active (config/display) order, even though
+		// scoring completed run-wide. Each feed keeps its own transaction and
+		// its own Result select, so one feed's record failure cannot roll back
+		// another's already committed work.
+		for i, f := range active {
+			p := prepared[i]
+			if len(p.unseen) == 0 {
+				continue
+			}
+			feedScores := scoresForFeed(scores, p.unseen, feedOfItem, i)
+			failed := len(p.unseen) - len(feedScores)
+			outcome.Failed += failed
+			logger.Info().Str("feed", f.Name).Int("processed", len(feedScores)).Int("failed", failed).
+				Msg("items processed")
+			selected := rank.Select(p.unseen, feedScores)
+
+			if opts.Record {
+				if err := record(ctx, db, p.unseen, feedScores, cfg.Inference.Model, activeProfile, day); err != nil {
+					logger.Warn().Str("feed", f.Name).Err(err).Msg("recording feed failed, skipping")
+					continue
+				}
+				logger.Info().Str("feed", f.Name).Int("recorded", len(p.unseen)).Int("scored", len(feedScores)).
+					Int("results", len(selected)).Int("failed", failed).
+					Str("elapsed", time.Since(p.start).Round(100*time.Millisecond).String()).Msg("ingested to db")
+			}
+
+			outcome.Unseen = append(outcome.Unseen, p.unseen...)
+			outcome.Results = append(outcome.Results, selected...)
+			outcome.Scored += len(feedScores)
+		}
 	}
 
 	// Each feed selected its own results; re-sort the merged set so the digest
@@ -415,9 +446,9 @@ func recordFeedFetches(
 	return db.PruneFeedFetches(ctx, 0)
 }
 
-// batchCount reports how many scoring batches rank.ScoreAll chunks items
-// into, mirroring its batchSize < 1 means 1 rule, so run-wide progress
-// totals are the exact sum of the per-feed totals.
+// batchCount reports how many scoring batches rank.Chunk splits items into,
+// mirroring its batchSize < 1 means 1 rule, so run-wide progress totals are
+// the exact sum of the per-feed totals.
 func batchCount(items, batchSize int) int {
 	if items <= 0 {
 		return 0
@@ -426,6 +457,29 @@ func batchCount(items, batchSize int) int {
 		batchSize = 1
 	}
 	return (items + batchSize - 1) / batchSize
+}
+
+// scoresForFeed slices one feed's verdicts out of the run-wide score map.
+// feedOfItem was built during the pre-pass, so attribution follows the feed
+// that actually contributed the candidate rather than re-deriving it from the
+// item's Source label.
+func scoresForFeed(
+	scores map[string]rank.ItemScore,
+	items []feeds.Item,
+	feedOfItem map[string]int,
+	feed int,
+) map[string]rank.ItemScore {
+	out := make(map[string]rank.ItemScore, len(items))
+	for _, item := range items {
+		owner, ok := feedOfItem[item.ID]
+		if !ok || owner != feed {
+			continue
+		}
+		if score, ok := scores[item.ID]; ok {
+			out[item.ID] = score
+		}
+	}
+	return out
 }
 
 // capNewest keeps at most maxItems items, newest first. maxItems <= 0 means

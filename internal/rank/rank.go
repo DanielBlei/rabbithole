@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -41,8 +42,27 @@ type Result struct {
 type Option func(*options)
 
 type options struct {
-	onBatch  func(done, total, scored int)
-	feedback feedback.Selection
+	onBatch         func(done, total, scored int)
+	onBatchProgress func(BatchProgress)
+	feedback        feedback.Selection
+}
+
+// BatchProgress is one batch completion plus the state of the shared scoring
+// pool at that moment. Group is the index of the group the batch came from, so
+// a caller that keeps a group per feed can attribute progress without the
+// pool knowing anything about feeds.
+type BatchProgress struct {
+	Batch      int // 0-based index of the completed batch across every group
+	Group      int // 0-based index of the group the batch came from
+	Done       int // batches completed so far, 1..Total
+	Total      int // total batches across every group
+	GroupDone  int // batches completed so far in this batch's group
+	GroupTotal int // total batches in this batch's group
+	Scored     int // items scored so far across the whole pool
+	// InFlight is how many scoring requests were still running after this
+	// one finished; Peak is the largest InFlight observed since scoring began.
+	InFlight int
+	Peak     int
 }
 
 // OnBatch registers a callback fired as each batch finishes, receiving the
@@ -55,6 +75,15 @@ type options struct {
 // results, so an implementation needs no locking of its own but must not block.
 func OnBatch(fn func(done, total, scored int)) Option {
 	return func(o *options) { o.onBatch = fn }
+}
+
+// OnBatchProgress registers a richer callback fired as each batch finishes. It
+// reports the same completion counts as OnBatch plus which group the batch came
+// from and the pool's current and peak in-flight scoring requests. Like
+// OnBatch, calls are serialised under the lock that merges results, so an
+// implementation needs no locking of its own but must not block.
+func OnBatchProgress(fn func(BatchProgress)) Option {
+	return func(o *options) { o.onBatchProgress = fn }
 }
 
 // WithFeedback adds explicit reader ratings to the scoring context for this
@@ -75,13 +104,58 @@ func ScoreAll(
 	batchSize, maxParallel int,
 	opts ...Option,
 ) map[string]ItemScore {
+	o := applyOptions(opts)
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	return scoreGroups(ctx, s, profile, [][]feeds.Item{items}, batchSize, maxParallel, o)
+}
+
+// ScoreGroups scores caller-grouped items through one shared concurrency pool.
+// Each group is chunked separately, so a batch never contains items from two
+// groups, then every batch from every group runs through the same maxParallel
+// semaphore, wait group, verdict guard and scoring context. This lets a caller
+// keep per-feed batches while treating maxParallel as a run-wide ceiling
+// instead of a per-call one. Batches that fail to score are retried
+// item-by-item; items that still fail are omitted from the result.
+func ScoreGroups(
+	ctx context.Context,
+	s Scorer,
+	profile string,
+	groups [][]feeds.Item,
+	batchSize, maxParallel int,
+	opts ...Option,
+) map[string]ItemScore {
+	o := applyOptions(opts)
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	return scoreGroups(ctx, s, profile, groups, batchSize, maxParallel, o)
+}
+
+func applyOptions(opts []Option) options {
 	var o options
 	for _, apply := range opts {
 		apply(&o)
 	}
-	if batchSize < 1 {
-		batchSize = 1
-	}
+	return o
+}
+
+// scoreJob is one batch plus the group it belongs to.
+type scoreJob struct {
+	group int
+	items []feeds.Item
+}
+
+// scoreGroups is the shared implementation behind ScoreAll and ScoreGroups.
+func scoreGroups(
+	ctx context.Context,
+	s Scorer,
+	profile string,
+	groups [][]feeds.Item,
+	batchSize, maxParallel int,
+	o options,
+) map[string]ItemScore {
 	if maxParallel < 1 {
 		maxParallel = 1
 	}
@@ -94,32 +168,51 @@ func ScoreAll(
 	if contextual {
 		provenance = scoringContext.Provenance()
 	}
-	batches := chunk(items, batchSize)
+	var (
+		jobs       []scoreJob
+		groupTotal = make([]int, len(groups))
+		itemCount  int
+	)
+	for gi, items := range groups {
+		batches := Chunk(items, batchSize)
+		groupTotal[gi] = len(batches)
+		itemCount += len(items)
+		for _, batch := range batches {
+			jobs = append(jobs, scoreJob{group: gi, items: batch})
+		}
+	}
 	logger := zerolog.Ctx(ctx)
 	guard := &verdictGuard{Scorer: s}
 	s = guard
 
 	sem := make(chan struct{}, maxParallel)
 	var (
-		mu   sync.Mutex
-		wg   sync.WaitGroup
-		done int
-		out  = make(map[string]ItemScore, len(items))
+		mu        sync.Mutex
+		wg        sync.WaitGroup
+		done      int
+		groupDone = make([]int, len(groups))
+		out       = make(map[string]ItemScore, itemCount)
+		inFlight  atomic.Int64
+		peak      atomic.Int64
 	)
-	for i, batch := range batches {
+	for i, job := range jobs {
 		wg.Add(1)
-		go func(idx int, batch []feeds.Item) {
+		go func(idx int, job scoreJob) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			logger.Debug().Int("batch", idx+1).Int("of", len(batches)).
-				Int("size", len(batch)).Msg("scoring batch")
+			current := inFlight.Add(1)
+			recordPeak(&peak, current)
 
-			scores := scoreBatch(ctx, s, scoringContext, batch)
+			logger.Debug().Int("batch", idx+1).Int("of", len(jobs)).Int("group", job.group).
+				Int("size", len(job.items)).Msg("scoring batch")
 
-			titles := make(map[string]string, len(batch))
-			for _, it := range batch {
+			scores := scoreBatch(ctx, s, scoringContext, job.items)
+			inFlight.Add(-1)
+
+			titles := make(map[string]string, len(job.items))
+			for _, it := range job.items {
 				titles[it.ID] = it.Title
 			}
 			mu.Lock()
@@ -132,21 +225,45 @@ func ScoreAll(
 					Str("title", truncate(titles[sc.ID], 80)).Msg("scored item")
 			}
 			done++
+			groupDone[job.group]++
 			if o.onBatch != nil {
-				o.onBatch(done, len(batches), len(out))
+				o.onBatch(done, len(jobs), len(out))
+			}
+			if o.onBatchProgress != nil {
+				o.onBatchProgress(BatchProgress{
+					Batch:      idx,
+					Group:      job.group,
+					Done:       done,
+					Total:      len(jobs),
+					GroupDone:  groupDone[job.group],
+					GroupTotal: groupTotal[job.group],
+					Scored:     len(out),
+					InFlight:   int(inFlight.Load()),
+					Peak:       int(peak.Load()),
+				})
 			}
 			mu.Unlock()
 
 			logger.Debug().Int("batch", idx+1).Int("scored", len(scores)).
-				Int("size", len(batch)).Msg("batch complete")
-		}(i, batch)
+				Int("size", len(job.items)).Msg("batch complete")
+		}(i, job)
 	}
 	wg.Wait()
 	if n := guard.rejected.Load(); n > 0 {
-		logger.Warn().Int64("unusable_verdicts", n).Int("items", len(items)).Int("scored", len(out)).
+		logger.Warn().Int64("unusable_verdicts", n).Int("items", itemCount).Int("scored", len(out)).
 			Msg("dropped unusable verdicts during scoring; the endpoint returned well-formed replies that make no sense")
 	}
 	return out
+}
+
+// recordPeak raises peak to current when current is higher.
+func recordPeak(peak *atomic.Int64, current int64) {
+	for {
+		prev := peak.Load()
+		if current <= prev || peak.CompareAndSwap(prev, current) {
+			return
+		}
+	}
 }
 
 // truncate shortens s to at most n runes, appending "…" when it does. Counting
@@ -283,7 +400,13 @@ func SortResults(results []Result) {
 	})
 }
 
-func chunk(items []feeds.Item, size int) [][]feeds.Item {
+// Chunk splits items into batches of at most size, preserving order. A size
+// below 1 is treated as 1, the same normalisation ScoreAll and ScoreGroups use,
+// so a caller can derive a batch total that matches what scoring will run.
+func Chunk(items []feeds.Item, size int) [][]feeds.Item {
+	if size < 1 {
+		size = 1
+	}
 	var out [][]feeds.Item
 	for i := 0; i < len(items); i += size {
 		end := min(i+size, len(items))
