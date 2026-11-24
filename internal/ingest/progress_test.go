@@ -5,6 +5,7 @@ package ingest
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
@@ -14,25 +15,55 @@ import (
 	"github.com/DanielBlei/rabbithole/internal/config"
 )
 
-// runLines runs one ingest at info level and returns its decoded log lines.
+// runLines runs one ingest at info level and returns its decoded log lines,
+// failing the test if Run does.
 func runLines(t *testing.T, cfg *testCfg) []map[string]any {
+	t.Helper()
+	lines, err := runLinesErr(t, cfg)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return lines
+}
+
+// runLinesErr is runLines for the abort paths: it returns the log lines
+// emitted before Run failed alongside the error, so a test can assert what a
+// failed run did and did not report.
+func runLinesErr(t *testing.T, cfg *testCfg) ([]map[string]any, error) {
 	t.Helper()
 	var buf bytes.Buffer
 	ctx := zerolog.New(&buf).Level(zerolog.InfoLevel).WithContext(t.Context())
 	db := openStore(t, cfg)
-	if _, err := Run(ctx, cfg.Config, testProfile("vllm inference"), db, time.Now(),
-		Options{Record: true, Client: loopbackClient}); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
+	_, err := Run(ctx, cfg.Config, testProfile("vllm inference"), db, time.Now(),
+		Options{Record: true, Client: loopbackClient})
 	var lines []map[string]any
 	for _, raw := range bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n")) {
+		if len(raw) == 0 {
+			continue
+		}
 		var m map[string]any
 		if err := json.Unmarshal(raw, &m); err != nil {
 			t.Fatalf("decode %q: %v", raw, err)
 		}
 		lines = append(lines, m)
 	}
-	return lines
+	return lines, err
+}
+
+// dropItemColumn removes a column from the test database through a second
+// SQLite connection to the same file. Breaking exactly one column lets a test
+// fail the query that reads it while every earlier stage of Run keeps working,
+// which is how the scoring-context abort path is reached deterministically.
+func dropItemColumn(t *testing.T, dbPath, column string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open raw store: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec("ALTER TABLE items DROP COLUMN " + column); err != nil {
+		t.Fatalf("drop items.%s: %v", column, err)
+	}
 }
 
 func linesWith(lines []map[string]any, msg string) []map[string]any {
@@ -205,6 +236,88 @@ func TestRunFeedAccountingOmitsFetchErrorDetails(t *testing.T) {
 		}
 		if bytes.Contains(encoded, []byte("SECRET")) {
 			t.Errorf("accounting record leaks the URL credential: %s", encoded)
+		}
+	}
+}
+
+// Accounting is emitted before scoring setup, so a run that aborts while
+// loading the scoring context still accounts for every enabled feed, not only
+// the feeds its loop had reached.
+func TestRunAccountsEveryFeedWhenScoringContextFails(t *testing.T) {
+	cfg := testConfig(t,
+		config.Feed{Name: "A", URL: serveRSS(t, multiItemRSS(t, "ctx-a", 2))},
+		config.Feed{Name: "B", URL: serveRSS(t, multiItemRSS(t, "ctx-b", 2))},
+	)
+	// loadScoringContext reads user_score/user_note from items, while the
+	// prepass that runs before it reads only link and llm_score. Dropping
+	// user_note fails the scoring-context read without disturbing the earlier
+	// stages of the run.
+	dropItemColumn(t, cfg.dbPath, "user_note")
+
+	lines, err := runLinesErr(t, cfg)
+	if err == nil {
+		t.Fatal("Run = nil error, want the scoring-context load to fail")
+	}
+
+	accounts := linesWith(lines, "feed accounting")
+	if len(accounts) != 2 {
+		t.Fatalf("feed accounting lines = %d, want 2, one per enabled feed: %v", len(accounts), accounts)
+	}
+	seen := map[string]bool{}
+	for _, l := range accounts {
+		feed, _ := l["feed"].(string)
+		if seen[feed] {
+			t.Fatalf("feed %s logged more than one accounting record: %v", feed, accounts)
+		}
+		seen[feed] = true
+		if int(l["raw"].(float64)) != 2 || int(l["filtered"].(float64)) != 2 ||
+			int(l["new"].(float64)) != 2 || int(l["skipped"].(float64)) != 0 {
+			t.Errorf("feed %s accounting = %v, want raw=filtered=new=2 skipped=0", feed, l)
+		}
+		if l["fetch_failed"] != false {
+			t.Errorf("feed %s fetch_failed = %v, want false", feed, l["fetch_failed"])
+		}
+	}
+	if got := linesWith(lines, "scoring progress"); len(got) != 0 {
+		t.Errorf("scoring progress lines = %d, want 0 on a run that aborted: %v", len(got), got)
+	}
+}
+
+// A scorer that fails to resolve aborts the run on the first feed with items;
+// every enabled feed is still accounted for before the abort.
+func TestRunAccountsEveryFeedWhenScorerResolutionFails(t *testing.T) {
+	cfg := testConfig(t,
+		config.Feed{Name: "A", URL: serveRSS(t, multiItemRSS(t, "scorer-a", 2))},
+		config.Feed{Name: "B", URL: serveRSS(t, multiItemRSS(t, "scorer-b", 2))},
+	)
+	// An ollama model without a tag fails in the backend constructor, before
+	// any network call, so resolution fails deterministically on the first
+	// feed that has something to score.
+	cfg.Inference.Provider = "ollama"
+	cfg.Inference.Host = "http://127.0.0.1:1"
+	cfg.Inference.Model = "no-tag"
+
+	lines, err := runLinesErr(t, cfg)
+	if err == nil {
+		t.Fatal("Run = nil error, want scorer resolution to fail")
+	}
+
+	accounts := linesWith(lines, "feed accounting")
+	if len(accounts) != 2 {
+		t.Fatalf("feed accounting lines = %d, want 2, one per enabled feed: %v", len(accounts), accounts)
+	}
+	seen := map[string]bool{}
+	for _, l := range accounts {
+		feed, _ := l["feed"].(string)
+		if seen[feed] {
+			t.Fatalf("feed %s logged more than one accounting record: %v", feed, accounts)
+		}
+		seen[feed] = true
+		if int(l["raw"].(float64)) != 2 || int(l["new"].(float64)) != 2 {
+			t.Errorf("feed %s accounting = %v, want raw=new=2", feed, l)
+		}
+		if l["fetch_failed"] != false {
+			t.Errorf("feed %s fetch_failed = %v, want false", feed, l["fetch_failed"])
 		}
 	}
 }

@@ -200,6 +200,26 @@ func Run(
 		runBatches += batchCount(len(p.unseen), cfg.Inference.BatchSize)
 	}
 
+	// One accounting record per enabled feed — including feeds that fetched
+	// nothing, failed to fetch, or had nothing new to score — so the log alone
+	// answers what each feed contributed. Emitted as a pass of its own before
+	// scoring setup: loadScoringContext and resolveScorer can both abort the
+	// run, and the per-feed counts are already known from results and prepared,
+	// so a failed run still accounts for every feed. raw is what the fetch
+	// returned, filtered what survived the age window and item cap, new the
+	// candidates actually scored, skipped what dedup removed. A fetch failure
+	// is a plain boolean: transport errors can embed the full request URL,
+	// credentials in query parameters included, so the raw error string must
+	// not reach the log.
+	for i, f := range active {
+		p := prepared[i]
+		logger.Info().Str("feed", f.Name).
+			Int("raw", p.raw).Int("filtered", p.fetched).
+			Int("new", len(p.unseen)).Int("skipped", p.skipped).
+			Bool("fetch_failed", results[i].Err != nil).
+			Msg("feed accounting")
+	}
+
 	scoringContext := rank.ProfileContext(activeProfile.Content)
 	if len(candidates) > 0 {
 		scoringContext, err = loadScoringContext(
@@ -246,19 +266,6 @@ func Run(
 	runBatchesDone := 0
 	for i, f := range active {
 		p := prepared[i]
-		// One accounting record per enabled feed — including feeds that
-		// fetched nothing, failed to fetch, or had nothing new to score —
-		// so the log alone answers what each feed contributed. raw is what
-		// the fetch returned, filtered what survived the age window and
-		// item cap, new the candidates actually scored, skipped what dedup
-		// removed. A fetch failure is a plain boolean: transport errors can
-		// embed the full request URL, credentials in query parameters
-		// included, so the raw error string must not reach the log.
-		feedAccount := logger.Info().Str("feed", f.Name).
-			Int("raw", p.raw).Int("filtered", p.fetched).
-			Int("new", len(p.unseen)).Int("skipped", p.skipped).
-			Bool("fetch_failed", results[i].Err != nil)
-		feedAccount.Msg("feed accounting")
 		if p.raw == 0 {
 			continue
 		}
