@@ -1,5 +1,6 @@
 {{define "row"}}
 <div class="row{{if .Seen}} is-seen{{end}}{{if .Hidden}} is-hidden{{end}}" data-id="{{.ID}}"{{if .Scored}} data-score="{{.Score}}"{{end}} data-source="{{.Source}}" data-tags="{{.TagsAttr}}">
+  <input type="checkbox" class="row__check" data-bulk-check value="{{.ID}}" aria-label="Select {{.Title}}">
   <div class="row__actions">
     <button type="button" class="act act-seen{{if .Seen}} is-active{{end}}"
       hx-post="/items/{{.ID}}/seen" hx-target="closest .row" hx-swap="outerHTML"

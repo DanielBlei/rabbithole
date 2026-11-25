@@ -237,6 +237,20 @@
   </div>
   {{end}}
 
+  {{if .Rows}}
+  <div class="feed-selectbar" data-bulk-selectbar>
+    <label class="feed-selectbar__label"><input type="checkbox" data-bulk-select-all aria-label="Select all visible rows"> Select all</label>
+    <span class="feed-selectbar__meta" data-bulk-visible></span>
+  </div>
+  <div class="feed-bulk" data-bulk-bar hidden role="toolbar" aria-label="Bulk actions">
+    <span class="feed-bulk__count" data-bulk-count></span>
+    <button type="button" class="clk-btn" data-bulk-action="bookmark">Bookmark</button>
+    <button type="button" class="clk-btn" data-bulk-action="seen">Mark seen</button>
+    <button type="button" class="clk-btn" data-bulk-action="hide">Hide</button>
+    <button type="button" class="clk-btn" data-bulk-action="unhide">Unhide</button>
+  </div>
+  {{end}}
+
   <div class="pane__body">
     {{if .Grouped}}{{range .Groups}}{{template "storyGroup" .}}{{end}}{{else}}{{range .Rows}}{{template "row" .}}{{end}}{{end}}
     {{if not .Rows}}{{template "feedEmpty" .Empty}}{{end}}

@@ -1107,6 +1107,18 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
 
 .pane__body{padding:18px 18px 6px;font-size:1.4rem;line-height:1.55;}
 
+/* Bulk selection: checkbox per row plus the select-all and bulk bar above the list. */
+.feed-selectbar{display:flex;align-items:center;gap:12px;padding:8px 4px 10px;font-size:1.25rem;color:var(--text-dim);}
+.feed-selectbar[hidden]{display:none;}
+.feed-selectbar__label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;}
+.feed-selectbar__label input{width:14px;height:14px;}
+.feed-selectbar__meta{opacity:.7;}
+.feed-bulk{position:sticky;top:calc(var(--topbar-h) + 8px);z-index:12;display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--card);border:1px solid var(--hairline);border-radius:10px;padding:8px 12px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.12);}
+.feed-bulk[hidden]{display:none;}
+.feed-bulk__count{margin-right:4px;font-weight:500;color:var(--accent);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.feed-bulk .clk-btn{font-size:1.2rem;padding:6px 10px;}
+
+
 /* --- Zero-state ---------------------------------------------------------- */
 /* An empty pane is where a first-time reader lands, so it carries the next
    action rather than an apology. Stays in the terminal's voice: the mascot, the
@@ -1150,10 +1162,14 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
 .row{
   position:relative;
   background:var(--card);border:1px solid transparent;border-radius:14px;
-  padding:14px 16px;margin-bottom:14px;
+  padding:14px 16px 14px 36px;margin-bottom:14px;
   box-shadow:var(--card-shadow);
   transition:transform .12s, box-shadow .12s, opacity .12s;
+  display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:10px;
 }
+.row__check{grid-column:1;grid-row:1 / span 4;align-self:start;margin-top:2px;width:16px;height:16px;cursor:pointer;}
+.row > .row__actions,.row > .line1,.row > .gauge,.row > .toggles{grid-column:2;}
+.row > .bookmark{grid-column:2;}
 .row:hover{transform:translateY(-1px);box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 0 8px 22px rgba(0,0,0,.42);}
 @media (prefers-reduced-motion: reduce){
   .row{transition:none;}
