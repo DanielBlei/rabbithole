@@ -565,8 +565,12 @@ func TestRunAttributesPartialScoringFailureToFeed(t *testing.T) {
 // collision discards the score.
 func TestRunDuplicateGUIDScoresFirstFeedOnce(t *testing.T) {
 	const guid = "urn:uuid:0b7f42e2-1c1d-4f2e-9a3b-5c6d7e8f9a0b"
-	cfg := testConfig(t,
-		config.Feed{Name: "Alpha", URL: serveRSS(t, feedRSSWithGUID("Same article", guid, "https://alpha.test/a42?utm=rss"))},
+	cfg := testConfig(
+		t,
+		config.Feed{
+			Name: "Alpha",
+			URL:  serveRSS(t, feedRSSWithGUID("Same article", guid, "https://alpha.test/a42?utm=rss")),
+		},
 		config.Feed{Name: "Beta", URL: serveRSS(t, feedRSSWithGUID("Same article", guid, "https://beta.test/a42"))},
 	)
 	db := openStore(t, cfg)
@@ -644,10 +648,17 @@ func TestRunRecordFailureIsolatesFeeds(t *testing.T) {
 	}
 	colliding := warm.Unseen[0]
 
-	cfg := testConfig(t,
-		config.Feed{Name: "Earlier", URL: serveRSS(t, feedRSSWithGUID("Earlier", "urn:uuid:earlier", "https://x.test/earlier"))},
+	cfg := testConfig(
+		t,
+		config.Feed{
+			Name: "Earlier",
+			URL:  serveRSS(t, feedRSSWithGUID("Earlier", "urn:uuid:earlier", "https://x.test/earlier")),
+		},
 		config.Feed{Name: "Failing", URL: serveRSS(t, feedRSSWithGUID("Failing", guid, "https://x.test/failing"))},
-		config.Feed{Name: "Later", URL: serveRSS(t, feedRSSWithGUID("Later", "urn:uuid:later", "https://x.test/later"))},
+		config.Feed{
+			Name: "Later",
+			URL:  serveRSS(t, feedRSSWithGUID("Later", "urn:uuid:later", "https://x.test/later")),
+		},
 	)
 	db := openStore(t, cfg)
 	if err := db.Record(t.Context(), []feeds.Item{colliding}, nil, time.Now()); err != nil {
