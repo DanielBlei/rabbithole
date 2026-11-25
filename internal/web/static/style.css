@@ -1116,6 +1116,7 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
 .feed-bulk{position:sticky;top:calc(var(--topbar-h) + 8px);z-index:12;display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--card);border:1px solid var(--hairline);border-radius:10px;padding:8px 12px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.12);}
 .feed-bulk[hidden]{display:none;}
 .feed-bulk__count{margin-right:4px;font-weight:500;color:var(--accent);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.feed-bulk__status{margin-left:auto;color:var(--warn);font-size:1.2rem;}
 .feed-bulk .clk-btn{font-size:1.2rem;padding:6px 10px;}
 
 

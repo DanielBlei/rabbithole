@@ -5,10 +5,12 @@
   var selectBar = document.querySelector('[data-bulk-selectbar]');
   var bulkBar = document.querySelector('[data-bulk-bar]');
   var countEl = document.querySelector('[data-bulk-count]');
+  var statusEl = document.querySelector('[data-bulk-status]');
   var selectAll = document.querySelector('[data-bulk-select-all]');
   if (!selectBar || !bulkBar) return;
 
   var selected = new Set();
+  var bulkInFlight = false;
 
   function allRows(){
     return Array.prototype.slice.call(document.querySelectorAll('.pane__body .row'));
@@ -41,10 +43,7 @@
     if (selectAll) {
       var selVis = 0;
       vis.forEach(function(r){ if (selected.has(r.dataset.id)) selVis++; });
-      if (totalVis === 0) {
-        selectAll.checked = false;
-        selectAll.indeterminate = false;
-      } else if (selVis === 0) {
+      if (totalVis === 0 || selVis === 0) {
         selectAll.checked = false;
         selectAll.indeterminate = false;
       } else if (selVis === totalVis) {
@@ -55,7 +54,6 @@
         selectAll.indeterminate = true;
       }
     }
-    // Sync row checkboxes
     allRows().forEach(function(row){
       var cb = row.querySelector('[data-bulk-check]');
       if (!cb) return;
@@ -64,18 +62,20 @@
   }
 
   function clearSelection(){
+    if (bulkInFlight) return;
     if (selected.size === 0) return;
     selected.clear();
+    if (statusEl) statusEl.textContent = '';
     updateUI();
   }
 
   function toggleRow(id, checked){
     if (checked) selected.add(id);
     else selected.delete(id);
+    if (statusEl) statusEl.textContent = '';
     updateUI();
   }
 
-  // Row checkbox changes (delegated)
   document.addEventListener('change', function(e){
     var cb = e.target.closest && e.target.closest('[data-bulk-check]');
     if (!cb) return;
@@ -86,7 +86,6 @@
     e.stopPropagation();
   });
 
-  // Select-all in header
   if (selectAll) {
     selectAll.addEventListener('change', function(){
       var vis = visibleRows();
@@ -95,32 +94,26 @@
       } else {
         vis.forEach(function(row){ selected.delete(row.dataset.id); });
       }
+      if (statusEl) statusEl.textContent = '';
       updateUI();
     });
   }
 
-  // Escape clears selection
   document.addEventListener('keydown', function(e){
     if (e.key !== 'Escape') return;
     if (selected.size === 0) return;
-    // Don't interfere if a modal or search suggestion is open and already handles Escape.
-    // Bulk clear should run, but we allow higher-priority handlers to run first.
-    // If selection exists, clear it and stop other Escape handlers from closing popmenus after.
     clearSelection();
     e.preventDefault();
   });
 
-  // Clear on filter/sort/page/view changes - any change in the filter bar.
   var filterForm = document.querySelector('.pane__filters');
   if (filterForm) {
     filterForm.addEventListener('change', function(){ clearSelection(); });
     filterForm.addEventListener('submit', function(){ clearSelection(); });
   }
-  // Pager buttons
   document.querySelectorAll('#btnPrev, #btnNext, #btnFirst, #btnPrevBottom, #btnNextBottom, [data-rows-btn]').forEach(function(btn){
     btn.addEventListener('click', function(){ clearSelection(); });
   });
-  // Search input - typing filters locally
   var searchInput = document.querySelector('[data-search-query]');
   if (searchInput) {
     searchInput.addEventListener('input', function(){ clearSelection(); });
@@ -129,17 +122,17 @@
     var clear = e.target.closest('[data-search-clear]');
     if (clear) clearSelection();
   });
-  // htmx afterSwap for single-row actions should also clear stale selection
   document.addEventListener('htmx:afterSwap', function(e){
     var t = e.detail && e.detail.target;
     if (!t || !t.classList || !t.classList.contains('row')) return;
-    // If a row swapped while bulk selection existed, clear to avoid stale ids.
+    if (bulkInFlight) {
+      updateUI();
+      return;
+    }
     if (selected.size) clearSelection();
-    // Re-sync UI because new row elements have fresh checkboxes
     updateUI();
   });
 
-  // Bulk actions
   function rowState(row){
     return {
       hidden: row.classList.contains('is-hidden'),
@@ -173,16 +166,12 @@
   bulkBar.addEventListener('click', function(e){
     var btn = e.target.closest('[data-bulk-action]');
     if (!btn) return;
+    if (bulkInFlight) return;
     var action = btn.getAttribute('data-bulk-action');
     var ids = Array.prototype.slice.call(selected);
     if (!ids.length) return;
-    btn.disabled = true;
-    var done = 0;
-    var total = ids.length;
     var byId = {};
     allRows().forEach(function(row){ byId[row.dataset.id] = row; });
-
-    // Filter to only rows that need action for idempotency; still count as attempted
     var tasks = [];
     ids.forEach(function(id){
       var row = byId[id];
@@ -193,18 +182,28 @@
       tasks.push({id:id, url:url, row:row});
     });
     if (tasks.length === 0) {
-      clearSelection();
-      btn.disabled = false;
+      selected.clear();
+      if (statusEl) statusEl.textContent = '';
+      updateUI();
       return;
     }
-
-    // Disable bulk bar while running
+    bulkInFlight = true;
+    if (statusEl) statusEl.textContent = '';
     bulkBar.querySelectorAll('button').forEach(function(b){ b.disabled = true; });
-
+    var failed = 0;
     Promise.all(tasks.map(function(t){
       return fetch(t.url, {method:'POST', credentials:'same-origin', headers:{'HX-Request':'true'}})
-        .then(function(res){ if (!res.ok) throw new Error('request failed'); return res.text(); })
+        .then(function(res){
+          var redirect = res.headers.get('HX-Redirect');
+          if (redirect) {
+            window.location.href = redirect;
+            throw new Error('redirect');
+          }
+          if (!res.ok) throw new Error('request failed: ' + res.status);
+          return res.text();
+        })
         .then(function(html){
+          if (!html) return;
           var cur = document.querySelector('.pane__body .row[data-id="' + t.id + '"]');
           if (!cur) return;
           var temp = document.createElement('div');
@@ -215,31 +214,32 @@
           var refreshed = document.querySelector('.pane__body .row[data-id="' + t.id + '"]');
           if (refreshed) {
             if (window.htmx) htmx.process(refreshed);
-            // Fire afterSwap so feed.js leave animation and pager refresh run
             var ev = new CustomEvent('htmx:afterSwap', {bubbles:true, detail:{target: refreshed}});
             document.dispatchEvent(ev);
-            // Also trigger search re-apply via same event (feed.js listens)
           }
         })
-        .catch(function(){})
-        .then(function(){ done++; });
+        .catch(function(err){
+          if (err && err.message === 'redirect') return;
+          failed++;
+        });
     })).then(function(){
-      clearSelection();
+      bulkInFlight = false;
+      selected.clear();
       bulkBar.querySelectorAll('button').forEach(function(b){ b.disabled = false; });
+      if (failed > 0 && statusEl) {
+        statusEl.textContent = failed + ' failed — refresh and try again';
+      } else if (statusEl) {
+        statusEl.textContent = '';
+      }
       updateUI();
     });
   });
 
-  // Initial sync
   updateUI();
-  // Re-sync after pager/search render changes visibility
-  var origRender = window.feedPager && window.feedPager.render;
-  if (origRender) {
-    // feedPager not yet available at defer time? bulk.js loads after feed.js, so it is.
-  }
-  // Observe DOM changes that affect visibility (pager hiding, filter class)
-  var observer = new MutationObserver(function(){ updateUI(); });
   var body = document.querySelector('.pane__body');
-  if (body) observer.observe(body, {attributes:true, attributeFilter:['class','style'], subtree:true});
+  if (body) {
+    var observer = new MutationObserver(function(){ updateUI(); });
+    observer.observe(body, {attributes:true, attributeFilter:['class','style'], subtree:true});
+  }
 
 })();
