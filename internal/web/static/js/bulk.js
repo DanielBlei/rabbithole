@@ -11,6 +11,7 @@
 
   var selected = new Set();
   var bulkInFlight = false;
+  var bulkFailed = 0;
 
   function allRows(){
     return Array.prototype.slice.call(document.querySelectorAll('.pane__body .row'));
@@ -39,7 +40,7 @@
     }
     var count = selected.size;
     if (countEl) countEl.textContent = count ? count + ' selected' : '';
-    if (bulkBar) bulkBar.hidden = count === 0;
+    if (bulkBar) bulkBar.hidden = count === 0 && bulkFailed === 0;
     if (selectAll) {
       var selVis = 0;
       vis.forEach(function(r){ if (selected.has(r.dataset.id)) selVis++; });
@@ -63,8 +64,9 @@
 
   function clearSelection(){
     if (bulkInFlight) return;
-    if (selected.size === 0) return;
+    if (selected.size === 0 && bulkFailed === 0) return;
     selected.clear();
+    bulkFailed = 0;
     if (statusEl) statusEl.textContent = '';
     updateUI();
   }
@@ -72,6 +74,7 @@
   function toggleRow(id, checked){
     if (checked) selected.add(id);
     else selected.delete(id);
+    bulkFailed = 0;
     if (statusEl) statusEl.textContent = '';
     updateUI();
   }
@@ -94,6 +97,7 @@
       } else {
         vis.forEach(function(row){ selected.delete(row.dataset.id); });
       }
+      bulkFailed = 0;
       if (statusEl) statusEl.textContent = '';
       updateUI();
     });
@@ -168,7 +172,7 @@
     if (!btn) return;
     if (bulkInFlight) return;
     var action = btn.getAttribute('data-bulk-action');
-    var ids = Array.prototype.slice.call(selected);
+    var ids = Array.from(selected);
     if (!ids.length) return;
     var byId = {};
     allRows().forEach(function(row){ byId[row.dataset.id] = row; });
@@ -183,6 +187,7 @@
     });
     if (tasks.length === 0) {
       selected.clear();
+      bulkFailed = 0;
       if (statusEl) statusEl.textContent = '';
       updateUI();
       return;
@@ -224,6 +229,7 @@
         });
     })).then(function(){
       bulkInFlight = false;
+      bulkFailed = failed;
       selected.clear();
       bulkBar.querySelectorAll('button').forEach(function(b){ b.disabled = false; });
       if (failed > 0 && statusEl) {
