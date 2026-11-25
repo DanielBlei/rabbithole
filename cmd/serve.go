@@ -348,6 +348,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	startLibrary(libLoader)
+	startIcons(mgr)
 
 	scheme := "http"
 	if tlsConfig != nil {
@@ -430,6 +431,15 @@ func libraryBase(raw string) (base string, custom bool, err error) {
 // delays serving, and fetches nothing when the library is off.
 func startLibrary(l *library.Loader) {
 	l.Snapshot()
+}
+
+// startIcons kicks one background pass that fetches any missing or stale
+// favicons. It returns at once and never delays serve; a fresh restart with
+// current icons contacts no sites.
+func startIcons(m *ingest.Manager) {
+	if m != nil {
+		m.KickIcons()
+	}
 }
 
 // newLibraryLoader builds the loader of the source library. Nothing is fetched

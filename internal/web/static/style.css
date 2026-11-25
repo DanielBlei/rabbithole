@@ -1107,6 +1107,19 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
 
 .pane__body{padding:18px 18px 6px;font-size:1.4rem;line-height:1.55;}
 
+/* Bulk selection: checkbox per row plus the select-all and bulk bar above the list. */
+.feed-selectbar{display:flex;align-items:center;gap:12px;padding:8px 4px 10px;font-size:1.25rem;color:var(--text-dim);}
+.feed-selectbar[hidden]{display:none;}
+.feed-selectbar__label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;}
+.feed-selectbar__label input{width:14px;height:14px;}
+.feed-selectbar__meta{opacity:.7;}
+.feed-bulk{position:sticky;top:calc(var(--topbar-h) + 8px);z-index:12;display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--card);border:1px solid var(--hairline);border-radius:10px;padding:8px 12px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.12);}
+.feed-bulk[hidden]{display:none;}
+.feed-bulk__count{margin-right:4px;font-weight:500;color:var(--accent);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.feed-bulk__status{margin-left:auto;color:var(--warn);font-size:1.2rem;}
+.feed-bulk .clk-btn{font-size:1.2rem;padding:6px 10px;}
+
+
 /* --- Zero-state ---------------------------------------------------------- */
 /* An empty pane is where a first-time reader lands, so it carries the next
    action rather than an apology. Stays in the terminal's voice: the mascot, the
@@ -1150,10 +1163,14 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
 .row{
   position:relative;
   background:var(--card);border:1px solid transparent;border-radius:14px;
-  padding:14px 16px;margin-bottom:14px;
+  padding:14px 16px 14px 36px;margin-bottom:14px;
   box-shadow:var(--card-shadow);
   transition:transform .12s, box-shadow .12s, opacity .12s;
+  display:grid;grid-template-columns:20px minmax(0,1fr);column-gap:10px;
 }
+.row__check{grid-column:1;grid-row:1 / span 4;align-self:start;margin-top:2px;width:16px;height:16px;cursor:pointer;}
+.row > .row__actions,.row > .line1,.row > .gauge,.row > .toggles{grid-column:2;}
+.row > .bookmark{grid-column:2;}
 .row:hover{transform:translateY(-1px);box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 0 8px 22px rgba(0,0,0,.42);}
 @media (prefers-reduced-motion: reduce){
   .row{transition:none;}
@@ -4245,19 +4262,20 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
    row's own grid. That is what lets the score leave the line under the title
    and take a column of its own without the template being rebuilt around it. */
 :root[data-theme="minimal"] .row{
-  display:grid;grid-template-columns:auto minmax(0,1fr) 52px;
+  display:grid;grid-template-columns:20px auto minmax(0,1fr) 52px;column-gap:10px;
   padding:22px 0;margin:0;
   background:none;border:0;border-radius:0;box-shadow:none;
   border-top:1px solid var(--hairline);
   transition:opacity .12s;
 }
+:root[data-theme="minimal"] .row__check{grid-column:1;grid-row:1 / span 3;align-self:start;margin-top:3px;width:16px;height:16px;cursor:pointer;}
 :root[data-theme="minimal"] .story-group{margin-bottom:0;}
 :root[data-theme="minimal"] .pane__body > .row:first-child{border-top:0;padding-top:8px;}
 :root[data-theme="minimal"] .row:hover{transform:none;box-shadow:none;}
 :root[data-theme="minimal"] .line1,
 :root[data-theme="minimal"] .gauge{display:contents;}
 :root[data-theme="minimal"] .row .line1{padding-right:0;}
-:root[data-theme="minimal"] .row .title{grid-column:1 / 3;grid-row:1;min-width:0;}
+:root[data-theme="minimal"] .row .title{grid-column:2 / 4;grid-row:1;min-width:0;}
 :root[data-theme="minimal"] .row .title a{
   font-size:var(--fs-title);line-height:1.32;text-wrap:balance;
   transition:color .18s var(--ease);
@@ -4265,25 +4283,25 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
 :root[data-theme="minimal"] .row .title a:hover{color:var(--accent);text-decoration:none;}
 /* Row two carries everything that is about the item rather than in it: when,
    where from, and the triage pair pushed to the far end of the measure. */
-:root[data-theme="minimal"] .row .time{grid-column:1;grid-row:2;margin-top:9px;}
+:root[data-theme="minimal"] .row .time{grid-column:2;grid-row:2;margin-top:9px;}
 :root[data-theme="minimal"] .gauge__meta{
-  grid-column:2;grid-row:2;margin-top:9px;align-self:center;
+  grid-column:3;grid-row:2;margin-top:9px;align-self:center;
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   padding-right:140px;
 }
 :root[data-theme="minimal"] .row__actions{
-  position:static;grid-column:2;grid-row:2;
+  position:static;grid-column:3;grid-row:2;
   justify-self:end;align-self:center;margin-top:9px;
 }
 :root[data-theme="minimal"] .note-edit-btn{margin-right:7px;}
-:root[data-theme="minimal"] .toggles{grid-column:1 / 3;grid-row:3;margin-top:10px;}
+:root[data-theme="minimal"] .toggles{grid-column:2 / 4;grid-row:3;margin-top:10px;}
 
 /* The score keeps every part of how it works — the same --score fill, the same
    ramp colour, the same hover tip and the same focus ring. It only stops being
    a 200px bar under the title and becomes a numeral over a short rule in its
    own column, which is the whole of what "sleeker" asks for here. */
 :root[data-theme="minimal"] .gauge-bar{
-  grid-column:3;grid-row:1 / 3;align-self:start;justify-self:end;
+  grid-column:4;grid-row:1 / 3;align-self:start;justify-self:end;
   width:22px;height:2px;margin:31px 0 0 26px;
   border-radius:1px;background:var(--hairline-strong);
 }
@@ -4304,7 +4322,7 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
    same states, drawn as the flag the gesture actually means and parked under
    the score. */
 :root[data-theme="minimal"] .bookmark{
-  position:static;grid-column:3;grid-row:2;
+  position:static;grid-column:4;grid-row:2;
   justify-self:end;align-self:center;
   width:13px;height:17px;margin:9px 0 0 26px;
   border-radius:0;border-bottom-right-radius:0;
