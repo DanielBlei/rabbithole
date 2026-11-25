@@ -4,7 +4,10 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -14,7 +17,9 @@ import (
 	"time"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/httpclient"
+	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/library"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -274,4 +279,142 @@ func TestRecoverBriefings(t *testing.T) {
 			t.Fatal("recoverBriefings on a closed store = nil, want the boot to abort")
 		}
 	})
+}
+
+func iconTestPNG() []byte {
+	img := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = 200, 30, 30, 255
+	}
+	var b bytes.Buffer
+	if err := png.Encode(&b, img); err != nil {
+		panic(err)
+	}
+	return b.Bytes()
+}
+
+func countedIconServer(t *testing.T) (string, *atomic.Int32) {
+	t.Helper()
+	hits := new(atomic.Int32)
+	png := iconTestPNG()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if r.URL.Path == "/favicon.ico" {
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(png)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html><head></head><body></body></html>"))
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(httpclient.AllowPrivateEnv, "1")
+	return srv.URL, hits
+}
+
+func iconTestStore(t *testing.T, feedURL string) *store.Store {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "icons.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	doc := config.FeedsDoc{Feeds: []config.Feed{{Name: "Test", URL: feedURL}}}
+	if _, err := db.SeedFeeds(context.Background(), doc); err != nil {
+		t.Fatalf("SeedFeeds: %v", err)
+	}
+	return db
+}
+
+func iconTestManager(t *testing.T, db *store.Store, client *http.Client) *ingest.Manager {
+	t.Helper()
+	m, err := ingest.NewManager(db, config.Static(config.Config{}), 0)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	m.SetClient(client)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		m.Shutdown(ctx)
+	})
+	return m
+}
+
+func TestStartIconsPreloadsInTheBackground(t *testing.T) {
+	url, hits := countedIconServer(t)
+	feedURL := url + "/rss"
+	db := iconTestStore(t, feedURL)
+	m := iconTestManager(t, db, feeds.NewClient("test"))
+
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("building the manager made %d requests, want none", n)
+	}
+	startIcons(m)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("icon pass did not record a row")
+		}
+		meta, _ := db.FeedIconMeta(context.Background())
+		if len(meta) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if hits.Load() == 0 {
+		t.Error("icon pass completed without a request")
+	}
+}
+
+func TestStartIconsSkipsFreshIcons(t *testing.T) {
+	url, hits := countedIconServer(t)
+	feedURL := url + "/rss"
+	db := iconTestStore(t, feedURL)
+	m := iconTestManager(t, db, feeds.NewClient("test"))
+
+	startIcons(m)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("first pass did not record a row")
+		}
+		meta, _ := db.FeedIconMeta(context.Background())
+		if len(meta) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// Wait until the first pass fully settles.
+	time.Sleep(100 * time.Millisecond)
+	hits.Store(0)
+	startIcons(m)
+	time.Sleep(200 * time.Millisecond)
+	if n := hits.Load(); n != 0 {
+		t.Errorf("fresh icons made %d requests, want none (normal restart contacts no sites)", n)
+	}
+}
+
+func TestStartIconsDoesNotBlock(t *testing.T) {
+	gate := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-gate }))
+	t.Cleanup(func() { close(gate); srv.Close() })
+	t.Setenv(httpclient.AllowPrivateEnv, "1")
+	feedURL := srv.URL + "/rss"
+	db := iconTestStore(t, feedURL)
+	m := iconTestManager(t, db, feeds.NewClient("test"))
+	start := time.Now()
+	startIcons(m)
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("startIcons took %v with the host held, want no wait", d)
+	}
+}
+
+func TestStartIconsToleratesNilManager(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("startIcons(nil) panicked: %v", r)
+		}
+	}()
+	startIcons(nil)
 }
