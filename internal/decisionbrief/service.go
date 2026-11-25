@@ -397,10 +397,14 @@ func (s *Service) canonicalize(ctx context.Context, itemIDs []string) ([]string,
 
 func (s *Service) statuses(ctx context.Context, ids []string) (map[string]Snapshot, error) {
 	// The persisted read and the in-memory overlay are one critical section. A
-	// generation saves its result before it removes its run, and removal needs
-	// this same lock; therefore a terminal snapshot can never be built from a
-	// read taken before a completed run's save. The query is an indexed
-	// single-table read, not a network or model call.
+	// generation saves its result outside this lock and then removes its run
+	// under it, so a read taken after the save commits can already contain the
+	// run's own brief while the run is still present. A running item therefore
+	// never reports that brief: its snapshot shows only the pre-run brief, and
+	// the terminal state is observed once, atomically with run removal. This
+	// matches startItem's running snapshot and keeps a poll from pairing
+	// `running` with ready content. The query is an indexed single-table read,
+	// not a network or model call.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	briefs, err := s.store.ItemBriefsByItemIDs(ctx, ids)
@@ -430,6 +434,13 @@ func (s *Service) statuses(ctx context.Context, ids []string) (map[string]Snapsh
 			}
 			if r.previous != nil {
 				snap.Brief = *r.previous
+			} else {
+				// The run has no pre-run brief, so any ready brief in the read is
+				// this run's own result, persisted before the run's terminal
+				// transition is published. Reporting it here would render terminal
+				// content in a panel that still polls; wait for run removal, which
+				// is the same critical section that publishes the stored brief.
+				snap.Brief = store.ItemBrief{}
 			}
 		}
 		out[id] = snap
