@@ -149,6 +149,80 @@ func TestStatusesDoesNotMissCompletion(t *testing.T) {
 	}
 }
 
+// TestStatusesNeverPairsRunningWithOwnResult covers the other half of the
+// completion window: the run's ready brief is committed before the run is
+// removed, so a status read can land after the save and still see the run. That
+// snapshot must not be `running` with the brief the same run just persisted —
+// the panel renders terminal content and then fails its "stopped polling"
+// check. It must show the pre-run brief (none for an initial generation, the
+// previous brief for a refresh) until run removal publishes the terminal state.
+func TestStatusesNeverPairsRunningWithOwnResult(t *testing.T) {
+	for _, refresh := range []bool{false, true} {
+		t.Run(fmt.Sprintf("refresh=%v", refresh), func(t *testing.T) {
+			db := testStore(t, item("a"))
+			if refresh {
+				score := 3
+				if err := db.SaveItemBrief(context.Background(), store.ItemBrief{
+					ItemID: "a", Status: store.ItemBriefReady, Score: &score,
+					Recommendation: "skim", Why: "previous brief",
+					KeyPoints: []string{"old"}, Novelty: "old", Caveats: "old", Focus: "old",
+				}); err != nil {
+					t.Fatalf("seed previous brief: %v", err)
+				}
+			}
+
+			saved := make(chan struct{})
+			release := make(chan struct{})
+			var saveOnce sync.Once
+			h := &hookedStore{Store: db}
+			h.save = func(_ context.Context, b store.ItemBrief) {
+				if b.Status == store.ItemBriefReady {
+					saveOnce.Do(func() {
+						close(saved)
+						<-release
+					})
+				}
+			}
+			svc := New(h, testProfile(), readyGenerator())
+			svc.SetFetcher(stubFetcher(validBody(), nil))
+
+			if _, err := svc.Start(context.Background(), "a", refresh, Options{}); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			// The write returned: the brief is durable and visible, and the run
+			// is still present because persistResult has not returned yet.
+			<-saved
+
+			snap, err := svc.Status(context.Background(), "a")
+			if err != nil {
+				t.Fatalf("Status: %v", err)
+			}
+			if snap.Status != StatusRunning && snap.Status != StatusQueued {
+				t.Fatalf("status during commit = %q, want running/queued", snap.Status)
+			}
+			if refresh {
+				if snap.Brief.Why != "previous brief" {
+					t.Fatalf("running snapshot brief = %+v, want the pre-run brief", snap.Brief)
+				}
+			} else if snap.Brief.Status != "" {
+				t.Fatalf("running snapshot exposed the run's own brief: %+v", snap.Brief)
+			}
+
+			close(release)
+			final := waitTerminal(t, svc, "a")
+			if final.Status != StatusReady {
+				t.Fatalf("final status = %+v, want ready", final.Status)
+			}
+			if final.Brief.Score == nil || *final.Brief.Score != 8 {
+				t.Fatalf("final brief = %+v, want the committed result", final.Brief)
+			}
+			if refresh && final.Brief.Why == "previous brief" {
+				t.Fatal("refresh kept the pre-refresh brief")
+			}
+		})
+	}
+}
+
 // TestStartWhileCompletionCommits races two Starts against the window where the
 // result is committed but the run is still present. Single-flight must hold:
 // no second generation, and a later Start sees the ready brief.
