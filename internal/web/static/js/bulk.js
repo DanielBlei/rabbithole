@@ -153,9 +153,8 @@
     if (action === 'seen') return '/items/' + encodeURIComponent(id) + '/seen';
     if (action === 'hide') return '/items/' + encodeURIComponent(id) + '/hide';
     if (action === 'unhide') {
-      var st = row ? rowState(row) : {hidden:false, seen:false};
+      var st = row ? rowState(row) : {hidden:false};
       if (st.hidden) return '/items/' + encodeURIComponent(id) + '/hide';
-      if (st.seen) return '/items/' + encodeURIComponent(id) + '/seen';
       return null;
     }
     return null;
@@ -167,7 +166,7 @@
     if (action === 'bookmark') return !st.bookmarked;
     if (action === 'seen') return !st.seen;
     if (action === 'hide') return !st.hidden;
-    if (action === 'unhide') return st.hidden || st.seen;
+    if (action === 'unhide') return st.hidden;
     return true;
   }
 

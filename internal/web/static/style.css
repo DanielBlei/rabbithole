@@ -4261,19 +4261,20 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
    row's own grid. That is what lets the score leave the line under the title
    and take a column of its own without the template being rebuilt around it. */
 :root[data-theme="minimal"] .row{
-  display:grid;grid-template-columns:auto minmax(0,1fr) 52px;
+  display:grid;grid-template-columns:20px auto minmax(0,1fr) 52px;column-gap:10px;
   padding:22px 0;margin:0;
   background:none;border:0;border-radius:0;box-shadow:none;
   border-top:1px solid var(--hairline);
   transition:opacity .12s;
 }
+:root[data-theme="minimal"] .row__check{grid-column:1;grid-row:1 / span 3;align-self:start;margin-top:3px;width:16px;height:16px;cursor:pointer;}
 :root[data-theme="minimal"] .story-group{margin-bottom:0;}
 :root[data-theme="minimal"] .pane__body > .row:first-child{border-top:0;padding-top:8px;}
 :root[data-theme="minimal"] .row:hover{transform:none;box-shadow:none;}
 :root[data-theme="minimal"] .line1,
 :root[data-theme="minimal"] .gauge{display:contents;}
 :root[data-theme="minimal"] .row .line1{padding-right:0;}
-:root[data-theme="minimal"] .row .title{grid-column:1 / 3;grid-row:1;min-width:0;}
+:root[data-theme="minimal"] .row .title{grid-column:2 / 4;grid-row:1;min-width:0;}
 :root[data-theme="minimal"] .row .title a{
   font-size:var(--fs-title);line-height:1.32;text-wrap:balance;
   transition:color .18s var(--ease);
@@ -4281,25 +4282,25 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
 :root[data-theme="minimal"] .row .title a:hover{color:var(--accent);text-decoration:none;}
 /* Row two carries everything that is about the item rather than in it: when,
    where from, and the triage pair pushed to the far end of the measure. */
-:root[data-theme="minimal"] .row .time{grid-column:1;grid-row:2;margin-top:9px;}
+:root[data-theme="minimal"] .row .time{grid-column:2;grid-row:2;margin-top:9px;}
 :root[data-theme="minimal"] .gauge__meta{
-  grid-column:2;grid-row:2;margin-top:9px;align-self:center;
+  grid-column:3;grid-row:2;margin-top:9px;align-self:center;
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   padding-right:140px;
 }
 :root[data-theme="minimal"] .row__actions{
-  position:static;grid-column:2;grid-row:2;
+  position:static;grid-column:3;grid-row:2;
   justify-self:end;align-self:center;margin-top:9px;
 }
 :root[data-theme="minimal"] .note-edit-btn{margin-right:7px;}
-:root[data-theme="minimal"] .toggles{grid-column:1 / 3;grid-row:3;margin-top:10px;}
+:root[data-theme="minimal"] .toggles{grid-column:2 / 4;grid-row:3;margin-top:10px;}
 
 /* The score keeps every part of how it works — the same --score fill, the same
    ramp colour, the same hover tip and the same focus ring. It only stops being
    a 200px bar under the title and becomes a numeral over a short rule in its
    own column, which is the whole of what "sleeker" asks for here. */
 :root[data-theme="minimal"] .gauge-bar{
-  grid-column:3;grid-row:1 / 3;align-self:start;justify-self:end;
+  grid-column:4;grid-row:1 / 3;align-self:start;justify-self:end;
   width:22px;height:2px;margin:31px 0 0 26px;
   border-radius:1px;background:var(--hairline-strong);
 }
@@ -4320,7 +4321,7 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
    same states, drawn as the flag the gesture actually means and parked under
    the score. */
 :root[data-theme="minimal"] .bookmark{
-  position:static;grid-column:3;grid-row:2;
+  position:static;grid-column:4;grid-row:2;
   justify-self:end;align-self:center;
   width:13px;height:17px;margin:9px 0 0 26px;
   border-radius:0;border-bottom-right-radius:0;
