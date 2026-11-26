@@ -246,12 +246,14 @@ func (s *Store) BriefingItems(ctx context.Context, start, end time.Time, limit i
 	if limit < 1 || limit > MaxBriefingItems {
 		return nil, fmt.Errorf("briefing limit must be between 1 and %d", MaxBriefingItems)
 	}
+	noDemo, args := demoExclusion("")
+	args = append(args, sqlTime(start), sqlTime(end), limit)
 	rows, err := s.query(ctx, `SELECT id, source, title, link, COALESCE(summary, ''),
 		published_at, created_at, llm_score, COALESCE(llm_score_reason, '')
 		FROM items
-		WHERE llm_score IS NOT NULL AND `+itemDate+` >= ? AND `+itemDate+` < ?
+		WHERE llm_score IS NOT NULL AND `+noDemo+` AND `+itemDate+` >= ? AND `+itemDate+` < ?
 		ORDER BY llm_score DESC, `+itemDate+` DESC, id ASC
-		LIMIT ?`, sqlTime(start), sqlTime(end), limit)
+		LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query briefing items: %w", err)
 	}

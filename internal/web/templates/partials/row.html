@@ -1,5 +1,5 @@
 {{define "row"}}
-<div class="row{{if .Seen}} is-seen{{end}}{{if .Hidden}} is-hidden{{end}}" data-id="{{.ID}}"{{if .Scored}} data-score="{{.Score}}"{{end}} data-source="{{.Source}}" data-tags="{{.TagsAttr}}">
+<div class="row{{if .Seen}} is-seen{{end}}{{if .Hidden}} is-hidden{{end}}" data-id="{{.ID}}"{{if .Demo}} data-demo="1"{{end}}{{if .Scored}} data-score="{{.Score}}"{{end}} data-source="{{.Source}}" data-tags="{{.TagsAttr}}">
   <div class="row__actions">
     <button type="button" class="act act-seen{{if .Seen}} is-active{{end}}"
       hx-post="/items/{{.ID}}/seen" hx-target="closest .row" hx-swap="outerHTML"
@@ -22,14 +22,15 @@
       <label class="tg-tab tg-tab-dive" for="tg-dive-{{.ID}}">dive</label>
     </div>
     <div class="tg-panel tg-panel-why">
-      {{if .Reason}}<div class="md">{{.ReasonHTML}}</div>
+      {{if .Demo}}<p class="tg-why-msg">Demo item from the guided tour. Its score is fixed by design; hide it any time.</p>
+      {{else if .Reason}}<div class="md">{{.ReasonHTML}}</div>
       {{else if .HasLLMScore}}<p class="tg-why-msg tg-why-msg--error">Scored, but no explanation was recorded &mdash; an error may have occurred.</p>
       {{else}}<p class="tg-why-msg">No score computed for this item yet.</p>{{end}}
       {{/* The thumbs ride this line as one more field. They record user_score
            and nothing more: the gauge above still shows the model's score.
            Re-posting the lit one clears the rating. Icons from Feather (MIT). */}}
       <p class="tg-footnote">
-        {{- if .HasLLMScore}}LLM Score {{.LLMScore}}/10{{if .ScoreModel}} &middot; {{.ScoreModel}}{{end}}{{if .ScoreProfile}} &middot; profile: {{.ScoreProfile}}{{if .ScoreProfileHash}}@{{.ScoreProfileHash}}{{end}}{{end}}{{if .ScoreFeedback}} &middot; {{.ScoreFeedback}}{{end}} &middot; {{end -}}
+        {{- if .HasLLMScore}}{{if .Demo}}Demo score{{else}}LLM Score{{end}} {{.LLMScore}}/10{{if .ScoreModel}} &middot; {{.ScoreModel}}{{end}}{{if .ScoreProfile}} &middot; profile: {{.ScoreProfile}}{{if .ScoreProfileHash}}@{{.ScoreProfileHash}}{{end}}{{end}}{{if .ScoreFeedback}} &middot; {{.ScoreFeedback}}{{end}} &middot; {{end -}}
         <button type="button" class="act rate rate-up{{if .RatedUp}} is-active{{end}}"
           hx-post="/items/{{.ID}}/rate" hx-vals='{"score":"10"}'
           hx-target="closest .row" hx-swap="outerHTML"

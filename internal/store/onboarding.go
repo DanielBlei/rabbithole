@@ -9,9 +9,8 @@ import (
 	"time"
 )
 
-// onboardingSchema records the first-run welcome: one row per step taken, and
-// one for the welcome itself once it is dismissed. Kept with the data, so a
-// new database greets its user again.
+// onboardingSchema records the first-run welcome: one row once it is dismissed.
+// Kept with the data, so a new database greets its user again.
 //
 // Plain TEXT and ON CONFLICT DO NOTHING, so the table ports to Postgres as is.
 const onboardingSchema = `
@@ -21,14 +20,9 @@ CREATE TABLE IF NOT EXISTS onboarding (
 );
 `
 
-// Onboarding steps. The first three are the welcome's checklist; the last is
-// the welcome being dismissed.
-const (
-	OnboardingSources   = "sources"
-	OnboardingProfile   = "profile"
-	OnboardingIngest    = "ingest"
-	OnboardingDismissed = "dismissed"
-)
+// OnboardingDismissed is the one recorded onboarding step: the welcome was
+// dismissed. Rows under any other step name are ignored.
+const OnboardingDismissed = "dismissed"
 
 // onboardingUpgradeSeed marks the welcome dismissed when the table is added to
 // a database that already existed, so the welcome is for new installs only.
@@ -36,11 +30,7 @@ const onboardingUpgradeSeed = "INSERT INTO onboarding (step, done_at) VALUES ('"
 
 // ValidOnboardingStep reports whether step is one MarkOnboarding accepts.
 func ValidOnboardingStep(step string) bool {
-	switch step {
-	case OnboardingSources, OnboardingProfile, OnboardingIngest, OnboardingDismissed:
-		return true
-	}
-	return false
+	return step == OnboardingDismissed
 }
 
 // OnboardingDone returns the steps recorded so far.

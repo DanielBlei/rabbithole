@@ -1,10 +1,10 @@
-// The modal layers, bottom to top: the first-run welcome, then #modal for the
+// The modal layers, bottom to top: the first-run popup, then #modal for the
 // base htmx dialog, then #modalTop for one stacked over it (the Sources page
 // opens defaults and export there). This owns dismissal, the
 // page scroll lock, and keeping focus inside the topmost open frame.
 //
 // The two htmx layers are containers htmx swaps a fragment into, so they are
-// open when they have a child and close by being emptied. The welcome is
+// open when they have a child and close by being emptied. The popup is
 // rendered with the page and only hides. Hence isOpen/close per layer rather
 // than one hardcoded test.
 (function(){
@@ -116,23 +116,38 @@
     if (e.key === 'Escape' && !e.defaultPrevented && top()) dismiss();
   });
 
+  // The guided tour card, when it is on screen, joins the top layer's Tab cycle
+  // so a keyboard user can reach it while a modal is open.
+  function tourCard(){
+    var card = document.getElementById('tourCard');
+    return card && !card.hidden && card.getClientRects().length ? card : null;
+  }
+
   // Keep Tab inside the open frame so it can't reach the page behind it.
   document.addEventListener('keydown', function(e){
     if (e.key !== 'Tab') return;
     var f = frame();
     if (!f) return;
-    var items = stops(f);
+    var card = tourCard();
+    var inner = stops(f), outer = card ? stops(card) : [];
+    var items = inner.concat(outer);
     if (!items.length){ e.preventDefault(); f.focus(); return; }
     var first = items[0], last = items[items.length - 1];
+    var active = document.activeElement;
     // Focus sits outside after the ingest poll replaces the focused control,
     // and on the frame itself right after open — both re-enter at an edge.
-    if (document.activeElement === f || !f.contains(document.activeElement)){
+    if (active === f || !(f.contains(active) || (card && card.contains(active)))){
       e.preventDefault();
       (e.shiftKey ? last : first).focus();
-    } else if (e.shiftKey && document.activeElement === first){
+    } else if (e.shiftKey && active === first){
       e.preventDefault(); last.focus();
-    } else if (!e.shiftKey && document.activeElement === last){
+    } else if (!e.shiftKey && active === last){
       e.preventDefault(); first.focus();
+    } else if (outer.length && inner.length && !e.shiftKey && active === inner[inner.length - 1]){
+      // From the frame's last stop into the card, and back.
+      e.preventDefault(); outer[0].focus();
+    } else if (outer.length && inner.length && e.shiftKey && active === outer[0]){
+      e.preventDefault(); inner[inner.length - 1].focus();
     }
   });
 })();

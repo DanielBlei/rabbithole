@@ -89,6 +89,11 @@ rabbithole sources import feeds.yaml
 Then hit ingest in the web UI. Nothing is fetched until you do. This step pulls your sources and
 scores them. Sources apply on the next ingest.
 
+A fresh install opens with a popup offering a six-step guided tour: your feed, your sources, running
+ingestion, what the runner does, a demo run on one built-in feed (no model needed, your settings stay as
+they are), and the scored story it leaves in the Feed. Every step waits for Next, and the demo story can be hidden like any
+other. Replay it from Settings → General → Basics.
+
 The first run has to score every item and takes a while on a local model. After that the
 **Feed** page fills in, best first, each item with a line on why it is there. Later runs only
 score what is new, because the store remembers what it has seen. The **Maze** page is there

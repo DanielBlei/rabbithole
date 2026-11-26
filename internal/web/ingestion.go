@@ -471,6 +471,8 @@ func ingestionTrigger(t string) string {
 		return "Manual"
 	case store.IngestTriggerProfileRescore:
 		return "Profile rescore"
+	case store.IngestTriggerDemo:
+		return "Demo"
 	case store.IngestTriggerCron:
 		return "Scheduled"
 	default:

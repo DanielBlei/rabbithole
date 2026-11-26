@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/DanielBlei/rabbithole/internal/config"
+	"github.com/DanielBlei/rabbithole/internal/feeds"
 	"github.com/DanielBlei/rabbithole/internal/ingest"
 	"github.com/DanielBlei/rabbithole/internal/store"
 )
@@ -93,9 +94,9 @@ func TestIngestModalAndRun(t *testing.T) {
 	if !strings.Contains(out, "ingest complete") {
 		t.Errorf("status body missing captured log lines; body=%s", out)
 	}
-	// Idle chip after an ok run: present for OOB targeting but hidden.
-	if !strings.Contains(out, "hidden") {
-		t.Errorf("idle chip should render hidden; body=%s", out)
+	// Idle chip after an ok run: the green play chip that opens the runner.
+	if !strings.Contains(out, "ing-chip--idle") {
+		t.Errorf("idle chip should render the green play state; body=%s", out)
 	}
 
 	// Reopening once the run is done starts over: the finished run stays as the
@@ -280,5 +281,101 @@ func TestIngestBarQueryCarriesTheNote(t *testing.T) {
 	}
 	if q := (ingestBarData{}).Query(); strings.Contains(q, "note") {
 		t.Errorf("a plain bar's Query() = %q carries a note", q)
+	}
+}
+
+// A demo run records the demo trigger, scores one built-in item 10/10, and its
+// banner says so; a bogus scorer is refused and a plain run is unchanged.
+func TestHandleIngestRunDemo(t *testing.T) {
+	w := newIngestWeb(t)
+	post(t, w, "/ingest/run?scorer=demo")
+	waitIngestIdle(t, w)
+
+	last, err := w.db.LastIngestRun(t.Context())
+	if err != nil || last == nil {
+		t.Fatalf("LastIngestRun: %v", err)
+	}
+	if last.TriggeredBy != store.IngestTriggerDemo || last.Counts.NewItems != 1 || last.Counts.Scored != 1 {
+		t.Errorf("run = %+v, want an ok demo run with one new scored item", last)
+	}
+	out := get(t, w, "/ingest/status")
+	for _, want := range []string{
+		`data-demo="1"`, `data-new="1"`, `data-scored="1"`,
+		"Demo run: 1 built-in item scored 10/10, no model needed. Hide removes it.", "refresh feed",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("idle body missing %q; body=%s", want, out)
+		}
+	}
+
+	// A second demo run finds the item already in the Feed.
+	post(t, w, "/ingest/run?scorer=demo")
+	waitIngestIdle(t, w)
+	if out := get(t, w, "/ingest/status"); !strings.Contains(out, "Demo item already in your Feed.") {
+		t.Errorf("repeat demo banner missing; body=%s", out)
+	}
+
+	rec := httptest.NewRecorder()
+	w.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ingest/run?scorer=bogus", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("bogus scorer status = %d, want 400", rec.Code)
+	}
+
+	post(t, w, "/ingest/run")
+	waitIngestIdle(t, w)
+	if out := get(t, w, "/ingest/status"); strings.Contains(out, "data-demo") {
+		t.Errorf("a plain run rendered the demo banner; body=%s", out)
+	}
+}
+
+// The demo item's row carries the stable selector and the demo wording, and a
+// real item's row carries neither.
+func TestRowDemoAttr(t *testing.T) {
+	w := newIngestWeb(t)
+	post(t, w, "/ingest/run?scorer=demo")
+	waitIngestIdle(t, w)
+	if err := w.db.Record(
+		t.Context(),
+		[]feeds.Item{{ID: "real", Source: "S", Title: "Real", Link: "https://x/real"}},
+		[]store.DigestEntry{
+			{Item: feeds.Item{ID: "real", Source: "S", Title: "Real", Link: "https://x/real"}, Score: 5, Reason: "r"},
+		},
+		time.Now(),
+	); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	page := get(t, w, "/feed")
+	if n := strings.Count(page, `data-demo="1"`); n != 1 {
+		t.Errorf("rows with data-demo = %d, want 1", n)
+	}
+	for _, want := range []string{
+		"Demo score 10/10", "Demo item from the guided tour. Its score is fixed by design; hide it any time.",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("feed missing %q", want)
+		}
+	}
+	if strings.Contains(page, "LLM Score 10/10") {
+		t.Error("demo row carries the LLM score footnote")
+	}
+	if !strings.Contains(page, "LLM Score 5/10") {
+		t.Error("real row lost its LLM score footnote")
+	}
+}
+
+// A demo item alone does not count as real data: the first-run welcome stays.
+func TestWelcomeIgnoresDemoItem(t *testing.T) {
+	w := newEmptyWeb(t)
+	demo := feeds.Item{ID: "demo", Source: "Demo", Title: "Welcome", Link: store.DemoItemLink}
+	if err := w.db.Record(t.Context(), []feeds.Item{demo}, nil, time.Now()); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if body := get(t, w, "/feed"); !strings.Contains(body, `id="welcomeModal"`) {
+		t.Error("a demo item retired the welcome")
+	}
+	done, err := w.db.OnboardingDone(t.Context())
+	if err != nil || done[store.OnboardingDismissed] {
+		t.Errorf("welcome marked dismissed: %v, err %v", done, err)
 	}
 }

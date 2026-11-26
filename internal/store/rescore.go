@@ -29,15 +29,19 @@ type ScoreReplacement struct {
 
 // RecentScoredItems returns already-scored stored items whose publication
 // date, or first-seen date when publication is unknown, is on or after cutoff.
-// Newest items come first with stable ID as the tie-break.
+// Newest items come first with stable ID as the tie-break. The demo item is
+// left out: its score is fixed and must never reach a scorer.
 func (s *Store) RecentScoredItems(ctx context.Context, cutoff time.Time) ([]feeds.Item, error) {
+	noDemo, args := demoExclusion("")
+	args = append(args, sqlTime(cutoff))
 	rows, err := s.query(ctx, `SELECT id, source, title, link,
 		COALESCE(summary, ''), published_at, COALESCE(tags, '')
 		FROM items
 		WHERE llm_score IS NOT NULL
 			AND trim(id) <> '' AND trim(source) <> '' AND trim(title) <> '' AND trim(link) <> ''
+			AND `+noDemo+`
 			AND `+itemDate+` >= ?
-		ORDER BY `+itemDate+` DESC, id ASC`, sqlTime(cutoff))
+		ORDER BY `+itemDate+` DESC, id ASC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query recent scored items: %w", err)
 	}

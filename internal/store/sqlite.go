@@ -830,6 +830,10 @@ type ListFilter struct {
 	// scores is a question about scored items.
 	MinScore *int
 	MaxScore *int
+
+	// ExcludeDemo drops the built-in demo item, so first-run checks do not
+	// count it as real data.
+	ExcludeDemo bool
 }
 
 // List's result-count bounds: defaultListLimit applies when ListFilter.Limit
@@ -932,6 +936,11 @@ func (filter ListFilter) whereClause(d dialect) (where []string, args []any) {
 	}
 	if filter.RatedOnly {
 		where = append(where, "user_score IS NOT NULL")
+	}
+	if filter.ExcludeDemo {
+		cond, a := demoExclusion("")
+		where = append(where, cond)
+		args = append(args, a...)
 	}
 	if filter.ScoredBy != "" {
 		where = append(where, "llm_score_model = ?")

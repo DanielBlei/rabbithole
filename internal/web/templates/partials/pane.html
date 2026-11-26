@@ -270,23 +270,32 @@
      the ingest runner, "filtered" leads back to an unnarrowed feed. */}}
 {{define "feedEmpty"}}
 <div class="feed-empty">
+  {{if or (eq .Kind "never") (eq .Kind "dry")}}
+  <pre class="feed-empty__bunny" aria-hidden="true">       Z
+ (\_/) z
+ (u_u)
+(")_(")</pre>
+  {{else}}
   <pre class="feed-empty__bunny" aria-hidden="true">(\_/)
 (&bull;_&bull;)</pre>
+  {{end}}
   <div class="feed-empty__sh">
     <span class="pane__prompt">$</span>&nbsp;<span class="pane__cmd">{{.Cmd}}</span>
     <div class="feed-empty__out">0 items{{if eq .Kind "never"}} &mdash; the hole hasn&rsquo;t been dug yet{{end}}<span class="blink">_</span></div>
   </div>
   {{if eq .Kind "never"}}
-  <p class="feed-empty__lead">Nothing has been ingested yet.<br>Run Ingest to dig your feeds.</p>
+  <p class="feed-empty__lead">Nothing has been ingested yet.<br>Run ingestion to dig your feeds.</p>
   <div class="feed-empty__acts">
-    <button class="feed-empty__go" type="button" hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML">&#9654; run ingest</button>
+    <button class="feed-empty__go" type="button" hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML">&#9654; run ingestion</button>
     <a class="feed-empty__alt" href="/sources">&#9636; edit sources</a>
+    <button class="feed-empty__alt" type="button" data-tour-start>? take the tour</button>
   </div>
   {{else if eq .Kind "dry"}}
   <p class="feed-empty__lead">The last run came back empty. Check the feed list, then run again.</p>
   <div class="feed-empty__acts">
-    <button class="feed-empty__go" type="button" hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML">&#9654; run ingest</button>
+    <button class="feed-empty__go" type="button" hx-get="/ingest" hx-target="#modal" hx-swap="innerHTML">&#9654; run ingestion</button>
     <a class="feed-empty__alt" href="/sources">&#9636; edit sources</a>
+    <button class="feed-empty__alt" type="button" data-tour-start>? take the tour</button>
   </div>
   {{else}}
   <p class="feed-empty__lead">No items match these filters.</p>

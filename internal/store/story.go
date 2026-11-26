@@ -87,17 +87,21 @@ CREATE TABLE IF NOT EXISTS story_cluster_items (
 CREATE INDEX IF NOT EXISTS idx_story_cluster_items_item ON story_cluster_items(item_id);
 `
 
-// StoryItems returns stored items for clustering, newest first and bounded.
+// StoryItems returns stored items for clustering, newest first and bounded. The
+// demo item is left out.
 func (s *Store) StoryItems(ctx context.Context, limit int) ([]StoryItem, error) {
 	if limit < 1 || limit > MaxStoryItems {
 		return nil, fmt.Errorf("story item limit must be between 1 and %d", MaxStoryItems)
 	}
+	noDemo, args := demoExclusion("")
+	args = append(args, limit)
 	rows, err := s.query(ctx, `SELECT id, source, title, link, COALESCE(summary, ''),
 		published_at, created_at, COALESCE(llm_score, 0)
 		FROM items
 		WHERE trim(id) <> '' AND trim(source) <> '' AND trim(title) <> '' AND trim(link) <> ''
+			AND `+noDemo+`
 		ORDER BY `+itemDate+` DESC, id ASC
-		LIMIT ?`, limit)
+		LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query story items: %w", err)
 	}

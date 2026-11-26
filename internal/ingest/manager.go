@@ -106,6 +106,14 @@ type Manager struct {
 	bg      sync.WaitGroup
 }
 
+// runMode says what an ingest run reads and scores.
+type runMode int
+
+const (
+	modeNormal runMode = iota // the configured feeds and the saved scorer
+	modeDemo                  // the built-in demo feed, scored without a model
+)
+
 // activeRun is the in-flight cycle's handle.
 type activeRun struct {
 	id      int64
@@ -116,6 +124,7 @@ type activeRun struct {
 	trigger string
 	profile string
 	window  time.Duration
+	mode    runMode
 }
 
 // Status is a point-in-time snapshot for the web UI. Lines is the most recent
@@ -175,7 +184,14 @@ func (m *Manager) SetOnRunComplete(fn func()) {
 // (single-flight). ctx covers only the setup writes; the run itself gets a
 // server-owned context so closing the browser/request never kills it.
 func (m *Manager) Start(ctx context.Context, triggeredBy string) error {
-	return m.start(ctx, RunKindIngest, triggeredBy, 0)
+	return m.start(ctx, RunKindIngest, triggeredBy, 0, modeNormal)
+}
+
+// StartDemo launches an ingest run over the built-in demo feed: no network, no
+// model, and the saved config is untouched. The classification hook does not
+// fire. Like Start it is a no-op while a run is live.
+func (m *Manager) StartDemo(ctx context.Context) error {
+	return m.start(ctx, RunKindIngest, store.IngestTriggerDemo, 0, modeDemo)
 }
 
 // StartRescore launches an explicit recent-item rescore using the active
@@ -185,7 +201,7 @@ func (m *Manager) StartRescore(ctx context.Context, window time.Duration) error 
 	if window <= 0 {
 		return errors.New("rescore window must be positive")
 	}
-	return m.start(ctx, RunKindRescore, store.IngestTriggerProfileRescore, window)
+	return m.start(ctx, RunKindRescore, store.IngestTriggerProfileRescore, window, modeNormal)
 }
 
 func (m *Manager) start(
@@ -193,6 +209,7 @@ func (m *Manager) start(
 	kind RunKind,
 	triggeredBy string,
 	window time.Duration,
+	mode runMode,
 ) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -214,7 +231,7 @@ func (m *Manager) start(
 	runCtx, cancel := context.WithCancel(context.Background())
 	run := &activeRun{
 		id: id, started: time.Now(), cancel: cancel, done: make(chan struct{}),
-		kind: kind, trigger: triggeredBy, profile: activeProfile.Name, window: window,
+		kind: kind, trigger: triggeredBy, profile: activeProfile.Name, window: window, mode: mode,
 	}
 	m.active = run
 	m.buf = newLogBuffer(maxLogLines)
@@ -386,6 +403,10 @@ func (m *Manager) execute(
 	if err != nil {
 		err = fmt.Errorf("read config: %w", err)
 	}
+	demo := run.mode == modeDemo
+	if err == nil && demo {
+		applyKeywordsOverride(&cfg)
+	}
 	switch {
 	case err != nil:
 	case run.kind == RunKindRescore:
@@ -401,10 +422,11 @@ func (m *Manager) execute(
 	default:
 		var outcome Outcome
 		outcome, err = m.run(ctx, cfg, activeProfile, m.db, time.Now(), Options{
-			Think:  cfg.Inference.ThinkEnabled(),
+			Think:  !demo && cfg.Inference.ThinkEnabled(),
 			Record: true,
 			Client: m.client,
 			RunID:  run.id,
+			Demo:   demo,
 		})
 		sites = outcome.Sites
 		counts = store.IngestCounts{
@@ -502,8 +524,8 @@ func (m *Manager) execute(
 	m.mu.Lock()
 	m.active = nil
 	hook := m.onRunComplete
-	notify := run.kind == RunKindIngest && status == store.IngestStatusOK && hook != nil && !m.closed
-	pass := run.kind == RunKindIngest && status == store.IngestStatusOK && sites != nil && !m.closed
+	notify := run.kind == RunKindIngest && !demo && status == store.IngestStatusOK && hook != nil && !m.closed
+	pass := run.kind == RunKindIngest && !demo && status == store.IngestStatusOK && sites != nil && !m.closed
 	var passCtx context.Context
 	if pass {
 		passCtx = m.rootLocked()
@@ -525,6 +547,15 @@ func (m *Manager) execute(
 		RefreshIcons(passCtx, m.db, m.client, sites, time.Now())
 		m.endIconPass(passCtx)
 	}
+}
+
+// applyKeywordsOverride switches one run's config snapshot to the heuristic
+// provider, clearing the fields it does not read exactly as Normalize does for a
+// saved heuristic config. The snapshot is a private copy, so the saved config is
+// unaffected.
+func applyKeywordsOverride(cfg *config.Config) {
+	cfg.Inference.Provider = config.ProviderHeuristic
+	cfg.Normalize()
 }
 
 // newRunLogger builds the logger for one run. Everything lands in buf, which the

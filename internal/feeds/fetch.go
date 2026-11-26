@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -145,6 +146,22 @@ func fetchOne(ctx context.Context, parser *gofeed.Parser, src Source) ([]Item, s
 	if err != nil {
 		return nil, "", err
 	}
+	return itemsFromFeed(src, feed), siteLink(src.URL, feed.Link), nil
+}
+
+// ParseFeed parses one feed document the way a fetch does, so a built-in
+// document yields items built exactly like fetched ones. It returns the items
+// and the feed's site address.
+func ParseFeed(src Source, r io.Reader) ([]Item, string, error) {
+	feed, err := gofeed.NewParser().Parse(r)
+	if err != nil {
+		return nil, "", err
+	}
+	return itemsFromFeed(src, feed), siteLink(src.URL, feed.Link), nil
+}
+
+// itemsFromFeed builds the stored items for one parsed feed.
+func itemsFromFeed(src Source, feed *gofeed.Feed) []Item {
 	items := make([]Item, 0, len(feed.Items))
 	for _, it := range feed.Items {
 		var published time.Time
@@ -167,7 +184,7 @@ func fetchOne(ctx context.Context, parser *gofeed.Parser, src Source) ([]Item, s
 			Tags:      src.Tags,
 		})
 	}
-	return items, siteLink(src.URL, feed.Link), nil
+	return items
 }
 
 // siteLink resolves a channel link against the feed's address and keeps it only

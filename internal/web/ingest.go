@@ -25,15 +25,19 @@ import (
 // ingestHistoryLimit is how many past runs one history page shows.
 const ingestHistoryLimit = 10
 
+// ingestModalHistory is how many recent runs the runner modal lists; the
+// Ingestion page holds the rest.
+const ingestModalHistory = 3
+
 // ingestBannerWindow is how long after a successful run the "run complete"
 // banner keeps rendering while the modal that watched it stays open.
 const ingestBannerWindow = 5 * time.Minute
 
-// ingestChipData drives the topbar status chip. The chip is ambient signal
-// only for the states that need attention: State is "running" (pulsing),
+// ingestChipData drives the topbar status chip: State is "running" (pulsing),
 // "failed" (red, with Ago), "warn" (cancelled, amber with Ago), "never" (amber,
-// nothing ingested yet) or "" — idle and healthy, in which case the chip renders
-// hidden (the element must still exist so htmx OOB swaps can find it).
+// nothing ingested yet) or "idle" (green play, healthy and ready to run). Every
+// state opens the runner modal. An empty State renders the chip hidden (the
+// element must still exist so htmx OOB swaps can find it).
 type ingestChipData struct {
 	State    string
 	Ago      string
@@ -69,6 +73,7 @@ type ingestRunView struct {
 	Counts  store.IngestCounts
 	Error   string
 	Rescore bool
+	Demo    bool // ran over the built-in demo feed
 }
 
 // ingestHistRowData is one history row rendered on its own — the summary row
@@ -96,11 +101,7 @@ type ingestBodyData struct {
 	RunKind    ingest.RunKind
 	RunProfile string
 
-	HistPage     int  // zero-based page currently shown (poll re-uses it)
-	HistPrevPage int  // HistPage-1, the "newer" pager target
-	HistNextPage int  // HistPage+1, the "older" pager target and 1-based label
-	HistHasPrev  bool // a newer page exists (page > 0)
-	HistHasNext  bool // an older page exists
+	HistMore bool // older runs exist beyond the few shown; the modal points at the Ingestion page
 }
 
 // ingestModalData wraps the body for the full-modal render. PromptUser feeds
@@ -159,14 +160,13 @@ func (d ingestBarData) Query() string {
 // that ingest responses re-render out-of-band so the chrome never goes stale.
 type chromeData struct {
 	Chip     ingestChipData
-	IngDot   string          // ingest status dot: err | warn | run | "" (healthy — no dot)
-	IngSub   string          // ingest subline shown inside the open side menu
-	IngNever bool            // no run has ever been recorded
-	FirstRun bool            // no run, no items and the welcome not dismissed — gates the welcome dialog
-	Welcome  map[string]bool // welcome steps already taken, by store.Onboarding* name
-	Running  bool            // a run is live — the ingWatch fragment polls while true
-	OOB      bool            // render the fragments with hx-swap-oob
-	Account  accountData     // Settings → Account; empty Mode when no gate ran
+	IngDot   string      // ingest status dot: err | warn | run | "" (healthy: no dot)
+	IngSub   string      // ingest subline shown inside the open side menu
+	IngNever bool        // no run has ever been recorded
+	FirstRun bool        // no run, no items and the welcome not dismissed: gates the welcome dialog
+	Running  bool        // a run is live: the ingWatch fragment polls while true
+	OOB      bool        // render the fragments with hx-swap-oob
+	Account  accountData // Settings > Account; empty Mode when no gate ran
 }
 
 // chrome assembles the layout's shared state for a full page render.
@@ -178,39 +178,39 @@ func (s *Web) chrome(ctx context.Context) chromeData {
 func (s *Web) chromeWith(ctx context.Context, c chromeData) chromeData {
 	c.Account = accountView(authFrom(ctx), "")
 	if c.IngNever {
-		c.FirstRun, c.Welcome = s.welcome(ctx)
+		c.FirstRun = s.welcome(ctx)
 	}
 	return c
 }
 
-// welcome reports whether to greet a first run, and the steps already taken.
-// A CLI ingest stores items without recording a run, so finding items retires
-// the welcome for good. Any failure skips the welcome rather than the page.
-func (s *Web) welcome(ctx context.Context) (bool, map[string]bool) {
+// welcome reports whether to greet a first run. A CLI ingest stores items
+// without recording a run, so finding items retires the welcome for good. Any
+// failure skips the welcome rather than the page.
+func (s *Web) welcome(ctx context.Context) bool {
 	done, err := s.db.OnboardingDone(ctx)
 	if err != nil {
 		log.Warn().Err(err).Msg("reading the welcome steps")
-		return false, nil
+		return false
 	}
 	if done[store.OnboardingDismissed] {
-		return false, nil
+		return false
 	}
-	n, err := s.db.Count(ctx, store.ListFilter{})
+	n, err := s.db.Count(ctx, store.ListFilter{ExcludeDemo: true})
 	if err != nil {
 		log.Warn().Err(err).Msg("counting items for the welcome dialog")
-		return false, nil
+		return false
 	}
 	if n > 0 {
 		if err := s.db.MarkOnboarding(ctx, store.OnboardingDismissed); err != nil {
 			log.Warn().Err(err).Msg("retiring the welcome")
 		}
-		return false, nil
+		return false
 	}
-	return true, done
+	return true
 }
 
-// handleWelcomeStep records a welcome step, or its dismissal, so the server
-// remembers it for every browser.
+// handleWelcomeStep records the welcome's dismissal, so the server remembers
+// it for every browser.
 func (s *Web) handleWelcomeStep(w http.ResponseWriter, r *http.Request) {
 	step := r.PathValue("step")
 	if !store.ValidOnboardingStep(step) {
@@ -269,7 +269,10 @@ func (s *Web) ingestChromeFor(st ingest.Status, last *store.IngestRun) chromeDat
 		if last.TriggeredBy == store.IngestTriggerProfileRescore {
 			prefix = "rescore ok"
 		}
-		return chromeData{IngSub: prefix + " · " + agoPhrase(last.StartedAt, now)}
+		return chromeData{
+			Chip:   ingestChipData{State: "idle"},
+			IngSub: prefix + " · " + agoPhrase(last.StartedAt, now),
+		}
 	case last.Status == store.IngestStatusError:
 		// Red chip, tab and menu item until the next successful run.
 		ago := agoPhrase(last.StartedAt, now)
@@ -304,7 +307,7 @@ func (s *Web) handleIngest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Web) renderIngestModal(w http.ResponseWriter, r *http.Request, fresh bool) {
-	body, err := s.ingestBody(r.Context(), histPageFromQuery(r), fresh)
+	body, err := s.ingestBody(r.Context(), fresh)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -317,11 +320,22 @@ func (s *Web) renderIngestModal(w http.ResponseWriter, r *http.Request, fresh bo
 	}
 }
 
-// handleIngestRun starts a manual run (a no-op joining the live run if one is
-// already in flight — single-flight lives in the manager) and re-renders the
-// modal body in its running state.
+// handleIngestRun starts a manual run, or with scorer=demo a demo run over the
+// built-in feed (a no-op joining the live run if one is already in flight:
+// single-flight lives in the manager) and re-renders the modal body in its
+// running state.
 func (s *Web) handleIngestRun(w http.ResponseWriter, r *http.Request) {
-	if err := s.ing.Start(r.Context(), store.IngestTriggerManual); err != nil {
+	var err error
+	switch r.URL.Query().Get("scorer") {
+	case "":
+		err = s.ing.Start(r.Context(), store.IngestTriggerManual)
+	case "demo":
+		err = s.ing.StartDemo(r.Context())
+	default:
+		http.Error(w, "unknown scorer", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -342,7 +356,7 @@ func (s *Web) renderIngestAction(w http.ResponseWriter, r *http.Request) {
 		s.renderIngestBar(w, r)
 		return
 	}
-	s.renderIngestBody(w, r.Context(), histPageFromQuery(r))
+	s.renderIngestBody(w, r.Context())
 }
 
 // handleIngestStatus is the poll target: the modal body re-renders itself
@@ -361,7 +375,7 @@ func (s *Web) handleIngestStatus(w http.ResponseWriter, r *http.Request) {
 		s.renderIngestNote(w, r)
 		return
 	}
-	s.renderIngestBody(w, r.Context(), histPageFromQuery(r))
+	s.renderIngestBody(w, r.Context())
 }
 
 // renderIngestBar writes the Sources ingest bar, then the running note out of
@@ -516,10 +530,10 @@ func (s *Web) handleIngestRunLog(w http.ResponseWriter, r *http.Request) {
 // renderIngestBody writes the modal-body fragment plus the out-of-band chrome
 // updates, so every poll/mutation response also keeps the topbar chip, the
 // side menu's ingest item and the edge tab in sync on whatever page is open.
-func (s *Web) renderIngestBody(w http.ResponseWriter, ctx context.Context, page int) {
+func (s *Web) renderIngestBody(w http.ResponseWriter, ctx context.Context) {
 	// Poll, run and cancel all continue a modal that is already open, so they
 	// render the watched state rather than the fresh one.
-	body, err := s.ingestBody(ctx, page, false)
+	body, err := s.ingestBody(ctx, false)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -561,42 +575,27 @@ func (s *Web) writeIngestChrome(w http.ResponseWriter, ctx context.Context) {
 }
 
 // ingestBody assembles the modal body's view model from the manager snapshot
-// and the requested history page. The top summary (last run, counts, banner,
-// chip) always reflects the newest runs, independent of which history page is
-// shown; only the History table pages.
+// and the newest runs. The summary (last run, counts, banner, chip) and the
+// short history table both read from the same newest runs.
 //
 // fresh marks a just-opened modal. The manager keeps a finished run's log until
 // the next one starts, and the banner is a completion notice, so with no run in
 // flight a fresh render drops both: the panel opens ready for the next ingest,
 // with the finished run readable in the history table below.
-func (s *Web) ingestBody(ctx context.Context, page int, fresh bool) (ingestBodyData, error) {
+func (s *Web) ingestBody(ctx context.Context, fresh bool) (ingestBodyData, error) {
 	st := s.ing.Status()
-	if page < 0 {
-		page = 0
-	}
-	history, hasMore, err := s.db.ListIngestRuns(ctx, ingestHistoryLimit, page*ingestHistoryLimit)
+	history, hasMore, err := s.db.ListIngestRuns(ctx, ingestModalHistory, 0)
 	if err != nil {
 		return ingestBodyData{}, err
 	}
-	// On page 0 the history already starts at the newest run, so reuse it for
-	// the summary; deeper pages need a separate newest-page read.
 	newest := history
-	if page > 0 {
-		if newest, _, err = s.db.ListIngestRuns(ctx, ingestHistoryLimit, 0); err != nil {
-			return ingestBodyData{}, err
-		}
-	}
 
 	now := time.Now()
 	data := ingestBodyData{
-		Running:      st.Running,
-		RunKind:      st.Kind,
-		RunProfile:   st.Profile,
-		HistPage:     page,
-		HistPrevPage: page - 1,
-		HistNextPage: page + 1,
-		HistHasPrev:  page > 0,
-		HistHasNext:  hasMore,
+		Running:    st.Running,
+		RunKind:    st.Kind,
+		RunProfile: st.Profile,
+		HistMore:   hasMore,
 	}
 	if st.Running {
 		data.ElapsedMS, data.Clock = runClock(st.StartedAt, now)
@@ -630,19 +629,9 @@ func (s *Web) ingestBody(ctx context.Context, page int, fresh bool) (ingestBodyD
 	return data, nil
 }
 
-// histPageFromQuery reads the zero-based history page from ?histPage=N,
-// clamping anything missing or invalid to 0.
-func histPageFromQuery(r *http.Request) int {
-	n, err := strconv.Atoi(r.URL.Query().Get("histPage"))
-	if err != nil || n < 0 {
-		return 0
-	}
-	return n
-}
-
 // ingestChip derives the topbar chip state: "running" while a run is live,
 // "failed" after an error, "warn" after a cancel, "never" until the first run,
-// hidden otherwise (idle and healthy).
+// a green "idle" play chip otherwise (healthy).
 func ingestChip(running bool, kind ingest.RunKind, last *ingestRunView) ingestChipData {
 	if running {
 		activity := "ingest"
@@ -660,7 +649,7 @@ func ingestChip(running bool, kind ingest.RunKind, last *ingestRunView) ingestCh
 	case store.IngestStatusCancelled:
 		return ingestChipData{State: "warn", Ago: last.When, Activity: runActivity(last.Rescore)}
 	default:
-		return ingestChipData{}
+		return ingestChipData{State: "idle"}
 	}
 }
 
@@ -684,6 +673,7 @@ func toIngestRunView(r store.IngestRun, now time.Time) ingestRunView {
 		Counts:  r.Counts,
 		Error:   r.Error,
 		Rescore: r.TriggeredBy == store.IngestTriggerProfileRescore,
+		Demo:    r.TriggeredBy == store.IngestTriggerDemo,
 	}
 	if r.FinishedAt != nil {
 		v.Took = fmtRunDur(r.FinishedAt.Sub(r.StartedAt))

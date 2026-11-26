@@ -1,0 +1,92 @@
+{{define "tour"}}
+{{/* The row contract is the header comment of static/js/tour.js. */}}
+<svg class="tour-mask" id="tourMask" aria-hidden="true"><path class="tour-mask__dim"/><path class="tour-mask__edge"/></svg>
+<aside class="tour" id="tourCard" role="dialog" aria-label="Guided tour"{{if .Chrome.FirstRun}} data-tour-fresh{{end}} hidden>
+  <span class="tour__arrow" aria-hidden="true"></span>
+  <div class="tour__body" aria-live="polite">
+    <section class="tour__step" data-tour-step="feed" data-tour-n="1" data-tour-reveal="topnav rail" data-tour-advance="at-sources" hidden>
+      <pre class="tour__bunny" aria-hidden="true">(\_/)
+(^_^)
+(")_(")</pre>
+      <p class="tour__count" data-tour-count></p>
+      <h2 class="tour__title">Your feed</h2>
+      <p class="tour__copy">Scored stories land here. To add feeds, open Sources: under Feed up top, or in the side menu.</p>
+      <span hidden data-tour-on data-path="^/(feed/?)?$" data-ring=".topbar__nav .navgrp" data-ring-also='#navRail a[href="/feed"], #navRail a[href="/sources"], #navRail a[href="/briefing"]' data-point='.topbar__nav a[href="/sources"]' data-side="below" data-to="sources" data-via='.topbar__nav a[href="/sources"]'></span>
+      <div class="tour__foot"><button class="clk-btn clk-btn--go" type="button" data-tour-primary data-tour-next>Next</button><button class="tour__end" type="button" data-tour-end>End tour</button></div>
+    </section>
+    <section class="tour__step" data-tour-step="sources" data-tour-n="2" hidden>
+      <p class="tour__count" data-tour-count></p>
+      <h2 class="tour__title">Your sources</h2>
+      <p class="tour__copy">Manage the feeds you read here. The Library has over 100 ready-made ones by topic. Add any later, nothing needed now.</p>
+      <span hidden data-tour-on data-path="^/sources" data-ring=".sh-nav" data-side="right" data-to="ingest" data-via='.topbar__nav a[href="/feed"]'></span>
+      <div class="tour__foot"><button class="clk-btn clk-btn--go" type="button" data-tour-primary data-tour-next>Next</button><button class="tour__end" type="button" data-tour-end>End tour</button></div>
+    </section>
+    <section class="tour__step" data-tour-step="ingest" data-tour-n="3" data-tour-reveal="rail" data-tour-advance="runner-open" hidden>
+      <p class="tour__count" data-tour-count></p>
+      <h2 class="tour__title">Run ingestion</h2>
+      <p class="tour__copy">Ingestion fills your feed. Start a run from Ingestion up top, or ingest in the side menu.</p>
+      <span hidden data-tour-on data-path="^/(feed/?)?$" data-ring="#ingChip" data-ring-also="#navIngest" data-to="explain"></span>
+      <div class="tour__foot"><button class="clk-btn clk-btn--go" type="button" data-tour-primary data-tour-next>Next</button><button class="tour__end" type="button" data-tour-end>End tour</button></div>
+    </section>
+    <section class="tour__step" data-tour-step="explain" data-tour-n="4" data-tour-when="runner-open" hidden>
+      <p class="tour__count" data-tour-count></p>
+      <h2 class="tour__title">Ingestion</h2>
+      <p class="tour__copy">Ingestion fetches your feeds and scores each story against your profile. Pick the model in Scoring and the feeds in Sources. Your profile lives in Settings, Profiles. All runs keeps the history.</p>
+      <span hidden data-tour-on data-path=".*" data-ring="#modal .ing__nav" data-to="demo"></span>
+      <div class="tour__foot"><button class="clk-btn clk-btn--go" type="button" data-tour-primary data-tour-next>Next</button><button class="tour__end" type="button" data-tour-end>End tour</button></div>
+    </section>
+    <section class="tour__step" data-tour-step="demo" data-tour-n="5" data-tour-when="run-failed" hidden>
+      <p class="tour__count" data-tour-count></p>
+      <h2 class="tour__title">Try it on a demo feed</h2>
+      <p class="tour__copy">The demo run failed; the runner shows why.</p>
+      <span hidden data-tour-on data-path=".*" data-ring="#modal .ing__errline"></span>
+      <div class="tour__foot"><button class="clk-btn clk-btn--go" type="button" data-tour-primary data-tour-run hx-post="/ingest/run?scorer=demo" hx-target="#ingestBody" hx-swap="outerHTML">Run the demo again</button><button class="tour__end" type="button" data-tour-end>End tour</button></div>
+    </section>
+    <section class="tour__step" data-tour-step="demo" data-tour-n="5" data-tour-when="demo-done" hidden>
+      <p class="tour__count" data-tour-count></p>
+      <h2 class="tour__title">Try it on a demo feed</h2>
+      <p class="tour__copy">The demo run is done. One story was fetched, scored and stored.</p>
+      <span hidden data-tour-on data-path=".*" data-ring="#modal .ing__done" data-to="done" data-via='#modal .ing__done a[href="/feed"]'></span>
+      <div class="tour__foot"><button class="clk-btn clk-btn--go" type="button" data-tour-primary data-tour-next>Show my feed</button><button class="tour__end" type="button" data-tour-end>End tour</button></div>
+    </section>
+    <section class="tour__step" data-tour-step="demo" data-tour-n="5" data-tour-when="running" hidden>
+      <p class="tour__count" data-tour-count></p>
+      <h2 class="tour__title">Try it on a demo feed</h2>
+      <p class="tour__copy">Running: fetch, score, store.</p>
+      <span hidden data-tour-on data-path=".*" data-ring="#modal .ing__log"></span>
+      <div class="tour__foot"><button class="clk-btn clk-btn--go" type="button" data-tour-primary aria-disabled="true">Running...</button><button class="tour__end" type="button" data-tour-end>End tour</button></div>
+    </section>
+    <section class="tour__step" data-tour-step="demo" data-tour-n="5" hidden>
+      <p class="tour__count" data-tour-count></p>
+      <h2 class="tour__title">Try it on a demo feed</h2>
+      <p class="tour__copy">No model needed. This run uses Keywords on one built-in demo feed, so you can watch a whole run. Your settings stay as they are.</p>
+      <span hidden data-tour-on data-path=".*" data-ring="#modal .ing__go"></span>
+      <span hidden data-tour-on data-path=".*" data-ring="#modal .ing__btn--run:not([disabled])"></span>
+      <span hidden data-tour-on data-path=".*"></span>
+      <div class="tour__foot"><button class="clk-btn clk-btn--go" type="button" data-tour-primary data-tour-run hx-post="/ingest/run?scorer=demo" hx-target="#ingestBody" hx-swap="outerHTML">Run the demo</button><button class="tour__end" type="button" data-tour-end>End tour</button></div>
+    </section>
+    <section class="tour__step" data-tour-step="done" data-tour-n="6" data-tour-when="demo-row" hidden>
+      <pre class="tour__bunny" aria-hidden="true">(\_/)
+\(^_^)/
+(")_(")</pre>
+      <p class="tour__count" data-tour-count></p>
+      <h2 class="tour__title">Done</h2>
+      <p class="tour__copy">That's your first scored story. It is a demo item: Hide removes it. Next: add real feeds from the Library and connect a model in Scoring.</p>
+      <p class="tour__links"><a class="tour__link" href="/sources/library">Open Library</a><a class="tour__link" href="/settings/scoring">Open Scoring</a></p>
+      <span hidden data-tour-on data-path="^/(feed/?)?$" data-ring=".row[data-demo]"></span>
+      <div class="tour__foot"><button class="clk-btn clk-btn--go" type="button" data-tour-primary data-tour-finish>Finish</button><button class="tour__end" type="button" data-tour-end>End tour</button></div>
+    </section>
+    <section class="tour__step" data-tour-step="done" data-tour-n="6" hidden>
+      <pre class="tour__bunny" aria-hidden="true">(\_/)
+\(^_^)/
+(")_(")</pre>
+      <p class="tour__count" data-tour-count></p>
+      <h2 class="tour__title">Done</h2>
+      <p class="tour__copy">That's the tour. Add real feeds from the Library and connect a model in Scoring.</p>
+      <p class="tour__links"><a class="tour__link" href="/sources/library">Open Library</a><a class="tour__link" href="/settings/scoring">Open Scoring</a></p>
+      <span hidden data-tour-on data-path="^/(feed/?)?$"></span>
+      <div class="tour__foot"><button class="clk-btn clk-btn--go" type="button" data-tour-primary data-tour-finish>Finish</button><button class="tour__end" type="button" data-tour-end>End tour</button></div>
+    </section>
+  </div>
+</aside>
+{{end}}

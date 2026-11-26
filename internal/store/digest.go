@@ -35,13 +35,15 @@ func (s *Store) DigestItems(ctx context.Context, start, end time.Time, limit int
 	if limit < 1 || limit > MaxDigestItems {
 		return nil, fmt.Errorf("digest limit must be between 1 and %d", MaxDigestItems)
 	}
+	noDemo, args := demoExclusion("")
+	args = append(args, sqlTime(start), sqlTime(end), limit)
 	rows, err := s.query(ctx, `SELECT id, source, title, link,
 		published_at, created_at,
 		llm_score, COALESCE(llm_score_reason, '')
 		FROM items
-		WHERE llm_score IS NOT NULL AND `+itemDate+` >= ? AND `+itemDate+` < ?
+		WHERE llm_score IS NOT NULL AND `+noDemo+` AND `+itemDate+` >= ? AND `+itemDate+` < ?
 		ORDER BY llm_score DESC, `+itemDate+` DESC, id ASC
-		LIMIT ?`, sqlTime(start), sqlTime(end), limit)
+		LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query digest items: %w", err)
 	}

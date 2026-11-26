@@ -164,6 +164,13 @@
   --z-nav-hot:43;
   --z-nav-tab:44;
   --z-navrail:45;
+  /* The tour's dim: over the bar and the side menu. Its card is over the dim and
+     the save bar, under the first-run popup. */
+  --z-tour-mask:46;
+  --z-tour:47;
+  /* The card beside a runner sits over the modal layers. */
+  --z-tour-over:61;
+  --tour-runner-top:72px;
   --z-modal:50;
   --z-modal-top:60;
 
@@ -352,11 +359,11 @@ header.topbar{
   content:"";position:absolute;left:0;top:50%;height:12px;margin-top:-6px;
   border-left:1px solid var(--line);
 }
-.navgrp:hover .navgrp__more,.navgrp:focus-within .navgrp__more,.navgrp--open .navgrp__more,
+.navgrp:hover .navgrp__more,.navgrp:focus-within .navgrp__more,.navgrp--open .navgrp__more,.navgrp.tour-open .navgrp__more,
 :root[data-navx="off"] .navgrp__more{
   grid-template-columns:1fr;opacity:1;transition-delay:0s;
 }
-.navgrp:hover .navgrp__car,.navgrp:focus-within .navgrp__car,.navgrp--open .navgrp__car,
+.navgrp:hover .navgrp__car,.navgrp:focus-within .navgrp__car,.navgrp--open .navgrp__car,.navgrp.tour-open .navgrp__car,
 :root[data-navx="off"] .navgrp__car{
   opacity:0;width:0;margin:0;transition-delay:0s;
 }
@@ -1145,6 +1152,13 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
   padding:6px 10px;border-radius:8px;transition:color .15s ease,background-color .15s ease;
 }
 .feed-empty__alt:hover{color:var(--accent);background:var(--fill);}
+/* The take-the-tour control is a button; reset what the UA gives buttons so it
+   matches the sibling link. */
+button.feed-empty__alt{
+  margin:0;border:0;background:none;appearance:none;
+  font-family:inherit;font-weight:inherit;line-height:inherit;letter-spacing:inherit;
+  cursor:pointer;
+}
 
 /* Rows are elevated cards */
 .row{
@@ -1447,6 +1461,7 @@ a.cmd__arg:focus-visible{outline:1px solid var(--accent);outline-offset:3px;bord
   .topbar__nav{gap:4px;}
   .topbar__nav a{padding:0 9px;}
   .topbar__amb .ing-chip{font-size:0;gap:0;}
+  .topbar__amb .ing-chip__play{width:11px;height:11px;}
   .topbar__right{gap:8px;min-width:0;}
   .topbar__amb{gap:8px;padding:5px 10px;min-width:0;}
 }
@@ -1827,6 +1842,10 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
    the alarm a cancelled run leaves behind. */
 .ing-chip--never{color:var(--caution);}
 .ing-chip--never i{background:transparent;box-shadow:inset 0 0 0 1px var(--caution);}
+/* Idle and healthy: a green play button that opens the runner. */
+.ing-chip--idle{color:var(--score-high);}
+.ing-chip__play{flex:none;filter:drop-shadow(0 0 4px var(--score-high));}
+.ing-chip--idle:hover{background:var(--fill-hover,var(--fill));}
 @keyframes ing-pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
 @media (prefers-reduced-motion: reduce){
   .navrail__dot--run,.navtab--run,.ing-chip--running i,.ing__st--run,.ing__live{animation:none;}
@@ -1845,33 +1864,120 @@ body.nav-open .navtab{opacity:0;pointer-events:none;}
 /* --- First-run welcome --------------------------------------------------- */
 /* Under settings and the htmx dialogs, so a step opens over it. */
 .modal--welcome{z-index:calc(var(--z-modal) - 2);}
-.modal__frame--welcome{width:min(560px,94vw);}
-.welcome__steps{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:8px;}
-.welcome__step{
-  display:flex;align-items:center;gap:14px;width:100%;padding:12px 14px;
-  border:0;border-radius:var(--r-sm);background:var(--sel-fill);box-shadow:var(--sel-shadow);
-  color:var(--title);font:inherit;font-size:1.4rem;text-align:left;cursor:pointer;
-  transition:background .14s var(--ease),transform .14s var(--ease);
+.modal__frame--welcome{width:min(580px,94vw);}
+.welcome{gap:0;padding:26px 30px 24px;}
+.welcome__top{display:flex;align-items:center;gap:22px;}
+.welcome .ask__lead{font-size:1.6rem;}
+.welcome .ask__sub{font-size:1.35rem;line-height:1.6;}
+.welcome__bunny{
+  margin:0;flex:none;font-family:var(--font-mono);font-size:2.4rem;line-height:1.2;font-weight:600;
+  color:var(--accent);text-shadow:0 0 12px var(--accent-ring);
 }
-.welcome__step:hover{background:var(--fill-hover);}
-.welcome__step:active{transform:scale(.99);}
-.welcome__step:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
-.welcome__opt{color:var(--text-dim);opacity:.75;font-style:italic;}
-.welcome__txt{flex:1;display:flex;flex-direction:column;gap:3px;}
-.welcome__txt small{font-size:1.2rem;color:var(--text-dim);}
-/* A way in, not a box to fill: the arrow until the step is opened, then a
-   quiet tick in its place. */
-.welcome__mark{
-  flex:none;width:1.6rem;text-align:center;line-height:1;
-  color:var(--text-dim);transition:transform .14s var(--ease),color .14s var(--ease);
+.welcome__text{display:flex;flex:1 1 0;flex-direction:column;gap:6px;min-width:0;}
+.welcome .ask__sub{color:var(--text);}
+.welcome__q{margin:22px 0 0;font-size:1.4rem;line-height:1.4;color:var(--title);}
+.welcome__acc{color:var(--accent);}
+.welcome__cursor{display:inline-block;width:.6em;height:1.05em;margin-left:4px;vertical-align:-.2em;background:var(--accent);}
+.welcome__acts{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:20px;}
+/* Colours, states and the look differences come from the shared dialog button
+   rules; this only sizes the pills for an easy click. */
+.welcome__acts .clk-btn.welcome__btn{
+  height:auto;min-width:168px;min-height:40px;padding:8px 20px 8px 9px;
+  justify-content:flex-start;gap:10px;font-size:1.3rem;line-height:1;
 }
-.welcome__mark::after{content:"\203A";font-size:1.8rem;}
-.welcome__step:hover .welcome__mark{color:var(--accent);transform:translateX(2px);}
-.welcome__step.is-done .welcome__mark{color:var(--accent);opacity:.8;transform:none;}
-.welcome__step.is-done .welcome__mark::after{content:"\2713";font-size:1.3rem;}
-/* The tick, said to a screen reader. */
-.welcome__state{display:none;}
-.welcome__step.is-done .welcome__state{display:block;position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
+.welcome__btn--go{margin-left:auto;}
+.welcome__key{
+  display:inline-flex;flex:none;align-items:center;justify-content:center;width:22px;height:22px;
+  border-radius:50%;background:var(--fill);color:var(--text);font-size:1.15rem;font-weight:600;
+}
+.welcome__btn--go .welcome__key{color:var(--accent);}
+.welcome__note{margin:18px 0 0;font-size:1.2rem;line-height:1.5;color:var(--text);}
+@media (max-width:480px){
+  .welcome__top{flex-direction:column;align-items:flex-start;}
+  .welcome__acts{flex-direction:column-reverse;flex-wrap:nowrap;align-items:stretch;gap:8px;}
+  .welcome__acts .clk-btn.welcome__btn{width:100%;}
+  .welcome__btn--go{margin-left:0;}
+}
+
+/* --- Guided tour --------------------------------------------------------- */
+/* The dim: one fixed svg, a viewport rectangle with a rounded hole over the
+   target (drawn by tour.js). Visual only, so the page underneath stays usable. */
+.tour-mask{display:none;position:fixed;inset:0;width:100%;height:100%;z-index:var(--z-tour-mask);pointer-events:none;}
+.tour-mask.is-on{display:block;}
+.tour-mask__dim{fill:var(--bg);fill-opacity:.7;fill-rule:evenodd;}
+.tour-mask__edge{fill:none;stroke:var(--accent);stroke-width:1;}
+/* Placed by tour.js beside the control it points at, else centred under the topbar. */
+.tour{
+  position:fixed;left:12px;top:72px;z-index:var(--z-tour);
+  width:min(440px, calc(100vw - 24px));box-sizing:border-box;
+  display:flex;flex-direction:column;padding:20px 24px 18px;
+  background:var(--e3-fill);border:1px solid var(--e3-line);border-radius:var(--r-md);
+  -webkit-backdrop-filter:var(--e3-blur);backdrop-filter:var(--e3-blur);
+  box-shadow:var(--e2-shadow);
+  font-size:1.5rem;line-height:1.55;color:var(--text);
+}
+.tour[hidden]{display:none;}
+/* Beside the runner it points into: above the modal layer so its backdrop does
+   not dim the card. */
+.tour--modal{z-index:var(--z-tour-over);}
+.tour:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
+.tour__body{display:flex;flex-direction:column;}
+/* The bunny, when a step has one, takes the left column; otherwise the text
+   spans the card. */
+.tour__step{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 16px;align-items:start;}
+.tour__step[hidden]{display:none;}
+.tour__step .tour__bunny ~ *{grid-column:2;}
+.tour__bunny{grid-column:1;grid-row:1 / span 4;margin:0;font-family:var(--font-mono);font-size:1.6rem;line-height:1.15;color:var(--accent);}
+.tour__count{grid-column:1 / -1;margin:0;font-size:1.2rem;color:var(--text-dim);font-variant-numeric:tabular-nums;}
+.tour__title{grid-column:1 / -1;margin:0;font-size:2rem;font-weight:600;line-height:1.25;color:var(--title);}
+.tour__copy{grid-column:1 / -1;margin:6px 0 0;color:var(--text);}
+.tour__links{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:4px 18px;margin:8px 0 0;}
+.tour__link{padding-block:4px;color:var(--accent);text-decoration:underline;text-underline-offset:3px;}
+.tour__link:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
+.tour__step .tour__foot{grid-column:1 / -1;}
+.tour__foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:16px;}
+.tour__foot .clk-btn[aria-disabled="true"]{opacity:.5;cursor:default;}
+.tour__end{
+  font:inherit;font-size:1.2rem;line-height:1;min-height:28px;padding:6px 10px;border:0;border-radius:var(--r-full);
+  background:none;color:var(--text);cursor:pointer;
+}
+.tour__end:hover{color:var(--accent);background:var(--fill);}
+.tour__end:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
+/* End tour is last in tab order (after the primary) and first on screen. */
+.tour__end{order:-1;}
+/* An arrow on the target's centre, at --tour-arrow along the card's edge. */
+.tour__arrow{display:none;position:absolute;width:0;height:0;border:solid transparent;}
+.tour--below .tour__arrow{display:block;top:-10px;left:calc(var(--tour-arrow) - 9px);border-width:0 9px 9px;border-bottom-color:var(--accent);}
+.tour--above .tour__arrow{display:block;bottom:-10px;left:calc(var(--tour-arrow) - 9px);border-width:9px 9px 0;border-top-color:var(--accent);}
+.tour--right .tour__arrow{display:block;left:-10px;top:calc(var(--tour-arrow) - 9px);border-width:9px 9px 9px 0;border-right-color:var(--accent);}
+.tour--left .tour__arrow{display:block;right:-10px;top:calc(var(--tour-arrow) - 9px);border-width:9px 0 9px 9px;border-left-color:var(--accent);}
+@media (max-width:520px){
+  .tour__bunny{display:none;}
+}
+:root[data-theme="minimal"] .tour{
+  background:var(--bg-2);border-color:var(--hairline-strong);
+  -webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:none;
+}
+
+/* A target inside the runner, which has its own backdrop: outline only, so the
+   layout around it never moves. */
+.tour-ring{outline:1px solid var(--accent);outline-offset:2px;}
+
+/* While the tour is on the runner keeps one top, so its idle, running and
+   finished states grow downward and the card beside it never has to move. Wide
+   enough, the runner and the card sit side by side as one centred pair. Weather
+   notices that arrive late would push the page and the spotlight, so they stay
+   out while it runs. On a narrow screen the runner starts below the card. */
+html.tour-on #modal .modal:has(.modal__frame--ingest){align-items:flex-start;padding-top:var(--tour-runner-top);}
+html.tour-on #modal .modal__frame--ingest{max-height:calc(100vh - var(--tour-runner-top) - 24px);}
+html.tour-on .wx-subbar:has(.wx-hint),html.tour-on .wx-band:has(.wx-hint),html.tour-on .wx-chip:has(.wx-hint),html.tour-on .src-wxrow:has(.wx-hint){display:none !important;}
+@media (max-width:520px){
+  html.tour-on{--tour-runner-top:300px;}
+}
+@media (min-width:1380px){
+  html.tour-on #modal .modal:has(.modal__frame--ingest){justify-content:flex-start;padding-left:max(24px, calc((100vw - 880px - 450px) / 2));}
+}
+
 .ask__foot{display:flex;justify-content:flex-end;gap:9px;margin-top:4px;}
 
 /* A footer of actions rather than a caption: the runner reaches settings and
@@ -1899,7 +2005,7 @@ button.modal__act{border:0;font:inherit;}
 /* The one that leaves the app says so. */
 .modal__foot--acts .modal__act--ext{margin-right:auto;}
 .ing{padding:16px 22px 20px;min-height:0;overflow-y:auto;overscroll-behavior:contain;}
-.ing__runline{display:flex;align-items:center;gap:9px;font-size:1.45rem;flex-wrap:wrap;}
+.ing__runline{display:flex;align-items:center;justify-content:center;gap:9px;margin-top:14px;font-size:1.45rem;flex-wrap:wrap;}
 .ing__st{font-weight:500;}
 .ing__st--ok{color:var(--score-high);}
 .ing__st--err{color:var(--warn);}
@@ -1907,15 +2013,9 @@ button.modal__act{border:0;font:inherit;}
 .ing__sep{color:var(--line);}
 .ing__dim{color:var(--text-dim);}
 .ing__trigger{font-size:1.15rem;padding:2px 9px;border-radius:999px;background:var(--fill);color:var(--text-dim);}
-.ing__errline{margin-top:9px;font-size:1.3rem;color:var(--warn);}
-.ing__counts{display:flex;gap:9px;margin-top:14px;flex-wrap:wrap;}
-.ing__counts.is-idle{visibility:hidden;}
-.ing__cnt{background:var(--fill);border-radius:8px;padding:8px 14px;font-size:1.25rem;color:var(--text-dim);}
-.ing__cnt b{display:block;font-size:1.9rem;color:var(--title);font-weight:500;}
-.ing__cnt--new b{color:var(--accent);}
-.ing__cnt--warn b{color:var(--warn);}
+.ing__errline{margin-top:9px;text-align:center;font-size:1.3rem;color:var(--warn);}
 .ing__actions{display:flex;align-items:center;gap:10px;margin-top:14px;}
-.ing__actions--end{justify-content:flex-end;margin-top:10px;}
+.ing__actions--split .ing__btn--cancel{margin-left:auto;}
 .ing__btn{
   font-family:inherit;font-size:1.35rem;border:0;border-radius:8px;
   padding:9px 18px;cursor:pointer;transition:background .15s ease,color .15s ease,box-shadow .15s ease;
@@ -1931,6 +2031,57 @@ button.modal__act{border:0;font:inherit;}
 .ing__btn:disabled{
   background:var(--fill);color:var(--text-dim);opacity:.45;
   box-shadow:inset 0 0 0 1px var(--hairline);cursor:default;
+}
+/* The counts and the next-step links reuse the Feed's tile row, so both looks
+   restyle them. The links are accent-filled so they read as places to go. */
+.ing__stats,.ing__nav{margin-bottom:12px;}
+.ing__stats .tile{min-width:84px;}
+.ing__stats.is-idle{opacity:.4;}
+.ing__stats .tile--bad .num{color:var(--warn);text-shadow:none;}
+.ing__nav .tile{min-width:120px;}
+.tile--go{
+  color:var(--accent);text-decoration:none;cursor:pointer;
+  border-color:rgba(128,203,196,.14);
+  transition:background .15s var(--ease),border-color .15s var(--ease),transform .15s var(--ease);
+}
+.tile--go .num{font-size:1.4rem;font-weight:500;text-shadow:none;}
+.tile--go .num i{font-style:normal;display:inline-block;transition:transform .15s var(--ease);}
+.tile--go:hover{background:var(--tint);border-color:rgba(128,203,196,.45);}
+.tile--go:hover .num i{transform:translateX(3px);}
+.tile--go:focus-visible{outline:1px solid var(--accent);outline-offset:2px;}
+:root[data-theme="minimal"] .ing__stats,:root[data-theme="minimal"] .ing__nav{margin-bottom:10px;}
+:root[data-theme="minimal"] .tile--go{background:none;border:0;color:var(--accent);}
+:root[data-theme="minimal"] .tile.tile--go .num{color:var(--accent);}
+:root[data-theme="minimal"] .tile--go .label{display:none;}
+:root[data-theme="minimal"] .tile--go:hover{background:none;text-decoration:underline;}
+:root[data-theme="minimal"] .ing__stats .tile--bad .num{color:var(--warn);}
+
+/* Idle runner: the run button is the centre of the popup, with the last run
+   under it. Starting a run swaps in the log layout, with Run back on the left. */
+.ing--idle{display:flex;flex-direction:column;align-items:center;text-align:center;animation:ing-rise .35s var(--ease) both;}
+.ing--idle .ing__stats,.ing--idle .ing__nav{align-self:stretch;}
+.ing--idle .ing__pad{display:flex;flex-direction:column;align-items:center;gap:16px;margin:40px 0 38px;}
+.ing--idle .ing__hist{align-self:stretch;text-align:left;margin-top:22px;}
+.ing__go{
+  position:relative;display:grid;place-items:center;width:8.8rem;height:8.8rem;border:0;border-radius:50%;
+  background:var(--tint);color:var(--score-high);cursor:pointer;
+  box-shadow:inset 0 0 0 2px var(--score-high);
+  transition:transform .18s var(--ease),background .18s var(--ease);
+}
+.ing__go svg{position:relative;margin-left:4px;}
+.ing__go:hover{transform:scale(1.06);background:var(--tint-hover);}
+.ing__go:active{transform:scale(.97);}
+.ing__go:focus-visible{outline:2px solid var(--accent);outline-offset:5px;}
+.ing__go-ring{position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 1px var(--score-high);opacity:0;
+  animation:ing-ring 2.8s ease-out infinite;pointer-events:none;}
+.ing__go-ring--b{animation-delay:1.4s;}
+.ing__go-lbl{font-size:1.6rem;font-weight:500;color:var(--title);}
+@keyframes ing-ring{0%{transform:scale(1);opacity:.55;}100%{transform:scale(1.7);opacity:0;}}
+@keyframes ing-rise{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+@media (prefers-reduced-motion: reduce){
+  .ing__go-ring{animation:none;}
+  .ing--idle{animation:none;}
+  .ing__go{transition:none;}
 }
 .ing__log{margin-top:12px;border:1px solid var(--hairline);border-radius:8px;background:rgba(0,0,0,.28);}
 .ing__logbar{
@@ -2008,15 +2159,12 @@ button.modal__act{border:0;font:inherit;}
 .ing__hist-log td{padding:0;}
 .ing__hist-log .ing__lines{height:auto;max-height:230px;background:rgba(0,0,0,.28);}
 .ing__hist-nolog{padding:10px 12px;color:var(--text-dim);opacity:.7;font-style:italic;font-size:1.25rem;}
-.ing__hist-pager{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:12px;font-size:1.2rem;}
-.ing__pg{
-  font-family:inherit;font-size:inherit;background:none;border:0;cursor:pointer;
-  color:var(--accent);padding:3px 10px;border-radius:999px;
-  transition:background .13s ease,color .13s ease;
-}
-.ing__pg:hover{background:var(--tint);}
-.ing__pg--off{color:var(--text-dim);opacity:.4;cursor:default;}
-.ing__pg-n{color:var(--text-dim);letter-spacing:0.042em;}
+/* A dimmed pointer to the rest of the history, lighting up like the All runs link. */
+.ing__more{display:block;text-align:right;margin-top:10px;font-size:1.2rem;color:var(--text-dim);text-decoration:none;opacity:.7;transition:color .13s ease,opacity .13s ease;}
+.ing__more i{font-style:normal;display:inline-block;transition:transform .13s ease;}
+.ing__more:hover{color:var(--accent);opacity:1;}
+.ing__more:hover i{transform:translateX(3px);}
+:root[data-theme="minimal"] .ing__more{text-decoration:none;}
 
 /* --- Ingest bar (Sources pages) ------------------------------------------ */
 .ingb{
@@ -3618,6 +3766,11 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
 .stp-tabs{order:0;z-index:15;top:auto;scrollbar-width:none;min-width:0;grid-auto-columns:108px;max-width:100%;overflow:visible;}
 .stp-tabs::-webkit-scrollbar{display:none;}
 @media (max-width:853px){ .stp-tabs{overflow-x:auto;} }
+/* Wide enough for every tab: the bar fills its row and the tabs share it. */
+@media (min-width:854px){
+  .stp-tabs{flex:1 1 auto;display:grid;grid-auto-columns:1fr;width:100%;}
+  .stp-tab,.stp-tab:hover,.stp-tab.is-on{width:auto;}
+}
 .maze-panel{display:none;}
 #mazeTabTodos:checked ~ .maze-grid .maze-panel--todos,
 #mazeTabIdeas:checked ~ .maze-grid .maze-panel--ideas{display:block;}
@@ -4532,8 +4685,8 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
    are fixed heights, and Minimal hands the bar's height back as top padding,
    so switching the look restyles a card without moving anything. */
 .gate__card{
-  --gate-bar:3.8rem;
-  width:min(46rem,100%);overflow:hidden;
+  --gate-bar:38px;
+  width:min(460px,100%);overflow:hidden;
   font-family:var(--font-mono);color:var(--text);
   background:rgba(20,28,32,.94);border:1px solid rgba(255,255,255,.1);border-radius:var(--r-sm);
   -webkit-backdrop-filter:var(--e3-blur);
@@ -4643,9 +4796,11 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
 .gate__mode input{position:absolute;inset:0;margin:0;opacity:0;cursor:pointer;}
 .gate__mode-body{
   display:flex;flex-direction:column;gap:3px;padding:14px 16px;
+  box-sizing:border-box;min-height:67px;
   border-radius:var(--r-xs);background:var(--fill);box-shadow:inset 0 0 0 1px var(--hairline);
   transition:background .15s var(--ease),box-shadow .15s var(--ease),transform .1s var(--ease);
 }
+@media (min-width:481px){.gate__mode-body{height:67px;}}
 .gate__mode input:hover ~ .gate__mode-body{background:var(--fill-hover);box-shadow:inset 0 0 0 1px var(--hairline-strong);}
 .gate__mode input:active ~ .gate__mode-body{transform:translateY(1px) scale(.995);}
 .gate__mode input:focus-visible ~ .gate__mode-body{outline:1px solid var(--accent);outline-offset:3px;}
@@ -4791,13 +4946,13 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
    same card making space rather than a new page. Every part of the picker has
    a fixed height, so both looks draw it at one size. */
 .gate__split{display:block;}
-.gate__card--first{width:min(96rem,100%);}
-.gate__card--first .gate__split{display:grid;grid-template-columns:1fr minmax(0,46rem);}
+.gate__card--first{width:min(960px,100%);}
+.gate__card--first .gate__split{display:grid;grid-template-columns:1fr minmax(0,460px);}
 @media (prefers-reduced-motion: no-preference){
   .gate__card--first:not(.gate--err){animation:gate-widen .55s var(--spring);}
   .gate__card--first:not(.gate--err) .gate__pick{animation:gate-pick-in .35s .4s var(--ease) both;}
 }
-@keyframes gate-widen{from{width:46rem;}}
+@keyframes gate-widen{from{width:460px;}}
 @keyframes gate-pick-in{from{opacity:0;transform:translateX(-6px);}}
 
 /* The picker's header lines up with the form's bunny row: the same top
@@ -4806,11 +4961,11 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
   display:flex;flex-direction:column;gap:16px;min-width:0;padding:18px 26px 24px;
   background:var(--bg-2);border-right:1px solid var(--hairline);
 }
-.gate__pick-hd{display:flex;flex-direction:column;justify-content:center;gap:5px;height:4.2rem;margin-bottom:4px;}
+.gate__pick-hd{display:flex;flex-direction:column;justify-content:center;gap:5px;height:42px;margin-bottom:6px;}
 .gate__pick-cmd{font-size:1.2rem;color:var(--text-dim);opacity:.7;}
 .gate__pick-t{font-size:1.5rem;font-weight:600;color:var(--title);}
 .gate__pick-sub{font-size:1.3rem;color:var(--text-dim);}
-.gate__pick-note{margin:auto 0 0;font-size:1.15rem;color:var(--text-dim);}
+.gate__pick-note{margin:auto 0 0;font-size:12px;line-height:15.5px;color:var(--text-dim);}
 
 /* One example feed, drawn in each look. Both drawings share a cell and
    crossfade, so a pick reads as the same feed redrawn. */
@@ -4877,7 +5032,7 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
 /* The two looks sit side by side in both layouts, in the same place; only
    their shape changes: a terminal radio in Default, a soft card with a dot in
    Minimal. They are Settings → Theme's radios, so theme.js drives them. */
-.look__opts{display:grid;flex:none;grid-template-columns:1fr 1fr;gap:10px;height:5.2rem;}
+.look__opts{display:grid;flex:none;grid-template-columns:1fr 1fr;gap:10px;height:52px;}
 .look__opt{position:relative;display:block;min-width:0;cursor:pointer;}
 .look__opt input{position:absolute;inset:0;margin:0;opacity:0;cursor:pointer;}
 .look__opt-body{
@@ -4917,7 +5072,6 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
 :root[data-theme="minimal"] .look__opt input:checked ~ .look__opt-body .look__opt-mk{box-shadow:inset 0 0 0 4px var(--accent);}
 :root[data-theme="minimal"] .look__opt-nm{font-size:1.45rem;font-weight:600;text-transform:none;}
 :root[data-theme="minimal"] .look__opt-ds{font-size:1.15rem;}
-:root[data-theme="minimal"] .gate__pick-note{font-size:1.2rem;}
 :root[data-theme="minimal"] .gate__mode-body{padding:14px 18px;border-radius:var(--r-md);}
 :root[data-theme="minimal"] .gate__mode-nm{font-size:1.45rem;font-weight:600;text-transform:none;}
 :root[data-theme="minimal"] .gate__mode-ds{font-size:1.2rem;}
@@ -4932,7 +5086,7 @@ a.ov-name:focus-visible{outline:1px solid var(--accent);outline-offset:2px;borde
 }
 /* Narrower than the two columns need: the picker stacks under the form. */
 @media (max-width: 1000px){
-  .gate__card--first{width:min(46rem,100%);}
+  .gate__card--first{width:min(460px,100%);}
   .gate__card--first .gate__split{display:flex;flex-direction:column-reverse;}
   .gate__pick{border-right:0;border-top:1px solid var(--hairline);}
   :root[data-theme="minimal"] .gate__pick{padding-top:20px;}
@@ -5142,17 +5296,17 @@ body:has(.stp-savebar) .stp-body{padding-bottom:16px;}
 .stp-row .stp-step .font-step__name{font-family:var(--font-mono);font-size:1.35rem;color:var(--title);}
 
 /* buttons: secondary, primary, destructive */
-.stp .clk-btn,.stp-dlg .clk-btn,.stp-dlg__foot .clk-btn,.prof-confirm__actions .clk-btn,.stp-save,.stp-savebar__discard{
+.stp .clk-btn,.stp-dlg .clk-btn,.stp-dlg__foot .clk-btn,.welcome__acts .clk-btn,.tour__foot .clk-btn,.tour__step .clk-btn,.prof-confirm__actions .clk-btn,.stp-save,.stp-savebar__discard{
   display:inline-flex;align-items:center;justify-content:center;gap:8px;height:var(--stp-h);box-sizing:border-box;padding:0 16px;
   border:0;border-radius:var(--stp-btn-r);font:inherit;font-size:1.2rem;white-space:nowrap;text-decoration:none;cursor:pointer;
   transition:background .15s var(--ease),color .15s var(--ease),box-shadow .15s var(--ease),transform .1s var(--ease);}
-.stp .clk-btn,.stp-dlg .clk-btn,.stp-dlg__foot .clk-btn,.prof-confirm__actions .clk-btn{background:var(--sel-fill);box-shadow:var(--sel-shadow);color:var(--text);}
-.stp .clk-btn:hover:not(:disabled),.stp-dlg .clk-btn:hover:not(:disabled),.stp-dlg__foot .clk-btn:hover:not(:disabled),.prof-confirm__actions .clk-btn:hover:not(:disabled){
+.stp .clk-btn,.stp-dlg .clk-btn,.stp-dlg__foot .clk-btn,.welcome__acts .clk-btn,.tour__foot .clk-btn,.tour__step .clk-btn,.prof-confirm__actions .clk-btn{background:var(--sel-fill);box-shadow:var(--sel-shadow);color:var(--text);}
+.stp .clk-btn:hover:not(:disabled),.stp-dlg .clk-btn:hover:not(:disabled),.stp-dlg__foot .clk-btn:hover:not(:disabled),.welcome__acts .clk-btn:hover:not(:disabled),.tour__foot .clk-btn:hover:not(:disabled),.tour__step .clk-btn:hover:not(:disabled),.prof-confirm__actions .clk-btn:hover:not(:disabled){
   background:var(--sel-fill-hover);color:var(--title);}
 .stp .clk-btn:active,.stp-save:active{transform:scale(.98);}
-.stp .clk-btn--go,.stp-dlg .clk-btn--go,.stp-dlg__foot .clk-btn--go,.prof-confirm__actions .clk-btn--go,.stp-save{
+.stp .clk-btn--go,.stp-dlg .clk-btn--go,.stp-dlg__foot .clk-btn--go,.welcome__acts .clk-btn--go,.tour__foot .clk-btn--go,.tour__step .clk-btn--go,.prof-confirm__actions .clk-btn--go,.stp-save{
   background:var(--tint);box-shadow:inset 0 0 0 1px rgba(128,203,196,.34);color:var(--accent);font-weight:500;}
-.stp .clk-btn--go:hover:not(:disabled),.stp-dlg .clk-btn--go:hover:not(:disabled),.stp-dlg__foot .clk-btn--go:hover:not(:disabled),
+.stp .clk-btn--go:hover:not(:disabled),.stp-dlg .clk-btn--go:hover:not(:disabled),.stp-dlg__foot .clk-btn--go:hover:not(:disabled),.welcome__acts .clk-btn--go:hover:not(:disabled),.tour__foot .clk-btn--go:hover:not(:disabled),.tour__step .clk-btn--go:hover:not(:disabled),
 .prof-confirm__actions .clk-btn--go:hover:not(:disabled),.stp-save:hover{background:rgba(128,203,196,.22);color:var(--accent);}
 .stp .clk-btn--danger,.stp-dlg .clk-btn--danger,.stp-dlg__foot .clk-btn--danger,.prof-confirm__actions .clk-btn--danger,.stp .clk-btn.prof__danger{
   background:rgba(255,83,112,.12);box-shadow:inset 0 0 0 1px rgba(255,83,112,.3);color:var(--warn);}
@@ -5415,7 +5569,6 @@ body:has(.stp-savebar) .stp-body{padding-bottom:16px;}
 .settings-btn[aria-current] .gear svg{transform:rotate(90deg);}
 a.settings-btn{text-decoration:none;}
 a.navrail__item--cmd{text-decoration:none;}
-a.welcome__step{text-decoration:none;}
 
 /* --- Minimal ---------------------------------------------------------------
    Default's page plus what Minimal changes elsewhere: the pane is flat, the tab

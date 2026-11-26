@@ -101,8 +101,10 @@
     document.body.classList.remove('nav-open');
     setExpanded(false);
   }
+  // A guided tour holds the menu out while it points at it.
+  var held = false;
   function closeSoon(){
-    if (isDocked()) return;
+    if (isDocked() || held) return;
     clearTimeout(closeT);
     closeT = setTimeout(closeNow, 240);
   }
@@ -125,6 +127,7 @@
     // Docking makes the temporary reveal meaningless, and undocking must not
     // leave the column stranded on screen with the page already closed up.
     closeNow();
+    if (held && !isDocked()) open();
     syncPin();
   }
   function syncPin(){
@@ -159,7 +162,7 @@
   rail.addEventListener('mouseleave', closeSoon);
   rail.addEventListener('click', function(e){
     // Docked, picking a page is just navigation — there is nothing to put away.
-    if (e.target.closest('.navrail__item') && !isDocked()) closeNow();
+    if (e.target.closest('.navrail__item') && !isDocked() && !held) closeNow();
   });
   document.addEventListener('click', function(e){
     if (e.target.closest('[data-rail-toggle]')){ setDocked(!isDocked()); return; }
@@ -169,18 +172,27 @@
       if (wide.matches) setDocked(true); else open();
       return;
     }
-    if (!isDocked() && rail.classList.contains('open') && !rail.contains(e.target)) closeNow();
+    if (!isDocked() && !held && rail.classList.contains('open') && !rail.contains(e.target)) closeNow();
   });
   document.addEventListener('keydown', function(e){
-    if (e.key === 'Escape' && !isDocked()) closeNow();
+    if (e.key === 'Escape' && !isDocked() && !held) closeNow();
   });
   // Crossing the width threshold changes which mode is in force, so the
   // temporary reveal must not survive the crossing.
-  wide.addEventListener('change', function(){ closeNow(); syncPin(); });
+  wide.addEventListener('change', function(){
+    closeNow();
+    if (held && !isDocked()) open();
+    syncPin();
+  });
   syncPin();
 
   // Whether the menu is part of the frame right now, for anything that has to
   // agree with it. static/js/feed.js asks before putting up the first-run hint,
   // which points at a tab that docking takes away.
-  window.navrail = { docked: isDocked };
+  function hold(on){
+    held = !!on;
+    if (held) { if (!isDocked()) open(); }
+    else if (!isDocked()) closeNow();
+  }
+  window.navrail = { docked: isDocked, hold: hold };
 })();

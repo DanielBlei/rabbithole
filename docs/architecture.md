@@ -87,7 +87,9 @@ the same scorer construction and batching stack, but reads already-scored item m
 the store for a fixed seven-day window instead of fetching feeds. Successful replacements update
 only model score/reason/model/profile provenance; failed items keep their previous score.
 Ingest and rescore share the same background manager, history, log capture, cancellation and
-single-flight slot, so they cannot write scores concurrently.
+single-flight slot, so they cannot write scores concurrently. A demo run (trigger `demo`)
+reads one built-in in-memory item instead of the feeds, with a fixed score and no model, leaves the
+saved settings alone, and is left out of classification and briefings.
 
 Each step has a knob, all of them in [configuration.md](configuration.md). The knobs are settings
 saved in the store as numbered versions, read when each ingest run starts, so a change applies to the
